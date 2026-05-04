@@ -624,7 +624,7 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
 
       <!-- BOTTOM TILES -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1.8fr;gap:14px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1.8fr;gap:14px;align-items:start;">
 
         <!-- EXPENSES TILE -->
         <div onclick="document.querySelector('.nav-btn[data-tab=expenses]').click()" style="background:rgba(255,255,255,0.025);border:1px solid rgba(34,197,94,0.2);border-radius:14px;padding:20px;cursor:pointer;transition:all 0.15s;position:relative;overflow:hidden;" class="home-nav-tile">
@@ -4734,11 +4734,13 @@ function loadHomeOverview() {
       }
       list.innerHTML = batches.slice(0, 5).map(function(b) {
         var timeAgo = b.updated_at ? timeAgoStr(b.updated_at) : '';
-        return '<div style="background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:10px 12px;cursor:pointer;" onclick="loadSavedBatch(' + String.fromCharCode(39) + b.id + String.fromCharCode(39) + ')">' +
-          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">' +
-          '<div style="font-size:12px;font-weight:700;color:var(--text);">' + escapeHtml(b.name || 'Untitled batch') + '</div>' +
-          '<div style="font-size:10px;color:var(--muted);">' + timeAgo + '</div></div>' +
-          '<div style="font-size:11px;color:var(--muted);">' + (b.count || 0) + ' items</div>' +
+        return '<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05);border-radius:8px;cursor:pointer;transition:all 0.1s;" onclick="loadSavedBatch(' + String.fromCharCode(39) + b.id + String.fromCharCode(39) + ')" onmouseover="this.style.background=\'rgba(255,255,255,0.06)\';this.style.borderColor=\'rgba(251,191,36,0.2)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.03)\';this.style.borderColor=\'rgba(255,255,255,0.05)\'">' +
+          '<div style="width:30px;height:30px;background:rgba(251,191,36,0.1);color:#fbbf24;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">' + (b.count||0) + '</div>' +
+          '<div style="flex:1;min-width:0;">' +
+            '<div style="font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(b.name || 'Untitled batch') + '</div>' +
+            '<div style="font-size:10px;color:#64748b;">' + timeAgo + '</div>' +
+          '</div>' +
+          '<span style="color:#475569;font-size:13px;">&#8594;</span>' +
           '</div>';
       }).join('');
     })
