@@ -1209,28 +1209,25 @@ async def get_scheduled_listings(request: Request):
             return {"ok": False, "error": r.text[:300]}
 
         offers = r.json().get("offers", [])
+        print(f"[eBay Listings] found {len(offers)} offers")
+
+        # Get all our DB listings with ebay_item_id set for enrichment
+        db_res = supabase.table("listings").select("photo_url,barcode_id,price,title,ebay_item_id,photo_id").eq("business_id", business_id).not_.is_("ebay_item_id", "null").execute()
+        db_by_listing_id = {str(i.get("ebay_item_id","")): i for i in (db_res.data or [])}
+
         results = []
         for offer in offers:
             sku = offer.get("sku", "")
             status = offer.get("status", "")
-            listing_id = offer.get("listing", {}).get("listingId", "")
+            listing_id = str(offer.get("listing", {}).get("listingId", ""))
             price = offer.get("pricingSummary", {}).get("price", {}).get("value", 0)
+            title = offer.get("listing", {}).get("listingTitle", "") or sku
 
-            # Get product details from inventory item
-            inv_r = _req.get(f"{api_base}/sell/inventory/v1/inventory_item/{sku}", headers=headers)
-            title = ""
-            photo_url = ""
-            if inv_r.ok:
-                inv = inv_r.json()
-                title = inv.get("product", {}).get("title", "")
-                images = inv.get("product", {}).get("imageUrls", [])
-                photo_url = images[0] if images else ""
-
-            # Also check our DB for photo + barcode
-            db_res = supabase.table("listings").select("photo_url,barcode_id,price,title,ebay_item_id").eq("business_id", business_id).eq("ebay_item_id", listing_id).limit(1).execute()
-            db_item = db_res.data[0] if db_res.data else {}
-            if not photo_url and db_item.get("photo_url"):
-                photo_url = db_item["photo_url"]
+            # Enrich from our DB
+            db_item = db_by_listing_id.get(listing_id, {})
+            photo_url = db_item.get("photo_url", "")
+            if not photo_url and db_item.get("photo_id"):
+                photo_url = f"https://febnocmzhgkikvxqaamr.supabase.co/storage/v1/object/public/part-photos/{db_item['photo_id']}"
             if not title and db_item.get("title"):
                 title = db_item["title"]
             if not price and db_item.get("price"):
