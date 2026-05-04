@@ -1101,6 +1101,57 @@ async def submit_listings_to_ebay(request: Request):
 
 
 
+
+@app.get("/api/ebay/orders")
+async def get_ebay_orders(request: Request, limit: int = 20):
+    """Fetch recent sold orders from eBay Orders API."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Not authenticated")
+    try:
+        import requests as _req
+        token = get_ebay_token(business_id)
+        api_base = "https://api.ebay.com" if EBAY_ENV != "sandbox" else "https://api.sandbox.ebay.com"
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+        r = _req.get(
+            f"{api_base}/sell/fulfillment/v1/order",
+            headers=headers,
+            params={"limit": limit, "ordersFulfillmentStatus": "NOT_STARTED,IN_PROGRESS,FULFILLED"}
+        )
+        print(f"[eBay Orders] status={r.status_code}")
+        if not r.ok:
+            return {"ok": False, "error": r.text[:300], "status": r.status_code}
+
+        data = r.json()
+        orders = data.get("orders", [])
+
+        # Simplify for frontend
+        result = []
+        for o in orders:
+            items = []
+            for li in o.get("lineItems", []):
+                items.append({
+                    "title": li.get("title"),
+                    "sku": li.get("sku"),
+                    "quantity": li.get("quantity"),
+                    "price": li.get("lineItemCost", {}).get("value"),
+                })
+            result.append({
+                "order_id": o.get("orderId"),
+                "created": o.get("creationDate"),
+                "status": o.get("orderFulfillmentStatus"),
+                "total": o.get("pricingSummary", {}).get("total", {}).get("value"),
+                "currency": o.get("pricingSummary", {}).get("total", {}).get("currency", "USD"),
+                "buyer": o.get("buyer", {}).get("username"),
+                "items": items,
+            })
+
+        return {"ok": True, "orders": result, "total": len(result)}
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(500, str(e))
+
 @app.get("/api/ebay/whoami")
 async def ebay_whoami(request: Request):
     """Check which eBay user account is connected."""
