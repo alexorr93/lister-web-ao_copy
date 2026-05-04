@@ -623,34 +623,13 @@ select.field-input { background: #fff; color: #0f172a; }
         <div id="home-scan-remaining" style="font-size:11px;color:#64748b;margin-top:6px;">0 scans remaining</div>
       </div>
 
-      <!-- BOTTOM TILES + ACTIVITY -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1.6fr;gap:14px;">
-
-        <!-- INVENTORY TILE -->
-        <div onclick="document.querySelector('.nav-btn[data-tab=inventory]').click()" style="background:rgba(255,255,255,0.025);border:1px solid rgba(6,182,212,0.2);border-radius:14px;padding:20px;cursor:pointer;transition:all 0.15s;position:relative;overflow:hidden;" class="home-nav-tile">
-          <div style="position:absolute;top:-30px;right:-30px;width:120px;height:120px;border-radius:50%;background:#06b6d4;opacity:0.1;pointer-events:none;"></div>
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
-            <div style="width:38px;height:38px;border-radius:10px;background:rgba(6,182,212,0.12);color:#22d3ee;display:flex;align-items:center;justify-content:center;">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
-            </div>
-            <span id="home-inv-need-loc" style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:6px;background:rgba(251,191,36,0.12);color:#fbbf24;display:none;">needs location</span>
-          </div>
-          <div id="home-inv-tile-stat" style="font-size:30px;font-weight:700;line-height:1;letter-spacing:-0.02em;color:#22d3ee;margin-bottom:4px;">0</div>
-          <div style="font-size:12px;font-weight:600;margin-bottom:2px;">Inventory</div>
-          <div id="home-inv-tile-label" style="font-size:11px;color:#64748b;">items in stock</div>
-          <div style="height:3px;background:rgba(255,255,255,0.05);border-radius:2px;overflow:hidden;margin-top:14px;">
-            <div id="home-inv-tile-bar" style="height:100%;background:linear-gradient(90deg,#22d3ee,#06b6d4);border-radius:2px;width:0%;transition:width 0.5s;"></div>
-          </div>
-          <div style="display:flex;justify-content:space-between;font-size:10px;color:#64748b;margin-top:5px;">
-            <span id="home-inv-tile-value">$0 value</span>
-            <span id="home-inv-tile-sold">0 sold</span>
-          </div>
-        </div>
+      <!-- BOTTOM TILES -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1.8fr;gap:14px;">
 
         <!-- EXPENSES TILE -->
         <div onclick="document.querySelector('.nav-btn[data-tab=expenses]').click()" style="background:rgba(255,255,255,0.025);border:1px solid rgba(34,197,94,0.2);border-radius:14px;padding:20px;cursor:pointer;transition:all 0.15s;position:relative;overflow:hidden;" class="home-nav-tile">
-          <div style="position:absolute;top:-30px;right:-30px;width:120px;height:120px;border-radius:50%;background:#22c55e;opacity:0.1;pointer-events:none;"></div>
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
+          <div style="position:absolute;top:-40px;right:-40px;width:140px;height:140px;border-radius:50%;background:#22c55e;opacity:0.1;pointer-events:none;"></div>
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">
             <div style="width:38px;height:38px;border-radius:10px;background:rgba(34,197,94,0.12);color:#4ade80;display:flex;align-items:center;justify-content:center;">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
             </div>
@@ -658,35 +637,35 @@ select.field-input { background: #fff; color: #0f172a; }
           </div>
           <div id="home-exp-tile-stat" style="font-size:30px;font-weight:700;line-height:1;letter-spacing:-0.02em;color:#4ade80;margin-bottom:4px;">$0</div>
           <div style="font-size:12px;font-weight:600;margin-bottom:2px;">Expenses</div>
-          <div id="home-exp-tile-label" style="font-size:11px;color:#64748b;">0 transactions</div>
-          <div style="margin-top:12px;display:flex;flex-direction:column;gap:4px;" id="home-exp-tile-cats"></div>
+          <div id="home-exp-tile-label" style="font-size:11px;color:#64748b;margin-bottom:12px;">0 transactions</div>
+          <div id="home-exp-tile-txns" style="display:flex;flex-direction:column;gap:0;"></div>
         </div>
 
         <!-- MESSAGES TILE -->
         <div onclick="document.querySelector('.nav-btn[data-tab=messages]').click()" style="background:rgba(255,255,255,0.025);border:1px solid rgba(168,85,247,0.2);border-radius:14px;padding:20px;cursor:pointer;transition:all 0.15s;position:relative;overflow:hidden;" class="home-nav-tile">
-          <div style="position:absolute;top:-30px;right:-30px;width:120px;height:120px;border-radius:50%;background:#a855f7;opacity:0.1;pointer-events:none;"></div>
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
+          <div style="position:absolute;top:-40px;right:-40px;width:140px;height:140px;border-radius:50%;background:#a855f7;opacity:0.1;pointer-events:none;"></div>
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">
             <div style="width:38px;height:38px;border-radius:10px;background:rgba(168,85,247,0.12);color:#c084fc;display:flex;align-items:center;justify-content:center;">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
             </div>
             <span id="home-msg-badge" style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:6px;background:rgba(34,197,94,0.12);color:#4ade80;">All caught up</span>
           </div>
           <div style="font-size:15px;font-weight:600;margin-bottom:6px;">Messages</div>
-          <div id="home-msg-label" style="font-size:11px;color:#64748b;margin-bottom:14px;">Support chat</div>
-          <div style="padding:10px 12px;background:rgba(168,85,247,0.06);border:1px solid rgba(168,85,247,0.15);border-radius:8px;font-size:11px;color:#94a3b8;line-height:1.5;">
-            Have a question? We typically reply within a few hours.
+          <div id="home-msg-label" style="font-size:11px;color:#64748b;margin-bottom:16px;">Support chat</div>
+          <div style="padding:12px;background:rgba(168,85,247,0.06);border:1px solid rgba(168,85,247,0.15);border-radius:10px;font-size:11px;color:#94a3b8;line-height:1.6;">
+            &#x1f4ac; Have a question or need help?<br/>We typically reply within a few hours.
           </div>
         </div>
 
-        <!-- RECENT BATCHES -->
+        <!-- RECENT BATCHES (wider) -->
         <div style="background:rgba(255,255,255,0.025);border:1px solid rgba(251,191,36,0.2);border-radius:14px;padding:20px;position:relative;overflow:hidden;">
-          <div style="position:absolute;top:-30px;right:-30px;width:120px;height:120px;border-radius:50%;background:#f59e0b;opacity:0.08;pointer-events:none;"></div>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-            <div style="display:flex;align-items:center;gap:8px;">
+          <div style="position:absolute;top:-40px;right:-40px;width:140px;height:140px;border-radius:50%;background:#f59e0b;opacity:0.08;pointer-events:none;"></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+            <div style="display:flex;align-items:center;gap:10px;">
               <div style="width:38px;height:38px;border-radius:10px;background:rgba(251,191,36,0.12);color:#fbbf24;display:flex;align-items:center;justify-content:center;">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
               </div>
-              <span style="font-size:12px;font-weight:700;color:var(--text);">Recent batches</span>
+              <span style="font-size:13px;font-weight:600;">Recent batches</span>
             </div>
             <span style="display:flex;align-items:center;gap:5px;font-size:10px;color:#4ade80;font-weight:600;">
               <div style="width:5px;height:5px;background:#22c55e;box-shadow:0 0 6px #22c55e;border-radius:50%;display:inline-block;animation:home-pulse 1.5s infinite;"></div>
@@ -696,7 +675,7 @@ select.field-input { background: #fff; color: #0f172a; }
           <div id="home-batches-list" style="display:flex;flex-direction:column;gap:6px;">
             <div style="font-size:12px;color:var(--muted);text-align:center;padding:16px;">Loading...</div>
           </div>
-          <button onclick="document.querySelector('.nav-btn[data-tab=dashboard]').click()" style="width:100%;margin-top:10px;background:transparent;border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#64748b;font-size:11px;padding:8px;cursor:pointer;font-family:inherit;transition:all 0.1s;">View scanner &rarr;</button>
+          <button onclick="document.querySelector('.nav-btn[data-tab=dashboard]').click()" style="width:100%;margin-top:10px;background:transparent;border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#64748b;font-size:11px;padding:8px;cursor:pointer;font-family:inherit;">Open scanner &rarr;</button>
         </div>
 
       </div>
@@ -4712,6 +4691,40 @@ function loadHomeOverview() {
       if (invVal) invVal.textContent = '$' + ((d.inventory_value || 0)).toLocaleString('en-US', {maximumFractionDigits:0}) + ' value';
       if (invSold) invSold.textContent = (d.sold_count || 0) + ' sold';
       if (invBar) { var pct = d.inventory_count > 0 ? Math.min((d.inventory_count / (d.inventory_count + (d.sold_count||1))) * 100, 100) : 0; invBar.style.width = pct + '%'; }
+
+      // Populate expense tile with recent transactions
+      var expTxns = document.getElementById('home-exp-tile-txns');
+      var expStat = document.getElementById('home-exp-tile-stat');
+      var expLabel = document.getElementById('home-exp-tile-label');
+      if (expTxns || expStat) {
+        fetch('/api/expenses?period=month', {credentials:'include'})
+          .then(function(r){return r.json();})
+          .then(function(ed){
+            var items = ed.items || [];
+            var total = ed.total || 0;
+            var EXP_COLORS_HOME = {'Cost of Goods':'#ef4444','Shipping & Postage':'#f59e0b','Supplies & Packaging':'#eab308','Fees & Subscriptions':'#22c55e','Gas & Travel':'#3b82f6','Food & Meals':'#a855f7','Software & Tools':'#06b6d4','Other':'#94a3b8'};
+            if (expStat) expStat.textContent = '$' + total.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+            if (expLabel) expLabel.textContent = items.length + ' transaction' + (items.length===1?'':'s');
+            if (expTxns) {
+              var recent = items.slice(0,3);
+              if (!recent.length) { expTxns.innerHTML = '<div style="font-size:11px;color:#475569;text-align:center;padding:8px;">No expenses this month</div>'; return; }
+              expTxns.innerHTML = recent.map(function(it) {
+                var color = EXP_COLORS_HOME[it.category] || '#94a3b8';
+                var dateStr = (it.expense_date||'').replace(/^(\d{4})-(\d{2})-(\d{2})$/,'$2/$3');
+                return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
+                  '<div style="display:flex;align-items:center;gap:7px;">' +
+                    '<div style="width:6px;height:6px;border-radius:50%;background:' + color + ';flex-shrink:0;"></div>' +
+                    '<span style="font-size:11px;color:#f1f5f9;font-weight:500;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (it.merchant||'Unknown') + '</span>' +
+                  '</div>' +
+                  '<div style="text-align:right;flex-shrink:0;">' +
+                    '<div style="font-size:11px;font-weight:600;color:#f1f5f9;">$' + parseFloat(it.amount||0).toFixed(2) + '</div>' +
+                    '<div style="font-size:9px;color:#64748b;">' + dateStr + '</div>' +
+                  '</div>' +
+                '</div>';
+              }).join('');
+            }
+          }).catch(function(){});
+      }
 
       var list = document.getElementById('home-batches-list');
       if (!list) return;
