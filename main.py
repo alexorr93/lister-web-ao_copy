@@ -1202,7 +1202,7 @@ async def get_scheduled_listings(request: Request):
         headers = {"Authorization": f"Bearer {token}"}
 
         # Pull offers from eBay (includes scheduled listings)
-        r = _req.get(f"{api_base}/sell/inventory/v1/offer?limit=100&marketplace_id=EBAY_US", headers=headers)
+        r = _req.get(f"{api_base}/sell/inventory/v1/offer?limit=100", headers=headers)
         print(f"[eBay Listings] offers status={r.status_code}")
 
         if not r.ok:
