@@ -6120,6 +6120,157 @@ async function submitEbayDrafts() {
   }
 }
 
+
+// ── SALES TAB ──────────────────────────────────────────────── //
+var salesPeriod = 'month';
+
+function loadSalesTab() {
+  loadSalesListings();
+  loadSalesOrders();
+}
+
+function initSalesPeriodBtns() {
+  document.querySelectorAll('.sales-period-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.sales-period-btn').forEach(function(b) {
+        b.style.background = 'transparent';
+        b.style.color = 'var(--muted)';
+      });
+      btn.style.background = 'rgba(34,197,94,0.15)';
+      btn.style.color = '#4ade80';
+      salesPeriod = btn.dataset.period;
+      loadSalesOrders();
+    });
+  });
+}
+
+async function loadSalesListings() {
+  var list = document.getElementById('sales-listings-list');
+  if (!list) return;
+  try {
+    var r = await fetch('/api/ebay/whoami', {credentials:'include'});
+    var d = await r.json();
+    var items = d.items || [];
+    var statEl = document.getElementById('sales-stat-listed');
+    if (statEl) statEl.textContent = items.length;
+    if (!items.length) {
+      list.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;">No items listed on eBay yet.</div>';
+      return;
+    }
+    list.innerHTML = items.map(function(it) {
+      var photoHtml = it.photo_url
+        ? '<img src="' + it.photo_url + '" style="width:56px;height:56px;object-fit:cover;border-radius:8px;flex-shrink:0;" />'
+        : '<div style="width:56px;height:56px;border-radius:8px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#475569;">📷</div>';
+      return '<div style="display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:1px solid rgba(255,255,255,0.04);">'
+        + photoHtml
+        + '<div style="flex:1;min-width:0;">'
+        +   '<div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(it.title||'Untitled') + '</div>'
+        +   '<div style="font-size:11px;color:var(--muted);margin-top:3px;display:flex;gap:10px;">'
+        +     (it.ebay_item_id ? '<span style="font-family:monospace;color:#64748b;">ID: ' + it.ebay_item_id + '</span>' : '')
+        +     (it.barcode_id ? '<span style="background:rgba(34,197,94,0.1);color:#4ade80;padding:1px 7px;border-radius:4px;font-weight:700;">SKU: ' + escapeHtml(it.barcode_id) + '</span>' : '')
+        +   '</div>'
+        + '</div>'
+        + '<div style="text-align:right;flex-shrink:0;">'
+        +   '<div style="font-size:15px;font-weight:700;color:#4ade80;">$' + parseFloat(it.price||0).toFixed(2) + '</div>'
+        +   '<div style="font-size:10px;color:#3b82f6;font-weight:600;margin-top:3px;">Scheduled</div>'
+        + '</div>'
+        + '</div>';
+    }).join('');
+  } catch(e) {
+    if (list) list.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);">Could not load listings.</div>';
+  }
+}
+
+async function loadSalesOrders() {
+  var list = document.getElementById('sales-orders-list');
+  var countEl = document.getElementById('sales-orders-count');
+  if (!list) return;
+  try {
+    var r = await fetch('/api/ebay/orders', {credentials:'include'});
+    var d = await r.json();
+    var orders = d.orders || [];
+    if (countEl) countEl.textContent = orders.length + ' order' + (orders.length===1?'':'s');
+    var totalRev = 0, totalSold = 0;
+    orders.forEach(function(o) {
+      totalRev += parseFloat(o.total||0);
+      totalSold += (o.items||[]).reduce(function(s,i){return s+(i.quantity||1);},0);
+    });
+    var revEl = document.getElementById('sales-stat-revenue');
+    if (revEl) revEl.textContent = '$' + totalRev.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+    var soldEl = document.getElementById('sales-stat-sold');
+    if (soldEl) soldEl.textContent = totalSold;
+    var avgEl = document.getElementById('sales-stat-avg');
+    if (avgEl) avgEl.textContent = totalSold > 0 ? '$' + (totalRev/totalSold).toFixed(2) : '$0';
+    if (!orders.length) {
+      list.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;"><div style="font-size:28px;margin-bottom:10px;">📦</div><div style="font-size:14px;font-weight:600;color:#94a3b8;margin-bottom:4px;">No orders yet</div><div>Click Pull orders from eBay to sync.</div></div>';
+      return;
+    }
+    list.innerHTML = orders.map(function(o) {
+      var date = o.created ? new Date(o.created).toLocaleDateString() : '';
+      return (o.items||[]).map(function(item) {
+        return '<div style="display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid rgba(255,255,255,0.04);">'
+          + '<div style="width:64px;height:64px;border-radius:10px;background:rgba(168,85,247,0.08);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#a855f7;">📦</div>'
+          + '<div style="flex:1;min-width:0;">'
+          +   '<div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px;">' + escapeHtml(item.title||'Item') + '</div>'
+          +   '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
+          +     (item.sku ? '<span style="background:rgba(34,197,94,0.1);color:#4ade80;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:700;">SKU: ' + escapeHtml(item.sku) + '</span>' : '<span style="font-size:11px;color:#475569;">No SKU</span>')
+          +     '<span style="font-size:11px;color:var(--muted);">Qty: ' + (item.quantity||1) + '</span>'
+          +     '<span style="font-size:11px;color:var(--muted);">Buyer: ' + escapeHtml(o.buyer||'—') + '</span>'
+          +     '<span style="font-size:11px;color:var(--muted);">' + date + '</span>'
+          +   '</div>'
+          + '</div>'
+          + '<div style="text-align:right;flex-shrink:0;">'
+          +   '<div style="font-size:16px;font-weight:700;color:#4ade80;font-variant-numeric:tabular-nums;">$' + parseFloat(item.price||0) + '</div>'
+          +   '<div style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;background:rgba(168,85,247,0.15);color:#c084fc;margin-top:4px;display:inline-block;">Sold</div>'
+          + '</div>'
+          + '</div>';
+      }).join('');
+    }).join('');
+  } catch(e) {
+    if (list) list.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);">Could not load orders.</div>';
+  }
+}
+
+async function pullEbayOrders() {
+  var btn = document.getElementById('pull-orders-btn');
+  if (btn) { btn.innerHTML = 'Syncing...'; btn.disabled = true; }
+  try {
+    var r = await fetch('/api/ebay/orders', {credentials:'include'});
+    var d = await r.json();
+    var orders = d.orders || [];
+    for (var o of orders) {
+      for (var item of (o.items||[])) {
+        if (item.sku) {
+          try {
+            await fetch('/api/inventory/mark-sold-by-sku', {
+              method:'POST', headers:{'Content-Type':'application/json'},
+              credentials:'include',
+              body: JSON.stringify({sku: item.sku, ebay_order_id: o.order_id})
+            });
+          } catch(e2) {}
+        }
+      }
+    }
+    await loadSalesOrders();
+    toast('Synced ' + orders.length + ' order' + (orders.length===1?'':'s') + ' from eBay', orders.length ? 'success' : 'info');
+  } catch(e) {
+    toast('Could not sync orders', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.1"/></svg> Pull orders from eBay';
+    }
+  }
+}
+
+window.addEventListener('load', function() {
+  initSalesPeriodBtns();
+  document.querySelectorAll('.nav-btn').forEach(function(btn) {
+    if (btn.dataset.tab === 'sales') {
+      btn.addEventListener('click', function() { setTimeout(loadSalesTab, 50); });
+    }
+  });
+});
 </script>
 
 
