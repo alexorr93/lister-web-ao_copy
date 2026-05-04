@@ -1102,6 +1102,42 @@ async def submit_listings_to_ebay(request: Request):
 
 
 
+
+@app.post("/api/inventory/mark-sold-by-sku")
+async def mark_sold_by_sku(request: Request):
+    """Mark an inventory item as sold when eBay order matches SKU."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Not authenticated")
+    try:
+        body = await request.json()
+        sku = body.get("sku", "").strip()
+        order_id = body.get("ebay_order_id", "")
+        if not sku:
+            return {"ok": False, "error": "No SKU"}
+
+        # Try to find listing by barcode_id (our SKU field)
+        res = supabase.table("listings").select("id,title,status").eq("business_id", business_id).eq("barcode_id", sku).limit(1).execute()
+        if not res.data:
+            # Also try matching by ebay_item_id prefix
+            print(f"[Sales] SKU {sku} not found in inventory")
+            return {"ok": False, "error": "SKU not found in inventory"}
+
+        listing = res.data[0]
+        if listing.get("status") == "sold":
+            return {"ok": True, "message": "Already marked sold"}
+
+        supabase.table("listings").update({
+            "status": "sold",
+            "notes": f"Sold via eBay order {order_id}"
+        }).eq("id", listing["id"]).eq("business_id", business_id).execute()
+
+        print(f"[Sales] Marked listing {listing['id']} ({listing.get('title','')}) as sold via eBay order {order_id}")
+        return {"ok": True, "listing_id": listing["id"], "title": listing.get("title")}
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(500, str(e))
+
 @app.get("/api/ebay/orders")
 async def get_ebay_orders(request: Request, limit: int = 20):
     """Fetch recent sold orders from eBay Orders API."""

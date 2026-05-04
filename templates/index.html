@@ -69,6 +69,8 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 .nav-btn[data-tab="settings"].active { background: rgba(148,163,184,0.12); color: #cbd5e1; }
 .nav-btn[data-tab="settings"].active svg { color: #cbd5e1; }
 .nav-btn[data-tab="messages"].active { background: rgba(251,191,36,0.12); color: #fbbf24; }
+.nav-btn[data-tab="sales"].active { background: rgba(34,197,94,0.12); color: #22c55e; }
+.nav-btn[data-tab="sales"].active svg { color: #22c55e; }
 .nav-btn[data-tab="messages"].active svg { color: #fbbf24; }
 .nav-btn[data-tab="auction"].active { background: rgba(251,146,60,0.12); color: #fb923c; }
 .nav-btn[data-tab="parts"].active { background: rgba(167,139,250,0.12); color: #a78bfa; }
@@ -437,6 +439,10 @@ select.field-input { background: #fff; color: #0f172a; }
     <button class="nav-btn" data-tab="inventory">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
       Inventory
+    </button>
+    <button class="nav-btn" data-tab="sales">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+      Sales
     </button>
     <button class="nav-btn" data-tab="settings">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -1651,6 +1657,101 @@ select.field-input { background: #fff; color: #0f172a; }
   </div>
 
   <!-- MESSAGES TAB -->
+  <div class="tab-content" id="tab-sales">
+    <div style="max-width:1100px;margin:0 auto;">
+
+      <!-- Header -->
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;flex-wrap:wrap;gap:14px;">
+        <div>
+          <div style="font-size:24px;font-weight:700;color:var(--text);letter-spacing:-0.02em;">Sales</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:4px;" id="sales-sub">Connected to eBay</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <div style="display:inline-flex;gap:2px;background:rgba(0,0,0,0.25);border:1px solid var(--border);border-radius:9px;padding:3px;">
+            <button class="sales-period-btn" data-period="day" style="font-size:12px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">Day</button>
+            <button class="sales-period-btn" data-period="week" style="font-size:12px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">Week</button>
+            <button class="sales-period-btn active" data-period="month" style="font-size:12px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:rgba(34,197,94,0.15);color:#4ade80;font-family:inherit;font-weight:500;">Month</button>
+            <button class="sales-period-btn" data-period="3month" style="font-size:12px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">3M</button>
+            <button class="sales-period-btn" data-period="12month" style="font-size:12px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">12M</button>
+            <button class="sales-period-btn" data-period="all" style="font-size:12px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">All</button>
+          </div>
+          <button onclick="pullEbayOrders()" id="pull-orders-btn" style="background:linear-gradient(135deg,#22c55e,#16a34a);color:white;padding:10px 18px;border-radius:8px;font-size:13px;font-weight:600;border:none;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:8px;box-shadow:0 4px 14px rgba(34,197,94,0.3);">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.1"/></svg>
+            Pull orders from eBay
+          </button>
+        </div>
+      </div>
+
+      <!-- Stats row -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:16px;">
+        <div style="background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:18px;position:relative;overflow:hidden;">
+          <div style="position:absolute;top:-30px;right:-30px;width:100px;height:100px;border-radius:50%;background:#22c55e;opacity:0.1;pointer-events:none;"></div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:6px;">Total revenue</div>
+          <div id="sales-stat-revenue" style="font-size:26px;font-weight:700;color:#4ade80;line-height:1;font-variant-numeric:tabular-nums;">$0</div>
+          <div id="sales-stat-revenue-sub" style="font-size:11px;color:var(--muted);margin-top:6px;">This month</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:18px;position:relative;overflow:hidden;">
+          <div style="position:absolute;top:-30px;right:-30px;width:100px;height:100px;border-radius:50%;background:#06b6d4;opacity:0.1;pointer-events:none;"></div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:6px;">Items sold</div>
+          <div id="sales-stat-sold" style="font-size:26px;font-weight:700;color:#22d3ee;line-height:1;">0</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px;">Across all platforms</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:18px;position:relative;overflow:hidden;">
+          <div style="position:absolute;top:-30px;right:-30px;width:100px;height:100px;border-radius:50%;background:#a855f7;opacity:0.1;pointer-events:none;"></div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:6px;">Currently listed</div>
+          <div id="sales-stat-listed" style="font-size:26px;font-weight:700;color:#c084fc;line-height:1;">0</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px;">On eBay</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:18px;position:relative;overflow:hidden;">
+          <div style="position:absolute;top:-30px;right:-30px;width:100px;height:100px;border-radius:50%;background:#fbbf24;opacity:0.1;pointer-events:none;"></div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:6px;">Avg sale price</div>
+          <div id="sales-stat-avg" style="font-size:26px;font-weight:700;color:#fbbf24;line-height:1;font-variant-numeric:tabular-nums;">$0</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px;">Per item</div>
+        </div>
+      </div>
+
+      <!-- Currently listed on eBay -->
+      <div style="background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.06);border-radius:14px;overflow:hidden;margin-bottom:14px;">
+        <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,0.05);">
+          <span style="font-size:13px;font-weight:600;">Currently listed on eBay</span>
+          <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:#4ade80;font-weight:600;">
+            <div style="width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 6px #22c55e;animation:sales-pulse 1.5s infinite;"></div>
+            Live
+          </span>
+        </div>
+        <div id="sales-listings-list" style="padding:0;">
+          <div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;">Loading listings...</div>
+        </div>
+      </div>
+
+      <!-- Sold orders -->
+      <div style="background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.06);border-radius:14px;overflow:hidden;">
+        <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,0.05);">
+          <span style="font-size:13px;font-weight:600;">Sold orders</span>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span id="sales-orders-count" style="font-size:11px;color:var(--muted);">0 orders</span>
+            <button onclick="pullEbayOrders()" style="font-size:11px;padding:5px 10px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:#4ade80;border-radius:6px;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:5px;">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.1"/></svg>
+              Sync
+            </button>
+          </div>
+        </div>
+        <div id="sales-orders-list" style="padding:0;">
+          <div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;">
+            <div style="font-size:28px;margin-bottom:10px;">📦</div>
+            <div style="font-size:14px;font-weight:600;color:#94a3b8;margin-bottom:4px;">No orders yet</div>
+            <div>Click "Pull orders from eBay" to sync your sold items.</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    <style>
+      @keyframes sales-pulse { 0%,100%{opacity:1}50%{opacity:0.4} }
+    </style>
+  </div>
+
+
   <div class="tab-content" id="tab-messages">
     <div style="max-width:760px;margin:0 auto;">
       <div style="margin-bottom:18px;">
