@@ -1188,6 +1188,70 @@ async def get_ebay_orders(request: Request, limit: int = 20):
         import traceback; traceback.print_exc()
         raise HTTPException(500, str(e))
 
+
+@app.get("/api/ebay/scheduled-listings")
+async def get_scheduled_listings(request: Request):
+    """Fetch scheduled/active listings from eBay offers API."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Not authenticated")
+    try:
+        import requests as _req
+        token = get_ebay_token(business_id)
+        api_base = "https://api.ebay.com" if EBAY_ENV != "sandbox" else "https://api.sandbox.ebay.com"
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Pull offers from eBay (includes scheduled listings)
+        r = _req.get(f"{api_base}/sell/inventory/v1/offer?limit=100&marketplace_id=EBAY_US", headers=headers)
+        print(f"[eBay Listings] offers status={r.status_code}")
+
+        if not r.ok:
+            return {"ok": False, "error": r.text[:300]}
+
+        offers = r.json().get("offers", [])
+        results = []
+        for offer in offers:
+            sku = offer.get("sku", "")
+            status = offer.get("status", "")
+            listing_id = offer.get("listing", {}).get("listingId", "")
+            price = offer.get("pricingSummary", {}).get("price", {}).get("value", 0)
+
+            # Get product details from inventory item
+            inv_r = _req.get(f"{api_base}/sell/inventory/v1/inventory_item/{sku}", headers=headers)
+            title = ""
+            photo_url = ""
+            if inv_r.ok:
+                inv = inv_r.json()
+                title = inv.get("product", {}).get("title", "")
+                images = inv.get("product", {}).get("imageUrls", [])
+                photo_url = images[0] if images else ""
+
+            # Also check our DB for photo + barcode
+            db_res = supabase.table("listings").select("photo_url,barcode_id,price,title,ebay_item_id").eq("business_id", business_id).eq("ebay_item_id", listing_id).limit(1).execute()
+            db_item = db_res.data[0] if db_res.data else {}
+            if not photo_url and db_item.get("photo_url"):
+                photo_url = db_item["photo_url"]
+            if not title and db_item.get("title"):
+                title = db_item["title"]
+            if not price and db_item.get("price"):
+                price = db_item["price"]
+
+            results.append({
+                "sku": sku,
+                "title": title,
+                "photo_url": photo_url,
+                "price": price,
+                "status": status,
+                "listing_id": listing_id,
+                "barcode_id": db_item.get("barcode_id", ""),
+                "ebay_item_id": listing_id,
+            })
+
+        return {"ok": True, "listings": results, "total": len(results)}
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(500, str(e))
+
 @app.get("/api/ebay/whoami")
 async def ebay_whoami(request: Request):
     """Check which eBay user account is connected."""

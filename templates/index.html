@@ -6148,9 +6148,9 @@ async function loadSalesListings() {
   var list = document.getElementById('sales-listings-list');
   if (!list) return;
   try {
-    var r = await fetch('/api/ebay/whoami', {credentials:'include'});
+    var r = await fetch('/api/ebay/scheduled-listings', {credentials:'include'});
     var d = await r.json();
-    var items = d.items || [];
+    var items = d.listings || [];
     var statEl = document.getElementById('sales-stat-listed');
     if (statEl) statEl.textContent = items.length;
     if (!items.length) {
