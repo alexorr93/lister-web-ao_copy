@@ -175,6 +175,8 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 @media (max-width: 768px) {
   #home-start-scan { flex-direction: column !important; align-items: flex-start !important; gap: 14px !important; padding: 18px !important; }
   #home-bottom-tiles { grid-template-columns: 1fr !important; }
+  #home-stats-row { grid-template-columns: 1fr 1fr !important; }
+  #home-stats-row > div:last-child { grid-column: 1 / -1 !important; }
   .home-hero-btns { margin-left: 0 !important; flex-wrap: wrap !important; width: 100% !important; }
   .home-hero-btns > div { flex: 1 1 calc(50% - 5px) !important; justify-content: center !important; min-width: 120px !important; }
   .upload-grid { grid-template-columns: 1fr !important; }
@@ -596,7 +598,7 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
 
       <!-- STATS ROW -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:14px;margin-bottom:14px;">
+      <div id="home-stats-row" style="display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:14px;margin-bottom:14px;">
         <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:20px 24px;display:flex;justify-content:space-between;align-items:center;">
           <div>
             <div style="font-size:16px;color:#4a6080;text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:6px;">Items in inventory</div>
@@ -1811,7 +1813,7 @@ select.field-input { background: #fff; color: #0f172a; }
         <div style="font-size:32px;font-weight:800;margin-bottom:4px;">💬 Support Chat</div>
         <div style="font-size:15px;color:var(--muted);">Send us a message — we typically reply within a few hours.</div>
       </div>
-      <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:0;display:flex;flex-direction:column;height:600px;">
+      <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:0;display:flex;flex-direction:column;height:calc(100vh - 300px);min-height:400px;">
         <div id="user-thread-view" style="flex:1;background:var(--bg);padding:22px;overflow-y:auto;border-radius:12px 12px 0 0;border-bottom:1px solid var(--border);">
           <div style="text-align:center;color:var(--muted);font-size:16px;padding:24px 0;">Loading...</div>
         </div>
