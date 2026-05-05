@@ -744,17 +744,6 @@ select.field-input { background: #fff; color: #0f172a; }
         </button>
       </div>
 
-      <!-- SAVED BATCHES -->
-      <div style="margin-bottom:20px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-          <div style="font-size:13px;font-weight:700;color:#4a6080;text-transform:uppercase;letter-spacing:0.08em;font-family:monospace;">// Saved batches</div>
-          <span id="scanner-batch-count" style="font-size:11px;color:#334155;"></span>
-        </div>
-        <div id="scanner-batches-list" style="display:flex;flex-direction:column;gap:6px;">
-          <div style="font-size:13px;color:#334155;text-align:center;padding:16px;">Loading...</div>
-        </div>
-      </div>
-
       <!-- Upload area — changes per mode -->
       <div id="scanner-upload-area" style="margin-bottom:20px;">
         <!-- Fast Scan: camera + gallery -->
@@ -774,13 +763,15 @@ select.field-input { background: #fff; color: #0f172a; }
                 <span style="font-size:10px;color:#334155;background:#0d1117;border:1px solid #1a2332;border-radius:4px;padding:2px 7px;font-family:monospace;">HEIC</span>
               </div>
             </div>
-            <label for="fast-gallery-input" id="fast-drop-zone" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:36px 20px;background:#060810;cursor:pointer;transition:background 0.15s;width:100%;box-sizing:border-box;">
-              <div style="width:48px;height:48px;border-radius:50%;border:1.5px dashed #1e3a2e;display:flex;align-items:center;justify-content:center;">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1e3a2e" stroke-width="1.5"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+            <label for="fast-gallery-input" id="fast-drop-zone" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:60px 20px;background:#060810;cursor:pointer;transition:background 0.15s;width:100%;box-sizing:border-box;">
+              <div style="width:64px;height:64px;border-radius:50%;border:2px dashed #1e3a2e;display:flex;align-items:center;justify-content:center;">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="1.5"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
               </div>
-              <div style="font-size:14px;font-weight:600;color:#64748b;">Drag photos here</div>
-              <div style="font-size:12px;color:#334155;margin-top:-6px;">or</div>
-              <div style="background:#4ade80;color:#052e16;border:none;border-radius:8px;padding:9px 22px;font-size:13px;font-weight:700;pointer-events:none;">Browse files</div>
+              <div>
+                <div style="font-size:20px;font-weight:800;color:#f0fdf4;text-align:center;margin-bottom:6px;">Drop photos here</div>
+                <div style="font-size:14px;color:#4a7c5a;text-align:center;">Drag and drop or click to browse your files</div>
+              </div>
+              <div style="background:#4ade80;color:#052e16;border:none;border-radius:10px;padding:13px 32px;font-size:15px;font-weight:800;pointer-events:none;letter-spacing:-0.01em;">Browse files</div>
             </label>
           </div>
           <input type="file" id="fast-gallery-input" accept="image/*" multiple style="display:none;" onchange="handleScannerUpload(this)">
