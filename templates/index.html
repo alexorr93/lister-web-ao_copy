@@ -3641,40 +3641,47 @@ function printBarcodes() {
   h += '</div><script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script>';
   h += '<script>setTimeout(function(){document.querySelectorAll(".qr-print").forEach(function(el){new QRCode(el,{text:el.dataset.code,width:' + qrSize + ',height:' + qrSize + ',correctLevel:QRCode.CorrectLevel.M});});setTimeout(function(){window.print();},500);},300);<\/script>';
   h += '
+
+</body>
+
 <!-- ROBO CHAT OVERLAY -->
-<div id="robo-chat-overlay" style="display:none;position:fixed;bottom:90px;right:24px;z-index:500;width:380px;max-width:calc(100vw - 32px);">
-  <div style="background:#0a0c10;border:1px solid #1a2332;border-radius:16px;width:100%;max-height:520px;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.6);">
-    <div style="padding:14px 16px;border-bottom:1px solid #1a2332;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
-      <div style="display:flex;align-items:center;gap:10px;">
-        <div style="width:32px;height:32px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:8px;display:flex;align-items:center;justify-content:center;">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2"><rect x="5" y="6" width="14" height="12" rx="2"/><line x1="12" y1="2" x2="12" y2="5"/><circle cx="12" cy="2" r="1" fill="#4ade80"/><circle cx="9" cy="11" r="1.5" fill="#4ade80"/><circle cx="15" cy="11" r="1.5" fill="#4ade80"/><line x1="3" y1="11" x2="5" y2="11"/><line x1="19" y1="11" x2="21" y2="11"/></svg>
+<div id="robo-chat-overlay" style="display:none;position:fixed;bottom:90px;right:24px;z-index:9999;width:360px;max-width:calc(100vw - 32px);">
+  <div style="background:#0a0c10;border:1px solid #1a2332;border-radius:16px;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.6);overflow:hidden;">
+    <div style="padding:12px 16px;border-bottom:1px solid #1a2332;display:flex;align-items:center;justify-content:space-between;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div style="width:28px;height:28px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:7px;display:flex;align-items:center;justify-content:center;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2"><rect x="5" y="6" width="14" height="12" rx="2"/><line x1="12" y1="2" x2="12" y2="5"/><circle cx="12" cy="2" r="1" fill="#4ade80"/><circle cx="9" cy="11" r="1.5" fill="#4ade80"/><circle cx="15" cy="11" r="1.5" fill="#4ade80"/><line x1="3" y1="11" x2="5" y2="11"/><line x1="19" y1="11" x2="21" y2="11"/></svg>
         </div>
         <div>
-          <div style="font-size:14px;font-weight:700;color:#f0fdf4;">Robo</div>
-          <div style="font-size:11px;color:#4ade80;font-family:monospace;">// online</div>
+          <div style="font-size:13px;font-weight:700;color:#f0fdf4;">Robo</div>
+          <div style="font-size:10px;color:#4ade80;font-family:monospace;">// online</div>
         </div>
       </div>
-      <button onclick="closeRoboChat()" style="background:transparent;border:none;color:#4a6080;cursor:pointer;font-size:22px;line-height:1;">x</button>
+      <button onclick="closeRoboChat()" style="background:transparent;border:none;color:#4a6080;cursor:pointer;font-size:20px;line-height:1;padding:4px;">x</button>
     </div>
-    <div id="robo-chat-messages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;min-height:200px;max-height:50vh;">
-      <div style="background:#0d1117;border:1px solid #1a2332;border-radius:12px 12px 12px 4px;padding:12px 14px;font-size:14px;color:#e2e8f0;max-width:85%;align-self:flex-start;">
-        Hey! I am Robo. Ask me anything about reselling, pricing, your inventory, or how to use the app.
+    <div id="robo-chat-messages" style="overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;height:300px;">
+      <div style="background:#0d1117;border:1px solid #1a2332;border-radius:10px 10px 10px 3px;padding:10px 12px;font-size:13px;color:#e2e8f0;max-width:90%;">
+        Hey! I am Robo. Ask me anything about reselling, pricing, or your inventory.
       </div>
     </div>
-    <div style="padding:12px 16px;border-top:1px solid #1a2332;display:flex;gap:8px;flex-shrink:0;">
-      <input id="robo-chat-input" type="text" placeholder="Ask Robo anything..." style="flex:1;background:#0d1117;border:1px solid #1a2332;border-radius:8px;padding:10px 14px;color:#e2e8f0;font-size:14px;font-family:inherit;outline:none;"/>
-      <button id="robo-send-btn" style="background:#4ade80;color:#052e16;border:none;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">Send</button>
+    <div style="padding:10px 12px;border-top:1px solid #1a2332;display:flex;gap:8px;">
+      <input id="robo-chat-input" type="text" placeholder="Ask Robo..." style="flex:1;background:#0d1117;border:1px solid #1a2332;border-radius:7px;padding:8px 12px;color:#e2e8f0;font-size:13px;font-family:inherit;outline:none;"/>
+      <button id="robo-send-btn" style="background:#4ade80;color:#052e16;border:none;border-radius:7px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">Send</button>
     </div>
   </div>
 </div>
-<button id="robo-fab" onclick="openRoboChat()" style="position:fixed;bottom:24px;right:24px;width:52px;height:52px;border-radius:50%;background:#4ade80;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(74,222,128,0.4);z-index:400;">
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#052e16" stroke-width="2.5"><rect x="5" y="6" width="14" height="12" rx="2"/><line x1="12" y1="2" x2="12" y2="5"/><circle cx="12" cy="2" r="1" fill="#052e16"/><circle cx="9" cy="11" r="1.5" fill="#052e16"/><circle cx="15" cy="11" r="1.5" fill="#052e16"/><line x1="3" y1="11" x2="5" y2="11"/><line x1="19" y1="11" x2="21" y2="11"/></svg>
+<button onclick="openRoboChat()" style="position:fixed;bottom:80px;right:24px;width:48px;height:48px;border-radius:50%;background:#4ade80;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(74,222,128,0.4);z-index:9998;">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#052e16" stroke-width="2.5"><rect x="5" y="6" width="14" height="12" rx="2"/><line x1="12" y1="2" x2="12" y2="5"/><circle cx="12" cy="2" r="1" fill="#052e16"/><circle cx="9" cy="11" r="1.5" fill="#052e16"/><circle cx="15" cy="11" r="1.5" fill="#052e16"/><line x1="3" y1="11" x2="5" y2="11"/><line x1="19" y1="11" x2="21" y2="11"/></svg>
 </button>
 <script>
-document.getElementById("robo-chat-input").addEventListener("keydown", function(e){ if(e.key==="Enter") sendRoboMessage(); });
-document.getElementById("robo-send-btn").addEventListener("click", sendRoboMessage);
+document.addEventListener("DOMContentLoaded", function() {
+  var inp = document.getElementById("robo-chat-input");
+  var btn = document.getElementById("robo-send-btn");
+  if (inp) inp.addEventListener("keydown", function(e){ if(e.key==="Enter") sendRoboMessage(); });
+  if (btn) btn.addEventListener("click", sendRoboMessage);
+});
 function openRoboChat() {
-  document.getElementById("robo-chat-overlay").style.display = "flex";
+  document.getElementById("robo-chat-overlay").style.display = "block";
   setTimeout(function(){ document.getElementById("robo-chat-input").focus(); }, 100);
 }
 function closeRoboChat() {
@@ -3687,11 +3694,11 @@ async function sendRoboMessage() {
   input.value = "";
   var messages = document.getElementById("robo-chat-messages");
   var userDiv = document.createElement("div");
-  userDiv.style.cssText = "background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.2);border-radius:12px 12px 4px 12px;padding:12px 14px;font-size:14px;color:#e2e8f0;max-width:85%;align-self:flex-end;";
+  userDiv.style.cssText = "background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.2);border-radius:10px 10px 3px 10px;padding:10px 12px;font-size:13px;color:#e2e8f0;max-width:90%;align-self:flex-end;margin-left:auto;";
   userDiv.textContent = msg;
   messages.appendChild(userDiv);
   var botDiv = document.createElement("div");
-  botDiv.style.cssText = "background:#0d1117;border:1px solid #1a2332;border-radius:12px 12px 12px 4px;padding:12px 14px;font-size:14px;color:#4a6080;max-width:85%;align-self:flex-start;";
+  botDiv.style.cssText = "background:#0d1117;border:1px solid #1a2332;border-radius:10px 10px 10px 3px;padding:10px 12px;font-size:13px;color:#4a6080;max-width:90%;";
   botDiv.textContent = "Thinking...";
   messages.appendChild(botDiv);
   messages.scrollTop = messages.scrollHeight;
@@ -3706,5 +3713,4 @@ async function sendRoboMessage() {
   messages.scrollTop = messages.scrollHeight;
 }
 </script>
-</body>
 </html>
