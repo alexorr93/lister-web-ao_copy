@@ -3641,6 +3641,11 @@ function printBarcodes() {
   h += '</div><script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script>';
   h += '<script>setTimeout(function(){document.querySelectorAll(".qr-print").forEach(function(el){new QRCode(el,{text:el.dataset.code,width:' + qrSize + ',height:' + qrSize + ',correctLevel:QRCode.CorrectLevel.M});});setTimeout(function(){window.print();},500);},300);<\/script>';
 
+  h += '</body></html>';
+  win.document.write(h);
+  win.document.close();
+}
+
 <!-- ROBO CHAT OVERLAY -->
 <div id="robo-chat-overlay" style="display:none;position:fixed;bottom:90px;right:24px;z-index:9999;width:360px;max-width:calc(100vw - 32px);">
   <div style="background:#0a0c10;border:1px solid #1a2332;border-radius:16px;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.6);overflow:hidden;">
