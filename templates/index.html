@@ -6125,6 +6125,9 @@ async function submitEbayDrafts() {
 var salesPeriod = 'month';
 
 function setSalesPeriod(period, btn) {
+  var periodLabels = { day:"Today", week:"This week", month:"This month", "3month":"Last 3 months", "12month":"Last 12 months", all:"All time" };
+  var subEl = document.getElementById("sales-stat-revenue-sub");
+  if (subEl) subEl.textContent = periodLabels[period] || period;
   salesPeriod = period;
   // Update button styles
   btn.parentElement.querySelectorAll('button').forEach(function(b) {
