@@ -1117,7 +1117,7 @@ async def mark_sold_by_sku(request: Request):
             return {"ok": False, "error": "No SKU"}
 
         # Try to find listing by barcode_id (our SKU field)
-        res = supabase.table("listings").select("id,title,status").eq("business_id", business_id).eq("barcode_id", sku).limit(1).execute()
+        res = supabase.table("listings").select("id,title,status").eq("business_id", business_id).eq("ebay_item_id", sku).limit(1).execute()
         if not res.data:
             # Also try matching by ebay_item_id prefix
             print(f"[Sales] SKU {sku} not found in inventory")
@@ -1203,7 +1203,7 @@ async def get_scheduled_listings(request: Request):
 
         # Pull from our DB - listings pushed to eBay
         db_res = supabase.table("listings").select(
-            "id,title,price,photo_id,barcode_id,ebay_item_id,status,created_at"
+            "id,title,price,photo_id,ebay_item_id,status,created_at"
         ).eq("business_id", business_id).eq("status", "ebay_scheduled").execute()
 
         items = db_res.data or []
@@ -1215,13 +1215,13 @@ async def get_scheduled_listings(request: Request):
             if not photo_url and it.get("photo_id"):
                 photo_url = f"https://febnocmzhgkikvxqaamr.supabase.co/storage/v1/object/public/part-photos/{it['photo_id']}"
             results.append({
-                "sku": it.get("barcode_id",""),
+                "sku": it.get("ebay_item_id",""),
                 "title": it.get("title",""),
                 "photo_url": photo_url,
                 "price": it.get("price",0),
                 "status": "Scheduled",
                 "listing_id": it.get("ebay_item_id",""),
-                "barcode_id": it.get("barcode_id",""),
+                "barcode_id": it.get("ebay_item_id",""),
                 "ebay_item_id": it.get("ebay_item_id",""),
             })
 
