@@ -6144,6 +6144,8 @@ function initSalesPeriodBtns() {
   });
 }
 
+var salesListingsAll = [];
+var salesListingsExpanded = false;
 async function loadSalesListings() {
   var list = document.getElementById('sales-listings-list');
   if (!list) return;
@@ -6157,8 +6159,8 @@ async function loadSalesListings() {
       list.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;">No items listed on eBay yet.</div>';
       return;
     }
-    var salesListingsAll = items;
-    var salesListingsExpanded = false;
+    salesListingsAll = items;
+    salesListingsExpanded = false;
     function renderSalesListings() {
       var visible = salesListingsExpanded ? salesListingsAll : salesListingsAll.slice(0, 3);
       var rows = visible.map(function(it) {
