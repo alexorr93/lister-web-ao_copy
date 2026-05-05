@@ -583,10 +583,10 @@ select.field-input { background: #fff; color: #0f172a; }
           <div style="font-size:15px;color:#94a3b8;">Snap a photo — Robo identifies, prices, and lists for you.</div>
         </div>
         <div class="home-hero-btns" style="display:flex;gap:10px;position:relative;z-index:2;flex-shrink:0;flex-shrink:0;flex-wrap:wrap;">
-          <div style="padding:11px 20px;border-radius:9px;font-size:15px;font-weight:600;background:linear-gradient(135deg,#22c55e,#16a34a);color:white;border:none;box-shadow:0 4px 18px rgba(34,197,94,0.4);display:flex;align-items:center;gap:7px;">
+          <label for="fast-gallery-input" onclick="event.stopPropagation();document.querySelector('.nav-btn[data-tab=dashboard]').click();" style="padding:11px 20px;border-radius:9px;font-size:15px;font-weight:600;background:linear-gradient(135deg,#22c55e,#16a34a);color:white;border:none;box-shadow:0 4px 18px rgba(34,197,94,0.4);display:flex;align-items:center;gap:7px;cursor:pointer;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
             Fast Scan
-          </div>
+          </label>
           <div style="padding:11px 20px;border-radius:9px;font-size:15px;font-weight:600;background:rgba(255,255,255,0.06);color:#94a3b8;border:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;gap:7px;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
             Bulk Upload
@@ -747,20 +747,33 @@ select.field-input { background: #fff; color: #0f172a; }
       <!-- Upload area — changes per mode -->
       <div id="scanner-upload-area" style="margin-bottom:20px;">
         <!-- Fast Scan: camera + gallery -->
-        <div id="scanner-fast-upload" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;" class="scanner-fast-grid">
-          <label for="fast-camera-input" class="mobile-only" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border:none;border-radius:12px;padding:24px 10px;cursor:pointer;background:#fbbf24;text-align:center;">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-            <span style="font-size:16px;font-weight:800;color:#000;">Take Photo</span>
-            <span style="font-size:16px;color:rgba(0,0,0,0.6);">Opens camera</span>
-          </label>
-          <input type="file" id="fast-camera-input" accept="image/*" capture="environment" multiple style="display:none;" onchange="handleScannerUpload(this)">
-          <label for="fast-gallery-input" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border:1.5px dashed var(--border);border-radius:12px;padding:24px 10px;cursor:pointer;background:#0a0f18;text-align:center;">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-            <span style="font-size:15px;font-weight:700;color:var(--text);">Gallery</span>
-            <span style="font-size:16px;color:var(--muted);">Choose photos</span>
+        <div id="scanner-fast-upload">
+          <label for="fast-gallery-input" id="fast-drop-zone" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border:2px dashed #1a2332;border-radius:14px;padding:40px 20px;cursor:pointer;background:#0a0f18;text-align:center;width:100%;box-sizing:border-box;transition:border-color 0.2s,background 0.2s;">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#4a6080" stroke-width="1.5"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+            <div>
+              <div style="font-size:15px;font-weight:700;color:#94a3b8;">Drop photos here or click to browse</div>
+              <div style="font-size:13px;color:#475569;margin-top:4px;">Supports JPG, PNG, HEIC — multiple files at once</div>
+            </div>
           </label>
           <input type="file" id="fast-gallery-input" accept="image/*" multiple style="display:none;" onchange="handleScannerUpload(this)">
+          <input type="file" id="fast-camera-input" accept="image/*" capture="environment" multiple style="display:none;" onchange="handleScannerUpload(this)">
         </div>
+        <script>
+        (function(){
+          var zone = document.getElementById("fast-drop-zone");
+          if (!zone) return;
+          zone.addEventListener("dragover", function(e){ e.preventDefault(); zone.style.borderColor="#4ade80"; zone.style.background="rgba(74,222,128,0.05)"; });
+          zone.addEventListener("dragleave", function(){ zone.style.borderColor="#1a2332"; zone.style.background="#0a0f18"; });
+          zone.addEventListener("drop", function(e){
+            e.preventDefault(); zone.style.borderColor="#1a2332"; zone.style.background="#0a0f18";
+            var inp = document.getElementById("fast-gallery-input");
+            if (inp && e.dataTransfer.files.length) {
+              Object.defineProperty(inp, "files", { value: e.dataTransfer.files, configurable: true });
+              inp.dispatchEvent(new Event("change"));
+            }
+          });
+        })();
+        </script>
         <!-- Bulk Upload — navigates to Upload tab, area hidden -->
         <div id="scanner-bulk-upload" style="display:none;">
           <label for="bulk-scanner-input" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border:2px dashed var(--border);border-radius:12px;padding:40px 20px;cursor:pointer;background:#0a0f18;text-align:center;"
