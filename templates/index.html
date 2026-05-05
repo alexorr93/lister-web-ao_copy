@@ -856,6 +856,8 @@ select.field-input { background: #fff; color: #0f172a; }
         <button class="btn" style="font-size:15px;padding:5px 10px;" onclick="deselectAll()">Deselect</button>
         <button class="btn" style="font-size:15px;padding:5px 10px;" onclick="openLotCostModal()" id="lot-cost-btn">Lot Cost</button>
         <button class="btn" style="font-size:15px;padding:5px 10px;background:#1a3a1a;border-color:#2d5a2d;color:#86efac;font-weight:700;" onclick="openSaveBatchModal()">Save Batch</button>
+        <button class="btn btn-danger" id="bulk-delete-btn" style="font-size:15px;padding:5px 10px;display:none;" onclick="bulkDeleteSelected()">Delete selected</button>
+        <button class="btn btn-danger" id="bulk-delete-btn" style="font-size:15px;padding:5px 10px;display:none;" onclick="bulkDeleteSelected()">Delete selected</button>
         <div style="position:relative;" id="submit-dropdown-wrap">
           <button class="btn btn-primary" id="submit-batch-btn" style="font-size:16px;padding:7px 14px;display:none;" onclick="toggleSubmitDropdown()">Submit (<span id="submit-count">0</span>) ▾</button>
           <div id="submit-dropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:4px;background:#0a0f18;border:1px solid #1a2332;border-radius:8px;padding:4px;min-width:180px;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,0.4);">
@@ -2380,6 +2382,8 @@ function renderTiles() {
   }).join('');
 
   updateSubmitBtn();
+  var delBtn = document.getElementById('bulk-delete-btn');
+  if (delBtn) delBtn.style.display = selected.size > 0 ? 'inline-flex' : 'none';
 }
 
 function initTileListeners() {
@@ -2501,6 +2505,18 @@ function toggleSelect(id) {
   updateSubmitBtn();
 }
 function selectAll()   { listings.forEach(l => selected.add(l.id)); renderTiles(); }
+async function bulkDeleteSelected() {
+  if (!selected.size) return;
+  if (!confirm('Delete ' + selected.size + ' selected item(s)? This cannot be undone.')) return;
+  var ids = Array.from(selected);
+  for (var id of ids) {
+    try { await api('DELETE', '/api/listings/' + id); } catch(e) {}
+  }
+  selected.clear();
+  await loadListings();
+  document.getElementById('bulk-delete-btn').style.display = 'none';
+}
+
 function deselectAll() { selected.clear(); renderTiles(); }
 function updateSubmitBtn() {
   const btn = document.getElementById('submit-batch-btn');
