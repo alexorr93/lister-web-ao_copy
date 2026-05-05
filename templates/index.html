@@ -3921,21 +3921,17 @@ async function startCamera() {
       document.getElementById('scan-status').style.color = '#ef4444';
       return;
     }
-    // Try rear camera first, fall back to any camera
-    var constraints = [
-      { video: { facingMode: { exact: 'environment' } } },
-      { video: { facingMode: 'environment' } },
-      { video: { facingMode: { ideal: 'environment' } } },
-      { video: true }
-    ];
+    // Try rear camera, fall back to any
     scanStream = null;
-    for (var i = 0; i < constraints.length; i++) {
+    try {
+      scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    } catch(e1) {
       try {
-        scanStream = await navigator.mediaDevices.getUserMedia(constraints[i]);
-        break;
-      } catch(ce) { /* try next */ }
+        scanStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      } catch(e2) {
+        throw new Error('Camera unavailable: ' + e2.name + ' — ' + e2.message);
+      }
     }
-    if (!scanStream) throw new Error('No camera available');
     var video = document.getElementById('scan-video');
     video.style.display = 'block';
     video.srcObject = scanStream;
