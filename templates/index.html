@@ -3881,37 +3881,32 @@ async function submitMultiScan() {
 var scanStream = null;
 var scanInterval = null;
 
-async function openScanBarcodeModal() {
-  // Request camera permission BEFORE opening modal — some mobile browsers
-  // block the permission prompt when it originates from inside a fixed overlay
-  document.getElementById('scan-status') && (document.getElementById('scan-status').textContent = 'Starting camera...');
-  // Debug: log what camera APIs are available
-  console.log('mediaDevices:', typeof navigator.mediaDevices, 'getUserMedia:', navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia, 'protocol:', location.protocol);
+function openScanBarcodeModal() {
   document.getElementById('scan-manual-input') && (document.getElementById('scan-manual-input').value = '');
+  var isIphone = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  var isChromeMobile = /CriOS/i.test(navigator.userAgent);
+  var statusEl = document.getElementById('scan-status');
+  var modal = document.getElementById('scan-modal');
+  modal.style.display = 'flex';
 
-  // Pre-request permission with minimal constraints first
-  var preStream = null;
-  try {
-    preStream = await navigator.mediaDevices.getUserMedia({ video: true });
-  } catch(pre_e) {
-    // Permission denied at OS/browser level — open modal to show manual entry
-    document.getElementById('scan-modal').style.display = 'flex';
-    var isIphone = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-    var currentUrl = window.location.href;
-    if (isIphone) {
-      document.getElementById('scan-status').innerHTML = '📱 iPhone camera requires Safari. <a href="' + currentUrl + '" style="color:#e8ff47;font-weight:700;">Tap to open in Safari →</a> or use manual entry below.';
-    } else {
-      document.getElementById('scan-status').textContent = 'Camera blocked — allow camera access in browser settings or use manual entry below.';
-    }
-    document.getElementById('scan-status').style.color = '#f59e0b';
-    document.getElementById('scan-status').style.color = '#ef4444';
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    statusEl.textContent = 'Camera not available — use manual entry below.';
+    statusEl.style.color = '#ef4444';
     return;
   }
 
-  // Permission granted — stop pre-stream and open modal with full camera start
-  if (preStream) preStream.getTracks().forEach(function(t) { t.stop(); });
-  document.getElementById('scan-modal').style.display = 'flex';
-  await startCamera();
+  if (isIphone && isChromeMobile) {
+    var currentUrl = window.location.href;
+    statusEl.innerHTML = '📱 Chrome on iPhone blocks camera. <a href="' + currentUrl + '" style="color:#4ade80;font-weight:700;">Open in Safari →</a> or use manual entry below.';
+    statusEl.style.color = '#f59e0b';
+    return;
+  }
+
+  // Show tap-to-start button so getUserMedia fires from a direct user gesture
+  var video = document.getElementById('scan-video');
+  video.style.display = 'none';
+  statusEl.innerHTML = '<button onclick="startCamera()" style="background:#22c55e;color:#000;font-weight:700;font-size:14px;padding:12px 24px;border-radius:10px;border:none;cursor:pointer;font-family:inherit;">📷 Tap to start camera</button>';
+  statusEl.style.color = 'var(--muted)';
 }
 
 function closeScanBarcodeModal() {
@@ -3942,6 +3937,7 @@ async function startCamera() {
     }
     if (!scanStream) throw new Error('No camera available');
     var video = document.getElementById('scan-video');
+    video.style.display = 'block';
     video.srcObject = scanStream;
     await video.play().catch(function(){});
     document.getElementById('scan-status').textContent = 'Looking for QR code...';
