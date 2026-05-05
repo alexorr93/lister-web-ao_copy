@@ -3640,11 +3640,3029 @@ function printBarcodes() {
 
   h += '</div><script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script>';
   h += '<script>setTimeout(function(){document.querySelectorAll(".qr-print").forEach(function(el){new QRCode(el,{text:el.dataset.code,width:' + qrSize + ',height:' + qrSize + ',correctLevel:QRCode.CorrectLevel.M});});setTimeout(function(){window.print();},500);},300);<\/script>';
+  h += '
+<!-- ROBO CHAT OVERLAY -->
+<div id="robo-chat-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:500;align-items:flex-end;">
+  <div style="background:#0a0c10;border-top:1px solid #1a2332;border-radius:16px 16px 0 0;width:100%;max-height:85vh;display:flex;flex-direction:column;">
+    <div style="padding:14px 16px;border-bottom:1px solid #1a2332;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:32px;height:32px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:8px;display:flex;align-items:center;justify-content:center;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2"><rect x="5" y="6" width="14" height="12" rx="2"/><line x1="12" y1="2" x2="12" y2="5"/><circle cx="12" cy="2" r="1" fill="#4ade80"/><circle cx="9" cy="11" r="1.5" fill="#4ade80"/><circle cx="15" cy="11" r="1.5" fill="#4ade80"/><line x1="3" y1="11" x2="5" y2="11"/><line x1="19" y1="11" x2="21" y2="11"/></svg>
+        </div>
+        <div>
+          <div style="font-size:14px;font-weight:700;color:#f0fdf4;">Robo</div>
+          <div style="font-size:11px;color:#4ade80;font-family:monospace;">// online</div>
+        </div>
+      </div>
+      <button onclick="closeRoboChat()" style="background:transparent;border:none;color:#4a6080;cursor:pointer;font-size:22px;line-height:1;">×</button>
+    </div>
+    <div id="robo-chat-messages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;min-height:200px;max-height:50vh;">
+      <div style="background:#0d1117;border:1px solid #1a2332;border-radius:12px 12px 12px 4px;padding:12px 14px;font-size:14px;color:#e2e8f0;max-width:85%;align-self:flex-start;">
+        Hey! I'm Robo. Ask me anything about reselling, pricing, your inventory, or how to use the app.
+      </div>
+    </div>
+    <div style="padding:12px 16px;border-top:1px solid #1a2332;display:flex;gap:8px;flex-shrink:0;">
+      <input id="robo-chat-input" type="text" placeholder="Ask Robo anything..." onkeydown="if(event.key==='Enter')sendRoboMessage();" style="flex:1;background:#0d1117;border:1px solid #1a2332;border-radius:8px;padding:10px 14px;color:#e2e8f0;font-size:14px;font-family:inherit;outline:none;"/>
+      <button onclick="sendRoboMessage()" style="background:#4ade80;color:#052e16;border:none;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">Send</button>
+    </div>
+  </div>
+</div>
 
-  h += '</body></html>';
+<!-- ROBO CHAT BUTTON (desktop) -->
+<button onclick="openRoboChat()" style="position:fixed;bottom:24px;right:24px;width:52px;height:52px;border-radius:50%;background:#4ade80;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(74,222,128,0.4);z-index:400;">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#052e16" stroke-width="2.5"><rect x="5" y="6" width="14" height="12" rx="2"/><line x1="12" y1="2" x2="12" y2="5"/><circle cx="12" cy="2" r="1" fill="#052e16"/><circle cx="9" cy="11" r="1.5" fill="#052e16"/><circle cx="15" cy="11" r="1.5" fill="#052e16"/><line x1="3" y1="11" x2="5" y2="11"/><line x1="19" y1="11" x2="21" y2="11"/></svg>
+</button>
+
+<script>
+function openRoboChat() {
+  var overlay = document.getElementById('robo-chat-overlay');
+  overlay.style.display = 'flex';
+  setTimeout(function(){ document.getElementById('robo-chat-input').focus(); }, 100);
+}
+function closeRoboChat() {
+  document.getElementById('robo-chat-overlay').style.display = 'none';
+}
+async function sendRoboMessage() {
+  var input = document.getElementById('robo-chat-input');
+  var msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  var messages = document.getElementById('robo-chat-messages');
+  var userDiv = document.createElement('div');
+  userDiv.style.cssText = 'background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.2);border-radius:12px 12px 4px 12px;padding:12px 14px;font-size:14px;color:#e2e8f0;max-width:85%;align-self:flex-end;';
+  userDiv.textContent = msg;
+  messages.appendChild(userDiv);
+  var botDiv = document.createElement('div');
+  botDiv.style.cssText = 'background:#0d1117;border:1px solid #1a2332;border-radius:12px 12px 12px 4px;padding:12px 14px;font-size:14px;color:#4a6080;max-width:85%;align-self:flex-start;';
+  botDiv.textContent = 'Thinking...';
+  messages.appendChild(botDiv);
+  messages.scrollTop = messages.scrollHeight;
+  try {
+    var r = await fetch('/api/robo/chat', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      credentials: 'include',
+      body: JSON.stringify({message: msg})
+    });
+    var d = await r.json();
+    botDiv.style.color = '#e2e8f0';
+    botDiv.textContent = d.reply || 'Sorry, I had trouble with that.';
+  } catch(e) {
+    botDiv.textContent = 'Connection error. Try again.';
+  }
+  messages.scrollTop = messages.scrollHeight;
+}
+</script>
+
+</body></html>';
   win.document.write(h);
   win.document.close();
 }
 
+// Escape closes any open modal
+window.addEventListener('keydown', function(e) {
+  if (e.key !== 'Escape') return;
+  closeInvEditModal();
+  closeBulkLocationModal();
+  closeBarcodeModal();
+});
 
+
+function editLocationInline(el) {
+  const id = el.dataset.id;
+  const item = invItems.find(x => x.id === id);
+  if (!item) return;
+  const cur = item.storage_location || '';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = cur;
+  input.setAttribute('list', 'inv-locations-list');
+  input.style.cssText = 'background:var(--bg);border:1px solid var(--accent);border-radius:4px;padding:2px 6px;color:var(--text);font-size:10px;font-family:inherit;width:120px;outline:none;';
+  input.onclick = e => e.stopPropagation();
+  el.replaceWith(input);
+  input.focus(); input.select();
+  fetch('/api/inventory/locations').then(r => r.json()).then(d => {
+    const dl = document.getElementById('inv-locations-list');
+    if (dl) dl.innerHTML = (d.locations||[]).map(n => '<option value="' + escapeText(n) + '"></option>').join('');
+  });
+  let done = false;
+  const save = async function() {
+    if (done) return;
+    done = true;
+    const newLoc = input.value.trim();
+    if (newLoc === cur) { loadInventory(); return; }
+    try {
+      await fetch('/api/inventory/' + id, {
+        method:'PATCH', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({storage_location: newLoc})
+      });
+      toast('Location saved');
+      loadInventory();
+    } catch(e) { toast('Failed', 'error'); loadInventory(); }
+  };
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { done = true; loadInventory(); }
+  });
+}
+
+function toggleSoldFields() {
+  const status = document.getElementById('inv-edit-status').value;
+  const block = document.getElementById('inv-edit-sold-fields');
+  if (block) block.style.display = status === 'sold' ? 'block' : 'none';
+}
+
+
+
+// ── MULTI-ITEM PHOTO SCANNER ──
+var multiPayload = null;
+var multiSelected = new Set();
+
+async function checkMultiScanTier() {
+  try {
+    var r = await fetch('/api/dashboard/summary?period=month');
+    var d = await r.json();
+    var hasAccess = (d.scan_limit || 0) >= 500;
+    var locked = document.getElementById('multi-scan-locked');
+    var active = document.getElementById('multi-scan-active');
+    if (locked) locked.style.display = hasAccess ? 'none' : 'block';
+    if (active) active.style.display = hasAccess ? 'block' : 'none';
+    return hasAccess;
+  } catch(e) {
+    var locked = document.getElementById('multi-scan-locked');
+    var active = document.getElementById('multi-scan-active');
+    if (locked) locked.style.display = 'block';
+    if (active) active.style.display = 'none';
+    return false;
+  }
+}
+
+async function startMultiScan(input) {
+  var file = input.files && input.files[0];
+  if (!file) return;
+  document.getElementById('multi-scan-active').style.display = 'none';
+  document.getElementById('multi-scan-detecting').style.display = 'block';
+  var fd = new FormData();
+  fd.append('file', file);
+  try {
+    var r = await fetch('/api/multi-scan/detect', {method:'POST', body:fd});
+    if (!r.ok) {
+      if (r.status === 402) {
+        toast('Multi-item scanning requires Growth plan or higher', 'error');
+      } else {
+        var txt = await r.text();
+        toast('Detection failed: ' + (txt || r.status), 'error');
+      }
+      document.getElementById('multi-scan-detecting').style.display = 'none';
+      document.getElementById('multi-scan-active').style.display = 'block';
+      input.value = '';
+      return;
+    }
+    var data = await r.json();
+    multiPayload = data;
+    multiPayload.originalFile = file;
+    multiSelected = new Set((data.items || []).map(function(it) { return it.id; }));
+    document.getElementById('multi-scan-detecting').style.display = 'none';
+    document.getElementById('multi-scan-active').style.display = 'block';
+    input.value = '';
+    if (!data.items || !data.items.length) {
+      toast('No items detected - try a clearer photo', 'error');
+      return;
+    }
+    openMultiReview(file);
+  } catch(e) {
+    toast('Detection failed: ' + e.message, 'error');
+    document.getElementById('multi-scan-detecting').style.display = 'none';
+    document.getElementById('multi-scan-active').style.display = 'block';
+    input.value = '';
+  }
+}
+
+function openMultiReview(file) {
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var img = document.getElementById('multi-review-img');
+    img.src = e.target.result;
+    img.onload = function() { drawMultiBoxes(); };
+  };
+  reader.readAsDataURL(file);
+  renderMultiItemList();
+  updateMultiSubmitCount();
+  // Show cap banner when detection hit the 20-item ceiling
+  var banner = document.getElementById('multi-cap-banner');
+  if (banner) {
+    banner.style.display = (multiPayload && multiPayload.items && multiPayload.items.length >= 20) ? 'block' : 'none';
+  }
+  document.getElementById('multi-review-modal').style.display = 'block';
+}
+
+function drawMultiBoxes() {
+  if (!multiPayload) return;
+  var svg = document.getElementById('multi-review-svg');
+  var w = multiPayload.image_width;
+  var h = multiPayload.image_height;
+  svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+  var html = '';
+  multiPayload.items.forEach(function(it, idx) {
+    var sel = multiSelected.has(it.id);
+    var color = sel ? '#22c55e' : '#64748b';
+    var opacity = sel ? '1' : '0.35';
+    var b = it.box;
+    html += '<g opacity="' + opacity + '">';
+    html += '<rect x="' + b.x + '" y="' + b.y + '" width="' + b.w + '" height="' + b.h + '" stroke="' + color + '" stroke-width="4" fill="' + color + '" fill-opacity="0.12"/>';
+    html += '<rect x="' + b.x + '" y="' + (b.y - 30) + '" width="36" height="28" fill="' + color + '"/>';
+    html += '<text x="' + (b.x + 18) + '" y="' + (b.y - 10) + '" text-anchor="middle" fill="#fff" font-size="20" font-weight="700">' + (idx + 1) + '</text>';
+    html += '</g>';
+  });
+  svg.innerHTML = html;
+}
+
+function renderMultiItemList() {
+  if (!multiPayload) return;
+  var list = document.getElementById('multi-review-list');
+  list.innerHTML = multiPayload.items.map(function(it, idx) {
+    var sel = multiSelected.has(it.id);
+    var labelText = it.label || ('Item ' + (idx + 1));
+    var div = document.createElement('div');
+    div.textContent = labelText;
+    var safeLabel = div.innerHTML;
+    return '<label style="display:flex;align-items:center;gap:10px;padding:8px 6px;border-bottom:1px solid var(--border);cursor:pointer;">'
+      + '<input type="checkbox" ' + (sel ? 'checked' : '') + ' onchange="toggleMultiItem(' + it.id + ')" style="width:16px;height:16px;cursor:pointer;"/>'
+      + '<span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:' + (sel ? '#22c55e' : '#64748b') + ';color:#fff;border-radius:5px;font-size:11px;font-weight:700;flex-shrink:0;">' + (idx + 1) + '</span>'
+      + '<span style="font-size:12px;flex:1;' + (sel ? '' : 'color:var(--muted);text-decoration:line-through;') + '">' + safeLabel + '</span>'
+      + '</label>';
+  }).join('');
+}
+
+function toggleMultiItem(id) {
+  if (multiSelected.has(id)) multiSelected.delete(id); else multiSelected.add(id);
+  drawMultiBoxes();
+  renderMultiItemList();
+  updateMultiSubmitCount();
+}
+
+function multiSelectAll() {
+  if (!multiPayload) return;
+  multiPayload.items.forEach(function(it) { multiSelected.add(it.id); });
+  drawMultiBoxes(); renderMultiItemList(); updateMultiSubmitCount();
+}
+
+function multiDeselectAll() {
+  multiSelected.clear();
+  drawMultiBoxes(); renderMultiItemList(); updateMultiSubmitCount();
+}
+
+function updateMultiSubmitCount() {
+  document.getElementById('multi-submit-count').textContent = multiSelected.size;
+  var btn = document.getElementById('multi-submit-btn');
+  btn.disabled = multiSelected.size === 0;
+  document.getElementById('multi-review-summary').textContent =
+    multiPayload.items.length + ' detected · ' + multiSelected.size + ' selected · max 20 per photo';
+}
+
+function closeMultiReview() {
+  document.getElementById('multi-review-modal').style.display = 'none';
+  multiPayload = null;
+  multiSelected.clear();
+}
+
+async function submitMultiScan() {
+  if (!multiPayload || !multiSelected.size) return;
+  var condition = document.getElementById('multi-review-condition').value;
+  var items = multiPayload.items.filter(function(it) { return multiSelected.has(it.id); });
+  var btn = document.getElementById('multi-submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Submitting...';
+  try {
+    var fd = new FormData();
+    fd.append('file', multiPayload.originalFile);
+    fd.append('items', JSON.stringify(items));
+    fd.append('condition', condition);
+    var r = await fetch('/api/multi-scan/finalize', {method:'POST', body: fd});
+    if (!r.ok) {
+      var txt = await r.text();
+      throw new Error(txt || ('Status ' + r.status));
+    }
+    var d = await r.json();
+    toast('Started scan of ' + d.groups_created + ' items - they will appear on your dashboard');
+    closeMultiReview();
+    var dashBtn = document.querySelector('[data-tab="dashboard"]');
+    if (dashBtn) dashBtn.click();
+  } catch(e) {
+    toast('Failed: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.innerHTML = 'Scan <span id="multi-submit-count">' + multiSelected.size + '</span> Items';
+  }
+}
+
+// ── BARCODE SCANNER ──
+var scanStream = null;
+var scanInterval = null;
+
+function openScanBarcodeModal() {
+  document.getElementById('scan-manual-input') && (document.getElementById('scan-manual-input').value = '');
+  var isIphone = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  var isChromeMobile = /CriOS/i.test(navigator.userAgent);
+  var statusEl = document.getElementById('scan-status');
+  var modal = document.getElementById('scan-modal');
+  modal.style.display = 'flex';
+
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    statusEl.textContent = 'Camera not available — use manual entry below.';
+    statusEl.style.color = '#ef4444';
+    return;
+  }
+
+  if (isIphone && isChromeMobile) {
+    var currentUrl = window.location.href;
+    statusEl.innerHTML = '📱 Chrome on iPhone blocks camera. <a href="' + currentUrl + '" style="color:#4ade80;font-weight:700;">Open in Safari →</a> or use manual entry below.';
+    statusEl.style.color = '#f59e0b';
+    return;
+  }
+
+  // Show tap-to-start button so getUserMedia fires from a direct user gesture
+  var video = document.getElementById('scan-video');
+  video.style.display = 'none';
+  statusEl.innerHTML = '<button onclick="startCamera()" style="background:#22c55e;color:#000;font-weight:700;font-size:14px;padding:12px 24px;border-radius:10px;border:none;cursor:pointer;font-family:inherit;">📷 Tap to start camera</button>';
+  statusEl.style.color = 'var(--muted)';
+}
+
+function closeScanBarcodeModal() {
+  document.getElementById('scan-modal').style.display = 'none';
+  stopCamera();
+}
+
+async function startCamera() {
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      document.getElementById('scan-status').textContent = 'Camera API not available. Use manual entry below.';
+      document.getElementById('scan-status').style.color = '#ef4444';
+      return;
+    }
+    // Try rear camera, fall back to any
+    scanStream = null;
+    try {
+      scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    } catch(e1) {
+      try {
+        scanStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      } catch(e2) {
+        throw new Error('Camera unavailable: ' + e2.name + ' — ' + e2.message);
+      }
+    }
+    var video = document.getElementById('scan-video');
+    video.style.display = 'block';
+    video.srcObject = scanStream;
+    await video.play().catch(function(){});
+    document.getElementById('scan-status').textContent = 'Looking for QR code...';
+    document.getElementById('scan-status').style.color = 'var(--muted)';
+    await loadJsQR();
+    if (scanInterval) clearInterval(scanInterval);
+    scanInterval = setInterval(scanFrame, 250);
+  } catch(e) {
+    console.error('Camera error', e.name, e.message);
+    var msg = e.name === 'NotAllowedError' ? 'Permission denied — tap the lock icon in Chrome address bar → Site Settings → Camera → Allow'
+            : e.name === 'NotFoundError' ? 'No camera found on this device'
+            : e.name === 'NotReadableError' ? 'Camera in use by another app — close other camera apps and retry'
+            : e.name === 'OverconstrainedError' ? 'Camera constraint failed — trying again...'
+            : 'Camera error: ' + e.name + ' — ' + e.message;
+    document.getElementById('scan-status').textContent = msg;
+    document.getElementById('scan-status').style.color = '#ef4444';
+
+    // If OverconstrainedError (facingMode rejected), retry with no constraints
+    if (e.name === 'OverconstrainedError' || e.name === 'NotFoundError') {
+      try {
+        scanStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        var video = document.getElementById('scan-video');
+        video.srcObject = scanStream;
+        document.getElementById('scan-status').textContent = 'Looking for QR code...';
+        document.getElementById('scan-status').style.color = 'var(--muted)';
+        await loadJsQR();
+        if (scanInterval) clearInterval(scanInterval);
+        scanInterval = setInterval(scanFrame, 250);
+      } catch(e2) {
+        document.getElementById('scan-status').textContent = 'Camera unavailable: ' + e2.message;
+      }
+    }
+  }
+}
+
+function stopCamera() {
+  if (scanInterval) { clearInterval(scanInterval); scanInterval = null; }
+  if (scanStream) {
+    scanStream.getTracks().forEach(function(t) { t.stop(); });
+    scanStream = null;
+  }
+}
+
+async function loadJsQR() {
+  if (typeof jsQR !== 'undefined') return;
+  return new Promise(function(resolve, reject) {
+    var s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js';
+    s.onload = resolve;
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+
+function scanFrame() {
+  var video = document.getElementById('scan-video');
+  var canvas = document.getElementById('scan-canvas');
+  if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) return;
+  if (typeof jsQR === 'undefined') return;
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  var ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  var imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  var code = jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: 'dontInvert' });
+  if (code && code.data) {
+    handleScannedCode(code.data);
+  }
+}
+
+async function handleScannedCode(code) {
+  stopCamera();
+  document.getElementById('scan-status').textContent = 'Found: ' + code + ' — looking up...';
+  document.getElementById('scan-status').style.color = '#22c55e';
+  try {
+    var r = await fetch('/api/inventory?search=' + encodeURIComponent(code));
+    var d = await r.json();
+    var codeLower = code.toLowerCase();
+    var match = (d.items || []).find(function(it) {
+      return (it.barcode_id || '').toLowerCase() === codeLower
+          || (it.photo_id || '').toLowerCase() === codeLower
+          || (it.barcode_id || '').toLowerCase().indexOf(codeLower) !== -1;
+    });
+    if (match) {
+      closeScanBarcodeModal();
+      invItems = d.items || [];
+      openInvEditModal(match.id);
+    } else {
+      document.getElementById('scan-status').innerHTML = 'No item found for: <b>' + code + '</b>';
+      document.getElementById('scan-status').style.color = '#f59e0b';
+      setTimeout(function() { startCamera(); }, 1500);
+    }
+  } catch(e) {
+    document.getElementById('scan-status').textContent = 'Lookup failed: ' + e.message;
+    document.getElementById('scan-status').style.color = '#ef4444';
+    setTimeout(function() { startCamera(); }, 1500);
+  }
+}
+
+async function manualLookup() {
+  var code = document.getElementById('scan-manual-input').value.trim();
+  if (!code) return;
+  await handleScannedCode(code);
+}
+
+window.addEventListener('keydown', function(e) {
+  if (e.key !== 'Escape') return;
+  var m = document.getElementById('scan-modal');
+  if (m && m.style.display === 'flex') closeScanBarcodeModal();
+});
+
+
+// ── DASHBOARD SORT ──
+var dashSortMode = 'batch_desc';
+
+function changeDashSort() {
+  var sel = document.getElementById('dash-sort');
+  if (!sel) return;
+  dashSortMode = sel.value;
+  sortListings();
+  renderTiles();
+}
+
+function sortListings() {
+  if (!Array.isArray(listings)) return;
+  listings.sort(function(a, b) {
+    switch(dashSortMode) {
+      case 'batch_asc':
+        return (a.batch_order || 0) - (b.batch_order || 0);
+      case 'batch_desc':
+        return (b.batch_order || 0) - (a.batch_order || 0);
+      case 'price_asc':
+        return (a.price || 0) - (b.price || 0);
+      case 'price_desc':
+        return (b.price || 0) - (a.price || 0);
+      case 'profit_asc':
+        return ((a.price || 0) - (a.cost || 0)) - ((b.price || 0) - (b.cost || 0));
+      case 'profit_desc':
+        return ((b.price || 0) - (b.cost || 0)) - ((a.price || 0) - (a.cost || 0));
+      default:
+        return 0;
+    }
+  });
+}
+
+// Hook sort into loadListings — sort BEFORE rendering
+var __origLoadListings = window.loadListings;
+if (typeof __origLoadListings === 'function') {
+  window.loadListings = async function() {
+    await __origLoadListings.apply(this, arguments);
+    sortListings();
+    if (typeof renderTiles === 'function') renderTiles();
+  };
+}
+
+
+
+// ── INTAKE INVENTORY ──
+var intakeRows = [];
+
+async function loadIntake() {
+  try {
+    const r = await fetch('/api/intake', {credentials:'include'});
+    const d = await r.json();
+    intakeRows = (d.items || []);
+    renderIntakeTable();
+  } catch(e) {
+    console.error('Intake load error:', e);
+    toast('Could not load intake', 'error');
+  }
+}
+
+function renderIntakeTable() {
+  const tbody = document.getElementById('intake-body');
+  const empty = document.getElementById('intake-empty');
+  const stats = document.getElementById('intake-stats');
+  if (!tbody) return;
+
+  if (!intakeRows.length) {
+    tbody.innerHTML = '';
+    if (empty) empty.style.display = 'block';
+    if (stats) stats.textContent = 'Track purchases before you scan them';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  let total = 0;
+  intakeRows.forEach(r => { total += parseFloat(r.purchase_price) || 0; });
+  if (stats) stats.textContent = `${intakeRows.length} record${intakeRows.length===1?'':'s'} · $${total.toFixed(2)} total purchase value`;
+
+  tbody.innerHTML = intakeRows.map(r => {
+    const photo = r.photo_url
+      ? `<img src="${r.photo_url}" style="width:60px;height:60px;border-radius:6px;object-fit:cover;cursor:pointer;" onclick="changeIntakePhoto('${r.id}')"/>`
+      : `<div onclick="changeIntakePhoto('${r.id}')" style="width:60px;height:60px;border-radius:6px;background:var(--bg);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--muted);font-size:18px;">📷</div>`;
+    return `<tr style="border-bottom:1px solid var(--border);" data-id="${r.id}">
+      <td style="padding:8px 12px;">${photo}</td>
+      <td style="padding:8px 12px;"><input type="text" value="${(r.item_name||'').replace(/"/g,'&quot;')}" placeholder="Item name..." data-field="item_name" onblur="saveIntakeField(this)" style="width:100%;background:transparent;border:1px solid transparent;color:var(--text);font-size:13px;padding:5px 7px;border-radius:5px;font-family:inherit;outline:none;" onfocus="this.style.borderColor='var(--border)';this.style.background='var(--bg)';" onblur2="this.style.borderColor='transparent';this.style.background='transparent';"/></td>
+      <td style="padding:8px 12px;"><input type="date" value="${r.purchase_date||''}" data-field="purchase_date" onblur="saveIntakeField(this)" style="background:transparent;border:1px solid transparent;color:var(--text);font-size:13px;padding:5px 7px;border-radius:5px;font-family:inherit;outline:none;width:130px;color-scheme:dark;"/></td>
+      <td style="padding:8px 12px;text-align:right;"><input type="number" step="0.01" value="${r.purchase_price||''}" placeholder="0.00" data-field="purchase_price" onblur="saveIntakeField(this)" style="width:100%;background:transparent;border:1px solid transparent;color:var(--text);font-size:13px;padding:5px 7px;border-radius:5px;font-family:inherit;outline:none;text-align:right;"/></td>
+      <td style="padding:8px 12px;"><input type="text" value="${(r.sku_code||'').replace(/"/g,'&quot;')}" placeholder="SKU..." data-field="sku_code" onblur="saveIntakeField(this)" style="width:100%;background:transparent;border:1px solid transparent;color:var(--text);font-size:13px;padding:5px 7px;border-radius:5px;font-family:'DM Mono',monospace;outline:none;"/></td>
+      <td style="padding:8px 12px;"><input type="text" value="${(r.notes||'').replace(/"/g,'&quot;')}" placeholder="Notes..." data-field="notes" onblur="saveIntakeField(this)" style="width:100%;background:transparent;border:1px solid transparent;color:var(--text);font-size:13px;padding:5px 7px;border-radius:5px;font-family:inherit;outline:none;"/></td>
+      <td style="padding:8px 12px;text-align:center;"><button onclick="deleteIntakeRow('${r.id}')" style="background:transparent;border:1px solid #1a2332;color:var(--muted);width:28px;height:28px;border-radius:5px;cursor:pointer;font-size:14px;line-height:1;" title="Delete row">×</button></td>
+    </tr>`;
+  }).join('');
+
+  // Add focus styles after render
+  document.querySelectorAll('#intake-body input').forEach(inp => {
+    inp.addEventListener('focus', function() {
+      this.style.borderColor = 'var(--border)';
+      this.style.background = 'var(--bg)';
+    });
+    inp.addEventListener('blur', function() {
+      this.style.borderColor = 'transparent';
+      this.style.background = 'transparent';
+    });
+  });
+}
+
+async function addIntakeRow() {
+  try {
+    const r = await fetch('/api/intake', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      credentials:'include',
+      body: JSON.stringify({})
+    });
+    const d = await r.json();
+    if (d.ok && d.item) {
+      intakeRows.unshift(d.item);
+      renderIntakeTable();
+      // Focus the item name input on the new row
+      setTimeout(function() {
+        const newRow = document.querySelector('#intake-body tr[data-id="' + d.item.id + '"]');
+        if (newRow) {
+          const nameInput = newRow.querySelector('input[data-field="item_name"]');
+          if (nameInput) nameInput.focus();
+        }
+      }, 50);
+    }
+  } catch(e) {
+    toast('Could not add row', 'error');
+  }
+}
+
+async function saveIntakeField(input) {
+  const tr = input.closest('tr');
+  if (!tr) return;
+  const id = tr.dataset.id;
+  const field = input.dataset.field;
+  let val = input.value;
+  if (field === 'purchase_price') val = val ? parseFloat(val) : null;
+  if (field === 'purchase_date' && !val) val = null;
+  try {
+    await fetch('/api/intake/' + id, {
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      credentials:'include',
+      body: JSON.stringify({[field]: val})
+    });
+    // Update local cache
+    const row = intakeRows.find(r => r.id === id);
+    if (row) row[field] = val;
+    // Update stats line
+    const stats = document.getElementById('intake-stats');
+    if (stats) {
+      let total = 0;
+      intakeRows.forEach(r => { total += parseFloat(r.purchase_price) || 0; });
+      stats.textContent = `${intakeRows.length} record${intakeRows.length===1?'':'s'} · $${total.toFixed(2)} total purchase value`;
+    }
+  } catch(e) {
+    toast('Save failed', 'error');
+  }
+}
+
+async function deleteIntakeRow(id) {
+  if (!confirm('Delete this intake row?')) return;
+  try {
+    await fetch('/api/intake/' + id, {method:'DELETE', credentials:'include'});
+    intakeRows = intakeRows.filter(r => r.id !== id);
+    renderIntakeTable();
+    toast('Row deleted');
+  } catch(e) {
+    toast('Delete failed', 'error');
+  }
+}
+
+function changeIntakePhoto(id) {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'image/*';
+  inp.onchange = async function() {
+    const file = inp.files && inp.files[0];
+    if (!file) return;
+    if (file.size > 10*1024*1024) { toast('Image too large (10MB max)', 'error'); return; }
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      toast('Uploading photo...');
+      const r = await fetch('/api/intake/upload-photo', {method:'POST', body: fd, credentials:'include'});
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'Upload failed');
+      // Patch the row with the new photo_id
+      await fetch('/api/intake/' + id, {
+        method:'PATCH',
+        headers:{'Content-Type':'application/json'},
+        credentials:'include',
+        body: JSON.stringify({photo_id: d.photo_id})
+      });
+      const row = intakeRows.find(r => r.id === id);
+      if (row) {
+        row.photo_id = d.photo_id;
+        row.photo_url = d.photo_url;
+      }
+      renderIntakeTable();
+      toast('Photo saved ✓');
+    } catch(e) {
+      toast('Upload failed', 'error');
+    }
+  };
+  inp.click();
+}
+
+
+// ── EXPENSES ──────────────────────────────────────────────────
+var expPeriod = 'month';
+var expCategory = '';
+var expItems = [];
+var expSummary = {};
+var expTotal = 0;
+var expEditId = null;
+var expChartInstance = null;
+
+var EXP_COLORS = {
+  "Cost of Goods":        "#ef4444",
+  "Shipping & Postage":   "#f97316",
+  "Supplies & Packaging": "#eab308",
+  "Fees & Subscriptions": "#22c55e",
+  "Gas & Travel":         "#3b82f6",
+  "Food & Meals":         "#a855f7",
+  "Software & Tools":     "#06b6d4",
+  "Other":                "#6b7280"
+};
+
+var EXP_EMOJIS = {
+  "Cost of Goods":"🔴","Shipping & Postage":"🟠","Supplies & Packaging":"🟡",
+  "Fees & Subscriptions":"🟢","Gas & Travel":"🔵","Food & Meals":"🟣",
+  "Software & Tools":"🩵","Other":"⚫"
+};
+
+async function loadExpenses() {
+  try {
+    var url = '/api/expenses?period=' + expPeriod;
+    if (expCategory) url += '&category=' + encodeURIComponent(expCategory);
+    var r = await fetch(url, {credentials:'include'});
+    var d = await r.json();
+    expItems = d.items || [];
+    expSummary = d.summary || {};
+    expTotal = d.total || 0;
+    renderExpSummaryCards();
+    renderExpChart();
+    renderExpTable();
+    // Load COGS toggle state
+    try {
+      var br = await fetch('/api/account', {credentials:'include'});
+      var bd = await br.json();
+      var tog = document.getElementById('exp-cogs-toggle');
+      if (tog && bd.cogs_import_enabled) tog.checked = true;
+    } catch(e) {}
+  } catch(e) {
+    console.error('loadExpenses error', e);
+  }
+}
+
+function setExpPeriod(p) {
+  expPeriod = p;
+  document.querySelectorAll('.exp-period-pill').forEach(function(btn) {
+    var isActive = btn.dataset.period === p;
+    btn.style.background = isActive ? 'var(--accent)' : 'transparent';
+    btn.style.color = isActive ? '#fff' : 'var(--muted)';
+    btn.style.fontWeight = isActive ? '500' : 'normal';
+    if (isActive) btn.classList.add('active'); else btn.classList.remove('active');
+  });
+  loadExpenses();
+}
+
+function setExpCategory(cat) {
+  expCategory = cat;
+  loadExpenses();
+}
+
+function renderExpSummaryCards() {
+  // New layout: hero card + quick stats + category list
+  var periodLabels = {day:'Today',week:'This week',month:'This month','3month':'Last 3 months','6month':'Last 6 months','12month':'Last 12 months',all:'All time'};
+
+  // Hero card
+  var heroPeriod = document.getElementById('exp-hero-period');
+  if (heroPeriod) heroPeriod.textContent = 'Total spend · ' + (periodLabels[expPeriod] || 'This month');
+  var heroTotal = document.getElementById('exp-hero-total');
+  if (heroTotal) heroTotal.textContent = '$' + expTotal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+  var heroMeta = document.getElementById('exp-hero-meta');
+  if (heroMeta) {
+    var avg = expItems.length ? (expTotal / expItems.length) : 0;
+    heroMeta.innerHTML = '<strong style="color:var(--text);font-weight:600;">' + expItems.length + '</strong> transactions · <strong style="color:var(--text);font-weight:600;">$' + avg.toFixed(2) + '</strong> avg';
+  }
+
+  // Quick stats
+  var cogsTotal = (expSummary['Cost of Goods'] && expSummary['Cost of Goods'].total) || 0;
+  var heroCogs = document.getElementById('exp-hero-cogs');
+  if (heroCogs) heroCogs.textContent = '$' + cogsTotal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+  // Tax-deductible: everything except "Other" (heuristic — Other is often personal/unknown)
+  var deductTotal = 0;
+  Object.keys(expSummary).forEach(function(cat) {
+    if (cat !== 'Other') deductTotal += (expSummary[cat].total || 0);
+  });
+  var heroDeduct = document.getElementById('exp-hero-deduct');
+  if (heroDeduct) heroDeduct.textContent = '$' + deductTotal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+  // Stats line under title
+  var stats = document.getElementById('exp-stats');
+  if (stats) stats.textContent = expItems.length + ' expense' + (expItems.length===1?'':'s') + ' · ' + (periodLabels[expPeriod] || 'This month').toLowerCase();
+
+  // Category breakdown list
+  var listEl = document.getElementById('exp-cat-list');
+  if (!listEl) return;
+  var cats = Object.keys(expSummary).filter(function(c) { return expSummary[c].total > 0; });
+  cats.sort(function(a,b) { return expSummary[b].total - expSummary[a].total; });
+  var catCount = document.getElementById('exp-cat-count');
+  if (catCount) catCount.textContent = cats.length + ' categor' + (cats.length===1?'y':'ies');
+
+  if (!cats.length) {
+    listEl.innerHTML = '<div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px;">No expenses yet for this period</div>';
+    return;
+  }
+
+  listEl.innerHTML = '<ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:14px;">' + cats.map(function(cat) {
+    var s = expSummary[cat];
+    var color = EXP_COLORS[cat] || '#94a3b8';
+    var pct = expTotal > 0 ? ((s.total / expTotal) * 100) : 0;
+    return '<li>' +
+      '<div style="display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;">' +
+        '<span style="width:10px;height:10px;border-radius:50%;background:' + color + ';"></span>' +
+        '<span style="font-size:13px;color:var(--text);font-weight:500;">' + cat + '</span>' +
+        '<span><span style="font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;">$' + s.total.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) + '</span><span style="font-size:11px;color:var(--muted);margin-left:6px;">' + pct.toFixed(1) + '%</span></span>' +
+      '</div>' +
+      '<div style="height:4px;background:rgba(255,255,255,0.05);border-radius:2px;overflow:hidden;margin-top:6px;">' +
+        '<div style="height:100%;background:' + color + ';width:' + Math.max(pct, 0.5) + '%;border-radius:2px;transition:width 0.4s;"></div>' +
+      '</div>' +
+    '</li>';
+  }).join('') + '</ul>';
+}
+
+function renderExpChart() {
+  var canvas = document.getElementById('exp-chart');
+  if (!canvas) return;
+  var cats = Object.keys(expSummary).filter(function(c) { return expSummary[c].total > 0; });
+  if (!cats.length) { canvas.style.display = 'none'; return; }
+  canvas.style.display = 'block';
+
+  if (expChartInstance) { expChartInstance.destroy(); expChartInstance = null; }
+
+  // Load Chart.js if needed
+  if (typeof Chart === 'undefined') {
+    var s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js';
+    s.onload = function() { renderExpChart(); };
+    document.head.appendChild(s);
+    return;
+  }
+
+  var labels = cats;
+  var data = cats.map(function(c) { return expSummary[c].total; });
+  var colors = cats.map(function(c) { return EXP_COLORS[c] || '#6b7280'; });
+
+  // Update center total
+  var centerEl = document.getElementById('exp-chart-total');
+  if (centerEl) centerEl.textContent = '$' + expTotal.toFixed(0);
+  var badgeEl = document.getElementById('exp-total-badge');
+  if (badgeEl) badgeEl.textContent = '';
+
+  // Render custom HTML legend
+  var legendEl = document.getElementById('exp-chart-legend');
+  if (legendEl) {
+    legendEl.innerHTML = cats.map(function(c) {
+      var pct = expTotal > 0 ? ((expSummary[c].total / expTotal) * 100).toFixed(1) : 0;
+      return '<div style="display:flex;align-items:center;gap:10px;">' +
+        '<div style="width:10px;height:10px;border-radius:50%;background:' + (EXP_COLORS[c]||'#6b7280') + ';flex-shrink:0;"></div>' +
+        '<div style="flex:1;font-size:12px;color:var(--text);font-weight:600;">' + c + '</div>' +
+        '<div style="font-size:12px;color:var(--muted);">' + pct + '%</div>' +
+        '<div style="font-size:12px;font-weight:700;color:var(--text);min-width:52px;text-align:right;">$' + expSummary[c].total.toFixed(0) + '</div>' +
+        '</div>';
+    }).join('');
+  }
+
+  expChartInstance = new Chart(canvas, {
+    type: 'doughnut',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: data,
+        backgroundColor: colors,
+        borderColor: '#0d0f14',
+        borderWidth: 3,
+        hoverOffset: 6
+      }]
+    },
+    options: {
+      responsive: false,
+      maintainAspectRatio: false,
+      cutout: '70%',
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              var pct = expTotal > 0 ? ((ctx.raw / expTotal) * 100).toFixed(1) : 0;
+              return ' $' + ctx.raw.toFixed(2) + ' (' + pct + '%)';
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+function renderExpTable() {
+  var tbody = document.getElementById('exp-tbody');
+  var empty = document.getElementById('exp-empty');
+  var countEl = document.getElementById('exp-txn-count');
+  if (countEl) countEl.textContent = expItems.length + ' transaction' + (expItems.length===1?'':'s');
+  if (!tbody) return;
+  if (!expItems.length) {
+    tbody.innerHTML = '';
+    if (empty) empty.style.display = 'block';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  tbody.innerHTML = expItems.map(function(it) {
+    var color = EXP_COLORS[it.category] || '#94a3b8';
+    var isCogs = it.source === 'cogs';
+    var merchant = it.merchant || '—';
+    var initial = (merchant.charAt(0) || '?').toUpperCase();
+    var dateStr = (it.expense_date||'').replace(/^(\d{4})-(\d{2})-(\d{2})$/,'$2/$3/$1');
+    return '<tr style="border-bottom:1px solid #111827;transition:background 0.1s;" onmouseover="this.style.background=\'rgba(255,255,255,0.02)\'" onmouseout="this.style.background=\'transparent\'">' +
+      '<td style="padding:12px 20px;">' +
+        '<div style="display:flex;align-items:center;gap:10px;">' +
+          '<div style="width:32px;height:32px;border-radius:8px;background:' + color + '20;color:' + color + ';display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;">' + initial + '</div>' +
+          '<div><div style="font-weight:500;color:var(--text);">' + merchant + '</div>' + (it.notes ? '<div style="font-size:11px;color:var(--muted);margin-top:2px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + it.notes + '</div>' : '') + '</div>' +
+        '</div>' +
+      '</td>' +
+      '<td style="padding:12px 20px;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap;">' + dateStr + '</td>' +
+      '<td style="padding:12px 20px;">' +
+        '<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:500;background:rgba(255,255,255,0.04);color:var(--text);">' +
+          '<span style="width:6px;height:6px;border-radius:50%;background:' + color + ';"></span>' + (it.category||'Other') +
+        '</span>' +
+      '</td>' +
+      '<td style="padding:12px 20px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text);">$' + parseFloat(it.amount||0).toFixed(2) + '</td>' +
+      '<td style="padding:12px 20px;text-align:center;">' + (isCogs ? '<span style="font-size:10px;color:var(--muted);">COGS</span>' : '<button onclick="editExpense(\'' + it.id + '\')" style="background:transparent;border:none;color:#4a6080;cursor:pointer;font-size:14px;padding:4px 8px;" onmouseover="this.style.color=\'#94a3b8\'" onmouseout="this.style.color=\'#475569\'" title="Edit">⋯</button>') + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+// ── ADD / EDIT MODAL ──
+function openExpenseModal(prefill) {
+  expEditId = null;
+  document.getElementById('exp-modal-title').textContent = 'Add Expense';
+  document.getElementById('exp-f-amount').value = (prefill && prefill.amount) ? prefill.amount : '';
+  document.getElementById('exp-f-merchant').value = (prefill && prefill.merchant) ? prefill.merchant : '';
+  document.getElementById('exp-f-category').value = (prefill && prefill.category) ? prefill.category : 'Fees & Subscriptions';
+  document.getElementById('exp-f-date').value = (prefill && prefill.expense_date) ? prefill.expense_date : new Date().toISOString().split('T')[0];
+  document.getElementById('exp-f-notes').value = (prefill && prefill.notes) ? prefill.notes : '';
+  document.getElementById('exp-f-error').style.display = 'none';
+  document.getElementById('exp-modal').style.display = 'flex';
+  setTimeout(function() { document.getElementById('exp-f-amount').focus(); }, 100);
+}
+
+function editExpense(id) {
+  var it = expItems.find(function(x) { return x.id === id; });
+  if (!it) return;
+  expEditId = id;
+  document.getElementById('exp-modal-title').textContent = 'Edit Expense';
+  document.getElementById('exp-f-amount').value = it.amount || '';
+  document.getElementById('exp-f-merchant').value = it.merchant || '';
+  document.getElementById('exp-f-category').value = it.category || 'Other';
+  document.getElementById('exp-f-date').value = it.expense_date || '';
+  document.getElementById('exp-f-notes').value = it.notes || '';
+  document.getElementById('exp-f-error').style.display = 'none';
+  document.getElementById('exp-modal').style.display = 'flex';
+}
+
+function closeExpenseModal() {
+  document.getElementById('exp-modal').style.display = 'none';
+  expEditId = null;
+}
+
+async function saveExpense() {
+  var amount = parseFloat(document.getElementById('exp-f-amount').value);
+  if (!amount || amount <= 0) {
+    document.getElementById('exp-f-error').textContent = 'Please enter a valid amount';
+    document.getElementById('exp-f-error').style.display = 'block';
+    return;
+  }
+  var body = {
+    amount: amount,
+    merchant: document.getElementById('exp-f-merchant').value.trim(),
+    category: document.getElementById('exp-f-category').value,
+    expense_date: document.getElementById('exp-f-date').value,
+    notes: document.getElementById('exp-f-notes').value.trim(),
+  };
+  try {
+    if (expEditId) {
+      await fetch('/api/expenses/' + expEditId, {method:'PATCH', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify(body)});
+      toast('Expense updated ✓');
+    } else {
+      await fetch('/api/expenses', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify(body)});
+      toast('Expense added ✓');
+    }
+    closeExpenseModal();
+    loadExpenses();
+  } catch(e) {
+    document.getElementById('exp-f-error').textContent = 'Save failed: ' + e.message;
+    document.getElementById('exp-f-error').style.display = 'block';
+  }
+}
+
+async function deleteExpense(id) {
+  if (!confirm('Delete this expense?')) return;
+  try {
+    await fetch('/api/expenses/' + id, {method:'DELETE', credentials:'include'});
+    toast('Deleted');
+    loadExpenses();
+  } catch(e) { toast('Delete failed', 'error'); }
+}
+
+// ── COGS TOGGLE ──
+async function toggleCogsImport() {
+  var enabled = document.getElementById('exp-cogs-toggle').checked;
+  try {
+    await fetch('/api/expenses/toggle-cogs', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      credentials:'include',
+      body: JSON.stringify({enabled: enabled})
+    });
+    toast(enabled ? 'COGS import enabled — new scan costs will appear here ✓' : 'COGS import disabled');
+  } catch(e) { toast('Toggle failed', 'error'); }
+}
+
+// ── RECEIPT SCANNER ──
+function openReceiptScanner() {
+  document.getElementById('receipt-modal').style.display = 'flex';
+  document.getElementById('receipt-step-upload').style.display = 'block';
+  document.getElementById('receipt-step-scanning').style.display = 'none';
+  document.getElementById('receipt-step-confirm').style.display = 'none';
+  document.getElementById('receipt-step-error').style.display = 'none';
+  document.getElementById('receipt-file-input').value = '';
+}
+
+function closeReceiptScanner() {
+  document.getElementById('receipt-modal').style.display = 'none';
+}
+
+async function scanReceipt(input) {
+  var file = input.files && input.files[0];
+  if (!file) return;
+  document.getElementById('receipt-step-upload').style.display = 'none';
+  document.getElementById('receipt-step-scanning').style.display = 'block';
+  var fd = new FormData();
+  fd.append('file', file);
+  try {
+    var r = await fetch('/api/expenses/scan-receipt', {method:'POST', body: fd, credentials:'include'});
+    if (!r.ok) {
+      var errData = await r.json().catch(function(){return {};});
+      throw new Error(errData.detail || 'Scan failed (' + r.status + ')');
+    }
+    var d = await r.json();
+    var data = d.data || {};
+    document.getElementById('rec-f-amount').value = data.amount || '';
+    document.getElementById('rec-f-merchant').value = data.merchant || '';
+    document.getElementById('rec-f-category').value = data.category || 'Other';
+    document.getElementById('rec-f-date').value = data.expense_date || new Date().toISOString().split('T')[0];
+    document.getElementById('rec-f-notes').value = data.notes || '';
+    document.getElementById('receipt-step-scanning').style.display = 'none';
+    document.getElementById('receipt-step-confirm').style.display = 'block';
+    // Show notice if AI couldn't read the receipt
+    var noticeEl = document.getElementById('receipt-ai-notice');
+    if (noticeEl) {
+      var couldntRead = !data.amount && !data.merchant;
+      noticeEl.style.display = couldntRead ? 'block' : 'none';
+      noticeEl.textContent = couldntRead ? "Couldn't read receipt automatically — please fill in the details below." : "Receipt scanned ✓ — review and confirm.";
+      noticeEl.style.color = couldntRead ? '#f59e0b' : '#22c55e';
+    }
+  } catch(e) {
+    document.getElementById('receipt-step-scanning').style.display = 'none';
+    document.getElementById('receipt-error-msg').textContent = 'Could not read receipt: ' + e.message;
+    document.getElementById('receipt-step-error').style.display = 'block';
+  }
+}
+
+async function confirmReceiptExpense() {
+  var amount = parseFloat(document.getElementById('rec-f-amount').value);
+  if (!amount || amount <= 0) { toast('Please enter a valid amount', 'error'); return; }
+  var body = {
+    amount: amount,
+    merchant: document.getElementById('rec-f-merchant').value.trim(),
+    category: document.getElementById('rec-f-category').value,
+    expense_date: document.getElementById('rec-f-date').value,
+    notes: document.getElementById('rec-f-notes').value.trim(),
+    source: 'receipt'
+  };
+  try {
+    await fetch('/api/expenses', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify(body)});
+    toast('Receipt expense saved ✓');
+    closeReceiptScanner();
+    loadExpenses();
+  } catch(e) { toast('Save failed', 'error'); }
+}
+
+// ── EXPORT ──
+function toggleExpExportMenu() {
+  var m = document.getElementById('exp-export-menu');
+  if (m) m.style.display = m.style.display === 'none' ? 'block' : 'none';
+}
+
+document.addEventListener('click', function(e) {
+  var menu = document.getElementById('exp-export-menu');
+  if (menu && !e.target.closest('#exp-export-menu') && !e.target.onclick?.toString().includes('toggleExpExportMenu')) {
+    menu.style.display = 'none';
+  }
+});
+
+function exportExpenses(fmt) {
+  document.getElementById('exp-export-menu').style.display = 'none';
+  if (fmt === 'csv') {
+    window.location.href = '/api/expenses/export?period=' + expPeriod + '&fmt=csv';
+    return;
+  }
+  // PDF — build a printable report in a new window
+  var periodLabels = {day:'Today',week:'This Week',month:'This Month','3month':'Last 3 Months','6month':'Last 6 Months','12month':'Last Year',all:'All Time'};
+  var periodLabel = periodLabels[expPeriod] || expPeriod;
+  var rows = expItems.map(function(it) {
+    var color = EXP_COLORS[it.category] || '#666';
+    return '<tr><td>' + (it.expense_date||'').replace(/^(\d{4})-(\d{2})-(\d{2})$/,'$2/$3/$1') + '</td>' +
+      '<td>' + (it.merchant||'—') + '</td>' +
+      '<td><span style="color:' + color + ';font-weight:700;">' + (it.category||'Other') + '</span></td>' +
+      '<td style="text-align:right;font-weight:700;">$' + parseFloat(it.amount||0).toFixed(2) + '</td>' +
+      '<td style="color:#666;">' + (it.notes||'') + '</td></tr>';
+  }).join('');
+  var catBreakdown = Object.keys(expSummary).filter(function(c){return expSummary[c].total>0;}).map(function(c) {
+    var color = EXP_COLORS[c]||'#666';
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #eee;">' +
+      '<span style="color:' + color + ';font-weight:600;">' + (EXP_EMOJIS[c]||'') + ' ' + c + '</span>' +
+      '<span style="font-weight:800;">$' + expSummary[c].total.toFixed(2) + '</span></div>';
+  }).join('');
+  var win = window.open('','_blank');
+  win.document.write('<!DOCTYPE html><html><head><title>Expense Report — ' + periodLabel + '</title>' +
+    '<style>body{font-family:Arial,sans-serif;max-width:900px;margin:40px auto;color:#111;}h1{font-size:24px;font-weight:900;margin-bottom:4px;}' +
+    '.sub{color:#666;font-size:14px;margin-bottom:24px;}.summary{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;}' +
+    '.scard{border:1px solid #ddd;border-radius:8px;padding:16px;}.total{font-size:32px;font-weight:900;color:#111;}' +
+    'table{width:100%;border-collapse:collapse;margin-top:16px;}th{background:#f5f5f5;padding:10px 12px;text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;color:#666;}' +
+    'td{padding:10px 12px;border-bottom:1px solid #eee;font-size:13px;}tr:last-child td{border:none;}' +
+    '@media print{button{display:none!important;}}' +
+    '</style></head><body>' +
+    '<h1>💰 Expense Report</h1><div class="sub">' + periodLabel + ' · Generated ' + new Date().toLocaleDateString() + '</div>' +
+    '<div class="summary"><div class="scard"><div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">Total Spent</div><div class="total">$' + expTotal.toFixed(2) + '</div><div style="font-size:12px;color:#666;margin-top:4px;">' + expItems.length + ' expenses</div></div>' +
+    '<div class="scard"><div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">By Category</div>' + catBreakdown + '</div></div>' +
+    '<table><thead><tr><th>Date</th><th>Merchant</th><th>Category</th><th style="text-align:right;">Amount</th><th>Notes</th></tr></thead><tbody>' + rows + '</tbody>' +
+    '<tfoot><tr><td colspan="3" style="font-weight:700;padding:12px;">TOTAL</td><td style="text-align:right;font-weight:900;font-size:16px;padding:12px;">$' + expTotal.toFixed(2) + '</td><td></td></tr></tfoot>' +
+    '</table><br><button onclick="window.print()" style="background:#111;color:#fff;border:none;padding:12px 24px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:700;">🖨️ Print / Save as PDF</button>' +
+    '</body></html>');
+  win.document.close();
+}
+
+
+// ── MOBILE BOTTOM TAB BAR ──
+var MOBILE_ALL_TABS = [
+  { tab: 'dashboard', label: 'Home',      svg: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>' },
+  { tab: 'fastscan',  label: 'Scan',      svg: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>' },
+  { tab: 'expenses',  label: 'Expenses',  svg: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>' },
+  { tab: 'inventory', label: 'Inventory', svg: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>' },
+  { tab: 'upload',    label: 'Upload',    svg: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>' },
+  { tab: 'intake',    label: 'Intake',    svg: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/></svg>' },
+  { tab: 'settings',  label: 'Account',   svg: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>' },
+  { tab: 'messages',  label: 'Messages',  svg: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>' },
+];
+
+var DEFAULT_MOBILE_TABS = ['dashboard','fastscan','expenses','inventory'];
+
+function getMobileTabs() {
+  try {
+    var saved = localStorage.getItem('mobile_tab_order');
+    if (saved) return JSON.parse(saved);
+  } catch(e) {}
+  return DEFAULT_MOBILE_TABS;
+}
+
+function saveMobileTabs(tabs) {
+  try { localStorage.setItem('mobile_tab_order', JSON.stringify(tabs)); } catch(e) {}
+}
+
+var currentMobileTab = 'home';
+
+
+function loadHomeOverview() {
+  fetch('/api/home/overview', { credentials: 'include' })
+    .then(r => r.json())
+    .then(d => {
+      var byId = function(id) { return document.getElementById(id); };
+      if (byId('home-business-name')) byId('home-business-name').textContent = d.business_name || 'Your business';
+      if (byId('home-total-items')) byId('home-total-items').textContent = (d.total_items || 0).toLocaleString();
+      if (byId('home-inv-count-label')) byId('home-inv-count-label').textContent = (d.total_items || 0) + ' items';
+
+      // Scans
+      var scansLeft = Math.max(0, (d.scan_limit || 500) - (d.scan_count || 0));
+      if (byId('home-scans-left')) byId('home-scans-left').textContent = scansLeft.toLocaleString();
+      if (byId('home-scan-pct')) byId('home-scan-pct').textContent = (d.scan_count || 0) + '/' + (d.scan_limit || 500);
+      if (byId('home-scan-remaining')) byId('home-scan-remaining').textContent = scansLeft + ' scans remaining this period';
+      var pct = (d.scan_count || 0) / Math.max(1, d.scan_limit || 500) * 100;
+      pct = Math.min(100, Math.max(0, pct));
+      if (byId('home-scan-bar')) {
+        byId('home-scan-bar').style.width = pct + '%';
+        byId('home-scan-bar').style.background = pct >= 100 ? '#ef4444' : (pct >= 80 ? '#f59e0b' : '#fbbf24');
+      }
+
+      // Connection dots
+      var eDot = byId('home-ebay-dot');
+      if (eDot) eDot.style.background = d.ebay_connected ? '#22c55e' : '#ef4444';
+      var eLabel = byId('home-ebay-label');
+      if (eLabel) eLabel.textContent = d.ebay_connected ? 'eBay' : 'eBay off';
+      var sDot = byId('home-shopify-dot');
+      if (sDot) sDot.style.background = d.shopify_connected ? '#22c55e' : '#ef4444';
+      var sLabel = byId('home-shopify-label');
+      if (sLabel) sLabel.textContent = d.shopify_connected ? 'Shopify' : 'Shopify off';
+      var sideEbay = byId('ebay-status-dot');
+      if (sideEbay) sideEbay.style.background = d.ebay_connected ? '#22c55e' : '#ef4444';
+      var sideShopify = byId('shopify-status-dot');
+      if (sideShopify) sideShopify.style.background = d.shopify_connected ? '#22c55e' : '#ef4444';
+    })
+    .catch(function(e) { console.error('home overview load failed', e); });
+
+  // Load recent batches
+  fetch('/api/saved-batches', { credentials: 'include' })
+    .then(r => r.json())
+    .then(batches => {
+      // Update inventory tile
+      var invStat = document.getElementById('home-inv-tile-stat');
+      var invVal = document.getElementById('home-inv-tile-value');
+      var invSold = document.getElementById('home-inv-tile-sold');
+      var invBar = document.getElementById('home-inv-tile-bar');
+      var invNeedLoc = document.getElementById('home-inv-need-loc');
+      var invLabel = document.getElementById('home-inv-tile-label');
+      if (invStat) invStat.textContent = d.inventory_count || 0;
+      if (invLabel) invLabel.textContent = (d.inventory_count || 0) + ' items in stock';
+      if (invVal) invVal.textContent = '$' + ((d.inventory_value || 0)).toLocaleString('en-US', {maximumFractionDigits:0}) + ' value';
+      if (invSold) invSold.textContent = (d.sold_count || 0) + ' sold';
+      if (invBar) { var pct = d.inventory_count > 0 ? Math.min((d.inventory_count / (d.inventory_count + (d.sold_count||1))) * 100, 100) : 0; invBar.style.width = pct + '%'; }
+
+      // Populate expense tile with recent transactions
+      var expTxns = document.getElementById('home-exp-tile-txns');
+      var expStat = document.getElementById('home-exp-tile-stat');
+      var expLabel = document.getElementById('home-exp-tile-label');
+      if (expTxns || expStat) {
+        fetch('/api/expenses?period=month', {credentials:'include'})
+          .then(function(r){return r.json();})
+          .then(function(ed){
+            var items = ed.items || [];
+            var total = ed.total || 0;
+            var EXP_COLORS_HOME = {'Cost of Goods':'#ef4444','Shipping & Postage':'#f59e0b','Supplies & Packaging':'#eab308','Fees & Subscriptions':'#22c55e','Gas & Travel':'#3b82f6','Food & Meals':'#a855f7','Software & Tools':'#06b6d4','Other':'#94a3b8'};
+            if (expStat) expStat.textContent = '$' + total.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+            if (expLabel) expLabel.textContent = items.length + ' transaction' + (items.length===1?'':'s');
+            if (expTxns) {
+              var recent = items.slice(0,3);
+              if (!recent.length) { expTxns.innerHTML = '<div style="font-size:11px;color:#4a6080;text-align:center;padding:8px;">No expenses this month</div>'; return; }
+              expTxns.innerHTML = recent.map(function(it) {
+                var color = EXP_COLORS_HOME[it.category] || '#94a3b8';
+                var dateStr = (it.expense_date||'').replace(/^(\d{4})-(\d{2})-(\d{2})$/,'$2/$3');
+                return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #111827;">' +
+                  '<div style="display:flex;align-items:center;gap:7px;">' +
+                    '<div style="width:6px;height:6px;border-radius:50%;background:' + color + ';flex-shrink:0;"></div>' +
+                    '<span style="font-size:11px;color:#f1f5f9;font-weight:500;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (it.merchant||'Unknown') + '</span>' +
+                  '</div>' +
+                  '<div style="text-align:right;flex-shrink:0;">' +
+                    '<div style="font-size:11px;font-weight:600;color:#f1f5f9;">$' + parseFloat(it.amount||0).toFixed(2) + '</div>' +
+                    '<div style="font-size:9px;color:#4a6080;">' + dateStr + '</div>' +
+                  '</div>' +
+                '</div>';
+              }).join('');
+            }
+          }).catch(function(){});
+      }
+
+      var list = document.getElementById('home-batches-list');
+      if (!list) return;
+      if (!batches || !batches.length) {
+        list.innerHTML = '<div style="font-size:12px;color:var(--muted);text-align:center;padding:20px;">No batches yet — start scanning!</div>';
+        return;
+      }
+      list.innerHTML = batches.slice(0, 5).map(function(b) {
+        var timeAgo = b.updated_at ? timeAgoStr(b.updated_at) : '';
+        return '<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05);border-radius:8px;cursor:pointer;transition:all 0.1s;" onclick="loadSavedBatch(' + String.fromCharCode(39) + b.id + String.fromCharCode(39) + ')" onmouseover="this.style.background=\'rgba(255,255,255,0.06)\';this.style.borderColor=\'rgba(251,191,36,0.2)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.03)\';this.style.borderColor=\'rgba(255,255,255,0.05)\'">' +
+          '<div style="width:30px;height:30px;background:rgba(251,191,36,0.1);color:#fbbf24;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">' + (b.count||0) + '</div>' +
+          '<div style="flex:1;min-width:0;">' +
+            '<div style="font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(b.name || 'Untitled batch') + '</div>' +
+            '<div style="font-size:10px;color:#4a6080;">' + timeAgo + '</div>' +
+          '</div>' +
+          '<span style="color:#4a6080;font-size:13px;">&#8594;</span>' +
+          '</div>';
+      }).join('');
+    })
+    .catch(function() {
+      var list = document.getElementById('home-batches-list');
+      if (list) list.innerHTML = '<div style="font-size:12px;color:var(--muted);text-align:center;padding:20px;">No batches yet</div>';
+    });
+}
+
+function timeAgoStr(dateStr) {
+  var diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
+  if (diff < 3600) return Math.round(diff/60) + 'm ago';
+  if (diff < 86400) return Math.round(diff/3600) + 'h ago';
+  if (diff < 604800) return Math.round(diff/86400) + 'd ago';
+  return Math.round(diff/604800) + 'w ago';
+}
+
+// Load home overview on page load + tab click
+window.addEventListener('load', function() {
+  setTimeout(loadHomeOverview, 200);
+});
+document.addEventListener('DOMContentLoaded', function() {
+  var homeBtn = document.querySelector('.nav-btn[data-tab="home"]');
+  if (homeBtn) {
+    homeBtn.addEventListener('click', function() {
+      setTimeout(loadHomeOverview, 50);
+    });
+  }
+});
+
+
+// ── SCANNER MODE SWITCHER ──
+var currentScannerMode = 'fast';
+
+function setScannerMode(mode) {
+  currentScannerMode = mode;
+  var modes = ['fast', 'bulk', 'multi'];
+  var colors = { fast: '#fbbf24', bulk: '#38bdf8', multi: '#a78bfa' };
+  var color = colors[mode];
+
+  var modeColors = { fast: '#fbbf24', bulk: '#38bdf8', multi: '#a78bfa' };
+  var modeBgs = { fast: 'rgba(251,191,36,0.06)', bulk: 'rgba(56,189,248,0.06)', multi: 'rgba(167,139,250,0.06)' };
+  modes.forEach(function(m) {
+    var btn = document.getElementById('scanner-mode-' + m);
+    var area = document.getElementById('scanner-' + m + '-upload');
+    if (!btn) return;
+    if (m === mode) {
+      btn.style.borderWidth = '2px';
+      btn.style.borderStyle = 'solid';
+      btn.style.borderColor = modeColors[m];
+      btn.style.background = modeBgs[m];
+      // Show active dot
+      var dot = btn.querySelector('.mode-active-dot');
+      if (dot) dot.style.display = 'block';
+    } else {
+      btn.style.borderWidth = '1px';
+      btn.style.borderStyle = 'solid';
+      btn.style.borderColor = 'var(--border)';
+      btn.style.background = 'var(--card)';
+      var dot = btn.querySelector('.mode-active-dot');
+      if (dot) dot.style.display = 'none';
+    }
+    if (area) area.style.display = m === mode ? (m === 'bulk' || m === 'multi' ? 'block' : 'grid') : 'none';
+  });
+
+  // Bulk mode — switch to upload tab directly
+  if (mode === 'bulk') {
+    document.querySelectorAll('.tab-content').forEach(function(t) { t.classList.remove('active'); });
+    var uploadTab = document.getElementById('tab-upload');
+    if (uploadTab) uploadTab.classList.add('active');
+    document.querySelectorAll('.nav-btn').forEach(function(b) { b.classList.remove('active'); });
+    var uploadBtn = document.querySelector('.nav-btn[data-tab="upload"]');
+    if (uploadBtn) uploadBtn.classList.add('active');
+    return;
+  }
+
+  // Multi-item mode — show inline upload area
+  if (mode === 'multi') {
+    var scanLimit = {{ scan_limit }};
+    if (scanLimit < 500) {
+      setScannerMode('fast');
+      toast('Multi-item scan requires Growth+ plan', 'error');
+      return;
+    }
+    // Show the multi upload area — it calls startMultiScan directly
+    return;
+  }
+}
+
+function handleScannerUpload(input) {
+  if (!input || !input.files || !input.files.length) return;
+  if (currentScannerMode === 'fast') {
+    startFastScan(input);
+  } else if (currentScannerMode === 'bulk') {
+    handleUploadFiles(input);
+  }
+}
+
+function handleMultiScannerUpload(input) {
+  var files = input.files;
+  if (!files || !files.length) return;
+  // Use the existing startMultiScan function directly
+  var multiInput = document.getElementById('multi-scan-input');
+  if (multiInput) {
+    var dt = new DataTransfer();
+    Array.from(files).forEach(function(f) { dt.items.add(f); });
+    multiInput.files = dt.files;
+    // Trigger startMultiScan
+    startMultiScan(multiInput);
+  } else {
+    toast('Multi-item scanner not available', 'error');
+  }
+}
+
+// Wire up scanner tab activation
+document.addEventListener('DOMContentLoaded', function() {
+  var scannerBtn = document.querySelector('.nav-btn[data-tab="dashboard"]');
+  if (scannerBtn) {
+    scannerBtn.addEventListener('click', function() {
+      currentScannerMode = 'fast';
+      setTimeout(function() { setScannerMode('fast'); }, 50);
+    });
+  }
+  // Init mode on load if scanner is active
+  if (document.getElementById('tab-dashboard') && 
+      document.getElementById('tab-dashboard').classList.contains('active')) {
+    setScannerMode('fast');
+  }
+});
+
+
+function showScannerToast(msg, duration) {
+  duration = duration || 2000;
+  var existing = document.getElementById('scanner-toast');
+  if (!existing) {
+    existing = document.createElement('div');
+    existing.id = 'scanner-toast';
+    existing.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);background:#0d1117;border:1px solid #22c55e;color:#22c55e;font-size:12px;font-weight:700;padding:8px 16px;border-radius:8px;z-index:9999;transition:opacity 0.3s;white-space:nowrap;';
+    document.body.appendChild(existing);
+  }
+  existing.textContent = msg;
+  existing.style.opacity = '1';
+  clearTimeout(existing._timer);
+  existing._timer = setTimeout(function() {
+    existing.style.opacity = '0';
+  }, duration);
+}
+
+
+var expSortCol = 'date';
+var expSortDir = -1;
+
+function sortExpenses(col) {
+  if (expSortCol === col) {
+    expSortDir *= -1;
+  } else {
+    expSortCol = col;
+    expSortDir = col === 'amount' ? -1 : 1;
+  }
+  // Update sort indicators
+  ['date','merchant','category','amount'].forEach(function(c) {
+    var el = document.getElementById('exp-sort-' + c);
+    if (el) el.textContent = c === col ? (expSortDir === 1 ? '↑' : '↓') : '↕';
+  });
+  // Sort and re-render
+  expItems.sort(function(a, b) {
+    var av, bv;
+    if (col === 'amount') { av = parseFloat(a.amount)||0; bv = parseFloat(b.amount)||0; }
+    else if (col === 'date') { av = a.expense_date||''; bv = b.expense_date||''; }
+    else if (col === 'merchant') { av = (a.merchant||'').toLowerCase(); bv = (b.merchant||'').toLowerCase(); }
+    else if (col === 'category') { av = (a.category||'').toLowerCase(); bv = (b.category||'').toLowerCase(); }
+    if (av < bv) return -expSortDir;
+    if (av > bv) return expSortDir;
+    return 0;
+  });
+  renderExpTable();
+}
+
+function renderMobileTabBar() {
+  var bar = document.getElementById('mobile-tabbar-inner');
+  if (!bar) return;
+  var tabs = [
+    { tab: 'home', label: 'Home', svg: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12L12 3l9 9"/><path d="M5 10v10h14V10"/></svg>' },
+    { tab: 'dashboard', label: 'Scanner', svg: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>' },
+  ];
+  bar.innerHTML = '';
+  tabs.forEach(function(def) {
+    var isActive = currentMobileTab === def.tab;
+    var color = isActive ? (def.tab === 'home' ? '#22c55e' : '#fbbf24') : (def.tab === 'dashboard' ? '#fbbf24' : '#64748b');
+    var btn = document.createElement('button');
+    btn.className = 'mobile-tab' + (isActive ? ' active' : '');
+    btn.style.cssText = 'flex:1 1 0;min-width:0;color:' + color + ';border-bottom:' + (isActive ? '2px solid ' + color : '2px solid transparent') + ';';
+    btn.onclick = function() { switchMobileTab(def.tab); };
+    btn.innerHTML = def.svg + '<span style="font-size:11px;font-weight:700;color:' + color + ';line-height:1;width:100%;text-align:center;display:block;margin-top:4px;">' + def.label + '</span>';
+    bar.appendChild(btn);
+  });
+}
+
+function switchMobileTab(tabId) {
+  currentMobileTab = tabId;
+  var btn = document.querySelector('.nav-btn[data-tab="' + tabId + '"]');
+  if (btn) btn.click();
+  renderMobileTabBar();
+  closeMobileMore();
+}
+
+// ── MOBILE MORE SHEET ──
+function openMobileMore() {
+  var sheet = document.getElementById('mobile-more-sheet');
+  if (!sheet) {
+    sheet = document.createElement('div');
+    sheet.id = 'mobile-more-sheet';
+    sheet.style.cssText = 'position:fixed;bottom:58px;left:0;right:0;background:#0d0f14;border-top:1px solid #0d1117;z-index:300;padding:16px;display:none;';
+    document.body.appendChild(sheet);
+  }
+  var activeTabs = getMobileTabs();
+  var otherTabs = MOBILE_ALL_TABS.filter(function(t) { return activeTabs.indexOf(t.tab) === -1; });
+
+  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">' +
+    '<div style="font-size:13px;font-weight:700;color:#f1f5f9;">More</div>' +
+    '<button onclick="openTabEditor()" style="background:#0d1117;border:none;color:#94a3b8;font-size:11px;padding:5px 10px;border-radius:6px;cursor:pointer;font-family:inherit;">Edit Tabs</button>' +
+    '</div>';
+  html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">';
+  otherTabs.forEach(function(def) {
+    html += '<button onclick="switchMobileTab(' + JSON.stringify(def.tab) + ')" style="display:flex;flex-direction:column;align-items:center;gap:6px;background:#0d1117;border:none;color:#94a3b8;padding:12px 6px;border-radius:10px;cursor:pointer;font-family:inherit;">' +
+      def.svg + '<span style="font-size:10px;font-weight:600;">' + def.label + '</span></button>';
+  });
+  html += '</div>';
+  sheet.innerHTML = html;
+  sheet.style.display = 'block';
+  // Tap outside to close
+  setTimeout(function() {
+    document.addEventListener('click', closeMobileMoreOutside);
+  }, 50);
+}
+
+function closeMobileMoreOutside(e) {
+  var sheet = document.getElementById('mobile-more-sheet');
+  if (sheet && !sheet.contains(e.target) && e.target.closest && !e.target.closest('.mobile-tabbar')) {
+    closeMobileMore();
+  }
+}
+
+function closeMobileMore() {
+  var sheet = document.getElementById('mobile-more-sheet');
+  if (sheet) sheet.style.display = 'none';
+  document.removeEventListener('click', closeMobileMoreOutside);
+}
+
+// ── TAB EDITOR ──
+function openTabEditor() {
+  closeMobileMore();
+  var sheet = document.getElementById('mobile-reorder-sheet');
+  if (!sheet) {
+    sheet = document.createElement('div');
+    sheet.id = 'mobile-reorder-sheet';
+    sheet.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:400;display:none;align-items:flex-end;';
+    document.body.appendChild(sheet);
+  }
+  var activeTabs = getMobileTabs();
+  var html = '<div style="background:#0d0f14;border-radius:16px 16px 0 0;padding:20px;width:100%;max-height:80vh;overflow-y:auto;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+    '<div style="font-size:15px;font-weight:800;color:#f1f5f9;">Edit Tab Bar</div>' +
+    '<button onclick="closeMobileTabEditor()" style="background:#0d1117;border:none;color:#94a3b8;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;">×</button>' +
+    '</div>' +
+    '<div style="font-size:12px;color:#4a6080;margin-bottom:16px;">Choose up to 4 tabs to show in your tab bar</div>' +
+    '<div id="tab-editor-list">';
+
+  MOBILE_ALL_TABS.forEach(function(def) {
+    var isActive = activeTabs.indexOf(def.tab) !== -1;
+    html += '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #0d1117;">' +
+      '<div style="color:#4a6080;">' + def.svg + '</div>' +
+      '<div style="flex:1;font-size:14px;font-weight:600;color:#f1f5f9;">' + def.label + '</div>' +
+      '<label style="display:flex;align-items:center;cursor:pointer;">' +
+      '<input type="checkbox" data-tab="' + def.tab + '" ' + (isActive?'checked':'') + ' onchange="updateTabSelection()" style="width:18px;height:18px;accent-color:#22c55e;cursor:pointer;">' +
+      '</label></div>';
+  });
+  html += '</div>' +
+    '<div id="tab-editor-error" style="color:#ef4444;font-size:12px;margin-top:8px;display:none;">Choose between 2 and 4 tabs</div>' +
+    '<button onclick="saveTabEditor()" style="width:100%;margin-top:16px;background:#22c55e;color:#000;border:none;padding:13px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">Save</button>' +
+    '</div>';
+
+  sheet.innerHTML = html;
+  sheet.style.display = 'flex';
+}
+
+function updateTabSelection() {
+  var checked = document.querySelectorAll('#tab-editor-list input:checked');
+  var err = document.getElementById('tab-editor-error');
+  if (checked.length > 4) {
+    // Uncheck the last one
+    event.target.checked = false;
+    if (err) { err.textContent = 'Max 4 tabs allowed'; err.style.display = 'block'; }
+    setTimeout(function() { if(err) err.style.display='none'; }, 2000);
+  }
+}
+
+function saveTabEditor() {
+  var checked = document.querySelectorAll('#tab-editor-list input:checked');
+  if (checked.length < 2) {
+    var err = document.getElementById('tab-editor-error');
+    if (err) { err.textContent = 'Choose at least 2 tabs'; err.style.display = 'block'; }
+    return;
+  }
+  var newTabs = [];
+  checked.forEach(function(inp) { newTabs.push(inp.dataset.tab); });
+  saveMobileTabs(newTabs);
+  closeMobileTabEditor();
+  renderMobileTabBar();
+  toast('Tab bar updated ✓');
+}
+
+function closeMobileTabEditor() {
+  var sheet = document.getElementById('mobile-reorder-sheet');
+  if (sheet) sheet.style.display = 'none';
+}
+
+// Init on page load
+document.addEventListener('DOMContentLoaded', function() {
+  renderMobileTabBar();
+  // Keep mobile tab bar in sync when desktop nav buttons are clicked
+  document.querySelectorAll('.nav-btn[data-tab]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var tabId = this.dataset.tab;
+      if (tabId && tabId !== 'detailed') {
+        currentMobileTab = tabId;
+        renderMobileTabBar();
+      }
+    });
+  });
+});
+
+// ── DETAILED ANALYTICS ─────────────────────────────────────
+let detailedPeriod = 'month';
+
+async function loadDetailedAnalytics() {
+  try {
+    const r = await fetch('/api/dashboard/summary?period=' + detailedPeriod);
+    const d = await r.json();
+    const profit = d.profit || 0;
+    document.getElementById('d-profit').textContent = (profit >= 0 ? '+$' : '-$') + Math.abs(profit).toFixed(0);
+    document.getElementById('d-profit').style.color = profit >= 0 ? '#22c55e' : '#ef4444';
+    document.getElementById('d-cost').textContent = '$' + (d.total_cost || 0).toFixed(0);
+    document.getElementById('d-listed').textContent = '$' + (d.total_listed || 0).toFixed(0);
+    document.getElementById('d-items').textContent = d.items || 0;
+    document.getElementById('d-units').textContent = (d.units || 0) + ' total units';
+    const itemCount = d.items || 0;
+    document.getElementById('d-avg-cost').textContent = '$' + (itemCount > 0 ? ((d.total_cost||0)/itemCount).toFixed(2) : '0.00');
+    document.getElementById('d-avg-listed').textContent = '$' + (itemCount > 0 ? ((d.total_listed||0)/itemCount).toFixed(2) : '0.00');
+    document.getElementById('d-avg-profit').textContent = '$' + (itemCount > 0 ? (profit/itemCount).toFixed(2) : '0.00');
+
+    // Scan usage bar
+    const used = d.scan_count || 0;
+    const limit = d.scan_limit || 0;
+    const pct = limit > 0 ? Math.min(100, (used/limit)*100) : 0;
+    document.getElementById('d-scan-bar').style.width = pct + '%';
+    document.getElementById('d-scan-text').textContent = used + ' / ' + limit;
+
+    // Render bar chart based on period buckets
+    renderDetailedChart(detailedPeriod, d);
+  } catch(e) {
+    console.error('Detailed load failed', e);
+  }
+}
+
+async function renderDetailedChart(period, summary) {
+  // For now we'll render a simple bar showing aggregate cost vs profit
+  // Real per-day buckets would need a separate endpoint — keeping this lean for v1
+  const chart = document.getElementById('d-chart');
+  const labels = document.getElementById('d-chart-labels');
+  const profit = summary.profit || 0;
+  const cost = summary.total_cost || 0;
+  const max = Math.max(profit, cost, 1);
+
+  chart.innerHTML = '';
+  labels.innerHTML = '';
+
+  // Generate placeholder buckets — 7 for day/week, 12 for longer
+  const buckets = (period === 'day' || period === 'week') ? 7 : (period === 'month' ? 12 : 8);
+  // Distribute totals roughly across buckets — each bucket is a fraction
+  for (let i = 0; i < buckets; i++) {
+    const fraction = (i + 1) / buckets;
+    const bProfit = (profit * fraction) - (profit * (i / buckets));
+    const bCost = (cost * fraction) - (cost * (i / buckets));
+    const profitH = Math.max(2, (bProfit / max) * 160);
+    const costH = Math.max(2, (bCost / max) * 160);
+
+    const col = document.createElement('div');
+    col.style.cssText = 'flex:1;display:flex;flex-direction:column;gap:2px;align-items:center;justify-content:flex-end;';
+    col.innerHTML = `
+      <div style="background:#22c55e;width:80%;height:${profitH}px;border-radius:3px 3px 0 0;"></div>
+      <div style="background:#ef4444;width:80%;height:${costH}px;"></div>
+    `;
+    chart.appendChild(col);
+
+    const label = document.createElement('div');
+    label.style.cssText = 'flex:1;text-align:center;';
+    label.textContent = period === 'day' ? (24-(buckets-i)*4) + 'h' : 'P' + (i+1);
+    labels.appendChild(label);
+  }
+}
+
+document.querySelectorAll('.dperiod-pill').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.dperiod-pill').forEach(b => {
+      b.style.background = 'transparent';
+      b.style.color = 'var(--muted)';
+      b.style.fontWeight = '400';
+      b.classList.remove('active');
+    });
+    btn.style.background = 'var(--accent)';
+    btn.style.color = '#fff';
+    btn.style.fontWeight = '500';
+    btn.classList.add('active');
+    detailedPeriod = btn.dataset.period;
+    loadDetailedAnalytics();
+  });
+});
+
+// ── Dashboard period filter & summary ──
+let currentPeriod = 'month';
+
+async function loadDashboardSummary() {
+  try {
+    const r = await fetch('/api/dashboard/summary?period=' + currentPeriod);
+    const d = await r.json();
+    window._costTrackingEnabled = d.cost_tracking_enabled !== false;
+    (document.getElementById('stat-profit')||{}).textContent = (d.profit >= 0 ? '+$' : '-$') + Math.abs(d.profit).toFixed(0);
+    var _sp = document.getElementById('stat-profit'); if(_sp) _sp.style.color = d.profit >= 0 ? '#22c55e' : '#ef4444';
+    (document.getElementById('stat-profit-sub')||{}).textContent = '$' + d.total_cost.toFixed(0) + ' cost · $' + d.total_listed.toFixed(0) + ' listed';
+    (document.getElementById('stat-items')||{}).textContent = d.items;
+    (document.getElementById('stat-items-sub')||{}).textContent = d.units + ' total units';
+    // scan count moved to top toolbar only
+    // Hide profit card if cost tracking is off — show listed value instead
+    const profitCard = document.getElementById('card-profit');
+    if (profitCard && !window._costTrackingEnabled) {
+      profitCard.querySelector('div:first-child').textContent = 'Listed Value';
+      (document.getElementById('stat-profit')||{}).textContent = '$' + d.total_listed.toFixed(0);
+      var _sp2 = document.getElementById('stat-profit'); if(_sp2) _sp2.style.color = '#f1f5f9';
+      (document.getElementById('stat-profit-sub')||{}).textContent = d.units + ' units in batch';
+    }
+  } catch(e) { console.error('summary failed', e); }
+}
+
+document.querySelectorAll('.period-pill').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.period-pill').forEach(b => {
+      b.style.background = 'transparent';
+      b.style.color = 'var(--muted)';
+      b.style.fontWeight = '400';
+      b.classList.remove('active');
+    });
+    btn.style.background = 'var(--accent)';
+    btn.style.color = '#fff';
+    btn.style.fontWeight = '500';
+    btn.classList.add('active');
+    currentPeriod = btn.dataset.period;
+    loadDashboardSummary();
+  });
+});
+
+// Cost input live save
+document.addEventListener('blur', async function(e) {
+  if (!e.target.classList || !e.target.classList.contains('tile-cost-input')) return;
+  const id = e.target.dataset.id;
+  const cost = parseFloat(e.target.value) || 0;
+  try {
+    await fetch('/api/listings/' + id + '/cost', {
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({cost})
+    });
+    // Update local state and re-render to refresh profit calc
+    const l = listings.find(x => String(x.id) === String(id));
+    if (l) { l.cost = cost; renderTiles(); loadDashboardSummary(); }
+  } catch(err) { toast('Failed to save cost', 'error'); }
+}, true);
+
+// Submit dropdown
+function toggleSubmitDropdown() {
+  const dd = document.getElementById('submit-dropdown');
+  if (!dd) return;
+  dd.style.display = dd.style.display === 'none' || !dd.style.display ? 'block' : 'none';
+}
+function closeSubmitDropdown() {
+  const dd = document.getElementById('submit-dropdown');
+  if (dd) dd.style.display = 'none';
+}
+document.addEventListener('click', (e) => {
+  const wrap = document.getElementById('submit-dropdown-wrap');
+  if (!wrap || wrap.contains(e.target)) return;
+  closeSubmitDropdown();
+});
+
+// Lot cost modal
+function openLotCostModal() {
+  if (selected.size === 0) {
+    if (!confirm('No items selected. Apply lot cost to ALL items in batch?')) return;
+  }
+  const target = selected.size > 0 ? selected.size + ' selected items' : listings.length + ' items in batch';
+  document.getElementById('lot-cost-target').textContent = 'Splits across ' + target;
+  document.getElementById('lot-cost-input').value = '';
+  document.getElementById('lot-cost-modal').style.display = 'flex';
+  setTimeout(() => document.getElementById('lot-cost-input').focus(), 50);
+}
+function closeLotCostModal() {
+  document.getElementById('lot-cost-modal').style.display = 'none';
+}
+async function applyLotCost() {
+  const total = parseFloat(document.getElementById('lot-cost-input').value);
+  if (!total || total <= 0) { toast('Enter a valid total cost', 'error'); return; }
+  const method = document.querySelector('input[name="lot-method"]:checked').value;
+  const ids = selected.size > 0 ? Array.from(selected) : listings.map(l => l.id);
+  if (!ids.length) { toast('No items to apply cost to', 'error'); return; }
+  const btn = document.getElementById('apply-lot-cost-btn');
+  btn.disabled = true; btn.textContent = 'Applying...';
+  try {
+    const r = await fetch('/api/listings/lot-cost', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({listing_ids: ids, total_cost: total, method})
+    });
+    if (!r.ok) throw new Error('Failed');
+    const d = await r.json();
+    toast('Lot cost applied to ' + d.applied_to + ' items');
+    closeLotCostModal();
+    loadListings();
+    loadDashboardSummary();
+  } catch(e) {
+    toast('Failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Apply';
+  }
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeLotCostModal();
+});
+var __lotModal = document.getElementById('lot-cost-modal');
+if (__lotModal) {
+  __lotModal.addEventListener('click', function(e) {
+    if (e.target.id === 'lot-cost-modal') closeLotCostModal();
+  });
+}
+
+// Run on load + every 30s
+loadDashboardSummary();
+setInterval(() => { if (activeTab === 'dashboard') loadDashboardSummary(); }, 30000);
+
+
+// ── INIT ───────────────────────────────────────────────────────
+loadListings();
+initTileListeners();
+
+// Auto-refresh dashboard every 30s when on that tab
+setInterval(() => { if (activeTab === 'dashboard') loadListings(); }, 30000);
+setInterval(() => { if (activeTab === 'auction' && activeSession) loadAuctionItems(activeSession); }, 30000);
+
+async function rotatePhoto(dir) {
+  const img = document.getElementById('modal-img');
+  if (!img) return;
+  // Use stored photo ID to avoid losing it after blob URL replacement
+  let photoId = img.dataset.photoId;
+  if (!photoId) {
+    const parts = img.src.split('/part-photos/');
+    if (parts.length < 2) return;
+    photoId = decodeURIComponent(parts[1].split('?')[0]);
+    img.dataset.photoId = photoId;
+  }
+  try {
+    const r = await api('POST', '/api/photos/rotate', {photo_id: photoId, direction: dir || 'cw'});
+    if (r && r.ok) {
+      const freshUrl = '/api/photos/view/' + photoId + '?t=' + Date.now();
+      fetch(freshUrl, {cache: 'no-store'})
+        .then(res => res.blob())
+        .then(blob => { img.src = URL.createObjectURL(blob); });
+    }
+  } catch(e) { console.warn('Rotate failed', e); }
+}
+
+function updatePriceByCondition() {
+  var l = window._modalListing;
+  if (!l) return;
+  var cond = document.getElementById('modal-cond-input').value;
+  var p = cond === 'new' ? (l.price_new || l.price) : (l.price_used || l.price);
+  if (p > 0) {
+    document.getElementById('modal-price-input').value = p.toFixed(2);
+    document.getElementById('modal-price').textContent = '$' + p.toFixed(2);
+  }
+}
+</script>
+
+<!-- Save Batch modal -->
+<div id="save-batch-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:24px;min-width:360px;max-width:90vw;">
+    <div style="font-size:16px;font-weight:700;margin-bottom:16px;color:var(--text);">💾 Save Current Batch</div>
+    <div style="font-size:16px;color:var(--muted);margin-bottom:8px;">Folder name</div>
+    <input id="save-batch-name" type="text" placeholder="e.g. Roller Auction 4-28" style="width:100%;padding:10px;background:var(--bg);border:1px solid #1a2332;border-radius:6px;color:var(--text);font-size:16px;margin-bottom:16px;" />
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn" onclick="closeSaveBatchModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmSaveBatch()" id="save-batch-confirm-btn">Save</button>
+    </div>
+  </div>
+</div>
+
+<style>
+.saved-batch-row { display:flex; align-items:center; gap:6px; padding:6px 8px; background:#0a0f18; border:1px solid #1a2332; border-radius:6px; font-size:12px; cursor:pointer; transition:background 0.15s; }
+.saved-batch-row:hover { background:var(--border); }
+.saved-batch-row .sb-name { flex:1; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.saved-batch-row .sb-count { color:var(--muted); font-size:10px; }
+.saved-batch-row .sb-del { color:#ef4444; opacity:0.6; padding:2px 6px; border-radius:4px; cursor:pointer; }
+.saved-batch-row .sb-del:hover { opacity:1; background:rgba(239,68,68,0.15); }
+.saved-batch-expanded { margin-top:6px; padding:8px; background:var(--bg); border:1px solid #1a2332; border-radius:6px; max-height:300px; overflow-y:auto; }
+.sb-item { display:flex; gap:8px; padding:6px; border-bottom:1px solid var(--border); align-items:center; }
+.sb-item:last-child { border-bottom:none; }
+.sb-item img { width:36px; height:36px; object-fit:cover; border-radius:4px; flex-shrink:0; }
+.sb-item .sb-item-title { flex:1; font-size:11px; color:var(--text); line-height:1.3; }
+.sb-item .sb-item-price { font-size:11px; color:#86efac; font-weight:600; white-space:nowrap; }
+</style>
+
+<script>
+function openSaveBatchModal() {
+  document.getElementById('save-batch-name').value = '';
+  document.getElementById('save-batch-modal').style.display = 'flex';
+  setTimeout(() => document.getElementById('save-batch-name').focus(), 50);
+}
+function closeSaveBatchModal() {
+  document.getElementById('save-batch-modal').style.display = 'none';
+}
+async function confirmSaveBatch() {
+  const name = document.getElementById('save-batch-name').value.trim();
+  if (!name) { toast('Please enter a folder name', 'error'); return; }
+  const btn = document.getElementById('save-batch-confirm-btn');
+  btn.disabled = true; btn.textContent = 'Saving...';
+  try {
+    const r = await fetch('/api/saved-batches', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name})
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    closeSaveBatchModal();
+    toast(`Saved "${data.name}" (${data.count} items)`, 'success');
+    loadSavedBatches();
+  } catch(e) {
+    toast('Failed to save batch', 'error');
+    console.error(e);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save';
+  }
+}
+
+async function loadSavedBatches() {
+  try {
+    const r = await fetch('/api/saved-batches');
+    if (!r.ok) return;
+    const folders = await r.json();
+    const list = document.getElementById('saved-batches-list');
+    const empty = document.getElementById('saved-batches-empty');
+    const countEl = document.getElementById('saved-batches-trigger-count');
+    if (!list) return;
+    list.innerHTML = '';
+    if (countEl) countEl.textContent = folders.length ? `(${folders.length})` : '';
+    if (!folders.length) { empty.style.display = 'block'; return; }
+    empty.style.display = 'none';
+    folders.forEach(f => {
+      const row = document.createElement('div');
+      row.className = 'saved-batch-row';
+      row.innerHTML = `
+        <span style="font-size:11px;">📁</span>
+        <span class="sb-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
+        <span class="sb-count">${f.count}</span>
+        <span class="sb-del" onclick="event.stopPropagation();deleteSavedBatch('${f.id}','${escapeHtml(f.name).replace(/'/g,"\\'")}')">✕</span>
+      `;
+      row.onclick = () => toggleSavedBatch(f.id, row);
+      list.appendChild(row);
+    });
+  } catch(e) { console.error('loadSavedBatches failed', e); }
+}
+
+function toggleSavedBatchesDropdown(e) {
+  if (e) { e.preventDefault(); e.stopPropagation(); }
+  const dd = document.getElementById('saved-batches-dropdown');
+  if (!dd) return;
+  const isOpen = dd.style.display === 'block';
+  dd.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) loadSavedBatches();
+}
+
+// Close dropdown on outside click
+document.addEventListener('click', (e) => {
+  const dd = document.getElementById('saved-batches-dropdown');
+  const trig = document.getElementById('saved-batches-trigger');
+  if (!dd || dd.style.display !== 'block') return;
+  if (dd.contains(e.target) || (trig && trig.contains(e.target))) return;
+  dd.style.display = 'none';
+});
+
+async function toggleSavedBatch(batchId, rowEl) {
+  try {
+    const r = await fetch(`/api/saved-batches/${batchId}`);
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    const dd = document.getElementById('saved-batches-dropdown');
+    if (dd) dd.style.display = 'none';
+    window._currentSavedBatch = data;
+    renderSavedBatchInDashboard(data);
+    return;
+    
+    const wrap = document.createElement('div');
+    wrap.className = 'saved-batch-expanded';
+    if (!data.items.length) {
+      wrap.innerHTML = '<div style="color:var(--muted);font-size:11px;padding:4px;">Empty folder</div>';
+    } else {
+      wrap.innerHTML = data.items.map(it => `
+        <div class="sb-item">
+          ${it.thumb_url ? `<img src="${it.thumb_url}" />` : '<div style="width:36px;height:36px;background:var(--border);border-radius:4px;flex-shrink:0;"></div>'}
+          <div class="sb-item-title">${escapeHtml(it.title || '(untitled)')}</div>
+          <div class="sb-item-price">$${(it.price || 0).toFixed(2)}</div>
+        </div>
+      `).join('');
+    }
+    rowEl.insertAdjacentElement('afterend', wrap);
+  } catch(e) {
+    toast('Failed to load folder', 'error');
+    console.error(e);
+  }
+}
+
+async function deleteSavedBatch(batchId, name) {
+  if (!confirm(`Delete saved batch "${name}"? This cannot be undone.`)) return;
+  try {
+    const r = await fetch(`/api/saved-batches/${batchId}`, {method: 'DELETE'});
+    if (!r.ok) throw new Error(await r.text());
+    toast('Folder deleted', 'success');
+    loadSavedBatches();
+  } catch(e) {
+    toast('Failed to delete folder', 'error');
+    console.error(e);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Load on page ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', loadSavedBatches);
+} else {
+  loadSavedBatches();
+}
+
+// Close modal on Escape / click outside
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeSaveBatchModal();
+});
+document.getElementById('save-batch-modal').addEventListener('click', e => {
+  if (e.target.id === 'save-batch-modal') closeSaveBatchModal();
+});
+
+function renderSavedBatchInDashboard(data) {
+  const grid = document.getElementById('tile-grid') || document.querySelector('.tile-grid');
+  if (!grid) { console.warn('No grid found'); return; }
+  let banner = document.getElementById('saved-batch-banner');
+  if (banner) banner.remove();
+  banner = document.createElement('div');
+  banner.id = 'saved-batch-banner';
+  banner.style.cssText = 'grid-column:1/-1;background:#1a3a1a;border:1px solid #2d5a2d;border-radius:8px;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;';
+  const safeName = String(data.name||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  banner.innerHTML = '<div><div style="font-size:11px;color:#86efac;text-transform:uppercase;letter-spacing:0.08em;font-weight:600;margin-bottom:2px;">Saved Batch</div><div style="font-size:15px;font-weight:700;color:#fff;">📁 ' + safeName + ' <span style="color:var(--muted);font-size:12px;font-weight:400;">· ' + data.items.length + ' items</span></div></div><button class="btn" onclick="exitSavedBatch()" style="background:transparent;border-color:var(--border);color:var(--text);font-size:13px;">← Back to Dashboard</button>';
+  grid.innerHTML = '';
+  grid.appendChild(banner);
+  if (!data.items.length) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'grid-column:1/-1;text-align:center;padding:40px;color:var(--muted);';
+    empty.textContent = 'This batch is empty';
+    grid.appendChild(empty);
+    return;
+  }
+  data.items.forEach(it => {
+    const tile = document.createElement('div');
+    tile.className = 'tile';
+    tile.style.cssText = 'background:#0a0f18;border:1px solid #1a2332;border-radius:10px;overflow:hidden;';
+    const photoUrl = it.thumb_url || (it.photo_id ? '/api/photos/view/' + it.photo_id : '');
+    const isNew = (it.condition || '').toUpperCase() === 'NEW';
+    const condBadge = isNew
+      ? '<span style="position:absolute;top:8px;left:8px;background:rgba(34,197,94,0.9);color:#000;font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;">NEW</span>'
+      : '<span style="position:absolute;top:8px;left:8px;background:rgba(245,158,11,0.9);color:#000;font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;">USED</span>';
+    const safeTitle = String(it.title || '(untitled)').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const imgHtml = photoUrl ? '<img src="' + photoUrl + '" style="width:100%;height:100%;object-fit:cover;"/>' : '';
+    tile.innerHTML = '<div style="position:relative;aspect-ratio:1;background:var(--bg);">' + imgHtml + condBadge + '</div><div style="padding:12px;"><div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">' + safeTitle + '</div><div style="font-size:18px;font-weight:800;color:#22c55e;">$' + (Number(it.price)||0).toFixed(2) + '</div></div>';
+    grid.appendChild(tile);
+  });
+}
+
+function exitSavedBatch() {
+  window._currentSavedBatch = null;
+  const banner = document.getElementById('saved-batch-banner');
+  if (banner) banner.remove();
+  if (typeof loadListings === 'function') loadListings();
+  else if (typeof refresh === 'function') refresh();
+  else location.reload();
+}
+
+
+async function connectShopify() {
+  try {
+    const r = await fetch('/api/shopify/status');
+    const d = await r.json();
+    if (d.connected) {
+      if (confirm('Shopify is connected to ' + d.shop_domain + '. Disconnect?')) {
+        await fetch('/api/shopify/disconnect', {method:'POST'});
+        location.reload();
+      }
+    } else {
+      window.location.href = '/shopify/connect';
+    }
+  } catch(e) {
+    window.location.href = '/shopify/connect';
+  }
+}
+(async function() {
+  try {
+    const r = await fetch('/api/shopify/status');
+    const d = await r.json();
+    const btn = document.getElementById('shopify-connect-btn');
+    if (btn && d.connected) {
+      btn.innerHTML = '✓ Shopify Connected';
+      btn.style.background = '#22c55e';
+      btn.style.borderColor = '#22c55e';
+    }
+  } catch(e) {}
+})();
+
+
+async function pushToShopify() {
+  if (!modalItemId) return;
+  const btn = document.getElementById('modal-shopify-btn');
+  const orig = btn.innerHTML;
+  btn.innerHTML = '⏳ Pushing...';
+  btn.disabled = true;
+  try {
+    if (modalDirty) await saveModal(true);
+    const r = await fetch('/api/shopify/push/' + modalItemId, {method: 'POST'});
+    const d = await r.json();
+    if (r.ok) {
+      btn.innerHTML = '✓ Pushed to Shopify';
+      btn.style.background = '#22c55e';
+      setTimeout(() => { btn.innerHTML = orig; btn.style.background = '#5a8e3b'; btn.disabled = false; }, 3000);
+    } else {
+      throw new Error(d.detail || 'Failed');
+    }
+  } catch(e) {
+    alert('Push failed: ' + e.message);
+    btn.innerHTML = orig;
+    btn.disabled = false;
+  }
+}
+
+
+async function submitToShopify() {
+  if (!selected.size) return;
+  const btn = document.getElementById('submit-batch-btn');
+  const orig = btn ? btn.textContent : '';
+  if (btn) btn.disabled = true;
+  let success = 0, failed = 0;
+  const total = selected.size;
+  const ids = Array.from(selected);
+  for (let i = 0; i < ids.length; i++) {
+    if (btn) btn.textContent = `Pushing ${i+1}/${total}...`;
+    try {
+      const r = await fetch('/api/shopify/push/' + ids[i], {method: 'POST'});
+      if (r.ok) success++;
+      else failed++;
+    } catch(e) { failed++; }
+  }
+  if (btn) {
+    btn.disabled = false;
+    btn.innerHTML = `Submit (<span id="submit-count">${selected.size}</span>) ▾`;
+  }
+  toast(`Pushed ${success}/${total} to Shopify` + (failed ? ` (${failed} failed)` : ''), failed ? 'error' : 'success');
+  if (success > 0) loadListings();
+}
+
+
+async function reportBadScan(id) {
+  const reason = prompt('What was wrong with this scan? (optional but helpful)');
+  if (reason === null) return;
+  try {
+    const r = await fetch('/api/listings/' + id + '/report-bad-scan', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({reason: reason || ''})
+    });
+    if (r.ok) {
+      toast('Report sent — thank you!', 'success');
+    } else {
+      const d = await r.json().catch(()=>({}));
+      throw new Error(d.detail || 'Failed');
+    }
+  } catch(e) {
+    toast('Report failed: ' + e.message, 'error');
+  }
+}
+
+</script>
+
+
+<!-- Plans Modal -->
+<div class="modal-overlay" id="plans-modal" onclick="closePlansModal(event)">
+  <div class="modal" onclick="event.stopPropagation()" style="max-width:880px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+      <div>
+        <h2 style="margin:0;">Choose Your Plan</h2>
+        <div style="font-size:16px;color:var(--muted);margin-top:3px;">Switch anytime, no contracts</div>
+      </div>
+      <button class="btn-sm" style="background:#0a0f18;color:#94a3b8;padding:6px 12px;" onclick="closePlansModal()">Close</button>
+    </div>
+    <div id="plan-cards" class="plan-card-grid"></div>
+  </div>
+</div>
+
+
+
+<script>
+// ── Account modal & user mailbox functions ──
+function openPlansModal() {
+  document.getElementById('plans-modal').classList.add('open');
+}
+function closePlansModal(e) {
+  if (e && e.target.id !== 'plans-modal') return;
+  document.getElementById('plans-modal').classList.remove('open');
+}
+
+function openUserMailbox() {
+  // Click the Messages tab instead
+  var btn = document.querySelector('.nav-btn[data-tab="messages"]');
+  if (btn) btn.click();
+}
+function closeUserMailbox() { /* no-op now that messages is a tab */ }
+
+async function loadUserThread() {
+  // Hide alert banner since user opened the chat
+  var banner = document.getElementById('support-alert');
+  if (banner) banner.style.display = 'none';
+  refreshUserMailboxBadge();
+
+  try {
+    var r = await fetch('/api/support/thread');
+    var d = await r.json();
+    var view = document.getElementById('user-thread-view');
+    if (!view) return;
+    if (!d.messages || !d.messages.length) {
+      view.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:12px;padding:24px 0;">No messages yet — say hi!</div>';
+      return;
+    }
+    view.innerHTML = d.messages.map(function(m) {
+      var isUser = m.sender === 'user';
+      var date = new Date(m.created_at).toLocaleString();
+      return '<div style="margin-bottom:10px;display:flex;flex-direction:column;align-items:' + (isUser ? 'flex-end' : 'flex-start') + ';">'
+        + '<div style="background:' + (isUser ? 'var(--accent)' : '#0a0f18') + ';color:' + (isUser ? '#fff' : 'var(--text)') + ';padding:9px 13px;border-radius:14px;max-width:75%;font-size:13px;line-height:1.5;white-space:pre-wrap;">' + escapeHtmlMsg(m.body) + '</div>'
+        + '<div style="font-size:10px;color:var(--muted);margin-top:3px;">' + (isUser ? 'You' : 'Support') + ' — ' + date + '</div>'
+        + '</div>';
+    }).join('');
+    view.scrollTop = view.scrollHeight;
+  } catch(e) {
+    document.getElementById('user-thread-view').innerHTML = '<div style="color:var(--red);font-size:12px;text-align:center;padding:20px;">Failed to load</div>';
+  }
+}
+
+async function sendUserThreadMessage() {
+  var input = document.getElementById('user-thread-input');
+  var text = input.value.trim();
+  if (!text) return;
+  try {
+    var r = await fetch('/api/support/send', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({body: text})
+    });
+    if (!r.ok) throw new Error('Failed');
+    input.value = '';
+    loadUserThread();
+  } catch(e) {
+    if (typeof toast === 'function') toast('Failed: ' + e.message, 'error');
+  }
+}
+
+async function refreshUserMailboxBadge() {
+  try {
+    var r = await fetch('/api/support/unread');
+    var d = await r.json();
+    var badge = document.getElementById('user-mailbox-badge');
+    if (!badge) return;
+    badge.style.display = d.unread ? 'inline-block' : 'none';
+  } catch(e) {}
+}
+
+function escapeHtmlMsg(s) {
+  var div = document.createElement('div');
+  div.textContent = String(s||'');
+  return div.innerHTML;
+}
+
+// Run badge check on load + every 30s
+window.addEventListener('DOMContentLoaded', function() {
+  setTimeout(refreshUserMailboxBadge, 1000);
+});
+setInterval(refreshUserMailboxBadge, 30000);
+
+// EBAY MODAL FUNCTIONS
+var ebayModalItems = [];
+var ebayModalPolicies = { fulfillment: [], returns: [], payments: [] };
+var ebayModalAspects = {};
+
+async function openEbayModal() {
+  if (!selected.size) { toast('Select items first', 'error'); return; }
+  var ebayDot = document.getElementById('ebay-status-dot');
+  var isConnected = ebayDot && ebayDot.style.background === 'rgb(34, 197, 94)';
+  if (!isConnected) {
+    if (confirm('eBay not connected. Open Account to connect?')) {
+      document.querySelector('.nav-btn[data-tab="settings"]').click();
+    }
+    return;
+  }
+  document.getElementById('ebay-review-modal').style.display = 'block';
+  document.getElementById('ebay-modal-subtitle').textContent = 'Loading ' + selected.size + ' items...';
+  document.getElementById('ebay-modal-items').innerHTML = '<div style="padding:40px;text-align:center;color:#4a6080;">Loading...</div>';
+
+  try {
+    var pr = await fetch('/api/ebay/policies', {credentials:'include'});
+    if (pr.ok) ebayModalPolicies = await pr.json();
+  } catch(e) { console.error('policies', e); }
+
+  var ids = Array.from(selected);
+  console.log('eBay modal: selected ids=', ids, 'listings count=', listings.length);
+  ebayModalItems = ids.map(function(id) {
+    var l = listings.find(function(x) { return x.id === id || String(x.id) === String(id); });
+    if (!l) { console.log('No match for id:', id, typeof id); return null; }
+    var loc = l.storage_location || '';
+    var sku = 'LISTER-' + String(id).substring(0,8) + (loc ? '-' + loc.replace(/\s+/g,'-').toUpperCase() : '');
+    return {
+      id: id,
+      title: l.title || '',
+      price: l.price || 0,
+      quantity: l.quantity || 1,
+      condition: 'USED_EXCELLENT',
+      category_id: l.ebay_category_id || '',
+      category_path: '',
+      photo_url: '',
+      sku: sku,
+      condition_notes: '',
+      shipping_policy_id: ebayModalPolicies.fulfillment[0] ? ebayModalPolicies.fulfillment[0].id : '',
+      aspects: {}
+    };
+  }).filter(Boolean);
+
+  document.getElementById('ebay-modal-subtitle').textContent = ebayModalItems.length + ' items - review before sending';
+  renderEbayModal();
+}
+
+function renderEbayModal() {
+  var container = document.getElementById('ebay-modal-items');
+  if (!container) return;
+  var html = '';
+  for (var i = 0; i < ebayModalItems.length; i++) {
+    var item = ebayModalItems[i];
+    var ready = item.title && item.price > 0 && item.shipping_policy_id;
+    var statusColor = ready ? '#22c55e' : '#f59e0b';
+    var statusText = ready ? 'Ready' : 'Needs info';
+
+    var shipOpts = '';
+    for (var j = 0; j < ebayModalPolicies.fulfillment.length; j++) {
+      var p = ebayModalPolicies.fulfillment[j];
+      var sel = p.id === item.shipping_policy_id ? ' selected' : '';
+      shipOpts += '<option value="' + p.id + '"' + sel + '>' + escapeHtml(p.name) + (p.default ? ' (default)' : '') + '</option>';
+    }
+    if (!shipOpts) shipOpts = '<option value="">No policies - set up at ebay.com/bp/manage</option>';
+
+    var condOpts = ['NEW','NEW_WITH_TAGS','USED_EXCELLENT','USED_VERY_GOOD','USED_GOOD','USED_ACCEPTABLE','FOR_PARTS_OR_NOT_WORKING'].map(function(c) {
+      var label = c.replace(/_/g,' ').toLowerCase().replace(/\b\w/g, function(l){return l.toUpperCase();});
+      var sel = c === item.condition ? ' selected' : '';
+      return '<option value="' + c + '"' + sel + '>' + label + '</option>';
+    }).join('');
+
+    html += '<div style="border-bottom:1px solid #0d1117;padding:22px 22px;">';
+    html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">';
+    html += '<div style="width:8px;height:8px;border-radius:50%;background:' + statusColor + ';flex-shrink:0;"></div>';
+    html += '<div style="flex:1;font-size:13px;font-weight:700;color:#f1f5f9;">Item ' + (i+1) + '</div>';
+    html += '<div style="font-size:10px;color:' + statusColor + ';font-weight:700;background:rgba(34,197,94,0.08);border:1px solid ' + statusColor + ';padding:3px 10px;border-radius:20px;">' + statusText + '</div>';
+    html += '</div>';
+
+    html += '<div style="margin-bottom:10px;"><div style="font-size:10px;color:#4a6080;text-transform:uppercase;letter-spacing:0.06em;font-weight:700;margin-bottom:4px;">Title <span style="color:#374151;text-transform:none;font-weight:400;">' + (80 - (item.title||'').length) + ' chars left</span></div>';
+    html += '<input value="' + escapeHtml(item.title) + '" maxlength="80" oninput="updateEbayField(' + i + ',&quot;title&quot;,this.value);renderEbayModal();" style="width:100%;background:#0f1420;border:1px solid #1a2332;border-radius:8px;padding:9px 12px;color:#f1f5f9;font-size:13px;font-family:inherit;outline:none;box-sizing:border-box;"></div>';
+
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr 1.5fr;gap:8px;margin-bottom:10px;">';
+    html += '<div><div style="font-size:10px;color:#4a6080;text-transform:uppercase;letter-spacing:0.06em;font-weight:700;margin-bottom:4px;">Price</div>';
+    html += '<input value="' + Number(item.price).toFixed(2) + '" type="number" step="0.01" oninput="updateEbayField(' + i + ',&quot;price&quot;,parseFloat(this.value))" style="width:100%;background:#0f1420;border:1px solid #1a2332;border-radius:8px;padding:9px 12px;color:#22c55e;font-size:13px;font-weight:700;font-family:inherit;outline:none;box-sizing:border-box;"></div>';
+    html += '<div><div style="font-size:10px;color:#4a6080;text-transform:uppercase;letter-spacing:0.06em;font-weight:700;margin-bottom:4px;">Qty</div>';
+    html += '<input value="' + item.quantity + '" type="number" min="1" oninput="updateEbayField(' + i + ',&quot;quantity&quot;,parseInt(this.value)||1)" style="width:100%;background:#0f1420;border:1px solid #1a2332;border-radius:8px;padding:9px 12px;color:#f1f5f9;font-size:13px;font-family:inherit;outline:none;box-sizing:border-box;"></div>';
+    html += '<div><div style="font-size:10px;color:#4a6080;text-transform:uppercase;letter-spacing:0.06em;font-weight:700;margin-bottom:4px;">Condition</div>';
+    html += '<select onchange="updateEbayField(' + i + ',&quot;condition&quot;,this.value)" style="width:100%;background:#0f1420;border:1px solid #1a2332;border-radius:8px;padding:9px 10px;color:#f1f5f9;font-size:12px;font-family:inherit;outline:none;cursor:pointer;">' + condOpts + '</select></div>';
+    html += '</div>';
+
+    html += '<div style="margin-bottom:10px;"><div style="font-size:10px;color:#4a6080;text-transform:uppercase;letter-spacing:0.06em;font-weight:700;margin-bottom:4px;">Shipping policy</div>';
+    html += '<select onchange="updateEbayField(' + i + ',&quot;shipping_policy_id&quot;,this.value);renderEbayModal();" style="width:100%;background:#0f1420;border:1px solid #1a2332;border-radius:8px;padding:9px 12px;color:#f1f5f9;font-size:12px;font-family:inherit;outline:none;cursor:pointer;">' + shipOpts + '</select></div>';
+
+    html += '<div style="margin-bottom:10px;"><div style="font-size:10px;color:#4a6080;text-transform:uppercase;letter-spacing:0.06em;font-weight:700;margin-bottom:4px;">SKU <span style="color:#374151;font-weight:400;text-transform:none;">' + (item.sku.includes('-') && item.sku.split('-').length > 2 ? 'includes location' : 'no location') + '</span></div>';
+    html += '<input value="' + escapeHtml(item.sku) + '" oninput="updateEbayField(' + i + ',&quot;sku&quot;,this.value)" style="width:100%;background:#0f1420;border:1px solid #1a2332;border-radius:8px;padding:9px 12px;color:#f1f5f9;font-size:13px;font-family:inherit;outline:none;box-sizing:border-box;font-family:monospace;"></div>';
+
+    html += '<div style="margin-bottom:10px;"><div style="font-size:10px;color:#4a6080;text-transform:uppercase;letter-spacing:0.06em;font-weight:700;margin-bottom:4px;">Condition notes <span style="color:#374151;text-transform:none;font-weight:400;">optional</span></div>';
+    html += '<input value="' + escapeHtml(item.condition_notes||'') + '" oninput="updateEbayField(' + i + ',&quot;condition_notes&quot;,this.value)" placeholder="e.g. Light wear, original box included" style="width:100%;background:#0f1420;border:1px solid #1a2332;border-radius:8px;padding:9px 12px;color:#f1f5f9;font-size:12px;font-family:inherit;outline:none;box-sizing:border-box;"></div>';
+
+    // Category section
+    html += '<div style="margin-bottom:10px;"><div style="font-size:10px;color:#4a6080;text-transform:uppercase;letter-spacing:0.06em;font-weight:700;margin-bottom:4px;">Category</div>';
+    html += '<div style="display:flex;gap:8px;">';
+    html += '<input id="cat-display-' + i + '" value="' + escapeHtml(item.category_path || ('ID: ' + item.category_id)) + '" readonly style="flex:1;background:#0f1420;border:1px solid #1a2332;border-radius:8px;padding:9px 12px;color:#94a3b8;font-size:12px;font-family:inherit;outline:none;box-sizing:border-box;">';
+    html += '<button onclick="openCatSearch(' + i + ')" style="background:#0f1420;border:1px solid #1a2332;color:#38bdf8;border-radius:8px;padding:9px 14px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;">Change</button>';
+    html += '</div>';
+    html += '<div id="cat-search-' + i + '" style="display:none;margin-top:8px;background:#090b0f;border:1px solid #0d1117;border-radius:8px;padding:10px;">';
+    html += '<input id="cat-input-' + i + '" placeholder="Search eBay categories..." oninput="searchCats(' + i + ',this.value)" style="width:100%;background:#0f1420;border:1px solid #1a2332;border-radius:6px;padding:8px 10px;color:#f1f5f9;font-size:12px;font-family:inherit;outline:none;box-sizing:border-box;margin-bottom:8px;">';
+    html += '<div id="cat-results-' + i + '"></div>';
+    html += '</div>';
+    html += '</div>';
+
+    // Item specifics section
+    html += '<div style="margin-top:14px;"><div style="font-size:10px;color:#4a6080;text-transform:uppercase;letter-spacing:0.06em;font-weight:700;margin-bottom:6px;display:flex;justify-content:space-between;">';
+    html += '<span>Item specifics</span>';
+    html += '<button onclick="loadAspects(' + i + ')" style="background:transparent;border:none;color:#38bdf8;font-size:10px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;">Load required fields</button>';
+    html += '</div>';
+    html += '<div id="aspects-' + i + '">';
+    if (item.aspects && Object.keys(item.aspects).length) {
+      for (var k in item.aspects) {
+        html += '<div style="display:grid;grid-template-columns:130px 1fr;gap:8px;align-items:center;margin-bottom:6px;">';
+        html += '<div style="font-size:11px;color:#94a3b8;font-weight:600;">' + escapeHtml(k) + '</div>';
+        html += '<input value="' + escapeHtml(item.aspects[k]) + '" oninput="updateAspect(' + i + ',&quot;' + escapeHtml(k) + '&quot;,this.value)" style="background:#0f1420;border:1px solid #1a2332;border-radius:6px;padding:7px 10px;color:#f1f5f9;font-size:12px;font-family:inherit;outline:none;box-sizing:border-box;">';
+        html += '</div>';
+      }
+    } else {
+      html += '<div style="font-size:11px;color:#4a6080;font-style:italic;padding:6px 0;">Click "Load required fields" to fetch from eBay</div>';
+    }
+    html += '</div></div>';
+
+    html += '</div>';
+  }
+  container.innerHTML = html;
+}
+
+function updateEbayField(idx, field, value) {
+  if (ebayModalItems[idx]) ebayModalItems[idx][field] = value;
+}
+
+function closeEbayModal() {
+  var modal = document.getElementById('ebay-review-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+
+function openCatSearch(idx) {
+  var el = document.getElementById('cat-search-' + idx);
+  if (el) {
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    if (el.style.display === 'block') {
+      var input = document.getElementById('cat-input-' + idx);
+      if (input) input.focus();
+    }
+  }
+}
+
+var catSearchTimers = {};
+function searchCats(idx, query) {
+  if (catSearchTimers[idx]) clearTimeout(catSearchTimers[idx]);
+  catSearchTimers[idx] = setTimeout(async function() {
+    if (!query || query.length < 2) {
+      document.getElementById('cat-results-' + idx).innerHTML = '';
+      return;
+    }
+    try {
+      var r = await fetch('/api/ebay/category-search?q=' + encodeURIComponent(query), {credentials:'include'});
+      var d = await r.json();
+      var html = '';
+      (d.categories || []).forEach(function(cat) {
+        html += '<div data-idx="' + idx + '" data-catid="' + cat.id + '" data-catpath="' + escapeHtml(cat.path) + '" onclick="selectCategoryFromEl(this)" class="ebay-cat-opt" style="padding:7px 10px;border-radius:6px;font-size:11px;color:#cbd5e1;cursor:pointer;">' + escapeHtml(cat.path) + '</div>';
+      });
+      document.getElementById('cat-results-' + idx).innerHTML = html || '<div style="padding:7px 10px;font-size:11px;color:#4a6080;">No matches</div>';
+    } catch(e) { console.error(e); }
+  }, 350);
+}
+
+function selectCategoryFromEl(el) {
+  var idx = parseInt(el.getAttribute('data-idx'));
+  var catId = el.getAttribute('data-catid');
+  var catPath = el.getAttribute('data-catpath');
+  ebayModalItems[idx].category_id = catId;
+  ebayModalItems[idx].category_path = catPath;
+  ebayModalItems[idx].aspects = {};
+  document.getElementById('cat-search-' + idx).style.display = 'none';
+  renderEbayModal();
+}
+
+async function loadAspects(idx) {
+  var item = ebayModalItems[idx];
+  if (!item.category_id) { toast('Set a category first', 'error'); return; }
+  try {
+    var r = await fetch('/api/ebay/item-aspects?category_id=' + item.category_id, {credentials:'include'});
+    var d = await r.json();
+    var aspects = {};
+    (d.aspects || []).filter(function(a){return a.required;}).forEach(function(a) {
+      aspects[a.name] = a.values && a.values[0] ? a.values[0] : '';
+    });
+    if (Object.keys(aspects).length === 0) {
+      toast('No required fields for this category', 'error');
+      return;
+    }
+    ebayModalItems[idx].aspects = Object.assign(aspects, ebayModalItems[idx].aspects || {});
+    renderEbayModal();
+  } catch(e) { toast('Failed to load: ' + e.message, 'error'); }
+}
+
+function updateAspect(idx, name, value) {
+  if (!ebayModalItems[idx].aspects) ebayModalItems[idx].aspects = {};
+  ebayModalItems[idx].aspects[name] = value;
+}
+
+async function submitEbayDrafts() {
+  var btn = document.getElementById('ebay-send-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
+  try {
+    var duration = document.getElementById('ebay-bulk-duration').value;
+    var defaultReturnId = ebayModalPolicies.returns[0] ? ebayModalPolicies.returns[0].id : '';
+    var defaultPaymentId = ebayModalPolicies.payments[0] ? ebayModalPolicies.payments[0].id : '';
+    var payload = {
+      listing_ids: ebayModalItems.map(function(x){return x.id;}),
+      items: ebayModalItems.map(function(item) {
+        return {
+          id: item.id,
+          title: item.title,
+          price: item.price,
+          quantity: item.quantity,
+          condition: item.condition,
+          condition_notes: item.condition_notes,
+          category_id: item.category_id,
+          sku: item.sku,
+          shipping_policy_id: item.shipping_policy_id,
+          return_policy_id: defaultReturnId,
+          payment_policy_id: defaultPaymentId,
+          listing_duration: duration,
+          aspects: item.aspects
+        };
+      })
+    };
+    var r = await fetch('/api/ebay/submit-listings', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      credentials: 'include',
+      body: JSON.stringify(payload)
+    });
+    var d = await r.json();
+    if (d.ok) {
+      toast(d.submitted + ' of ' + d.total + ' drafts sent to eBay');
+      closeEbayModal();
+      selected.clear();
+      await loadListings();
+    } else {
+      toast('Submit failed', 'error');
+    }
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Send Drafts'; }
+  }
+}
+
+
+// ── SALES TAB ──────────────────────────────────────────────── //
+var salesPeriod = 'month';
+
+function setSalesPeriod(period, btn) {
+  var periodLabels = { day:"Today", week:"This week", month:"This month", "3month":"Last 3 months", "12month":"Last 12 months", all:"All time" };
+  var subEl = document.getElementById("sales-stat-revenue-sub");
+  if (subEl) subEl.textContent = periodLabels[period] || period;
+  salesPeriod = period;
+  // Update button styles
+  btn.parentElement.querySelectorAll('button').forEach(function(b) {
+    b.style.background = 'transparent';
+    b.style.color = 'var(--muted)';
+  });
+  btn.style.background = 'rgba(34,197,94,0.15)';
+  btn.style.color = '#4ade80';
+  loadSalesOrders();
+}
+
+function loadSalesTab() {
+  loadSalesListings();
+  loadSalesOrders();
+}
+
+function initSalesPeriodBtns() {
+  document.querySelectorAll('.sales-period-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.sales-period-btn').forEach(function(b) {
+        b.style.background = 'transparent';
+        b.style.color = 'var(--muted)';
+      });
+      btn.style.background = 'rgba(34,197,94,0.15)';
+      btn.style.color = '#4ade80';
+      salesPeriod = btn.dataset.period;
+      loadSalesOrders();
+    });
+  });
+}
+
+function renderSalesListings() {
+  var list = document.getElementById('sales-listings-list');
+  if (!list) return;
+  var visible = salesListingsExpanded ? salesListingsAll : salesListingsAll.slice(0, 3);
+  var rows = visible.map(function(it) {
+    var photoHtml = it.photo_url
+      ? '<img src="' + it.photo_url + '" style="width:48px;height:48px;object-fit:cover;border-radius:8px;flex-shrink:0;" />'
+      : '<div style="width:48px;height:48px;border-radius:8px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px;">📷</div>';
+    return '<div style="display:flex;align-items:center;gap:12px;padding:14px 24px;border-bottom:1px solid #111827;">'
+      + photoHtml
+      + '<div style="flex:1;min-width:0;">'
+      +   '<div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(it.title||'Untitled') + '</div>'
+      +   '<div style="font-size:10px;color:var(--muted);margin-top:2px;">'
+      +     (it.ebay_item_id ? 'ID: ' + it.ebay_item_id : '')
+      +   '</div>'
+      + '</div>'
+      + '<div style="text-align:right;flex-shrink:0;">'
+      +   '<div style="font-size:13px;font-weight:700;color:#4ade80;">$' + parseFloat(it.price||0).toFixed(2) + '</div>'
+      +   '<div style="font-size:10px;color:#3b82f6;font-weight:600;margin-top:2px;">Scheduled</div>'
+      +   ''
+      + '</div>'
+      + '</div>';
+  }).join('');
+  var toggleBtn = salesListingsAll.length > 3
+    ? '<div onclick="salesListingsExpanded=!salesListingsExpanded;renderSalesListings();" style="padding:14px 24px;text-align:center;font-size:12px;color:#4ade80;cursor:pointer;font-weight:600;border-top:1px solid #111827;">'
+      + (salesListingsExpanded ? '▲ Show less' : '▼ See all ' + salesListingsAll.length + ' listings')
+      + '</div>'
+    : '';
+  list.innerHTML = rows + toggleBtn;
+}
+
+var salesListingsAll = [];
+var salesListingsExpanded = false;
+async function loadSalesListings() {
+  var list = document.getElementById('sales-listings-list');
+  if (!list) return;
+  try {
+    var r = await fetch('/api/ebay/scheduled-listings', {credentials:'include'});
+    var d = await r.json();
+    var items = d.listings || [];
+    var statEl = document.getElementById('sales-stat-listed');
+    if (statEl) statEl.textContent = items.length;
+    if (!items.length) {
+      list.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;">No items listed on eBay yet.</div>';
+      return;
+    }
+    salesListingsAll = items;
+    salesListingsExpanded = false;
+    function renderSalesListings() {
+      var visible = salesListingsExpanded ? salesListingsAll : salesListingsAll.slice(0, 3);
+      var rows = visible.map(function(it) {
+        var photoHtml = it.photo_url
+          ? '<img src="' + it.photo_url + '" style="width:48px;height:48px;object-fit:cover;border-radius:8px;flex-shrink:0;" />'
+          : '<div style="width:48px;height:48px;border-radius:8px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px;">📷</div>';
+        return '<div style="display:flex;align-items:center;gap:12px;padding:14px 24px;border-bottom:1px solid #111827;">'
+          + photoHtml
+          + '<div style="flex:1;min-width:0;">'
+          +   '<div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(it.title||'Untitled') + '</div>'
+          +   '<div style="font-size:10px;color:var(--muted);margin-top:2px;">'
+          +     (it.ebay_item_id ? 'ID: ' + it.ebay_item_id : '')
+          +   '</div>'
+          + '</div>'
+          + '<div style="text-align:right;flex-shrink:0;">'
+          +   '<div style="font-size:13px;font-weight:700;color:#4ade80;">$' + parseFloat(it.price||0).toFixed(2) + '</div>'
+          +   '<div style="font-size:10px;color:#3b82f6;font-weight:600;margin-top:2px;">Scheduled</div>'
+          + '</div>'
+          + '</div>';
+      }).join('');
+      var toggleBtn = salesListingsAll.length > 3
+        ? '<div onclick="salesListingsExpanded=!salesListingsExpanded;renderSalesListings();" style="padding:14px 24px;text-align:center;font-size:12px;color:#4ade80;cursor:pointer;font-weight:600;border-top:1px solid #111827;">'
+          + (salesListingsExpanded ? '▲ Show less' : '▼ See all ' + salesListingsAll.length + ' listings')
+          + '</div>'
+        : '';
+      list.innerHTML = rows + toggleBtn;
+    }
+    renderSalesListings();
+  } catch(e) {
+    if (list) list.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);">Could not load listings.</div>';
+  }
+}
+
+async function loadSalesOrders() {
+  var list = document.getElementById('sales-orders-list');
+  var countEl = document.getElementById('sales-orders-count');
+  if (!list) return;
+  try {
+    var r = await fetch('/api/ebay/orders?period=' + salesPeriod, {credentials:'include'});
+    var d = await r.json();
+    var orders = d.orders || [];
+    if (countEl) countEl.textContent = orders.length + ' order' + (orders.length===1?'':'s');
+    var totalRev = 0, totalSold = 0;
+    orders.forEach(function(o) {
+      totalRev += parseFloat(o.total||0);
+      totalSold += (o.items||[]).reduce(function(s,i){return s+(i.quantity||1);},0);
+    });
+    var revEl = document.getElementById('sales-stat-revenue');
+    if (revEl) revEl.textContent = '$' + totalRev.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+    var soldEl = document.getElementById('sales-stat-sold');
+    if (soldEl) soldEl.textContent = totalSold;
+    var avgEl = document.getElementById('sales-stat-avg');
+    if (avgEl) avgEl.textContent = totalSold > 0 ? '$' + (totalRev/totalSold).toFixed(2) : '$0';
+    if (!orders.length) {
+      list.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;"><div style="font-size:28px;margin-bottom:10px;">📦</div><div style="font-size:14px;font-weight:600;color:#94a3b8;margin-bottom:4px;">No orders yet</div><div>Click Pull orders from eBay to sync.</div></div>';
+      return;
+    }
+    list.innerHTML = orders.map(function(o) {
+      var date = o.created ? new Date(o.created).toLocaleDateString() : '';
+      return (o.items||[]).map(function(item) {
+        return '<div style="display:flex;align-items:center;gap:14px;padding:20px 24px;border-bottom:1px solid #111827;">'
+          + '<div style="width:64px;height:64px;border-radius:10px;background:rgba(168,85,247,0.08);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#a855f7;">📦</div>'
+          + '<div style="flex:1;min-width:0;">'
+          +   '<div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px;">' + escapeHtml(item.title||'Item') + '</div>'
+          +   '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
+          +     (item.sku ? '<span style="background:rgba(34,197,94,0.1);color:#4ade80;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:700;">SKU: ' + escapeHtml(item.sku) + '</span>' : '<span style="font-size:11px;color:#4a6080;">No SKU</span>')
+          +     '<span style="font-size:11px;color:var(--muted);">Qty: ' + (item.quantity||1) + '</span>'
+          +     '<span style="font-size:11px;color:var(--muted);">Buyer: ' + escapeHtml(o.buyer||'—') + '</span>'
+          +     '<span style="font-size:11px;color:var(--muted);">' + date + '</span>'
+          +   '</div>'
+          + '</div>'
+          + '<div style="text-align:right;flex-shrink:0;">'
+          +   '<div style="font-size:16px;font-weight:700;color:#4ade80;font-variant-numeric:tabular-nums;">$' + parseFloat(item.price||0) + '</div>'
+          +   '<div style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;background:rgba(168,85,247,0.15);color:#c084fc;margin-top:4px;display:inline-block;">Sold</div>'
+          + '</div>'
+          + '</div>';
+      }).join('');
+    }).join('');
+  } catch(e) {
+    if (list) list.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);">Could not load orders.</div>';
+  }
+}
+
+async function pullEbayOrders() {
+  var btn = document.getElementById('pull-orders-btn');
+  if (btn) { btn.innerHTML = 'Syncing...'; btn.disabled = true; }
+  try {
+    var r = await fetch('/api/ebay/orders', {credentials:'include'});
+    var d = await r.json();
+    var orders = d.orders || [];
+    for (var o of orders) {
+      for (var item of (o.items||[])) {
+        if (item.sku) {
+          try {
+            await fetch('/api/inventory/mark-sold-by-sku', {
+              method:'POST', headers:{'Content-Type':'application/json'},
+              credentials:'include',
+              body: JSON.stringify({sku: item.sku, ebay_order_id: o.order_id})
+            });
+          } catch(e2) {}
+        }
+      }
+    }
+    await loadSalesOrders();
+    toast('Synced ' + orders.length + ' order' + (orders.length===1?'':'s') + ' from eBay', orders.length ? 'success' : 'info');
+  } catch(e) {
+    toast('Could not sync orders', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.1"/></svg> Pull orders from eBay';
+    }
+  }
+}
+
+window.addEventListener('load', function() {
+  initSalesPeriodBtns();
+  document.querySelectorAll('.nav-btn').forEach(function(btn) {
+    if (btn.dataset.tab === 'sales') {
+      btn.addEventListener('click', function() { setTimeout(loadSalesTab, 50); });
+    }
+  });
+});
+</script>
+
+
+<!-- Lot Cost Modal -->
+<div id="lot-cost-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:24px;min-width:380px;max-width:90vw;">
+    <div style="font-size:16px;font-weight:600;margin-bottom:6px;">Add Lot Cost</div>
+    <div style="font-size:16px;color:var(--muted);margin-bottom:16px;" id="lot-cost-target">Splits across selected items</div>
+    <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;font-weight:600;">Total Cost ($)</div>
+    <input id="lot-cost-input" type="number" step="0.01" placeholder="50.00" style="width:100%;padding:10px;background:var(--bg);border:1px solid #1a2332;border-radius:6px;color:var(--text);font-size:16px;margin-bottom:14px;font-family:inherit;outline:none;"/>
+    <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;font-weight:600;">Distribution</div>
+    <div style="display:flex;gap:6px;margin-bottom:18px;">
+      <label style="flex:1;display:flex;align-items:center;gap:6px;padding:10px;background:var(--bg);border:1px solid #1a2332;border-radius:6px;cursor:pointer;font-size:16px;">
+        <input type="radio" name="lot-method" value="even" checked style="margin:0;"/>
+        Even split
+      </label>
+      <label style="flex:1;display:flex;align-items:center;gap:6px;padding:10px;background:var(--bg);border:1px solid #1a2332;border-radius:6px;cursor:pointer;font-size:16px;">
+        <input type="radio" name="lot-method" value="weighted" style="margin:0;"/>
+        By price
+      </label>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn" onclick="closeLotCostModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="applyLotCost()" id="apply-lot-cost-btn">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Inventory Item Edit Modal -->
+<div id="inv-edit-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;align-items:center;justify-content:center;padding:16px;overflow-y:auto;">
+  <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:14px;padding:0;max-width:520px;width:100%;max-height:90vh;overflow-y:auto;">
+    <div style="position:relative;">
+      <img id="inv-edit-img" src="" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:14px 14px 0 0;background:#161925;cursor:zoom-in;" onclick="window.open(this.src)"/>
+      <button onclick="closeInvEditModal()" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.6);border:none;color:#fff;width:32px;height:32px;border-radius:50%;font-size:18px;cursor:pointer;">×</button>
+    </div>
+    <div style="padding:22px;">
+      <div class="acct-field-label">Title</div>
+      <input id="inv-edit-title" class="acct-input" style="margin-bottom:12px;"/>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+        <div>
+          <div class="acct-field-label">Listed Price</div>
+          <input id="inv-edit-price" class="acct-input" type="number" step="0.01"/>
+        </div>
+        <div>
+          <div class="acct-field-label">Cost</div>
+          <input id="inv-edit-cost" class="acct-input" type="number" step="0.01"/>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+        <div>
+          <div class="acct-field-label">Status</div>
+          <select id="inv-edit-status" class="acct-input" onchange="toggleSoldFields()">
+            <option value="in_stock">In Stock</option>
+            <option value="listed">Listed</option>
+            <option value="sold">Sold</option>
+            <option value="archived">Archived</option>
+          </select>
+        </div>
+        <div>
+          <div class="acct-field-label">Quantity</div>
+          <input id="inv-edit-qty" class="acct-input" type="number" min="0"/>
+        </div>
+      </div>
+      <div id="inv-edit-sold-fields" style="display:none;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);border-radius:8px;padding:12px;margin-bottom:12px;">
+        <div style="font-size:15px;color:#f59e0b;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px;">Sold Details</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+          <div>
+            <div class="acct-field-label">Sold For</div>
+            <input id="inv-edit-sold-price" class="acct-input" type="number" step="0.01"/>
+          </div>
+          <div>
+            <div class="acct-field-label">Sold Date</div>
+            <input id="inv-edit-sold-date" class="acct-input" type="date"/>
+          </div>
+        </div>
+        <div>
+          <div class="acct-field-label">Sold Where</div>
+          <input id="inv-edit-sold-location" class="acct-input" placeholder="e.g. eBay, Mercari, in-person"/>
+        </div>
+      </div>
+      <div style="margin-bottom:12px;">
+        <div class="acct-field-label">Storage Location</div>
+        <input id="inv-edit-location" class="acct-input" list="inv-locations-list" placeholder="e.g. Garage Shelf A"/>
+        <datalist id="inv-locations-list"></datalist>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">
+        <div>
+          <div class="acct-field-label">Category</div>
+          <select id="inv-edit-category" class="acct-input">
+            <option>Electronics</option><option>Clothing</option><option>Tools</option>
+            <option>Home</option><option>Toys</option><option>Books</option>
+            <option>Auto</option><option>Sports</option><option>Collectibles</option>
+            <option>Health</option><option>Other</option>
+          </select>
+        </div>
+        <div>
+          <div class="acct-field-label">Barcode ID</div>
+          <input id="inv-edit-barcode" class="acct-input" readonly style="color:var(--muted);"/>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-danger" style="flex:1;" onclick="deleteCurrentInvItem()">Delete</button>
+        <button class="btn" style="flex:1;" onclick="closeInvEditModal()">Cancel</button>
+        <button class="btn btn-primary" style="flex:1;" onclick="saveInvItem()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Bulk Location Modal -->
+<div id="bulk-loc-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:22px;min-width:380px;max-width:90vw;">
+    <div style="font-size:16px;font-weight:600;margin-bottom:6px;">Set Storage Location</div>
+    <div style="font-size:16px;color:var(--muted);margin-bottom:16px;" id="bulk-loc-target">Apply to selected items</div>
+    <div class="acct-field-label">Location</div>
+    <input id="bulk-loc-input" class="acct-input" list="inv-locations-list" placeholder="e.g. Garage Shelf A" style="margin-bottom:16px;"/>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn" onclick="closeBulkLocationModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="applyBulkLocation()">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Barcode Generator Modal -->
+<div id="barcode-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;align-items:center;justify-content:center;padding:16px;overflow-y:auto;">
+  <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:14px;padding:24px;max-width:680px;width:100%;max-height:90vh;overflow-y:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+      <div>
+        <div style="font-size:18px;font-weight:700;">Generate Barcodes</div>
+        <div style="font-size:16px;color:var(--muted);margin-top:2px;" id="barcode-target">—</div>
+      </div>
+      <button class="btn" onclick="closeBarcodeModal()">Close</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+      <div>
+        <div class="acct-field-label">Prefix</div>
+        <input id="bc-prefix" class="acct-input" placeholder="e.g. JOHN-" value="LSTR-"/>
+      </div>
+      <div>
+        <div class="acct-field-label">Start Number</div>
+        <input id="bc-start" class="acct-input" type="number" value="1" min="1"/>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+      <div>
+        <div class="acct-field-label">Number Padding</div>
+        <select id="bc-padding" class="acct-input">
+          <option value="3">001, 002, 003...</option>
+          <option value="4">0001, 0002...</option>
+          <option value="0">1, 2, 3...</option>
+        </select>
+      </div>
+      <div>
+        <div class="acct-field-label">Label Size</div>
+        <select id="bc-size" class="acct-input">
+          <option value="small">Small (Avery 5160 - 30/sheet)</option>
+          <option value="medium" selected>Medium (Avery 5163 - 10/sheet)</option>
+          <option value="large">Large (4 per sheet)</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;">
+      <button class="btn btn-primary" style="flex:1;" onclick="previewBarcodes()">Preview &amp; Save</button>
+      <button class="btn" style="flex:1;" onclick="printBarcodes()" id="bc-print-btn" disabled>Print</button>
+    </div>
+    <div id="bc-preview" style="margin-top:14px;"></div>
+  </div>
+</div>
+
+<div id="scan-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:9999;align-items:center;justify-content:center;padding:16px;">
+  <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:14px;padding:20px;max-width:500px;width:100%;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <div>
+        <div style="font-size:18px;font-weight:700;">Scan Barcode</div>
+        <div style="font-size:16px;color:var(--muted);margin-top:2px;">Point camera at a QR code</div>
+      </div>
+      <button class="btn" onclick="closeScanBarcodeModal()">Close</button>
+    </div>
+    <div id="scan-status" style="background:var(--bg);border:1px solid #1a2332;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:16px;color:var(--muted);text-align:center;">Starting camera...</div>
+    <div style="position:relative;background:#000;border-radius:10px;overflow:hidden;aspect-ratio:1;">
+      <video id="scan-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;"></video>
+      <canvas id="scan-canvas" style="display:none;"></canvas>
+      <div style="position:absolute;inset:15%;border:2px solid rgba(16,185,129,0.7);border-radius:10px;pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,0.3);"></div>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:8px;">
+      <input type="text" id="scan-manual-input" class="acct-input" style="flex:1;" placeholder="Or type barcode manually..."/>
+      <button class="btn btn-primary" onclick="manualLookup()">Lookup</button>
+    </div>
+  </div>
+</div>
+
+<!-- Multi-Item Review Modal -->
+<div id="multi-review-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.95);z-index:9999;overflow-y:auto;padding:16px;">
+  <div style="max-width:1100px;margin:0 auto;background:#0a0f18;border:1px solid #1a2332;border-radius:14px;padding:20px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+      <div>
+        <div style="font-size:18px;font-weight:700;">Review Detected Items</div>
+        <div style="font-size:16px;color:var(--muted);margin-top:2px;" id="multi-review-summary">—</div>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button class="btn" style="font-size:16px;padding:7px 12px;" onclick="multiSelectAll()">Select all</button>
+        <button class="btn" style="font-size:16px;padding:7px 12px;" onclick="multiDeselectAll()">Deselect</button>
+        <button class="btn" onclick="closeMultiReview()" style="font-size:16px;padding:7px 12px;">Cancel</button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 320px;gap:16px;">
+      <div style="position:relative;background:#000;border-radius:10px;overflow:hidden;align-self:start;">
+        <img id="multi-review-img" src="" style="display:block;width:100%;height:auto;"/>
+        <svg id="multi-review-svg" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" preserveAspectRatio="none"></svg>
+      </div>
+      <div style="background:var(--bg);border:1px solid #1a2332;border-radius:10px;padding:10px;max-height:60vh;overflow-y:auto;">
+        <div style="font-size:15px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Detected items</div>
+        <div id="multi-review-list"></div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:16px;flex-wrap:wrap;">
+      <div style="display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid #1a2332;border-radius:7px;padding:5px 10px;">
+        <span style="font-size:15px;color:var(--muted);font-weight:600;">Condition:</span>
+        <select id="multi-review-condition" class="acct-input" style="width:auto;padding:3px 8px;font-size:16px;">
+          <option value="used">Used</option>
+          <option value="new">New</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" id="multi-submit-btn" onclick="submitMultiScan()" style="margin-left:auto;font-size:15px;padding:9px 18px;">Scan <span id="multi-submit-count">0</span> Items</button>
+    </div>
+  </div>
+</div>
+
+<!-- EBAY REVIEW MODAL -->
+<div id="ebay-review-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:1000;overflow-y:auto;padding:20px;">
+  <div style="max-width:920px;margin:0 auto;background:#0d0f14;border-radius:14px;overflow:hidden;border:1px solid #0d1117;">
+    <div style="background:#090b0f;padding:16px 22px;border-bottom:1px solid #0d1117;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div style="width:32px;height:32px;background:#0064D2;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px;">eB</div>
+        <div>
+          <div style="font-size:17px;font-weight:800;color:#f1f5f9;">eBay Draft Review</div>
+          <div id="ebay-modal-subtitle" style="font-size:15px;color:#4a6080;margin-top:1px;">Loading items...</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:6px;background:#0f1420;border:1px solid #0d1117;padding:6px 12px;border-radius:8px;">
+          <span style="font-size:15px;color:#4a6080;">Duration</span>
+          <select id="ebay-bulk-duration" style="background:transparent;border:none;color:#f1f5f9;font-size:15px;font-family:inherit;outline:none;cursor:pointer;">
+            <option value="GTC">Good Till Cancelled</option>
+            <option value="DAYS_7">7 Days</option>
+            <option value="DAYS_30">30 Days</option>
+          </select>
+        </div>
+        <button onclick="closeEbayModal()" style="background:transparent;border:1px solid #0d1117;color:#4a6080;border-radius:8px;padding:8px 14px;font-size:16px;cursor:pointer;font-family:inherit;">Cancel</button>
+        <button onclick="submitEbayDrafts()" id="ebay-send-btn" style="background:#0064D2;border:none;color:#fff;border-radius:8px;padding:8px 16px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;">Send Drafts</button>
+      </div>
+    </div>
+    <div id="ebay-modal-items" style="max-height:70vh;overflow-y:auto;"></div>
+    <div style="padding:14px 22px;border-top:1px solid #0d1117;background:#090b0f;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+      <div style="font-size:16px;color:#4a6080;">Sent as drafts in eBay Seller Hub</div>
+      <button onclick="submitEbayDrafts()" style="background:#0064D2;border:none;color:#fff;border-radius:8px;padding:14px 24px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;">Send Drafts to eBay</button>
+    </div>
+  </div>
+</div>
+
+</body>
 </html>
