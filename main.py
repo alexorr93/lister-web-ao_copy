@@ -1139,7 +1139,7 @@ async def mark_sold_by_sku(request: Request):
         raise HTTPException(500, str(e))
 
 @app.get("/api/ebay/orders")
-async def get_ebay_orders(request: Request, limit: int = 20):
+async def get_ebay_orders(request: Request, limit: int = 20, period: str = "month"):
     """Fetch recent sold orders from eBay Orders API."""
     business_id = require_auth(request)
     if not business_id:
@@ -1160,7 +1160,14 @@ async def get_ebay_orders(request: Request, limit: int = 20):
             return {"ok": False, "error": r.text[:300], "status": r.status_code}
 
         data = r.json()
+        from datetime import datetime, timezone, timedelta
         orders = data.get("orders", [])
+        # Filter by period client-side after fetch
+        now = datetime.now(timezone.utc)
+        period_map = {"day": 1, "week": 7, "month": 30, "3month": 90, "12month": 365}
+        if period in period_map:
+            cutoff = now - timedelta(days=period_map[period])
+            orders = [o for o in orders if o.get("creationDate","") >= cutoff.strftime("%Y-%m-%dT%H:%M:%S.000Z")]
 
         # Simplify for frontend
         result = []

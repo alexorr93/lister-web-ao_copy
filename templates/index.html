@@ -6244,7 +6244,7 @@ async function loadSalesOrders() {
   var countEl = document.getElementById('sales-orders-count');
   if (!list) return;
   try {
-    var r = await fetch('/api/ebay/orders', {credentials:'include'});
+    var r = await fetch('/api/ebay/orders?period=' + salesPeriod, {credentials:'include'});
     var d = await r.json();
     var orders = d.orders || [];
     if (countEl) countEl.textContent = orders.length + ' order' + (orders.length===1?'':'s');
