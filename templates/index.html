@@ -86,7 +86,7 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
   transition: background 0.15s;
 }
 .sidebar-icon-btn:hover { background: #2d3348; }
-.main { padding: 20px 20px 80px; max-width: 1200px; margin: 0 auto; margin-left: 210px; }
+.main { padding: 20px 20px 80px; max-width: 1800px; margin: 0 auto; margin-left: 210px; }
 
 /* ── MOBILE TOP BAR ── */
 .mobile-topbar {
@@ -257,7 +257,7 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 .spacer { flex: 1; }
 
 /* TILE GRID */
-.tile-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+.tile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-bottom: 16px; }
 @media (max-width: 700px) { .tile-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; } }
 @media (max-width: 400px) { .tile-grid { grid-template-columns: 1fr; } }
 
