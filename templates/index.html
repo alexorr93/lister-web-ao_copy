@@ -5076,11 +5076,11 @@ async function loadScannerBatches() {
       return;
     }
     list.innerHTML = batches.map(function(b) {
-      return '<div class="saved-batch-row" onclick="loadBatch('' + b.id + '')" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#0a0f18;border:1px solid #1a2332;border-radius:8px;cursor:pointer;">'
+      return '<div class="saved-batch-row" onclick="loadBatch(&quot;' + b.id + '&quot;)" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#0a0f18;border:1px solid #1a2332;border-radius:8px;cursor:pointer;">'
         + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4a6080" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>'
         + '<span style="flex:1;font-size:13px;font-weight:600;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (b.name || 'Untitled batch') + '</span>'
         + '<span style="font-size:11px;color:#334155;">' + (b.item_count || 0) + ' items</span>'
-        + '<span class="sb-del" onclick="event.stopPropagation();deleteSavedBatch('' + b.id + '')" style="font-size:11px;color:#ef4444;padding:2px 8px;border-radius:4px;cursor:pointer;">✕</span>'
+        + '<span class="sb-del" onclick="event.stopPropagation();deleteSavedBatch(&quot;' + b.id + '&quot;)" style="font-size:11px;color:#ef4444;padding:2px 8px;border-radius:4px;cursor:pointer;">✕</span>'
         + '</div>';
     }).join('');
   } catch(e) {
