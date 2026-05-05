@@ -1203,7 +1203,7 @@ async def get_scheduled_listings(request: Request):
 
         # Pull from our DB - listings pushed to eBay
         db_res = supabase.table("listings").select(
-            "id,title,price,photo_url,photo_id,barcode_id,ebay_item_id,status,created_at"
+            "id,title,price,photo_id,barcode_id,ebay_item_id,status,created_at"
         ).eq("business_id", business_id).eq("status", "ebay_scheduled").execute()
 
         items = db_res.data or []
