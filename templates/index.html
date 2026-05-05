@@ -1710,21 +1710,10 @@ select.field-input { background: #fff; color: #0f172a; }
         </div>
       </div>
 
-      <!-- Currently listed on eBay -->
-      <div style="background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.06);border-radius:14px;overflow:hidden;margin-bottom:14px;">
-        <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,0.05);">
-          <span style="font-size:13px;font-weight:600;">Current scheduled listings</span>
-          <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:#4ade80;font-weight:600;">
-            <div style="width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 6px #22c55e;animation:sales-pulse 1.5s infinite;"></div>
-            Live
-          </span>
-        </div>
-        <div id="sales-listings-list" style="padding:0;">
-          <div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;">Loading listings...</div>
-        </div>
-      </div>
+      <!-- Two column grid: Sold orders first, then Scheduled -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
 
-      <!-- Sold orders -->
+      <!-- Sold orders (first/left) -->
       <div style="background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.06);border-radius:14px;overflow:hidden;">
         <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,0.05);">
           <span style="font-size:13px;font-weight:600;">Sold orders</span>
@@ -1742,6 +1731,20 @@ select.field-input { background: #fff; color: #0f172a; }
             <div style="font-size:14px;font-weight:600;color:#94a3b8;margin-bottom:4px;">No orders yet</div>
             <div>Click "Pull orders from eBay" to sync your sold items.</div>
           </div>
+        </div>
+      </div>
+
+      <!-- Currently listed on eBay (second/right) -->
+      <div style="background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.06);border-radius:14px;overflow:hidden;">
+        <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,0.05);">
+          <span style="font-size:13px;font-weight:600;">Scheduled listings</span>
+          <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:#4ade80;font-weight:600;">
+            <div style="width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 6px #22c55e;animation:sales-pulse 1.5s infinite;"></div>
+            Live
+          </span>
+        </div>
+        <div id="sales-listings-list" style="padding:0;">
+          <div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;">Loading listings...</div>
         </div>
       </div>
 
