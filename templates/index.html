@@ -2337,7 +2337,7 @@ function renderTiles() {
     ` : '';
 
     return `<div class="tile${isSel?' selected':''}${ebayDraft?' ebay-draft':''}" id="tile-${l.id}" data-photos='${JSON.stringify(photos)}' data-photo-idx="0" style="position:relative;">
-      <div class="tile-batch-num" style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,0.7);color:#fff;font-size:10px;font-weight:700;padding:3px 7px;border-radius:5px;z-index:6;font-family:'DM Mono',monospace;letter-spacing:0.05em;">#${(idx + 1)}</div>
+      <div class="tile-batch-num" style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,0.45);color:#64748b;font-size:10px;font-weight:500;padding:2px 6px;border-radius:4px;z-index:6;font-family:monospace;">#${(idx + 1)}</div>
       ${checkmark}
       <div class="tile-photo" onclick="openModal('${l.id}')">
         ${photoHtml}
@@ -2373,9 +2373,8 @@ function renderTiles() {
           <div class="qty-num" id="qty-${l.id}">${qty}</div>
           <button class="qty-btn plus" onclick="changeQty('${l.id}',1)">+</button>
         </div>
-        <button class="tile-rescan" onclick="rescanItem('${l.id}')">🔄</button>
-        <button class="tile-rescan" style="color:#f59e0b;border-color:#92400e;" onclick="reportBadScan('${l.id}')" title="Report bad scan">⚠️</button>
-        <button class="tile-rescan" style="color:var(--red);border-color:#991b1b;" onclick="deleteItem('${l.id}')">✕</button>
+        <button class="tile-rescan" onclick="rescanItem('${l.id}')" title="Rescan">↺ Rescan</button>
+        <button class="tile-rescan" style="color:#f59e0b;border-color:#92400e;" onclick="reportBadScan('${l.id}')" title="Report bad scan">⚠</button>
       </div>
     </div>`;
   }).join('');
