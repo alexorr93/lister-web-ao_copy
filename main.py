@@ -1201,47 +1201,28 @@ async def get_scheduled_listings(request: Request):
         api_base = "https://api.ebay.com" if EBAY_ENV != "sandbox" else "https://api.sandbox.ebay.com"
         headers = {"Authorization": f"Bearer {token}"}
 
-        # Pull offers from eBay (includes scheduled listings)
-        r = _req.get(f"{api_base}/sell/inventory/v1/offer?limit=100", headers=headers)
-        print(f"[eBay Listings] offers status={r.status_code}")
+        # Pull from our DB - listings pushed to eBay
+        db_res = supabase.table("listings").select(
+            "id,title,price,photo_url,photo_id,barcode_id,ebay_item_id,status,created_at"
+        ).eq("business_id", business_id).eq("status", "ebay_scheduled").execute()
 
-        if not r.ok:
-            return {"ok": False, "error": r.text[:300]}
-
-        offers = r.json().get("offers", [])
-        print(f"[eBay Listings] found {len(offers)} offers")
-
-        # Get all our DB listings with ebay_item_id set for enrichment
-        db_res = supabase.table("listings").select("photo_url,barcode_id,price,title,ebay_item_id,photo_id").eq("business_id", business_id).not_.is_("ebay_item_id", "null").execute()
-        db_by_listing_id = {str(i.get("ebay_item_id","")): i for i in (db_res.data or [])}
+        items = db_res.data or []
+        print(f"[eBay Listings] found {len(items)} scheduled listings in DB")
 
         results = []
-        for offer in offers:
-            sku = offer.get("sku", "")
-            status = offer.get("status", "")
-            listing_id = str(offer.get("listing", {}).get("listingId", ""))
-            price = offer.get("pricingSummary", {}).get("price", {}).get("value", 0)
-            title = offer.get("listing", {}).get("listingTitle", "") or sku
-
-            # Enrich from our DB
-            db_item = db_by_listing_id.get(listing_id, {})
-            photo_url = db_item.get("photo_url", "")
-            if not photo_url and db_item.get("photo_id"):
-                photo_url = f"https://febnocmzhgkikvxqaamr.supabase.co/storage/v1/object/public/part-photos/{db_item['photo_id']}"
-            if not title and db_item.get("title"):
-                title = db_item["title"]
-            if not price and db_item.get("price"):
-                price = db_item["price"]
-
+        for it in items:
+            photo_url = it.get("photo_url","")
+            if not photo_url and it.get("photo_id"):
+                photo_url = f"https://febnocmzhgkikvxqaamr.supabase.co/storage/v1/object/public/part-photos/{it['photo_id']}"
             results.append({
-                "sku": sku,
-                "title": title,
+                "sku": it.get("barcode_id",""),
+                "title": it.get("title",""),
                 "photo_url": photo_url,
-                "price": price,
-                "status": status,
-                "listing_id": listing_id,
-                "barcode_id": db_item.get("barcode_id", ""),
-                "ebay_item_id": listing_id,
+                "price": it.get("price",0),
+                "status": "Scheduled",
+                "listing_id": it.get("ebay_item_id",""),
+                "barcode_id": it.get("barcode_id",""),
+                "ebay_item_id": it.get("ebay_item_id",""),
             })
 
         return {"ok": True, "listings": results, "total": len(results)}
