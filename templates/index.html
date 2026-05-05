@@ -1747,10 +1747,10 @@ select.field-input { background: #fff; color: #0f172a; }
       <div style="background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.06);border-radius:14px;overflow:hidden;">
         <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,0.05);">
           <span style="font-size:13px;font-weight:600;">Scheduled listings</span>
-          <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:#4ade80;font-weight:600;">
-            <div style="width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 6px #22c55e;animation:sales-pulse 1.5s infinite;"></div>
-            Live
-          </span>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <a href="https://www.ebay.com/sh/lst/scheduled" target="_blank" style="font-size:11px;padding:5px 12px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:#4ade80;border-radius:6px;text-decoration:none;font-weight:600;">View on eBay ↗</a>
+            <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:#4ade80;font-weight:600;"><div style="width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 6px #22c55e;animation:sales-pulse 1.5s infinite;"></div>Live</span>
+          </div>
         </div>
         <div id="sales-listings-list" style="padding:0;">
           <div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;">Loading listings...</div>
@@ -6185,7 +6185,7 @@ function renderSalesListings() {
       + '<div style="text-align:right;flex-shrink:0;">'
       +   '<div style="font-size:13px;font-weight:700;color:#4ade80;">$' + parseFloat(it.price||0).toFixed(2) + '</div>'
       +   '<div style="font-size:10px;color:#3b82f6;font-weight:600;margin-top:2px;">Scheduled</div>'
-      +   '<a href="https://www.ebay.com/sh/lst/scheduled" target="_blank" style="display:inline-block;margin-top:5px;font-size:10px;color:#4ade80;text-decoration:none;border:1px solid rgba(34,197,94,0.3);border-radius:4px;padding:2px 7px;font-weight:600;">View on eBay ↗</a>'
+      +   ''
       + '</div>'
       + '</div>';
   }).join('');
