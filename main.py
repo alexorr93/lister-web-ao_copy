@@ -5205,13 +5205,18 @@ async def robo_chat(request: Request):
     try:
         body = await request.json()
         message = body.get("message", "")
-        import google.generativeai as genai
-        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-        model = genai.GenerativeModel("gemini-2.0-flash")
-        system = """You are Robo, an AI assistant built into RoboReseller — a reselling business management app. 
-You help users with: pricing items, writing eBay listings, identifying products, reselling strategies, 
-understanding their inventory, and using the app. Be concise, practical, and friendly. No markdown formatting."""
-        response = model.generate_content(system + "\n\nUser: " + message)
+        from google import genai as _genai
+        from google.genai import types as _gt
+        client = _genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        config = _gt.GenerateContentConfig(
+            system_instruction="You are Robo, an AI assistant built into RoboReseller — a reselling business management app. Help with pricing, eBay listings, product identification, reselling strategy, and using the app. Be concise and practical. No markdown.",
+            temperature=0.7
+        )
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=message,
+            config=config
+        )
         return {"ok": True, "reply": response.text}
     except Exception as e:
         raise HTTPException(500, str(e))
