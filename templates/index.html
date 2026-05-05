@@ -1823,7 +1823,7 @@ select.field-input { background: #fff; color: #0f172a; }
   <div class="modal" onclick="event.stopPropagation()">
     <div style="position:relative;z-index:5;">
       <img class="modal-img" id="modal-img" src="" alt="" style="pointer-events:none;"/>
-      <button onclick="event.stopPropagation();rotatePhoto('ccw')" title="Rotate left" style="position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,0.6);border:none;color:#fff;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;z-index:10;">↺</button><button onclick="event.stopPropagation();rotatePhoto('cw')" title="Rotate right" style="position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,0.6);border:none;color:#fff;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;z-index:10;">↻</button>
+      
     </div>
     <div class="modal-body">
       <div class="modal-title" id="modal-title"></div>
@@ -1850,10 +1850,13 @@ select.field-input { background: #fff; color: #0f172a; }
         </div>
       </div>
       <div>
+        <div class="field-label">Custom SKU <span style="font-size:10px;color:#334155;font-weight:400;">(maps to eBay Custom Label)</span></div>
+        <input type="text" class="field-input" id="modal-sku-input" placeholder="e.g. SHELF-A3-001" oninput="modalDirty=true" style="font-family:monospace;"/>
+      </div>
+      <div>
         <div class="field-label">eBay Description</div>
         <textarea class="field-input" id="modal-desc-input" rows="4" oninput="modalDirty=true" style="resize:vertical;font-size:16px;line-height:1.5;"></textarea>
       </div>
-      <button class="btn" onclick="pushToShopify()" id="modal-shopify-btn" style="background:#5a8e3b;color:#fff;border-color:#5a8e3b;width:100%;padding:11px;margin-top:8px;font-weight:700;">🛍️ Push to Shopify</button>
       <button class="modal-close" onclick="saveModal()">💾 Save & Close</button>
     </div>
   </div>
