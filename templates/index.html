@@ -3640,9 +3640,6 @@ function printBarcodes() {
 
   h += '</div><script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script>';
   h += '<script>setTimeout(function(){document.querySelectorAll(".qr-print").forEach(function(el){new QRCode(el,{text:el.dataset.code,width:' + qrSize + ',height:' + qrSize + ',correctLevel:QRCode.CorrectLevel.M});});setTimeout(function(){window.print();},500);},300);<\/script>';
-  h += '
-
-</body>
 
 <!-- ROBO CHAT OVERLAY -->
 <div id="robo-chat-overlay" style="display:none;position:fixed;bottom:90px;right:24px;z-index:9999;width:360px;max-width:calc(100vw - 32px);">
@@ -3713,42 +3710,4 @@ async function sendRoboMessage() {
   messages.scrollTop = messages.scrollHeight;
 }
 </script>
-
-<script>
-var currentMobileTab = 'home';
-
-function renderMobileTabBar() {
-  var bar = document.getElementById('mobile-tabbar-inner');
-  if (!bar) return;
-  var tabs = [
-    { tab: 'home', label: 'Home', svg: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12L12 3l9 9"/><path d="M5 10v10h14V10"/></svg>' },
-    { tab: 'dashboard', label: 'Scanner', svg: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>' },
-    { tab: 'robo', label: 'Robo', svg: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="6" width="14" height="12" rx="2"/><line x1="12" y1="2" x2="12" y2="5"/><circle cx="12" cy="2" r="1" fill="currentColor"/><circle cx="9" cy="11" r="1.5" fill="currentColor"/><circle cx="15" cy="11" r="1.5" fill="currentColor"/><line x1="3" y1="11" x2="5" y2="11"/><line x1="19" y1="11" x2="21" y2="11"/></svg>' },
-  ];
-  bar.innerHTML = '';
-  tabs.forEach(function(def) {
-    var isActive = currentMobileTab === def.tab && def.tab !== 'robo';
-    var color = isActive ? '#4ade80' : (def.tab === 'robo' ? '#4ade80' : '#64748b');
-    var btn = document.createElement('button');
-    btn.className = 'mobile-tab' + (isActive ? ' active' : '');
-    btn.style.cssText = 'flex:1 1 0;min-width:0;color:' + color + ';border-bottom:' + (isActive ? '2px solid ' + color : '2px solid transparent') + ';background:transparent;border-left:none;border-right:none;border-top:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:6px 4px;';
-    btn.onclick = function() { switchMobileTab(def.tab); };
-    btn.innerHTML = def.svg + '<span style="font-size:10px;font-weight:700;color:' + color + ';line-height:1;">' + def.label + '</span>';
-    bar.appendChild(btn);
-  });
-}
-
-function switchMobileTab(tabId) {
-  if (tabId === 'robo') { openRoboChat(); return; }
-  currentMobileTab = tabId;
-  var btn = document.querySelector('.nav-btn[data-tab="' + tabId + '"]');
-  if (btn) btn.click();
-  renderMobileTabBar();
-}
-
-document.addEventListener('DOMContentLoaded', function() {
-  renderMobileTabBar();
-});
-</script>
-
 </html>
