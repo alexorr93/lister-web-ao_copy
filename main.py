@@ -5205,9 +5205,12 @@ async def robo_chat(request: Request):
     try:
         body = await request.json()
         message = body.get("message", "")
+        gemini_key = os.getenv("GEMINI_API_KEY", "")
+        if not gemini_key:
+            return {"ok": False, "reply": "Gemini API key not configured."}
         from google import genai as _genai
         from google.genai import types as _gt
-        client = _genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        client = _genai.Client(api_key=gemini_key)
         config = _gt.GenerateContentConfig(
             system_instruction="You are Robo, an AI assistant built into RoboReseller — a reselling business management app. Help with pricing, eBay listings, product identification, reselling strategy, and using the app. Be concise and practical. No markdown.",
             temperature=0.7
@@ -5219,4 +5222,5 @@ async def robo_chat(request: Request):
         )
         return {"ok": True, "reply": response.text}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        print(f"[Robo chat error] {type(e).__name__}: {e}")
+        return {"ok": False, "reply": f"Error: {str(e)}"}
