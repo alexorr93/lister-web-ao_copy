@@ -88,11 +88,10 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 }
 @media (max-width: 768px) { .mobile-topbar { display: flex; } }
   /* HOME MOBILE - no scroll, fits screen */
-  #tab-home { overflow: hidden !important; }
+  #tab-home { overflow: auto !important; }
   #tab-home > div { 
     display: flex; flex-direction: column; 
-    height: calc(100dvh - 130px); 
-    overflow: hidden; gap: 8px !important;
+    gap: 8px !important;
     margin-bottom: 0 !important;
   }
   #home-main-grid { grid-template-columns: 1fr !important; flex: 1; min-height: 0; overflow: hidden; }
