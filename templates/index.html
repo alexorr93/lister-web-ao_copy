@@ -37,7 +37,7 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
   position: fixed; top: 0; left: 0; bottom: 0; z-index: 100; overflow-y: auto;
 }
 .sidebar-logo {
-  padding: 16px 16px 12px; font-size: 18px; font-weight: 800;
+  padding: 20px 16px 16px; font-size: 20px; font-weight: 800;
   letter-spacing: -0.02em; color: #f0fdf4; flex-shrink: 0;
 }
 .sidebar-nav { flex: 1; padding: 8px; display: flex; flex-direction: column; gap: 2px; }
@@ -78,7 +78,7 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
   transition: background 0.15s;
 }
 .sidebar-icon-btn:hover { background: #1a2332; }
-.main { padding: 28px 28px 80px; max-width: 1800px; margin: 0 auto; margin-left: 230px; }
+.main { padding: 32px 32px 80px; max-width: 1800px; margin: 0 auto; margin-left: 230px; }
 
 /* ── MOBILE TOP BAR ── */
 .mobile-topbar {
@@ -103,7 +103,7 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
   #home-stats-grid > div { padding: 10px 12px !important; }
   #home-stats-grid .stat-num { font-size: 22px !important; }
   #home-scan-meter { flex-shrink: 0; padding: 10px 12px !important; }
-  #home-quick-grid { flex: 1; min-height: 0; grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
+  #home-quick-grid { grid-template-columns: 1fr !important; gap: 10px !important; }
   #home-quick-grid > div { padding: 10px 12px !important; border-radius: 12px !important; }
   #home-quick-grid > div > div:first-child { width: 32px !important; height: 32px !important; margin-bottom: 6px !important; }
   #home-quick-grid > div > div:first-child svg { width: 16px !important; height: 16px !important; }
@@ -174,6 +174,7 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 
 @media (max-width: 768px) {
   #home-start-scan { flex-direction: column !important; align-items: flex-start !important; gap: 14px !important; padding: 18px !important; }
+  #home-bottom-tiles { grid-template-columns: 1fr !important; }
   .home-hero-btns { margin-left: 0 !important; flex-wrap: wrap !important; width: 100% !important; }
   .home-hero-btns > div { flex: 1 1 calc(50% - 5px) !important; justify-content: center !important; min-width: 120px !important; }
   .upload-grid { grid-template-columns: 1fr !important; }
@@ -385,7 +386,7 @@ select.field-input { background: #fff; color: #0f172a; }
   .main { margin-left: 0 !important; padding: 12px 12px 100px !important; }
 
   #home-main-grid { grid-template-columns: 1fr !important; }
-  #home-quick-grid { grid-template-columns: 1fr 1fr !important; }
+
 }
 </style>
 </head>
@@ -631,7 +632,7 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
 
       <!-- BOTTOM TILES -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1.8fr;gap:14px;align-items:start;">
+      <div id="home-bottom-tiles" style="display:grid;grid-template-columns:1fr 1fr 1.8fr;gap:14px;align-items:start;">
 
         <!-- EXPENSES TILE -->
         <div onclick="document.querySelector('.nav-btn[data-tab=expenses]').click()" style="background:#0a0f18;border:1px solid rgba(34,197,94,0.2);border-radius:14px;padding:20px;cursor:pointer;transition:all 0.15s;position:relative;overflow:hidden;" class="home-nav-tile">
