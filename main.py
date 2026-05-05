@@ -5216,7 +5216,7 @@ async def robo_chat(request: Request):
             temperature=0.7
         )
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.0-flash-001",
             contents=message,
             config=config
         )
