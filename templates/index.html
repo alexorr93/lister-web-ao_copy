@@ -3641,7 +3641,7 @@ function printBarcodes() {
   h += '</div><script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script>';
   h += '<script>setTimeout(function(){document.querySelectorAll(".qr-print").forEach(function(el){new QRCode(el,{text:el.dataset.code,width:' + qrSize + ',height:' + qrSize + ',correctLevel:QRCode.CorrectLevel.M});});setTimeout(function(){window.print();},500);},300);<\/script>';
 
-</body></html>';
+  h += '<\/body><\/html>';
   win.document.write(h);
   win.document.close();
 }
