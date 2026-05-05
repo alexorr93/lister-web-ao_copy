@@ -286,7 +286,7 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 .tile-cond-toggle { display:flex; margin-left:auto; border:1px solid #1a2332; border-radius:5px; overflow:hidden; }
 .tile-cond-btn { font-size:10px; padding:4px 8px; background:transparent; border:none; color:var(--muted); cursor:pointer; font-family:inherit; font-weight:600; }
 .tile-cond-btn.active { background:var(--accent); color:#fff; }
-.proc-bar-wrap { background:#0d1117; border:1px solid #1a2332; border-radius:10px; padding:10px 14px; margin-bottom:14px; }
+.proc-bar-wrap { background:#0d1117; border:1px solid #1a2332; border-radius:10px; padding:14px 18px; margin-bottom:14px; }
 .proc-bar-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:7px; font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:0.06em; }
 .proc-bar-track { height:5px; background:var(--border); border-radius:3px; overflow:hidden; margin-bottom:7px; }
 .proc-bar-fill { height:100%; background:#16a34a; border-radius:3px; transition:width 0.5s; }
@@ -391,7 +391,7 @@ select.field-input { background: #fff; color: #0f172a; }
 </head>
 <body>
 
-<div id="support-alert" style="display:none;position:fixed;top:14px;right:14px;z-index:9999;background:linear-gradient(90deg,#ef4444,#dc2626);color:#fff;padding:12px 16px;border-radius:10px;box-shadow:0 4px 20px rgba(239,68,68,0.4);align-items:center;gap:10px;cursor:pointer;font-size:13px;font-weight:600;" onclick="document.querySelector('[data-tab=\'messages\']').click();">
+<div id="support-alert" style="display:none;position:fixed;top:14px;right:14px;z-index:9999;background:linear-gradient(90deg,#ef4444,#dc2626);color:#fff;padding:12px 16px;border-radius:10px;box-shadow:0 4px 20px rgba(239,68,68,0.4);align-items:center;gap:10px;cursor:pointer;font-size:15px;font-weight:600;" onclick="document.querySelector('[data-tab=\'messages\']').click();">
   <span style="font-size:18px;">💬</span>
   <span>You have a new message from support</span>
 </div>
@@ -459,9 +459,9 @@ select.field-input { background: #fff; color: #0f172a; }
   <div class="sidebar-bottom">
     <div style="display:flex;align-items:center;gap:4px;flex:1;">
       <div class="status-dot" id="ebay-status-dot" style="background:#ef4444;" title="eBay not connected"></div>
-      <span style="font-size:10px;color:#4a6080;">eBay</span>
+      <span style="font-size:16px;color:#4a6080;">eBay</span>
       <div class="status-dot" id="shopify-status-dot" style="background:#ef4444;margin-left:6px;" title="Shopify not connected"></div>
-      <span style="font-size:10px;color:#4a6080;">Shopify</span>
+      <span style="font-size:16px;color:#4a6080;">Shopify</span>
     </div>
     <button class="sidebar-icon-btn" id="sidebar-mail-btn" onclick="document.querySelector('[data-tab=\'messages\']').click()" title="Messages" style="position:relative;">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
@@ -499,17 +499,17 @@ select.field-input { background: #fff; color: #0f172a; }
 <!-- MOBILE MORE SHEET -->
 <div class="mobile-more-sheet" id="mobile-more-sheet">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-    <span style="font-size:13px;font-weight:700;color:#f1f5f9;">More</span>
+    <span style="font-size:15px;font-weight:700;color:#f1f5f9;">More</span>
     <button onclick="closeMobileMore()" style="background:transparent;border:none;color:#4a6080;cursor:pointer;font-size:18px;line-height:1;">×</button>
   </div>
   <div class="mobile-more-grid" id="mobile-more-grid"><!-- rendered by JS --></div>
   <div style="border-top:1px solid #0d1117;padding-top:10px;display:flex;flex-direction:column;gap:6px;">
     <div style="display:flex;align-items:center;gap:8px;padding:8px;background:#0d1117;border-radius:8px;">
       <div class="status-dot" id="mobile-ebay-dot" style="background:#ef4444;"></div>
-      <span style="font-size:11px;color:#94a3b8;flex:1;">eBay</span>
+      <span style="font-size:15px;color:#94a3b8;flex:1;">eBay</span>
       <div class="status-dot" id="mobile-shopify-dot" style="background:#ef4444;"></div>
-      <span style="font-size:11px;color:#94a3b8;flex:1;">Shopify</span>
-      <div id="mobile-scans-badge" style="font-size:10px;color:#4a6080;margin-left:auto;"></div>
+      <span style="font-size:15px;color:#94a3b8;flex:1;">Shopify</span>
+      <div id="mobile-scans-badge" style="font-size:16px;color:#4a6080;margin-left:auto;"></div>
     </div>
     <button class="mobile-edit-tabs-btn" onclick="openTabReorder()">✦ Customize tab bar</button>
     <button class="mobile-edit-tabs-btn" onclick="window.location.href='/logout'" style="color:#ef4444;border-color:#7f1d1d;">Logout</button>
@@ -522,12 +522,12 @@ select.field-input { background: #fff; color: #0f172a; }
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
       <div>
         <div style="font-size:15px;font-weight:700;color:#f1f5f9;">Customize Tab Bar</div>
-        <div style="font-size:11px;color:#4a6080;margin-top:2px;">Select up to 4 tabs to show</div>
+        <div style="font-size:15px;color:#4a6080;margin-top:2px;">Select up to 4 tabs to show</div>
       </div>
       <button onclick="closeTabReorder()" style="background:transparent;border:none;color:#4a6080;cursor:pointer;font-size:18px;">×</button>
     </div>
     <div id="reorder-list" style="display:flex;flex-direction:column;gap:6px;"></div>
-    <button onclick="saveTabOrder()" style="width:100%;margin-top:14px;background:#e8ff47;color:#000;border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">Save</button>
+    <button onclick="saveTabOrder()" style="width:100%;margin-top:14px;background:#e8ff47;color:#000;border:none;padding:12px;border-radius:8px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;">Save</button>
   </div>
 </div>
 
@@ -546,17 +546,17 @@ select.field-input { background: #fff; color: #0f172a; }
           <div>
             <div style="display:flex;align-items:center;gap:7px;">
               <div class="status-dot" style="background:#22c55e;box-shadow:0 0 10px #22c55e;animation:home-pulse 1.5s infinite;"></div>
-              <span style="font-size:11px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;">Robot online</span>
+              <span style="font-size:15px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;">Robot online</span>
             </div>
             <div id="home-business-name" style="font-size:18px;font-weight:700;letter-spacing:-0.01em;margin-top:1px;">Loading...</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;">
-          <div id="home-ebay-status" style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:6px 12px;border-radius:7px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);color:#4ade80;">
+          <div id="home-ebay-status" style="display:flex;align-items:center;gap:6px;font-size:16px;font-weight:600;padding:6px 12px;border-radius:7px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);color:#4ade80;">
             <div class="status-dot" id="home-ebay-dot" style="background:#22c55e;box-shadow:0 0 8px #22c55e;"></div>
             <span id="home-ebay-label">eBay</span>
           </div>
-          <div id="home-shopify-status" style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:6px 12px;border-radius:7px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);color:#4ade80;">
+          <div id="home-shopify-status" style="display:flex;align-items:center;gap:6px;font-size:16px;font-weight:600;padding:6px 12px;border-radius:7px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);color:#4ade80;">
             <div class="status-dot" id="home-shopify-dot" style="background:#22c55e;box-shadow:0 0 8px #22c55e;"></div>
             <span id="home-shopify-label">Shopify</span>
           </div>
@@ -571,23 +571,23 @@ select.field-input { background: #fff; color: #0f172a; }
           <div style="position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,rgba(34,197,94,0.5),transparent);animation:home-scanline 3s linear infinite;"></div>
         </div>
         <div style="position:relative;z-index:2;">
-          <div style="font-size:11px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+          <div style="font-size:15px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
             <div class="status-dot" style="background:#22c55e;box-shadow:0 0 8px #22c55e;width:6px;height:6px;"></div>
             Robot ready
           </div>
-          <div style="font-size:26px;font-weight:700;letter-spacing:-0.02em;line-height:1.1;margin-bottom:6px;">Start scanning inventory</div>
-          <div style="font-size:13px;color:#94a3b8;">Snap a photo — robot identifies, prices, and lists for you.</div>
+          <div style="font-size:32px;font-weight:700;letter-spacing:-0.02em;line-height:1.1;margin-bottom:6px;">Start scanning inventory</div>
+          <div style="font-size:15px;color:#94a3b8;">Snap a photo — robot identifies, prices, and lists for you.</div>
         </div>
         <div class="home-hero-btns" style="display:flex;gap:10px;position:relative;z-index:2;flex-shrink:0;margin-left:0;flex-wrap:wrap;width:100%;">
-          <div style="padding:11px 20px;border-radius:9px;font-size:13px;font-weight:600;background:linear-gradient(135deg,#22c55e,#16a34a);color:white;border:none;box-shadow:0 4px 18px rgba(34,197,94,0.4);display:flex;align-items:center;gap:7px;">
+          <div style="padding:11px 20px;border-radius:9px;font-size:15px;font-weight:600;background:linear-gradient(135deg,#22c55e,#16a34a);color:white;border:none;box-shadow:0 4px 18px rgba(34,197,94,0.4);display:flex;align-items:center;gap:7px;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
             Fast Scan
           </div>
-          <div style="padding:11px 20px;border-radius:9px;font-size:13px;font-weight:600;background:rgba(255,255,255,0.06);color:#94a3b8;border:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;gap:7px;">
+          <div style="padding:11px 20px;border-radius:9px;font-size:15px;font-weight:600;background:rgba(255,255,255,0.06);color:#94a3b8;border:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;gap:7px;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
             Bulk Upload
           </div>
-          <div style="padding:11px 20px;border-radius:9px;font-size:13px;font-weight:600;background:rgba(255,255,255,0.06);color:#94a3b8;border:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;gap:7px;">
+          <div style="padding:11px 20px;border-radius:9px;font-size:15px;font-weight:600;background:rgba(255,255,255,0.06);color:#94a3b8;border:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;gap:7px;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
             Multi-Item
           </div>
@@ -598,9 +598,9 @@ select.field-input { background: #fff; color: #0f172a; }
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
         <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:20px 24px;display:flex;justify-content:space-between;align-items:center;">
           <div>
-            <div style="font-size:10px;color:#4a6080;text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:6px;">Items in inventory</div>
+            <div style="font-size:16px;color:#4a6080;text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:6px;">Items in inventory</div>
             <div id="home-total-items" style="font-size:36px;font-weight:700;line-height:1;letter-spacing:-0.02em;color:#4ade80;">0</div>
-            <div id="home-inv-count-label" style="font-size:12px;color:#4a6080;margin-top:6px;">in stock</div>
+            <div id="home-inv-count-label" style="font-size:16px;color:#4a6080;margin-top:6px;">in stock</div>
           </div>
           <div style="width:44px;height:44px;border-radius:11px;background:rgba(34,197,94,0.1);color:#4ade80;display:flex;align-items:center;justify-content:center;">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
@@ -608,9 +608,9 @@ select.field-input { background: #fff; color: #0f172a; }
         </div>
         <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:20px 24px;display:flex;justify-content:space-between;align-items:center;">
           <div>
-            <div style="font-size:10px;color:#4a6080;text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:6px;">Scans remaining</div>
+            <div style="font-size:16px;color:#4a6080;text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:6px;">Scans remaining</div>
             <div id="home-scans-left" style="font-size:36px;font-weight:700;line-height:1;letter-spacing:-0.02em;color:#22d3ee;">0</div>
-            <div style="font-size:12px;color:#4a6080;margin-top:6px;">this period</div>
+            <div style="font-size:16px;color:#4a6080;margin-top:6px;">this period</div>
           </div>
           <div style="width:44px;height:44px;border-radius:11px;background:rgba(6,182,212,0.1);color:#22d3ee;display:flex;align-items:center;justify-content:center;">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
@@ -619,15 +619,15 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
 
       <!-- SCAN PROGRESS -->
-      <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:18px 24px;margin-bottom:14px;">
+      <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:22px 24px;margin-bottom:14px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-          <span style="font-size:11px;color:#4a6080;text-transform:uppercase;letter-spacing:0.1em;font-weight:700;">AI scan usage this period</span>
-          <span id="home-scan-pct" style="font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;">0/500</span>
+          <span style="font-size:15px;color:#4a6080;text-transform:uppercase;letter-spacing:0.1em;font-weight:700;">AI scan usage this period</span>
+          <span id="home-scan-pct" style="font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;">0/500</span>
         </div>
         <div style="height:8px;background:rgba(255,255,255,0.05);border-radius:4px;overflow:hidden;">
           <div id="home-scan-bar" style="height:100%;background:linear-gradient(90deg,#22c55e,#06b6d4);border-radius:4px;width:0%;transition:width 0.5s;"></div>
         </div>
-        <div id="home-scan-remaining" style="font-size:11px;color:#4a6080;margin-top:6px;">0 scans remaining</div>
+        <div id="home-scan-remaining" style="font-size:15px;color:#4a6080;margin-top:6px;">0 scans remaining</div>
       </div>
 
       <!-- BOTTOM TILES -->
@@ -640,11 +640,11 @@ select.field-input { background: #fff; color: #0f172a; }
             <div style="width:38px;height:38px;border-radius:10px;background:rgba(34,197,94,0.12);color:#4ade80;display:flex;align-items:center;justify-content:center;">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
             </div>
-            <span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:6px;background:rgba(34,197,94,0.12);color:#4ade80;">This month</span>
+            <span style="font-size:16px;font-weight:700;padding:3px 8px;border-radius:6px;background:rgba(34,197,94,0.12);color:#4ade80;">This month</span>
           </div>
           <div id="home-exp-tile-stat" style="font-size:30px;font-weight:700;line-height:1;letter-spacing:-0.02em;color:#4ade80;margin-bottom:4px;">$0</div>
-          <div style="font-size:12px;font-weight:600;margin-bottom:2px;">Expenses</div>
-          <div id="home-exp-tile-label" style="font-size:11px;color:#4a6080;margin-bottom:12px;">0 transactions</div>
+          <div style="font-size:16px;font-weight:600;margin-bottom:2px;">Expenses</div>
+          <div id="home-exp-tile-label" style="font-size:15px;color:#4a6080;margin-bottom:12px;">0 transactions</div>
           <div id="home-exp-tile-txns" style="display:flex;flex-direction:column;gap:0;"></div>
         </div>
 
@@ -655,11 +655,11 @@ select.field-input { background: #fff; color: #0f172a; }
             <div style="width:38px;height:38px;border-radius:10px;background:rgba(168,85,247,0.12);color:#c084fc;display:flex;align-items:center;justify-content:center;">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
             </div>
-            <span id="home-msg-badge" style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:6px;background:rgba(34,197,94,0.12);color:#4ade80;">All caught up</span>
+            <span id="home-msg-badge" style="font-size:16px;font-weight:700;padding:3px 8px;border-radius:6px;background:rgba(34,197,94,0.12);color:#4ade80;">All caught up</span>
           </div>
           <div style="font-size:15px;font-weight:600;margin-bottom:6px;">Messages</div>
-          <div id="home-msg-label" style="font-size:11px;color:#4a6080;margin-bottom:16px;">Support chat</div>
-          <div style="padding:12px;background:rgba(168,85,247,0.06);border:1px solid rgba(168,85,247,0.15);border-radius:10px;font-size:11px;color:#94a3b8;line-height:1.6;">
+          <div id="home-msg-label" style="font-size:15px;color:#4a6080;margin-bottom:16px;">Support chat</div>
+          <div style="padding:12px;background:rgba(168,85,247,0.06);border:1px solid rgba(168,85,247,0.15);border-radius:10px;font-size:15px;color:#94a3b8;line-height:1.6;">
             &#x1f4ac; Have a question or need help?<br/>We typically reply within a few hours.
           </div>
         </div>
@@ -672,17 +672,17 @@ select.field-input { background: #fff; color: #0f172a; }
               <div style="width:38px;height:38px;border-radius:10px;background:rgba(251,191,36,0.12);color:#fbbf24;display:flex;align-items:center;justify-content:center;">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
               </div>
-              <span style="font-size:13px;font-weight:600;">Recent batches</span>
+              <span style="font-size:15px;font-weight:600;">Recent batches</span>
             </div>
-            <span style="display:flex;align-items:center;gap:5px;font-size:10px;color:#4ade80;font-weight:600;">
+            <span style="display:flex;align-items:center;gap:5px;font-size:16px;color:#4ade80;font-weight:600;">
               <div style="width:5px;height:5px;background:#22c55e;box-shadow:0 0 6px #22c55e;border-radius:50%;display:inline-block;animation:home-pulse 1.5s infinite;"></div>
               Live
             </span>
           </div>
           <div id="home-batches-list" style="display:flex;flex-direction:column;gap:6px;">
-            <div style="font-size:12px;color:var(--muted);text-align:center;padding:16px;">Loading...</div>
+            <div style="font-size:16px;color:var(--muted);text-align:center;padding:16px;">Loading...</div>
           </div>
-          <button onclick="document.querySelector('.nav-btn[data-tab=dashboard]').click()" style="width:100%;margin-top:10px;background:transparent;border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#4a6080;font-size:11px;padding:8px;cursor:pointer;font-family:inherit;">Open scanner &rarr;</button>
+          <button onclick="document.querySelector('.nav-btn[data-tab=dashboard]').click()" style="width:100%;margin-top:10px;background:transparent;border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#4a6080;font-size:15px;padding:8px;cursor:pointer;font-family:inherit;">Open scanner &rarr;</button>
         </div>
 
       </div>
@@ -703,7 +703,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
         <div>
           <div style="font-size:20px;font-weight:800;color:var(--text);">Scanner</div>
-          <div style="font-size:12px;color:var(--muted);margin-top:2px;">Choose a mode then add photos</div>
+          <div style="font-size:16px;color:var(--muted);margin-top:2px;">Choose a mode then add photos</div>
         </div>
       </div>
 
@@ -713,23 +713,23 @@ select.field-input { background: #fff; color: #0f172a; }
           <div style="width:36px;height:36px;background:rgba(251,191,36,0.15);border-radius:9px;display:flex;align-items:center;justify-content:center;margin-bottom:8px;">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
           </div>
-          <div style="font-size:13px;font-weight:800;color:#fbbf24;margin-bottom:3px;">Fast Scan</div>
-          <div style="font-size:11px;color:#4a6080;line-height:1.4;">One photo per item</div>
+          <div style="font-size:15px;font-weight:800;color:#fbbf24;margin-bottom:3px;">Fast Scan</div>
+          <div style="font-size:15px;color:#4a6080;line-height:1.4;">One photo per item</div>
           <div class="mode-active-dot" style="position:absolute;top:10px;right:10px;width:8px;height:8px;border-radius:50%;background:#fbbf24;"></div>
         </button>
         <button id="scanner-mode-bulk" onclick="setScannerMode('bulk')" style="border:1px solid #1a2332;border-radius:12px;padding:14px;cursor:pointer;background:#0a0f18;text-align:left;font-family:inherit;">
           <div style="width:36px;height:36px;background:rgba(56,189,248,0.12);border-radius:9px;display:flex;align-items:center;justify-content:center;margin-bottom:8px;">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           </div>
-          <div style="font-size:13px;font-weight:800;color:#38bdf8;margin-bottom:3px;">Bulk Upload</div>
-          <div style="font-size:11px;color:#4a6080;line-height:1.4;">Multiple photos per item</div>
+          <div style="font-size:15px;font-weight:800;color:#38bdf8;margin-bottom:3px;">Bulk Upload</div>
+          <div style="font-size:15px;color:#4a6080;line-height:1.4;">Multiple photos per item</div>
         </button>
         <button id="scanner-mode-multi" onclick="setScannerMode('multi')" style="border:1px solid #1a2332;border-radius:12px;padding:14px;cursor:pointer;background:#0a0f18;text-align:left;font-family:inherit;position:relative;">
           <div style="width:36px;height:36px;background:rgba(167,139,250,0.12);border-radius:9px;display:flex;align-items:center;justify-content:center;margin-bottom:8px;">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
           </div>
-          <div style="font-size:13px;font-weight:800;color:#a78bfa;margin-bottom:3px;">Multi-Item</div>
-          <div style="font-size:11px;color:#4a6080;line-height:1.4;">AI detects many items</div>
+          <div style="font-size:15px;font-weight:800;color:#a78bfa;margin-bottom:3px;">Multi-Item</div>
+          <div style="font-size:15px;color:#4a6080;line-height:1.4;">AI detects many items</div>
           <div style="position:absolute;top:10px;right:10px;font-size:8px;font-weight:800;background:linear-gradient(90deg,#7c3aed,#ec4899);color:#fff;padding:2px 5px;border-radius:4px;">G+</div>
         </button>
       </div>
@@ -740,14 +740,14 @@ select.field-input { background: #fff; color: #0f172a; }
         <div id="scanner-fast-upload" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
           <label for="fast-camera-input" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border:none;border-radius:12px;padding:24px 10px;cursor:pointer;background:#fbbf24;text-align:center;">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-            <span style="font-size:14px;font-weight:800;color:#000;">Take Photo</span>
-            <span style="font-size:10px;color:rgba(0,0,0,0.6);">Opens camera</span>
+            <span style="font-size:16px;font-weight:800;color:#000;">Take Photo</span>
+            <span style="font-size:16px;color:rgba(0,0,0,0.6);">Opens camera</span>
           </label>
           <input type="file" id="fast-camera-input" accept="image/*" capture="environment" multiple style="display:none;" onchange="handleScannerUpload(this)">
           <label for="fast-gallery-input" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border:1.5px dashed var(--border);border-radius:12px;padding:24px 10px;cursor:pointer;background:#0a0f18;text-align:center;">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-            <span style="font-size:13px;font-weight:700;color:var(--text);">Gallery</span>
-            <span style="font-size:10px;color:var(--muted);">Choose photos</span>
+            <span style="font-size:15px;font-weight:700;color:var(--text);">Gallery</span>
+            <span style="font-size:16px;color:var(--muted);">Choose photos</span>
           </label>
           <input type="file" id="fast-gallery-input" accept="image/*" multiple style="display:none;" onchange="handleScannerUpload(this)">
         </div>
@@ -757,7 +757,7 @@ select.field-input { background: #fff; color: #0f172a; }
             ondragover="event.preventDefault();this.style.borderColor='#38bdf8'" ondragleave="this.style.borderColor='var(--border)'" ondrop="event.preventDefault();this.style.borderColor='var(--border)';handleScannerUpload({files:event.dataTransfer.files})">
             <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
             <div style="font-size:15px;font-weight:700;color:var(--text);">Drop photos here or tap to upload</div>
-            <div style="font-size:11px;color:var(--muted);">JPG/PNG · multiple files supported</div>
+            <div style="font-size:15px;color:var(--muted);">JPG/PNG · multiple files supported</div>
           </label>
           <input type="file" id="bulk-scanner-input" accept="image/*" multiple style="display:none;" onchange="handleScannerUpload(this)">
         </div>
@@ -766,7 +766,7 @@ select.field-input { background: #fff; color: #0f172a; }
           <label for="multi-scanner-input" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border:2px dashed rgba(167,139,250,0.4);border-radius:12px;padding:40px 20px;cursor:pointer;background:rgba(167,139,250,0.05);text-align:center;">
             <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
             <div style="font-size:15px;font-weight:700;color:var(--text);">Upload a photo with multiple items</div>
-            <div style="font-size:11px;color:var(--muted);">AI will detect and separate each item</div>
+            <div style="font-size:15px;color:var(--muted);">AI will detect and separate each item</div>
           </label>
           <input type="file" id="multi-scanner-input" accept="image/*" style="display:none;" onchange="handleMultiScannerUpload(this)">
         </div>
@@ -786,7 +786,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <div class="proc-pills">
         <span class="proc-pill proc-pill-done" id="proc-pill-done">0 complete</span>
         <span class="proc-pill proc-pill-scan" id="proc-pill-scan">0 scanning</span>
-        <button onclick="fetch('/api/reset-queue',{method:'POST'}).then(()=>location.reload())" style="margin-left:8px;font-size:10px;padding:3px 8px;background:#0a0f18;border:1px solid #1a2332;border-radius:6px;color:#4a6080;cursor:pointer;" title="Clear stuck queue">↺ Reset</button>
+        <button onclick="fetch('/api/reset-queue',{method:'POST'}).then(()=>location.reload())" style="margin-left:8px;font-size:16px;padding:3px 8px;background:#0a0f18;border:1px solid #1a2332;border-radius:6px;color:#4a6080;cursor:pointer;" title="Clear stuck queue">↺ Reset</button>
       </div>
     </div>
 
@@ -794,10 +794,10 @@ select.field-input { background: #fff; color: #0f172a; }
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap;">
       <div style="display:flex;align-items:baseline;gap:10px;">
         <div style="font-size:15px;font-weight:700;color:var(--text);">Current Batch</div>
-        <div style="font-size:12px;color:var(--muted);" id="batch-summary">—</div>
+        <div style="font-size:16px;color:var(--muted);" id="batch-summary">—</div>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-        <select id="dash-sort" onchange="changeDashSort()" style="background:#0a0f18;border:1px solid #1a2332;border-radius:6px;color:var(--muted);font-size:11px;padding:5px 8px;cursor:pointer;font-family:inherit;outline:none;">
+        <select id="dash-sort" onchange="changeDashSort()" style="background:#0a0f18;border:1px solid #1a2332;border-radius:6px;color:var(--muted);font-size:15px;padding:5px 8px;cursor:pointer;font-family:inherit;outline:none;">
           <option value="batch_desc">Newest first</option>
           <option value="batch_asc">Oldest first</option>
           <option value="price_desc">Price h→l</option>
@@ -805,28 +805,28 @@ select.field-input { background: #fff; color: #0f172a; }
           <option value="profit_desc">Profit h→l</option>
           <option value="profit_asc">Profit l→h</option>
         </select>
-        <button class="btn" style="font-size:11px;padding:5px 10px;" onclick="selectAll()">Select all</button>
-        <button class="btn" style="font-size:11px;padding:5px 10px;" onclick="deselectAll()">Deselect</button>
-        <button class="btn" style="font-size:11px;padding:5px 10px;" onclick="openLotCostModal()" id="lot-cost-btn">Lot Cost</button>
-        <button class="btn" style="font-size:11px;padding:5px 10px;background:#1a3a1a;border-color:#2d5a2d;color:#86efac;font-weight:700;" onclick="openSaveBatchModal()">Save Batch</button>
+        <button class="btn" style="font-size:15px;padding:5px 10px;" onclick="selectAll()">Select all</button>
+        <button class="btn" style="font-size:15px;padding:5px 10px;" onclick="deselectAll()">Deselect</button>
+        <button class="btn" style="font-size:15px;padding:5px 10px;" onclick="openLotCostModal()" id="lot-cost-btn">Lot Cost</button>
+        <button class="btn" style="font-size:15px;padding:5px 10px;background:#1a3a1a;border-color:#2d5a2d;color:#86efac;font-weight:700;" onclick="openSaveBatchModal()">Save Batch</button>
         <div style="position:relative;" id="submit-dropdown-wrap">
-          <button class="btn btn-primary" id="submit-batch-btn" style="font-size:12px;padding:7px 14px;display:none;" onclick="toggleSubmitDropdown()">Submit (<span id="submit-count">0</span>) ▾</button>
+          <button class="btn btn-primary" id="submit-batch-btn" style="font-size:16px;padding:7px 14px;display:none;" onclick="toggleSubmitDropdown()">Submit (<span id="submit-count">0</span>) ▾</button>
           <div id="submit-dropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:4px;background:#0a0f18;border:1px solid #1a2332;border-radius:8px;padding:4px;min-width:180px;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,0.4);">
-            <button onclick="openEbayModal();closeSubmitDropdown();" style="display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;color:var(--text);font-size:12px;padding:8px 10px;cursor:pointer;font-family:inherit;text-align:left;border-radius:6px;">
+            <button onclick="openEbayModal();closeSubmitDropdown();" style="display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;color:var(--text);font-size:16px;padding:8px 10px;cursor:pointer;font-family:inherit;text-align:left;border-radius:6px;">
               <span style="display:inline-block;width:7px;height:7px;background:#2563eb;border-radius:50%;"></span>
               Submit to eBay
             </button>
-            <button onclick="submitToShopify();closeSubmitDropdown();" style="display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;color:var(--text);font-size:12px;padding:8px 10px;cursor:pointer;font-family:inherit;text-align:left;border-radius:6px;">
+            <button onclick="submitToShopify();closeSubmitDropdown();" style="display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;color:var(--text);font-size:16px;padding:8px 10px;cursor:pointer;font-family:inherit;text-align:left;border-radius:6px;">
               <span style="display:inline-block;width:7px;height:7px;background:#5a8e3b;border-radius:50%;"></span>
               Push to Shopify
             </button>
-            <button onclick="window.location.href='/api/export/ebay-csv';closeSubmitDropdown();" style="display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;color:var(--text);font-size:12px;padding:8px 10px;cursor:pointer;font-family:inherit;text-align:left;border-radius:6px;">
+            <button onclick="window.location.href='/api/export/ebay-csv';closeSubmitDropdown();" style="display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;color:var(--text);font-size:16px;padding:8px 10px;cursor:pointer;font-family:inherit;text-align:left;border-radius:6px;">
               <span style="display:inline-block;width:7px;height:7px;background:#06b6d4;border-radius:50%;"></span>
               Export eBay CSV
             </button>
           </div>
         </div>
-        <button class="btn btn-danger" style="font-size:11px;padding:5px 10px;" onclick="confirmClearBatch()">Clear</button>
+        <button class="btn btn-danger" style="font-size:15px;padding:5px 10px;" onclick="confirmClearBatch()">Clear</button>
       </div>
     </div>
 
@@ -843,28 +843,28 @@ select.field-input { background: #fff; color: #0f172a; }
     <div id="upload-start" style="display:flex;align-items:center;justify-content:center;min-height:400px;padding:20px;">
       <div style="width:100%;max-width:380px;">
         <div style="font-size:20px;font-weight:800;color:var(--text);margin-bottom:4px;">New Batch</div>
-        <div style="font-size:13px;color:var(--muted);margin-bottom:24px;">Set up your batch before scanning</div>
+        <div style="font-size:15px;color:var(--muted);margin-bottom:24px;">Set up your batch before scanning</div>
 
         <div style="display:flex;flex-direction:column;gap:14px;margin-bottom:24px;">
           <div>
-            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:6px;">Batch name <span style="color:#374151;text-transform:none;letter-spacing:0;font-weight:400;font-size:11px;">optional</span></div>
-            <input id="up-batch-title" type="text" placeholder="e.g. Estate sale, Garage haul..." style="width:100%;background:#0a0f18;border:1px solid #1a2332;border-radius:10px;padding:12px 14px;color:var(--text);font-size:13px;font-family:inherit;outline:none;box-sizing:border-box;" />
+            <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:6px;">Batch name <span style="color:#374151;text-transform:none;letter-spacing:0;font-weight:400;font-size:15px;">optional</span></div>
+            <input id="up-batch-title" type="text" placeholder="e.g. Estate sale, Garage haul..." style="width:100%;background:#0a0f18;border:1px solid #1a2332;border-radius:10px;padding:12px 14px;color:var(--text);font-size:15px;font-family:inherit;outline:none;box-sizing:border-box;" />
           </div>
 
           <div>
-            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:6px;">Lot price <span style="color:#374151;text-transform:none;letter-spacing:0;font-weight:400;font-size:11px;">optional</span></div>
+            <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:6px;">Lot price <span style="color:#374151;text-transform:none;letter-spacing:0;font-weight:400;font-size:15px;">optional</span></div>
             <div style="display:flex;align-items:center;background:#0a0f18;border:1px solid #1a2332;border-radius:10px;overflow:hidden;">
-              <div style="padding:12px 14px;font-size:14px;font-weight:700;color:var(--muted);border-right:1px solid var(--border);">$</div>
-              <input id="up-lot-price" type="number" min="0" step="0.01" placeholder="0.00" style="flex:1;background:transparent;border:none;padding:12px 14px;color:var(--text);font-size:13px;font-family:inherit;outline:none;" />
+              <div style="padding:12px 14px;font-size:16px;font-weight:700;color:var(--muted);border-right:1px solid var(--border);">$</div>
+              <input id="up-lot-price" type="number" min="0" step="0.01" placeholder="0.00" style="flex:1;background:transparent;border:none;padding:12px 14px;color:var(--text);font-size:15px;font-family:inherit;outline:none;" />
             </div>
-            <div style="font-size:11px;color:#ef4444;margin-top:5px;font-weight:600;">Cost per item = lot ÷ items scanned</div>
+            <div style="font-size:15px;color:#ef4444;margin-top:5px;font-weight:600;">Cost per item = lot ÷ items scanned</div>
           </div>
 
           <div>
-            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:8px;">Default condition</div>
+            <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:8px;">Default condition</div>
             <div style="display:flex;gap:8px;">
-              <button class="btn btn-primary" id="up-cond-new" onclick="setUpCondition('new')" style="flex:1;padding:12px;border-radius:10px;font-size:13px;font-weight:800;">New</button>
-              <button class="btn" id="up-cond-used" onclick="setUpCondition('used')" style="flex:1;padding:12px;border-radius:10px;font-size:13px;font-weight:700;">Used</button>
+              <button class="btn btn-primary" id="up-cond-new" onclick="setUpCondition('new')" style="flex:1;padding:12px;border-radius:10px;font-size:15px;font-weight:800;">New</button>
+              <button class="btn" id="up-cond-used" onclick="setUpCondition('used')" style="flex:1;padding:12px;border-radius:10px;font-size:15px;font-weight:700;">Used</button>
             </div>
           </div>
         </div>
@@ -881,14 +881,14 @@ select.field-input { background: #fff; color: #0f172a; }
       <!-- Batch header bar -->
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border);">
         <div>
-          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;">Bulk Upload Session</div>
+          <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;">Bulk Upload Session</div>
           <div id="up-batch-title-display" style="font-size:18px;font-weight:800;color:var(--text);margin-top:2px;">Untitled batch</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
-          <div id="up-lot-indicator" style="display:none;background:#0a0f18;border:1px solid #1a2332;padding:6px 12px;border-radius:8px;font-size:12px;color:var(--muted);">
+          <div id="up-lot-indicator" style="display:none;background:#0a0f18;border:1px solid #1a2332;padding:6px 12px;border-radius:8px;font-size:16px;color:var(--muted);">
             Lot: $<span id="up-lot-display">0</span>
           </div>
-          <button onclick="endUploadBatch()" style="background:transparent;border:1px solid #1a2332;color:var(--muted);border-radius:8px;padding:8px 16px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">End batch</button>
+          <button onclick="endUploadBatch()" style="background:transparent;border:1px solid #1a2332;color:var(--muted);border-radius:8px;padding:8px 16px;font-size:16px;font-weight:600;cursor:pointer;font-family:inherit;">End batch</button>
         </div>
       </div>
 
@@ -899,7 +899,7 @@ select.field-input { background: #fff; color: #0f172a; }
         <div>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
             <div style="font-size:15px;font-weight:700;color:var(--text);" id="up-item-label">Item 1</div>
-            <div style="font-size:11px;color:var(--muted);">Add photos of this item</div>
+            <div style="font-size:15px;color:var(--muted);">Add photos of this item</div>
           </div>
 
           <div id="upload-thumbs" class="photo-thumbs" style="margin-bottom:14px;min-height:60px;"></div>
@@ -907,26 +907,26 @@ select.field-input { background: #fff; color: #0f172a; }
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
             <button onclick="document.getElementById('upload-camera-input').click()" style="display:flex;flex-direction:column;align-items:center;gap:8px;background:#0a0f18;border:1.5px dashed #38bdf8;border-radius:12px;padding:22px 10px;cursor:pointer;font-family:inherit;">
               <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-              <span style="font-size:13px;font-weight:700;color:#38bdf8;">Take Photo</span>
+              <span style="font-size:15px;font-weight:700;color:#38bdf8;">Take Photo</span>
             </button>
             <button onclick="document.getElementById('upload-file-input').click()" style="display:flex;flex-direction:column;align-items:center;gap:8px;background:#0a0f18;border:1.5px dashed var(--border);border-radius:12px;padding:22px 10px;cursor:pointer;font-family:inherit;">
               <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-              <span style="font-size:13px;font-weight:700;color:var(--text);">Gallery</span>
+              <span style="font-size:15px;font-weight:700;color:var(--text);">Gallery</span>
             </button>
           </div>
 
           <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:16px;margin-bottom:16px;">
-            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:12px;">Quantity of this item</div>
+            <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:12px;">Quantity of this item</div>
             <div style="display:flex;align-items:center;gap:12px;">
-              <button onclick="upQty(-1)" style="width:44px;height:44px;border-radius:10px;background:#0d1117;border:1px solid #1a2332;color:#ef4444;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit;">−</button>
-              <div id="up-qty-display" style="flex:1;text-align:center;font-size:28px;font-weight:800;color:var(--text);">1</div>
-              <button onclick="upQty(1)" style="width:44px;height:44px;border-radius:10px;background:#0d1117;border:1px solid #1a2332;color:#22c55e;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit;">+</button>
+              <button onclick="upQty(-1)" style="width:44px;height:44px;border-radius:10px;background:#0d1117;border:1px solid #1a2332;color:#ef4444;font-size:32px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit;">−</button>
+              <div id="up-qty-display" style="flex:1;text-align:center;font-size:34px;font-weight:800;color:var(--text);">1</div>
+              <button onclick="upQty(1)" style="width:44px;height:44px;border-radius:10px;background:#0d1117;border:1px solid #1a2332;color:#22c55e;font-size:32px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit;">+</button>
             </div>
           </div>
 
           <div id="up-progress" style="display:none;margin-bottom:12px;">
             <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;"><div id="up-progress-bar" style="height:100%;background:#0891b2;width:0%;transition:width 0.3s;"></div></div>
-            <div id="up-progress-text" style="font-size:12px;color:var(--muted);margin-top:6px;text-align:center;"></div>
+            <div id="up-progress-text" style="font-size:16px;color:var(--muted);margin-top:6px;text-align:center;"></div>
           </div>
 
           <button id="up-done-btn" onclick="submitUploadItem()" style="width:100%;background:#0891b2;border:none;border-radius:10px;color:#fff;font-size:15px;font-weight:700;padding:15px;cursor:pointer;font-family:inherit;">
@@ -936,9 +936,9 @@ select.field-input { background: #fff; color: #0f172a; }
 
         <!-- RIGHT: Items added so far -->
         <div>
-          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:10px;">Items added</div>
+          <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:10px;">Items added</div>
           <div id="upload-items-list" style="display:flex;flex-direction:column;gap:6px;">
-            <div style="font-size:12px;color:var(--muted);text-align:center;padding:20px;border:1px dashed var(--border);border-radius:10px;">No items yet — add photos and tap Done</div>
+            <div style="font-size:16px;color:var(--muted);text-align:center;padding:20px;border:1px dashed var(--border);border-radius:10px;">No items yet — add photos and tap Done</div>
           </div>
         </div>
 
@@ -949,7 +949,7 @@ select.field-input { background: #fff; color: #0f172a; }
   <!-- FAST SCAN TAB (hidden — accessed via Scanner mode) -->
   <div class="tab-content" id="tab-fastscan" style="display:none !important;">
     <div id="fastscan-progress" style="display:none;" class="fastscan-progress">
-      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">
+      <div style="display:flex;justify-content:space-between;font-size:15px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">
         <span>Processing</span>
         <span id="fs-count">0 / 0</span>
       </div>
@@ -960,28 +960,28 @@ select.field-input { background: #fff; color: #0f172a; }
 
     <!-- Multi-Item Photo Scanner -->
     <div class="acct-card" id="multi-scan-card" style="margin-bottom:14px;position:relative;">
-      <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:8px;">
+      <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:8px;">
         Multi-Item Photo
         <span style="font-size:9px;font-weight:700;background:linear-gradient(90deg,#7c3aed,#ec4899);color:#fff;padding:2px 7px;border-radius:10px;letter-spacing:0.05em;">GROWTH+</span>
       </div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Upload one photo of many items - AI detects each one, you review, then scans them all separately. <strong style="color:#f59e0b;">Max 20 items per photo.</strong></div>
-      <div id="multi-scan-locked" style="display:none;background:rgba(124,58,237,0.08);border:1px dashed rgba(124,58,237,0.4);border-radius:10px;padding:18px;text-align:center;">
+      <div style="font-size:16px;color:var(--muted);margin-bottom:12px;">Upload one photo of many items - AI detects each one, you review, then scans them all separately. <strong style="color:#f59e0b;">Max 20 items per photo.</strong></div>
+      <div id="multi-scan-locked" style="display:none;background:rgba(124,58,237,0.08);border:1px dashed rgba(124,58,237,0.4);border-radius:10px;padding:22px;text-align:center;">
         <div style="font-size:32px;margin-bottom:8px;">🔒</div>
-        <div style="font-size:13px;font-weight:600;margin-bottom:4px;">Available on Growth plan or higher</div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:12px;">Detect and scan up to 20 items from one photo.</div>
-        <button class="btn btn-primary" onclick="openPlansModal()" style="font-size:12px;padding:8px 16px;">Upgrade Plan</button>
+        <div style="font-size:15px;font-weight:600;margin-bottom:4px;">Available on Growth plan or higher</div>
+        <div style="font-size:15px;color:var(--muted);margin-bottom:12px;">Detect and scan up to 20 items from one photo.</div>
+        <button class="btn btn-primary" onclick="openPlansModal()" style="font-size:16px;padding:8px 16px;">Upgrade Plan</button>
       </div>
       <div id="multi-scan-active" style="display:none;">
         <label for="multi-scan-input" style="display:block;border:2px dashed var(--border);border-radius:10px;padding:24px 16px;text-align:center;cursor:pointer;">
-          <div style="font-size:28px;margin-bottom:6px;">📷</div>
-          <div style="font-size:13px;font-weight:600;color:var(--text);">Click to upload photo</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:3px;">JPG/PNG/HEIC - up to 20 items detected</div>
+          <div style="font-size:34px;margin-bottom:6px;">📷</div>
+          <div style="font-size:15px;font-weight:600;color:var(--text);">Click to upload photo</div>
+          <div style="font-size:15px;color:var(--muted);margin-top:3px;">JPG/PNG/HEIC - up to 20 items detected</div>
         </label>
         <input type="file" id="multi-scan-input" accept="image/*,image/heic" style="display:none;" onchange="startMultiScan(this)"/>
       </div>
       <div id="multi-scan-detecting" style="display:none;text-align:center;padding:24px;">
         <div style="display:inline-block;width:32px;height:32px;border:3px solid var(--border);border-top-color:#7c3aed;border-radius:50%;animation:spin 1s linear infinite;"></div>
-        <div style="font-size:13px;color:var(--muted);margin-top:10px;">Detecting items - this can take 10-20 seconds</div>
+        <div style="font-size:15px;color:var(--muted);margin-top:10px;">Detecting items - this can take 10-20 seconds</div>
       </div>
     </div>
   </div>
@@ -990,27 +990,27 @@ select.field-input { background: #fff; color: #0f172a; }
   <div class="tab-content" id="tab-auction">
     <!-- PDF Auction Scanner -->
     <div style="margin-bottom:20px;">
-      <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:10px;">📄 PDF Auction Scanner</div>
+      <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:10px;">📄 PDF Auction Scanner</div>
       <div class="pdf-drop-zone" id="pdf-drop-zone">
         <input type="file" id="pdf-input" accept=".pdf" onchange="scanPdfAuction(this)">
         <div style="font-size:2rem;margin-bottom:8px;">📄</div>
-        <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;">Upload auction PDF</div>
-        <div style="font-size:12px;color:var(--muted);">Gemini will extract all items and estimate values</div>
+        <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px;">Upload auction PDF</div>
+        <div style="font-size:16px;color:var(--muted);">Gemini will extract all items and estimate values</div>
       </div>
       <div id="pdf-scanning" style="display:none;background:#0d1117;border:1px solid #1a2332;border-radius:10px;padding:16px;margin-bottom:14px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-          <div style="font-size:12px;font-weight:600;color:var(--amber);text-transform:uppercase;letter-spacing:0.06em;" id="pdf-scan-label">Reading PDF...</div>
-          <div style="font-size:11px;color:var(--muted);" id="pdf-scan-pct">0%</div>
+          <div style="font-size:16px;font-weight:600;color:var(--amber);text-transform:uppercase;letter-spacing:0.06em;" id="pdf-scan-label">Reading PDF...</div>
+          <div style="font-size:15px;color:var(--muted);" id="pdf-scan-pct">0%</div>
         </div>
         <div style="height:5px;background:var(--border);border-radius:3px;overflow:hidden;margin-bottom:10px;">
           <div id="pdf-scan-bar" style="height:100%;background:var(--amber);border-radius:3px;width:0%;transition:width 0.6s ease;"></div>
         </div>
-        <div style="font-size:11px;color:var(--muted);text-align:center;">Items will appear below as each section completes</div>
+        <div style="font-size:15px;color:var(--muted);text-align:center;">Items will appear below as each section completes</div>
       </div>
       <div id="pdf-results" style="display:none;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-          <div style="font-size:13px;font-weight:700;color:var(--text);" id="pdf-result-title">Results</div>
-          <button class="btn" style="font-size:11px;padding:4px 12px;" onclick="downloadPdfCsv()">⬇️ Download CSV</button>
+          <div style="font-size:15px;font-weight:700;color:var(--text);" id="pdf-result-title">Results</div>
+          <button class="btn" style="font-size:15px;padding:4px 12px;" onclick="downloadPdfCsv()">⬇️ Download CSV</button>
         </div>
         <div style="overflow-x:auto;">
           <table class="pdf-result-table" id="pdf-result-table">
@@ -1020,14 +1020,14 @@ select.field-input { background: #fff; color: #0f172a; }
         </div>
       </div>
     </div>
-    <div style="border-top:1px solid var(--border);padding-top:16px;margin-bottom:10px;font-size:14px;font-weight:700;color:var(--text);">🔗 URL Scanner</div>
+    <div style="border-top:1px solid var(--border);padding-top:16px;margin-bottom:10px;font-size:16px;font-weight:700;color:var(--text);">🔗 URL Scanner</div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
       <input type="url" id="auction-url-input" class="field-input" style="flex:1;min-width:200px;" placeholder="https://www.bidspotter.com/..."/>
       <button class="btn btn-primary" onclick="startAuctionScan()">Scan URL</button>
     </div>
     <div id="auction-scan-progress" style="display:none;margin-bottom:10px;">
       <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;"><div id="auction-scan-bar" style="height:100%;background:var(--amber);width:0%;transition:width 2s;"></div></div>
-      <div id="auction-scan-text" style="font-size:12px;color:var(--muted);margin-top:4px;text-align:center;">Scanning...</div>
+      <div id="auction-scan-text" style="font-size:16px;color:var(--muted);margin-top:4px;text-align:center;">Scanning...</div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
       <select id="auction-session-select" class="field-input" style="flex:1;min-width:200px;" onchange="loadAuctionItems(this.value)">
@@ -1047,15 +1047,15 @@ select.field-input { background: #fff; color: #0f172a; }
   <div class="tab-content" id="tab-parts">
     <div style="margin-bottom:16px;">
       <div style="font-size:18px;font-weight:800;color:var(--text);margin-bottom:4px;">🔍 Parts Photo Lookup</div>
-      <div style="font-size:13px;color:var(--muted);">Paste part numbers below, then scan your photos. Gemini Vision will read each photo and flag any matches.</div>
+      <div style="font-size:15px;color:var(--muted);">Paste part numbers below, then scan your photos. Gemini Vision will read each photo and flag any matches.</div>
     </div>
 
     <div class="settings-section" style="border-left:4px solid #7c3aed;">
       <div class="settings-title">Part Numbers to Search</div>
       <div class="settings-sub">One part number per line. Up to 200 numbers.</div>
-      <textarea id="parts-input" class="field-input" rows="8" style="font-family:monospace;font-size:13px;" placeholder="ABC-12345&#10;XYZ-67890&#10;MOD-11111"></textarea>
+      <textarea id="parts-input" class="field-input" rows="8" style="font-family:monospace;font-size:15px;" placeholder="ABC-12345&#10;XYZ-67890&#10;MOD-11111"></textarea>
       <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <div style="font-size:12px;color:var(--muted);">Scan:</div>
+        <div style="font-size:16px;color:var(--muted);">Scan:</div>
         <button class="btn btn-primary" onclick="startPartsScan('all')" style="background:#7c3aed;border-color:#7c3aed;">📷 All Photos</button>
         <button class="btn" onclick="startPartsScan('recent')" style="border-color:#7c3aed;color:#7c3aed;">📅 Last 100 Only</button>
       </div>
@@ -1064,8 +1064,8 @@ select.field-input { background: #fff; color: #0f172a; }
     <div id="parts-progress" style="display:none;margin-bottom:16px;">
       <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:10px;padding:14px;">
         <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-          <span style="font-size:13px;font-weight:600;color:var(--text);" id="parts-progress-label">Scanning...</span>
-          <span style="font-size:12px;color:var(--muted);" id="parts-progress-count">0 / 0</span>
+          <span style="font-size:15px;font-weight:600;color:var(--text);" id="parts-progress-label">Scanning...</span>
+          <span style="font-size:16px;color:var(--muted);" id="parts-progress-count">0 / 0</span>
         </div>
         <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
           <div id="parts-progress-bar" style="height:100%;background:#7c3aed;width:0%;transition:width 0.3s;"></div>
@@ -1080,9 +1080,9 @@ select.field-input { background: #fff; color: #0f172a; }
     </div>
 
     <div id="parts-no-matches" style="display:none;">
-      <div style="font-size:13px;color:var(--muted);margin-bottom:10px;" id="parts-no-match-header"></div>
+      <div style="font-size:15px;color:var(--muted);margin-bottom:10px;" id="parts-no-match-header"></div>
       <details>
-        <summary style="font-size:12px;color:var(--muted);cursor:pointer;">Show all scanned (no match)</summary>
+        <summary style="font-size:16px;color:var(--muted);cursor:pointer;">Show all scanned (no match)</summary>
         <div id="parts-no-match-list" style="margin-top:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:6px;"></div>
       </details>
     </div>
@@ -1094,8 +1094,8 @@ select.field-input { background: #fff; color: #0f172a; }
 
       <!-- Header -->
       <div style="margin-bottom:24px;">
-        <div style="font-size:22px;font-weight:800;margin-bottom:4px;">Account</div>
-        <div style="font-size:13px;color:var(--muted);">Manage your business info, plan, and integrations</div>
+        <div style="font-size:32px;font-weight:800;margin-bottom:4px;">Account</div>
+        <div style="font-size:15px;color:var(--muted);">Manage your business info, plan, and integrations</div>
       </div>
 
       <!-- Plan summary row -->
@@ -1103,11 +1103,11 @@ select.field-input { background: #fff; color: #0f172a; }
         <div style="display:flex;align-items:center;gap:14px;">
           <div style="width:42px;height:42px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">💎</div>
           <div style="flex:1;min-width:0;">
-            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;">Current Plan</div>
+            <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;">Current Plan</div>
             <div style="font-size:16px;font-weight:700;margin-top:2px;" id="acct-plan-name">—</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:2px;" id="acct-plan-usage">—</div>
+            <div style="font-size:16px;color:var(--muted);margin-top:2px;" id="acct-plan-usage">—</div>
           </div>
-          <button class="btn btn-primary" style="padding:8px 16px;font-size:13px;white-space:nowrap;" onclick="openPlansModal()">Change Plan</button>
+          <button class="btn btn-primary" style="padding:8px 16px;font-size:15px;white-space:nowrap;" onclick="openPlansModal()">Change Plan</button>
         </div>
         <div style="margin-top:12px;height:6px;background:var(--bg);border-radius:3px;overflow:hidden;">
           <div id="acct-usage-bar" style="height:100%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);width:0%;transition:width 0.3s;"></div>
@@ -1130,7 +1130,7 @@ select.field-input { background: #fff; color: #0f172a; }
           </div>
         </div>
         <div style="display:flex;justify-content:flex-end;margin-top:12px;">
-          <button class="btn btn-primary" style="padding:7px 18px;font-size:13px;" onclick="saveAccountInfo()">Save</button>
+          <button class="btn btn-primary" style="padding:7px 18px;font-size:15px;" onclick="saveAccountInfo()">Save</button>
         </div>
       </div>
 
@@ -1138,10 +1138,10 @@ select.field-input { background: #fff; color: #0f172a; }
       <div class="acct-card" style="margin-bottom:14px;">
         <div class="acct-card-header">
           <div style="display:flex;align-items:center;gap:10px;">
-            <div style="width:30px;height:30px;border-radius:7px;background:linear-gradient(135deg,#22c55e,#16a34a);display:flex;align-items:center;justify-content:center;font-size:14px;">💰</div>
+            <div style="width:30px;height:30px;border-radius:7px;background:linear-gradient(135deg,#22c55e,#16a34a);display:flex;align-items:center;justify-content:center;font-size:16px;">💰</div>
             <div>
               <div class="acct-card-title">Cost Tracking</div>
-              <div style="font-size:11px;color:var(--muted);margin-top:1px;">Track item costs to see profit margins</div>
+              <div style="font-size:15px;color:var(--muted);margin-top:1px;">Track item costs to see profit margins</div>
             </div>
           </div>
           <label style="position:relative;display:inline-block;width:44px;height:24px;cursor:pointer;">
@@ -1156,10 +1156,10 @@ select.field-input { background: #fff; color: #0f172a; }
       <div class="acct-card" style="margin-bottom:14px;">
         <div class="acct-card-header">
           <div style="display:flex;align-items:center;gap:10px;">
-            <div style="width:30px;height:30px;border-radius:7px;background:#0064D2;display:flex;align-items:center;justify-content:center;font-size:14px;">🏷️</div>
+            <div style="width:30px;height:30px;border-radius:7px;background:#0064D2;display:flex;align-items:center;justify-content:center;font-size:16px;">🏷️</div>
             <div>
               <div class="acct-card-title">eBay Account</div>
-              <div id="ebay-oauth-status" style="font-size:11px;color:var(--muted);margin-top:1px;">Checking...</div>
+              <div id="ebay-oauth-status" style="font-size:15px;color:var(--muted);margin-top:1px;">Checking...</div>
             </div>
           </div>
           <div id="ebay-oauth-actions"></div>
@@ -1170,10 +1170,10 @@ select.field-input { background: #fff; color: #0f172a; }
       <div class="acct-card" style="margin-bottom:14px;">
         <div class="acct-card-header">
           <div style="display:flex;align-items:center;gap:10px;">
-            <div style="width:30px;height:30px;border-radius:7px;background:#5a8e3b;display:flex;align-items:center;justify-content:center;font-size:14px;">🛍️</div>
+            <div style="width:30px;height:30px;border-radius:7px;background:#5a8e3b;display:flex;align-items:center;justify-content:center;font-size:16px;">🛍️</div>
             <div>
               <div class="acct-card-title">Shopify Store</div>
-              <div id="shopify-status" style="font-size:11px;color:var(--muted);margin-top:1px;">Checking...</div>
+              <div id="shopify-status" style="font-size:15px;color:var(--muted);margin-top:1px;">Checking...</div>
             </div>
           </div>
           <div id="shopify-actions"></div>
@@ -1185,17 +1185,17 @@ select.field-input { background: #fff; color: #0f172a; }
         <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;">
           <div>
             <div class="acct-card-title">API Keys & Integrations</div>
-            <div style="font-size:11px;color:var(--muted);margin-top:1px;">Gemini AI, eBay credentials</div>
+            <div style="font-size:15px;color:var(--muted);margin-top:1px;">Gemini AI, eBay credentials</div>
           </div>
-          <span style="color:var(--muted);font-size:12px;">▾</span>
+          <span style="color:var(--muted);font-size:16px;">▾</span>
         </summary>
         <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
           <div class="acct-field-label">🤖 Google Gemini API Key</div>
           <div style="display:flex;gap:6px;">
             <input type="password" class="acct-input" id="set-gemini" placeholder="AIza..." style="flex:1;"/>
-            <button class="btn btn-primary" style="padding:7px 14px;font-size:12px;white-space:nowrap;" onclick="saveSetting('GEMINI_API_KEY','set-gemini')">Save</button>
+            <button class="btn btn-primary" style="padding:7px 14px;font-size:16px;white-space:nowrap;" onclick="saveSetting('GEMINI_API_KEY','set-gemini')">Save</button>
           </div>
-          <div style="font-size:11px;color:var(--muted);margin-top:4px;margin-bottom:14px;">Used for AI scanning and value research.</div>
+          <div style="font-size:15px;color:var(--muted);margin-top:4px;margin-bottom:14px;">Used for AI scanning and value research.</div>
 
           <div class="acct-field-label" style="margin-top:8px;">🏷️ eBay API Credentials</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
@@ -1204,8 +1204,8 @@ select.field-input { background: #fff; color: #0f172a; }
             <input type="password" class="acct-input" id="set-ebay-cert" placeholder="Cert ID"/>
             <input type="password" class="acct-input" id="set-ebay-token" placeholder="User Token"/>
           </div>
-          <button class="btn btn-primary" style="width:100%;padding:8px;font-size:12px;" onclick="saveEbaySettings()">Save eBay Credentials</button>
-          <div style="font-size:11px;color:var(--muted);margin-top:4px;">Find at developer.ebay.com</div>
+          <button class="btn btn-primary" style="width:100%;padding:8px;font-size:16px;" onclick="saveEbaySettings()">Save eBay Credentials</button>
+          <div style="font-size:15px;color:var(--muted);margin-top:4px;">Find at developer.ebay.com</div>
         </div>
       </details>
 
@@ -1220,71 +1220,71 @@ select.field-input { background: #fff; color: #0f172a; }
 
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:10px;">
         <div>
-          <button class="btn" style="font-size:12px;padding:6px 12px;margin-bottom:8px;" onclick="document.querySelector('[data-tab=\'dashboard\']').click();">← Back to Dashboard</button>
-          <div style="font-size:22px;font-weight:800;">Detailed Analytics</div>
-          <div style="font-size:13px;color:var(--muted);">Profit, costs, and quantity over time</div>
+          <button class="btn" style="font-size:16px;padding:6px 12px;margin-bottom:8px;" onclick="document.querySelector('[data-tab=\'dashboard\']').click();">← Back to Dashboard</button>
+          <div style="font-size:32px;font-weight:800;">Detailed Analytics</div>
+          <div style="font-size:15px;color:var(--muted);">Profit, costs, and quantity over time</div>
         </div>
         <div style="display:flex;gap:4px;background:#0a0f18;border:1px solid #1a2332;border-radius:8px;padding:3px;flex-wrap:wrap;" id="detailed-period-pills">
-          <button class="dperiod-pill" data-period="day" style="font-size:12px;padding:6px 12px;border-radius:5px;color:var(--muted);cursor:pointer;background:transparent;border:none;font-family:inherit;">Day</button>
-          <button class="dperiod-pill" data-period="week" style="font-size:12px;padding:6px 12px;border-radius:5px;color:var(--muted);cursor:pointer;background:transparent;border:none;font-family:inherit;">Week</button>
-          <button class="dperiod-pill active" data-period="month" style="font-size:12px;padding:6px 12px;border-radius:5px;color:#fff;background:var(--accent);font-weight:500;cursor:pointer;border:none;font-family:inherit;">Month</button>
-          <button class="dperiod-pill" data-period="3month" style="font-size:12px;padding:6px 12px;border-radius:5px;color:var(--muted);cursor:pointer;background:transparent;border:none;font-family:inherit;">3M</button>
-          <button class="dperiod-pill" data-period="6month" style="font-size:12px;padding:6px 12px;border-radius:5px;color:var(--muted);cursor:pointer;background:transparent;border:none;font-family:inherit;">6M</button>
-          <button class="dperiod-pill" data-period="year" style="font-size:12px;padding:6px 12px;border-radius:5px;color:var(--muted);cursor:pointer;background:transparent;border:none;font-family:inherit;">1Y</button>
-          <button class="dperiod-pill" data-period="lifetime" style="font-size:12px;padding:6px 12px;border-radius:5px;color:var(--muted);cursor:pointer;background:transparent;border:none;font-family:inherit;">All</button>
+          <button class="dperiod-pill" data-period="day" style="font-size:16px;padding:6px 12px;border-radius:5px;color:var(--muted);cursor:pointer;background:transparent;border:none;font-family:inherit;">Day</button>
+          <button class="dperiod-pill" data-period="week" style="font-size:16px;padding:6px 12px;border-radius:5px;color:var(--muted);cursor:pointer;background:transparent;border:none;font-family:inherit;">Week</button>
+          <button class="dperiod-pill active" data-period="month" style="font-size:16px;padding:6px 12px;border-radius:5px;color:#fff;background:var(--accent);font-weight:500;cursor:pointer;border:none;font-family:inherit;">Month</button>
+          <button class="dperiod-pill" data-period="3month" style="font-size:16px;padding:6px 12px;border-radius:5px;color:var(--muted);cursor:pointer;background:transparent;border:none;font-family:inherit;">3M</button>
+          <button class="dperiod-pill" data-period="6month" style="font-size:16px;padding:6px 12px;border-radius:5px;color:var(--muted);cursor:pointer;background:transparent;border:none;font-family:inherit;">6M</button>
+          <button class="dperiod-pill" data-period="year" style="font-size:16px;padding:6px 12px;border-radius:5px;color:var(--muted);cursor:pointer;background:transparent;border:none;font-family:inherit;">1Y</button>
+          <button class="dperiod-pill" data-period="lifetime" style="font-size:16px;padding:6px 12px;border-radius:5px;color:var(--muted);cursor:pointer;background:transparent;border:none;font-family:inherit;">All</button>
         </div>
       </div>
 
       <!-- Big stat cards -->
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px;">
         <div class="acct-card">
-          <div style="font-size:11px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:0.06em;">Profit</div>
-          <div style="font-size:24px;font-weight:600;color:#22c55e;margin-top:4px;" id="d-profit">—</div>
+          <div style="font-size:15px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:0.06em;">Profit</div>
+          <div style="font-size:34px;font-weight:600;color:#22c55e;margin-top:4px;" id="d-profit">—</div>
         </div>
         <div class="acct-card">
-          <div style="font-size:11px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:0.06em;">Total Cost</div>
-          <div style="font-size:24px;font-weight:600;color:#ef4444;margin-top:4px;" id="d-cost">—</div>
+          <div style="font-size:15px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:0.06em;">Total Cost</div>
+          <div style="font-size:34px;font-weight:600;color:#ef4444;margin-top:4px;" id="d-cost">—</div>
         </div>
         <div class="acct-card">
-          <div style="font-size:11px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:0.06em;">Listed Value</div>
-          <div style="font-size:24px;font-weight:600;margin-top:4px;" id="d-listed">—</div>
+          <div style="font-size:15px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:0.06em;">Listed Value</div>
+          <div style="font-size:34px;font-weight:600;margin-top:4px;" id="d-listed">—</div>
         </div>
         <div class="acct-card">
-          <div style="font-size:11px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:0.06em;">Items</div>
-          <div style="font-size:24px;font-weight:600;margin-top:4px;" id="d-items">—</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px;" id="d-units">—</div>
+          <div style="font-size:15px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:0.06em;">Items</div>
+          <div style="font-size:34px;font-weight:600;margin-top:4px;" id="d-items">—</div>
+          <div style="font-size:15px;color:var(--muted);margin-top:2px;" id="d-units">—</div>
         </div>
       </div>
 
       <!-- Bar chart -->
       <div class="acct-card" style="margin-bottom:14px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-          <div style="font-size:14px;font-weight:600;">Profit & Cost Over Time</div>
-          <div style="display:flex;gap:14px;font-size:11px;">
+          <div style="font-size:16px;font-weight:600;">Profit & Cost Over Time</div>
+          <div style="display:flex;gap:14px;font-size:15px;">
             <div style="display:flex;align-items:center;gap:5px;"><span style="width:10px;height:10px;background:#22c55e;border-radius:2px;"></span><span style="color:#94a3b8;">Profit</span></div>
             <div style="display:flex;align-items:center;gap:5px;"><span style="width:10px;height:10px;background:#ef4444;border-radius:2px;"></span><span style="color:#94a3b8;">Cost</span></div>
           </div>
         </div>
         <div id="d-chart" style="display:flex;gap:6px;height:180px;align-items:flex-end;padding:10px 0;border-bottom:1px solid var(--border);">
-          <div style="flex:1;text-align:center;color:var(--muted);font-size:12px;align-self:center;">Loading...</div>
+          <div style="flex:1;text-align:center;color:var(--muted);font-size:16px;align-self:center;">Loading...</div>
         </div>
-        <div id="d-chart-labels" style="display:flex;gap:6px;margin-top:8px;font-size:10px;color:var(--muted);"></div>
+        <div id="d-chart-labels" style="display:flex;gap:6px;margin-top:8px;font-size:16px;color:var(--muted);"></div>
       </div>
 
       <!-- Avg per item card -->
       <div class="acct-card" style="margin-bottom:14px;">
-        <div style="font-size:14px;font-weight:600;margin-bottom:12px;">Per-Item Averages</div>
+        <div style="font-size:16px;font-weight:600;margin-bottom:12px;">Per-Item Averages</div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">
           <div>
-            <div style="font-size:11px;color:var(--muted);">Avg Cost</div>
+            <div style="font-size:15px;color:var(--muted);">Avg Cost</div>
             <div style="font-size:18px;font-weight:600;margin-top:2px;" id="d-avg-cost">—</div>
           </div>
           <div>
-            <div style="font-size:11px;color:var(--muted);">Avg Listed</div>
+            <div style="font-size:15px;color:var(--muted);">Avg Listed</div>
             <div style="font-size:18px;font-weight:600;margin-top:2px;" id="d-avg-listed">—</div>
           </div>
           <div>
-            <div style="font-size:11px;color:var(--muted);">Avg Profit / Item</div>
+            <div style="font-size:15px;color:var(--muted);">Avg Profit / Item</div>
             <div style="font-size:18px;font-weight:600;color:#22c55e;margin-top:2px;" id="d-avg-profit">—</div>
           </div>
         </div>
@@ -1292,12 +1292,12 @@ select.field-input { background: #fff; color: #0f172a; }
 
       <!-- Scans usage -->
       <div class="acct-card">
-        <div style="font-size:14px;font-weight:600;margin-bottom:10px;">Scan Usage</div>
+        <div style="font-size:16px;font-weight:600;margin-bottom:10px;">Scan Usage</div>
         <div style="display:flex;align-items:center;gap:10px;">
           <div style="flex:1;height:6px;background:var(--bg);border-radius:3px;overflow:hidden;">
             <div id="d-scan-bar" style="height:100%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);width:0%;transition:width 0.3s;"></div>
           </div>
-          <span style="font-size:13px;font-weight:600;" id="d-scan-text">— / —</span>
+          <span style="font-size:15px;font-weight:600;" id="d-scan-text">— / —</span>
         </div>
       </div>
 
@@ -1314,26 +1314,26 @@ select.field-input { background: #fff; color: #0f172a; }
       <!-- New header -->
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;flex-wrap:wrap;gap:14px;">
         <div>
-          <div style="font-size:24px;font-weight:700;color:var(--text);letter-spacing:-0.02em;">Expenses</div>
-          <div style="font-size:13px;color:var(--muted);margin-top:4px;" id="exp-stats">Loading...</div>
+          <div style="font-size:34px;font-weight:700;color:var(--text);letter-spacing:-0.02em;">Expenses</div>
+          <div style="font-size:15px;color:var(--muted);margin-top:4px;" id="exp-stats">Loading...</div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-          <button class="btn" style="font-size:13px;padding:8px 14px;display:flex;align-items:center;gap:6px;" onclick="openReceiptScanner()">
+          <button class="btn" style="font-size:15px;padding:8px 14px;display:flex;align-items:center;gap:6px;" onclick="openReceiptScanner()">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
             Scan receipt
           </button>
-          <button onclick="openExpenseModal()" style="font-size:13px;padding:9px 16px;border-radius:8px;border:none;cursor:pointer;background:linear-gradient(135deg,#22c55e,#16a34a);color:white;font-weight:600;font-family:inherit;display:flex;align-items:center;gap:6px;box-shadow:0 4px 14px rgba(34,197,94,0.25);">
+          <button onclick="openExpenseModal()" style="font-size:15px;padding:9px 16px;border-radius:8px;border:none;cursor:pointer;background:linear-gradient(135deg,#22c55e,#16a34a);color:white;font-weight:600;font-family:inherit;display:flex;align-items:center;gap:6px;box-shadow:0 4px 14px rgba(34,197,94,0.25);">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             Add expense
           </button>
           <div style="position:relative;">
-            <button class="btn" style="font-size:13px;padding:8px 14px;" onclick="toggleExpExportMenu()">Export</button>
+            <button class="btn" style="font-size:15px;padding:8px 14px;" onclick="toggleExpExportMenu()">Export</button>
             <div id="exp-export-menu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:#0a0f18;border:1px solid #1a2332;border-radius:8px;z-index:50;min-width:160px;overflow:hidden;">
-              <button onclick="exportExpenses('csv')" style="display:block;width:100%;padding:10px 14px;background:transparent;border:none;color:var(--text);font-size:13px;text-align:left;cursor:pointer;font-family:inherit;">CSV / Excel</button>
-              <button onclick="exportExpenses('pdf')" style="display:block;width:100%;padding:10px 14px;background:transparent;border:none;color:var(--text);font-size:13px;text-align:left;cursor:pointer;font-family:inherit;">PDF Report</button>
+              <button onclick="exportExpenses('csv')" style="display:block;width:100%;padding:14px 18px;background:transparent;border:none;color:var(--text);font-size:15px;text-align:left;cursor:pointer;font-family:inherit;">CSV / Excel</button>
+              <button onclick="exportExpenses('pdf')" style="display:block;width:100%;padding:14px 18px;background:transparent;border:none;color:var(--text);font-size:15px;text-align:left;cursor:pointer;font-family:inherit;">PDF Report</button>
             </div>
           </div>
-          <label style="display:flex;align-items:center;gap:7px;font-size:11px;color:var(--muted);cursor:pointer;padding:7px 10px;border-radius:7px;background:#0a0f18;border:1px solid #1a2332;">
+          <label style="display:flex;align-items:center;gap:7px;font-size:15px;color:var(--muted);cursor:pointer;padding:7px 10px;border-radius:7px;background:#0a0f18;border:1px solid #1a2332;">
             <input type="checkbox" id="exp-cogs-toggle" onchange="toggleCogsImport()" style="width:13px;height:13px;accent-color:#22c55e;cursor:pointer;">
             Auto-import COGS
           </label>
@@ -1343,13 +1343,13 @@ select.field-input { background: #fff; color: #0f172a; }
       <!-- Period tabs (clean, no extra filters) -->
       <div style="margin-bottom:20px;">
         <div style="display:inline-flex;gap:2px;background:rgba(0,0,0,0.25);border:1px solid #1a2332;border-radius:9px;padding:3px;">
-          <button class="exp-period-pill" data-period="day" onclick="setExpPeriod('day')" style="font-size:12px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">Day</button>
-          <button class="exp-period-pill" data-period="week" onclick="setExpPeriod('week')" style="font-size:12px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">Week</button>
-          <button class="exp-period-pill active" data-period="month" onclick="setExpPeriod('month')" style="font-size:12px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:rgba(34,197,94,0.15);color:#4ade80;font-family:inherit;font-weight:500;">Month</button>
-          <button class="exp-period-pill" data-period="3month" onclick="setExpPeriod('3month')" style="font-size:12px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">3M</button>
-          <button class="exp-period-pill" data-period="6month" onclick="setExpPeriod('6month')" style="font-size:12px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">6M</button>
-          <button class="exp-period-pill" data-period="12month" onclick="setExpPeriod('12month')" style="font-size:12px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">12M</button>
-          <button class="exp-period-pill" data-period="all" onclick="setExpPeriod('all')" style="font-size:12px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">All</button>
+          <button class="exp-period-pill" data-period="day" onclick="setExpPeriod('day')" style="font-size:16px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">Day</button>
+          <button class="exp-period-pill" data-period="week" onclick="setExpPeriod('week')" style="font-size:16px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">Week</button>
+          <button class="exp-period-pill active" data-period="month" onclick="setExpPeriod('month')" style="font-size:16px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:rgba(34,197,94,0.15);color:#4ade80;font-family:inherit;font-weight:500;">Month</button>
+          <button class="exp-period-pill" data-period="3month" onclick="setExpPeriod('3month')" style="font-size:16px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">3M</button>
+          <button class="exp-period-pill" data-period="6month" onclick="setExpPeriod('6month')" style="font-size:16px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">6M</button>
+          <button class="exp-period-pill" data-period="12month" onclick="setExpPeriod('12month')" style="font-size:16px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">12M</button>
+          <button class="exp-period-pill" data-period="all" onclick="setExpPeriod('all')" style="font-size:16px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">All</button>
         </div>
       </div>
 
@@ -1357,24 +1357,24 @@ select.field-input { background: #fff; color: #0f172a; }
       <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-bottom:20px;" id="exp-hero-row">
         <div style="background:linear-gradient(135deg,rgba(34,197,94,0.08),rgba(6,182,212,0.05));border:1px solid rgba(34,197,94,0.2);border-radius:14px;padding:24px;position:relative;overflow:hidden;">
           <div style="position:absolute;top:-50px;right:-50px;width:200px;height:200px;background:radial-gradient(circle,rgba(34,197,94,0.18),transparent 60%);pointer-events:none;"></div>
-          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:600;margin-bottom:8px;position:relative;" id="exp-hero-period">Total spend</div>
+          <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:600;margin-bottom:8px;position:relative;" id="exp-hero-period">Total spend</div>
           <div style="font-size:42px;font-weight:700;line-height:1;letter-spacing:-0.03em;position:relative;" id="exp-hero-total">$0.00</div>
-          <div style="font-size:12px;color:var(--muted);margin-top:14px;position:relative;" id="exp-hero-meta">0 transactions</div>
+          <div style="font-size:16px;color:var(--muted);margin-top:14px;position:relative;" id="exp-hero-meta">0 transactions</div>
         </div>
         <div style="display:grid;grid-template-rows:1fr 1fr;gap:8px;">
           <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:10px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;">
             <div>
-              <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:600;">Cost of goods</div>
+              <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:600;">Cost of goods</div>
               <div style="font-size:18px;font-weight:700;margin-top:2px;" id="exp-hero-cogs">$0.00</div>
             </div>
-            <div style="width:28px;height:28px;border-radius:7px;background:rgba(239,68,68,0.12);color:#f87171;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;">$</div>
+            <div style="width:28px;height:28px;border-radius:7px;background:rgba(239,68,68,0.12);color:#f87171;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;">$</div>
           </div>
           <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:10px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;">
             <div>
-              <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:600;">Tax-deductible</div>
+              <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:600;">Tax-deductible</div>
               <div style="font-size:18px;font-weight:700;margin-top:2px;" id="exp-hero-deduct">$0.00</div>
             </div>
-            <div style="width:28px;height:28px;border-radius:7px;background:rgba(168,85,247,0.12);color:#c084fc;display:flex;align-items:center;justify-content:center;font-size:13px;">✓</div>
+            <div style="width:28px;height:28px;border-radius:7px;background:rgba(168,85,247,0.12);color:#c084fc;display:flex;align-items:center;justify-content:center;font-size:15px;">✓</div>
           </div>
         </div>
       </div>
@@ -1383,20 +1383,20 @@ select.field-input { background: #fff; color: #0f172a; }
       <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:14px;margin-bottom:20px;" id="exp-main-grid">
         <div style="background:rgba(255,255,255,0.02);border:1px solid #1a2332;border-radius:14px;padding:20px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-            <span style="font-size:13px;font-weight:600;color:var(--text);">Spending by category</span>
-            <span style="font-size:11px;color:var(--muted);" id="exp-cat-count">0 categories</span>
+            <span style="font-size:15px;font-weight:600;color:var(--text);">Spending by category</span>
+            <span style="font-size:15px;color:var(--muted);" id="exp-cat-count">0 categories</span>
           </div>
           <div id="exp-cat-list"></div>
         </div>
         <div style="background:rgba(255,255,255,0.02);border:1px solid #1a2332;border-radius:14px;padding:20px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-            <span style="font-size:13px;font-weight:600;color:var(--text);">Distribution</span>
+            <span style="font-size:15px;font-weight:600;color:var(--text);">Distribution</span>
           </div>
           <div style="display:flex;align-items:center;justify-content:center;padding:8px 0;position:relative;">
             <canvas id="exp-chart" width="200" height="200"></canvas>
             <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;">
-              <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:600;">Total</div>
-              <div id="exp-chart-total" style="font-size:22px;font-weight:700;letter-spacing:-0.01em;color:var(--text);">$0</div>
+              <div style="font-size:16px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:600;">Total</div>
+              <div id="exp-chart-total" style="font-size:32px;font-weight:700;letter-spacing:-0.01em;color:var(--text);">$0</div>
             </div>
           </div>
         </div>
@@ -1410,19 +1410,19 @@ select.field-input { background: #fff; color: #0f172a; }
 
       <!-- Transactions panel -->
       <div style="background:rgba(255,255,255,0.02);border:1px solid #1a2332;border-radius:14px;overflow:hidden;">
-        <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);">
-          <span style="font-size:13px;font-weight:600;color:var(--text);">Recent transactions</span>
-          <span style="font-size:11px;color:var(--muted);" id="exp-txn-count">0 transactions</span>
+        <div style="padding:20px 24px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);">
+          <span style="font-size:15px;font-weight:600;color:var(--text);">Recent transactions</span>
+          <span style="font-size:15px;color:var(--muted);" id="exp-txn-count">0 transactions</span>
         </div>
         <div style="overflow-x:auto;">
-          <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:700px;">
+          <table style="width:100%;border-collapse:collapse;font-size:15px;min-width:700px;">
             <thead>
               <tr style="background:rgba(0,0,0,0.15);">
-                <th onclick="sortExpenses('merchant')" style="padding:10px 20px;text-align:left;font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.08em;cursor:pointer;user-select:none;border-bottom:1px solid var(--border);">Merchant <span id="exp-sort-merchant">↕</span></th>
-                <th onclick="sortExpenses('date')" style="padding:10px 20px;text-align:left;font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.08em;width:120px;cursor:pointer;user-select:none;border-bottom:1px solid var(--border);">Date <span id="exp-sort-date">↕</span></th>
-                <th onclick="sortExpenses('category')" style="padding:10px 20px;text-align:left;font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.08em;width:170px;cursor:pointer;user-select:none;border-bottom:1px solid var(--border);">Category <span id="exp-sort-category">↕</span></th>
-                <th onclick="sortExpenses('amount')" style="padding:10px 20px;text-align:right;font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.08em;width:110px;cursor:pointer;user-select:none;border-bottom:1px solid var(--border);">Amount <span id="exp-sort-amount">↕</span></th>
-                <th style="padding:10px 20px;width:50px;border-bottom:1px solid var(--border);"></th>
+                <th onclick="sortExpenses('merchant')" style="padding:14px 24px;text-align:left;font-size:16px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.08em;cursor:pointer;user-select:none;border-bottom:1px solid var(--border);">Merchant <span id="exp-sort-merchant">↕</span></th>
+                <th onclick="sortExpenses('date')" style="padding:14px 24px;text-align:left;font-size:16px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.08em;width:120px;cursor:pointer;user-select:none;border-bottom:1px solid var(--border);">Date <span id="exp-sort-date">↕</span></th>
+                <th onclick="sortExpenses('category')" style="padding:14px 24px;text-align:left;font-size:16px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.08em;width:170px;cursor:pointer;user-select:none;border-bottom:1px solid var(--border);">Category <span id="exp-sort-category">↕</span></th>
+                <th onclick="sortExpenses('amount')" style="padding:14px 24px;text-align:right;font-size:16px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.08em;width:110px;cursor:pointer;user-select:none;border-bottom:1px solid var(--border);">Amount <span id="exp-sort-amount">↕</span></th>
+                <th style="padding:14px 24px;width:50px;border-bottom:1px solid var(--border);"></th>
               </tr>
             </thead>
             <tbody id="exp-tbody"></tbody>
@@ -1430,8 +1430,8 @@ select.field-input { background: #fff; color: #0f172a; }
         </div>
         <div id="exp-empty" style="padding:60px 24px;text-align:center;display:none;">
           <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="1.5" stroke-linecap="round" style="margin-bottom:14px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 10 12 15 7 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          <div style="font-size:14px;font-weight:600;margin-bottom:4px;color:var(--text);">No expenses yet</div>
-          <div style="font-size:12px;color:var(--muted);">Add an expense or scan a receipt to get started</div>
+          <div style="font-size:16px;font-weight:600;margin-bottom:4px;color:var(--text);">No expenses yet</div>
+          <div style="font-size:16px;color:var(--muted);">Add an expense or scan a receipt to get started</div>
         </div>
       </div>
 
@@ -1447,15 +1447,15 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
       <div style="display:flex;flex-direction:column;gap:12px;">
         <div>
-          <label style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:5px;">Amount *</label>
+          <label style="font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:5px;">Amount *</label>
           <input id="exp-f-amount" type="number" step="0.01" placeholder="0.00" class="acct-input" style="width:100%;font-size:20px;font-weight:700;">
         </div>
         <div>
-          <label style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:5px;">Merchant / Vendor</label>
+          <label style="font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:5px;">Merchant / Vendor</label>
           <input id="exp-f-merchant" type="text" placeholder="e.g. Costco, USPS, Amazon" class="acct-input" style="width:100%;">
         </div>
         <div>
-          <label style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:5px;">Category</label>
+          <label style="font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:5px;">Category</label>
           <select id="exp-f-category" class="acct-input" style="width:100%;">
             <option value="Cost of Goods">🔴 Cost of Goods</option>
             <option value="Shipping & Postage">🟠 Shipping & Postage</option>
@@ -1468,15 +1468,15 @@ select.field-input { background: #fff; color: #0f172a; }
           </select>
         </div>
         <div>
-          <label style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:5px;">Date</label>
+          <label style="font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:5px;">Date</label>
           <input id="exp-f-date" type="date" class="acct-input" style="width:100%;color-scheme:dark;">
         </div>
         <div>
-          <label style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:5px;">Notes</label>
+          <label style="font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:5px;">Notes</label>
           <input id="exp-f-notes" type="text" placeholder="Optional description" class="acct-input" style="width:100%;">
         </div>
-        <div id="exp-f-error" style="display:none;color:#ef4444;font-size:12px;"></div>
-        <button onclick="saveExpense()" style="background:#e8ff47;color:#000;border:none;padding:13px;border-radius:9px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;margin-top:4px;">Save Expense</button>
+        <div id="exp-f-error" style="display:none;color:#ef4444;font-size:16px;"></div>
+        <button onclick="saveExpense()" style="background:#e8ff47;color:#000;border:none;padding:13px;border-radius:9px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;margin-top:4px;">Save Expense</button>
       </div>
     </div>
   </div>
@@ -1491,15 +1491,15 @@ select.field-input { background: #fff; color: #0f172a; }
 
       <div id="receipt-step-upload">
         <div style="font-size:36px;text-align:center;margin-bottom:12px;">🧾</div>
-        <div style="font-size:14px;font-weight:600;text-align:center;margin-bottom:16px;color:var(--text);">Add your receipt</div>
+        <div style="font-size:16px;font-weight:600;text-align:center;margin-bottom:16px;color:var(--text);">Add your receipt</div>
         <div style="display:flex;gap:10px;">
-          <label for="receipt-camera-input" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;border:1px solid #1a2332;border-radius:10px;padding:18px 10px;cursor:pointer;background:var(--bg);text-align:center;" onmouseover="this.style.borderColor='#e8ff47'" onmouseout="this.style.borderColor='var(--border)'">
+          <label for="receipt-camera-input" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;border:1px solid #1a2332;border-radius:10px;padding:22px 10px;cursor:pointer;background:var(--bg);text-align:center;" onmouseover="this.style.borderColor='#e8ff47'" onmouseout="this.style.borderColor='var(--border)'">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-            <span style="font-size:12px;font-weight:600;">Take Photo</span>
+            <span style="font-size:16px;font-weight:600;">Take Photo</span>
           </label>
-          <label for="receipt-file-input" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;border:1px solid #1a2332;border-radius:10px;padding:18px 10px;cursor:pointer;background:var(--bg);text-align:center;" onmouseover="this.style.borderColor='#e8ff47'" onmouseout="this.style.borderColor='var(--border)'">
+          <label for="receipt-file-input" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;border:1px solid #1a2332;border-radius:10px;padding:22px 10px;cursor:pointer;background:var(--bg);text-align:center;" onmouseover="this.style.borderColor='#e8ff47'" onmouseout="this.style.borderColor='var(--border)'">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-            <span style="font-size:12px;font-weight:600;">Choose from Gallery</span>
+            <span style="font-size:16px;font-weight:600;">Choose from Gallery</span>
           </label>
         </div>
         <input type="file" id="receipt-camera-input" accept="image/*" capture="environment" style="display:none;" onchange="scanReceipt(this)">
@@ -1508,23 +1508,23 @@ select.field-input { background: #fff; color: #0f172a; }
 
       <div id="receipt-step-scanning" style="display:none;text-align:center;padding:30px;">
         <div style="display:inline-block;width:38px;height:38px;border:3px solid var(--border);border-top-color:#e8ff47;border-radius:50%;animation:demospin 0.9s linear infinite;"></div>
-        <div style="font-size:13px;color:var(--muted);margin-top:12px;">Reading receipt...</div>
+        <div style="font-size:15px;color:var(--muted);margin-top:12px;">Reading receipt...</div>
       </div>
 
       <div id="receipt-step-confirm" style="display:none;">
-        <div id="receipt-ai-notice" style="display:none;font-size:12px;font-weight:600;margin-bottom:12px;padding:8px 12px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:8px;"></div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:14px;">Review and edit before saving:</div>
+        <div id="receipt-ai-notice" style="display:none;font-size:16px;font-weight:600;margin-bottom:12px;padding:8px 12px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:8px;"></div>
+        <div style="font-size:16px;color:var(--muted);margin-bottom:14px;">Review and edit before saving:</div>
         <div style="display:flex;flex-direction:column;gap:10px;">
           <div>
-            <label style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px;">Amount</label>
+            <label style="font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px;">Amount</label>
             <input id="rec-f-amount" type="number" step="0.01" class="acct-input" style="width:100%;font-size:18px;font-weight:700;">
           </div>
           <div>
-            <label style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px;">Merchant</label>
+            <label style="font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px;">Merchant</label>
             <input id="rec-f-merchant" type="text" class="acct-input" style="width:100%;">
           </div>
           <div>
-            <label style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px;">Category</label>
+            <label style="font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px;">Category</label>
             <select id="rec-f-category" class="acct-input" style="width:100%;">
               <option value="Cost of Goods">🔴 Cost of Goods</option>
               <option value="Shipping & Postage">🟠 Shipping & Postage</option>
@@ -1537,23 +1537,23 @@ select.field-input { background: #fff; color: #0f172a; }
             </select>
           </div>
           <div>
-            <label style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px;">Date</label>
+            <label style="font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px;">Date</label>
             <input id="rec-f-date" type="date" class="acct-input" style="width:100%;color-scheme:dark;">
           </div>
           <div>
-            <label style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px;">Notes</label>
+            <label style="font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px;">Notes</label>
             <input id="rec-f-notes" type="text" class="acct-input" style="width:100%;">
           </div>
         </div>
         <div style="display:flex;gap:8px;margin-top:16px;">
-          <button onclick="closeReceiptScanner()" style="flex:1;background:transparent;border:1px solid #1a2332;color:var(--muted);padding:11px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:13px;">Cancel</button>
-          <button onclick="confirmReceiptExpense()" style="flex:2;background:#e8ff47;color:#000;border:none;padding:11px;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;font-size:13px;">Save Expense</button>
+          <button onclick="closeReceiptScanner()" style="flex:1;background:transparent;border:1px solid #1a2332;color:var(--muted);padding:11px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:15px;">Cancel</button>
+          <button onclick="confirmReceiptExpense()" style="flex:2;background:#e8ff47;color:#000;border:none;padding:11px;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;font-size:15px;">Save Expense</button>
         </div>
-        <button onclick="document.getElementById('receipt-step-upload').style.display='block';document.getElementById('receipt-step-confirm').style.display='none';" style="display:block;width:100%;margin-top:8px;background:transparent;border:none;color:var(--muted);font-size:12px;cursor:pointer;font-family:inherit;">↩ Scan different photo</button>
+        <button onclick="document.getElementById('receipt-step-upload').style.display='block';document.getElementById('receipt-step-confirm').style.display='none';" style="display:block;width:100%;margin-top:8px;background:transparent;border:none;color:var(--muted);font-size:16px;cursor:pointer;font-family:inherit;">↩ Scan different photo</button>
       </div>
 
       <div id="receipt-step-error" style="display:none;text-align:center;padding:20px;">
-        <div style="font-size:13px;color:#ef4444;margin-bottom:12px;" id="receipt-error-msg">Could not read receipt</div>
+        <div style="font-size:15px;color:#ef4444;margin-bottom:12px;" id="receipt-error-msg">Could not read receipt</div>
         <button onclick="document.getElementById('receipt-step-upload').style.display='block';document.getElementById('receipt-step-error').style.display='none';" style="background:#e8ff47;color:#000;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-family:inherit;">Try Again</button>
       </div>
     </div>
@@ -1566,26 +1566,26 @@ select.field-input { background: #fff; color: #0f172a; }
       <!-- Header -->
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
         <div>
-          <div style="font-size:22px;font-weight:800;">📥 Intake</div>
-          <div style="font-size:13px;color:var(--muted);margin-top:2px;" id="intake-stats">Track purchases before you scan them</div>
+          <div style="font-size:32px;font-weight:800;">📥 Intake</div>
+          <div style="font-size:15px;color:var(--muted);margin-top:2px;" id="intake-stats">Track purchases before you scan them</div>
         </div>
         <div style="display:flex;gap:6px;">
-          <button class="btn btn-primary" style="font-size:13px;padding:8px 16px;background:#f59e0b;border-color:#f59e0b;color:#000;" onclick="addIntakeRow()">+ Add Row</button>
+          <button class="btn btn-primary" style="font-size:15px;padding:8px 16px;background:#f59e0b;border-color:#f59e0b;color:#000;" onclick="addIntakeRow()">+ Add Row</button>
         </div>
       </div>
 
       <!-- Spreadsheet table -->
       <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:10px;overflow:hidden;">
         <div style="overflow-x:auto;">
-          <table id="intake-table" style="width:100%;border-collapse:collapse;font-size:13px;min-width:880px;">
+          <table id="intake-table" style="width:100%;border-collapse:collapse;font-size:15px;min-width:880px;">
             <thead>
               <tr style="background:var(--bg);border-bottom:1px solid var(--border);">
-                <th style="padding:10px 12px;text-align:left;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;width:90px;">Photo</th>
-                <th style="padding:10px 12px;text-align:left;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;">Item Name</th>
-                <th style="padding:10px 12px;text-align:left;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;width:140px;">Purchase Date</th>
-                <th style="padding:10px 12px;text-align:right;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;width:120px;">Price</th>
-                <th style="padding:10px 12px;text-align:left;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;width:140px;">SKU Code</th>
-                <th style="padding:10px 12px;text-align:left;font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;">Notes</th>
+                <th style="padding:10px 12px;text-align:left;font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;width:90px;">Photo</th>
+                <th style="padding:10px 12px;text-align:left;font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;">Item Name</th>
+                <th style="padding:10px 12px;text-align:left;font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;width:140px;">Purchase Date</th>
+                <th style="padding:10px 12px;text-align:right;font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;width:120px;">Price</th>
+                <th style="padding:10px 12px;text-align:left;font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;width:140px;">SKU Code</th>
+                <th style="padding:10px 12px;text-align:left;font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;">Notes</th>
                 <th style="padding:10px 12px;width:50px;"></th>
               </tr>
             </thead>
@@ -1595,12 +1595,12 @@ select.field-input { background: #fff; color: #0f172a; }
         <div id="intake-empty" style="padding:60px 24px;text-align:center;display:none;">
           <div style="font-size:42px;margin-bottom:10px;">📥</div>
           <div style="font-size:15px;font-weight:600;margin-bottom:4px;">No intake records yet</div>
-          <div style="font-size:12px;color:var(--muted);">Click "Add Row" to log a purchase before scanning</div>
+          <div style="font-size:16px;color:var(--muted);">Click "Add Row" to log a purchase before scanning</div>
         </div>
       </div>
 
       <!-- Bottom helper text -->
-      <div style="margin-top:14px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.25);border-radius:8px;padding:12px 14px;font-size:12px;color:#94a3b8;line-height:1.55;">
+      <div style="margin-top:14px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.25);border-radius:8px;padding:12px 14px;font-size:16px;color:#94a3b8;line-height:1.55;">
         <strong style="color:#f59e0b;">Tip:</strong> Use intake to log estate sale or auction lots before you photograph each item. Snap a quick photo of a sticker or receipt, jot down the price, and come back to it later. Each row is independent — link to inventory items will come in a future update.
       </div>
 
@@ -1611,8 +1611,8 @@ select.field-input { background: #fff; color: #0f172a; }
   <div class="tab-content" id="tab-inventory">
     <div style="max-width:1100px;margin:0 auto;">
       <div style="margin-bottom:14px;">
-        <div style="font-size:22px;font-weight:800;">Inventory</div>
-        <div style="font-size:13px;color:var(--muted);margin-top:2px;" id="inv-stats">Loading...</div>
+        <div style="font-size:32px;font-weight:800;">Inventory</div>
+        <div style="font-size:15px;color:var(--muted);margin-top:2px;" id="inv-stats">Loading...</div>
       </div>
       <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;">
         <input type="text" id="inv-search" class="acct-input" style="flex:1;min-width:220px;" placeholder="Search title, barcode..."/>
@@ -1636,16 +1636,16 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
-          <button class="btn" style="font-size:12px;padding:7px 12px;" onclick="invSelectAll()">Select all</button>
-          <button class="btn" style="font-size:12px;padding:7px 12px;" onclick="invDeselectAll()">Deselect</button>
-          <button class="btn" style="font-size:12px;padding:7px 12px;" id="inv-bulk-loc-btn" onclick="openBulkLocationModal()" disabled>Set Location</button>
-          <button class="btn" style="font-size:12px;padding:7px 12px;background:#10b981;border-color:#10b981;color:#fff;" onclick="openScanBarcodeModal()">Scan</button>
-          <button class="btn" style="font-size:12px;padding:7px 12px;background:#7c3aed;border-color:#7c3aed;color:#fff;" id="inv-barcode-btn" onclick="openBarcodeModal()" disabled>Generate Barcodes</button>
-          <button class="btn btn-danger" style="font-size:12px;padding:7px 12px;" id="inv-bulk-del-btn" onclick="bulkDeleteInventory()" disabled>Delete</button>
+          <button class="btn" style="font-size:16px;padding:7px 12px;" onclick="invSelectAll()">Select all</button>
+          <button class="btn" style="font-size:16px;padding:7px 12px;" onclick="invDeselectAll()">Deselect</button>
+          <button class="btn" style="font-size:16px;padding:7px 12px;" id="inv-bulk-loc-btn" onclick="openBulkLocationModal()" disabled>Set Location</button>
+          <button class="btn" style="font-size:16px;padding:7px 12px;background:#10b981;border-color:#10b981;color:#fff;" onclick="openScanBarcodeModal()">Scan</button>
+          <button class="btn" style="font-size:16px;padding:7px 12px;background:#7c3aed;border-color:#7c3aed;color:#fff;" id="inv-barcode-btn" onclick="openBarcodeModal()" disabled>Generate Barcodes</button>
+          <button class="btn btn-danger" style="font-size:16px;padding:7px 12px;" id="inv-bulk-del-btn" onclick="bulkDeleteInventory()" disabled>Delete</button>
         </div>
         <div style="display:flex;gap:4px;background:#0a0f18;border:1px solid #1a2332;border-radius:8px;padding:3px;">
-          <button class="inv-view-btn active" data-view="grid" style="font-size:12px;padding:5px 12px;border-radius:5px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-family:inherit;font-weight:500;">Grid</button>
-          <button class="inv-view-btn" data-view="list" style="font-size:12px;padding:5px 12px;border-radius:5px;border:none;background:transparent;color:var(--muted);cursor:pointer;font-family:inherit;">List</button>
+          <button class="inv-view-btn active" data-view="grid" style="font-size:16px;padding:5px 12px;border-radius:5px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-family:inherit;font-weight:500;">Grid</button>
+          <button class="inv-view-btn" data-view="list" style="font-size:16px;padding:5px 12px;border-radius:5px;border:none;background:transparent;color:var(--muted);cursor:pointer;font-family:inherit;">List</button>
         </div>
       </div>
       <div id="inv-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;"></div>
@@ -1664,19 +1664,19 @@ select.field-input { background: #fff; color: #0f172a; }
       <!-- Header -->
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;flex-wrap:wrap;gap:14px;">
         <div>
-          <div style="font-size:24px;font-weight:700;color:var(--text);letter-spacing:-0.02em;">Sales</div>
-          <div style="font-size:13px;color:var(--muted);margin-top:4px;" id="sales-sub">Connected to eBay</div>
+          <div style="font-size:34px;font-weight:700;color:var(--text);letter-spacing:-0.02em;">Sales</div>
+          <div style="font-size:15px;color:var(--muted);margin-top:4px;" id="sales-sub">Connected to eBay</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
           <div style="display:inline-flex;gap:2px;background:rgba(0,0,0,0.25);border:1px solid #1a2332;border-radius:9px;padding:3px;">
-            <button onclick="setSalesPeriod('day',this)" style="font-size:12px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">Day</button>
-            <button onclick="setSalesPeriod('week',this)" style="font-size:12px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">Week</button>
-            <button onclick="setSalesPeriod('month',this)" style="font-size:12px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:rgba(34,197,94,0.15);color:#4ade80;font-family:inherit;font-weight:500;">Month</button>
-            <button onclick="setSalesPeriod('3month',this)" style="font-size:12px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">3M</button>
-            <button onclick="setSalesPeriod('12month',this)" style="font-size:12px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">12M</button>
-            <button onclick="setSalesPeriod('all',this)" style="font-size:12px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">All</button>
+            <button onclick="setSalesPeriod('day',this)" style="font-size:16px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">Day</button>
+            <button onclick="setSalesPeriod('week',this)" style="font-size:16px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">Week</button>
+            <button onclick="setSalesPeriod('month',this)" style="font-size:16px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:rgba(34,197,94,0.15);color:#4ade80;font-family:inherit;font-weight:500;">Month</button>
+            <button onclick="setSalesPeriod('3month',this)" style="font-size:16px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">3M</button>
+            <button onclick="setSalesPeriod('12month',this)" style="font-size:16px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">12M</button>
+            <button onclick="setSalesPeriod('all',this)" style="font-size:16px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">All</button>
           </div>
-          <button onclick="pullEbayOrders()" id="pull-orders-btn" style="background:linear-gradient(135deg,#22c55e,#16a34a);color:white;padding:10px 18px;border-radius:8px;font-size:13px;font-weight:600;border:none;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:8px;box-shadow:0 4px 14px rgba(34,197,94,0.3);">
+          <button onclick="pullEbayOrders()" id="pull-orders-btn" style="background:linear-gradient(135deg,#22c55e,#16a34a);color:white;padding:10px 18px;border-radius:8px;font-size:15px;font-weight:600;border:none;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:8px;box-shadow:0 4px 14px rgba(34,197,94,0.3);">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.1"/></svg>
             Pull orders from eBay
           </button>
@@ -1685,29 +1685,29 @@ select.field-input { background: #fff; color: #0f172a; }
 
       <!-- Stats row -->
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:16px;">
-        <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:18px;position:relative;overflow:hidden;">
+        <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:22px;position:relative;overflow:hidden;">
           <div style="position:absolute;top:-30px;right:-30px;width:100px;height:100px;border-radius:50%;background:#22c55e;opacity:0.1;pointer-events:none;"></div>
-          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:6px;">Total revenue</div>
-          <div id="sales-stat-revenue" style="font-size:26px;font-weight:700;color:#4ade80;line-height:1;font-variant-numeric:tabular-nums;">$0</div>
-          <div id="sales-stat-revenue-sub" style="font-size:11px;color:var(--muted);margin-top:6px;">This month</div>
+          <div style="font-size:16px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:6px;">Total revenue</div>
+          <div id="sales-stat-revenue" style="font-size:32px;font-weight:700;color:#4ade80;line-height:1;font-variant-numeric:tabular-nums;">$0</div>
+          <div id="sales-stat-revenue-sub" style="font-size:15px;color:var(--muted);margin-top:6px;">This month</div>
         </div>
-        <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:18px;position:relative;overflow:hidden;">
+        <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:22px;position:relative;overflow:hidden;">
           <div style="position:absolute;top:-30px;right:-30px;width:100px;height:100px;border-radius:50%;background:#06b6d4;opacity:0.1;pointer-events:none;"></div>
-          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:6px;">Items sold</div>
-          <div id="sales-stat-sold" style="font-size:26px;font-weight:700;color:#22d3ee;line-height:1;">0</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:6px;">Across all platforms</div>
+          <div style="font-size:16px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:6px;">Items sold</div>
+          <div id="sales-stat-sold" style="font-size:32px;font-weight:700;color:#22d3ee;line-height:1;">0</div>
+          <div style="font-size:15px;color:var(--muted);margin-top:6px;">Across all platforms</div>
         </div>
-        <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:18px;position:relative;overflow:hidden;">
+        <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:22px;position:relative;overflow:hidden;">
           <div style="position:absolute;top:-30px;right:-30px;width:100px;height:100px;border-radius:50%;background:#a855f7;opacity:0.1;pointer-events:none;"></div>
-          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:6px;">Scheduled listings</div>
-          <div id="sales-stat-listed" style="font-size:26px;font-weight:700;color:#c084fc;line-height:1;">0</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:6px;">drafts ready to publish</div>
+          <div style="font-size:16px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:6px;">Scheduled listings</div>
+          <div id="sales-stat-listed" style="font-size:32px;font-weight:700;color:#c084fc;line-height:1;">0</div>
+          <div style="font-size:15px;color:var(--muted);margin-top:6px;">drafts ready to publish</div>
         </div>
-        <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:18px;position:relative;overflow:hidden;">
+        <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:22px;position:relative;overflow:hidden;">
           <div style="position:absolute;top:-30px;right:-30px;width:100px;height:100px;border-radius:50%;background:#fbbf24;opacity:0.1;pointer-events:none;"></div>
-          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:6px;">Avg sale price</div>
-          <div id="sales-stat-avg" style="font-size:26px;font-weight:700;color:#fbbf24;line-height:1;font-variant-numeric:tabular-nums;">$0</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:6px;">Per item</div>
+          <div style="font-size:16px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:6px;">Avg sale price</div>
+          <div id="sales-stat-avg" style="font-size:32px;font-weight:700;color:#fbbf24;line-height:1;font-variant-numeric:tabular-nums;">$0</div>
+          <div style="font-size:15px;color:var(--muted);margin-top:6px;">Per item</div>
         </div>
       </div>
 
@@ -1716,20 +1716,20 @@ select.field-input { background: #fff; color: #0f172a; }
 
       <!-- Sold orders (first/left) -->
       <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:14px;overflow:hidden;">
-        <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #111827;">
-          <span style="font-size:13px;font-weight:600;">Sold orders</span>
+        <div style="padding:20px 24px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #111827;">
+          <span style="font-size:15px;font-weight:600;">Sold orders</span>
           <div style="display:flex;align-items:center;gap:10px;">
-            <span id="sales-orders-count" style="font-size:11px;color:var(--muted);">0 orders</span>
-            <button onclick="pullEbayOrders()" style="font-size:11px;padding:5px 10px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:#4ade80;border-radius:6px;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:5px;">
+            <span id="sales-orders-count" style="font-size:15px;color:var(--muted);">0 orders</span>
+            <button onclick="pullEbayOrders()" style="font-size:15px;padding:5px 10px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:#4ade80;border-radius:6px;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:5px;">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.1"/></svg>
               Sync
             </button>
           </div>
         </div>
         <div id="sales-orders-list" style="padding:0;">
-          <div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;">
-            <div style="font-size:28px;margin-bottom:10px;">📦</div>
-            <div style="font-size:14px;font-weight:600;color:#94a3b8;margin-bottom:4px;">No orders yet</div>
+          <div style="padding:40px;text-align:center;color:var(--muted);font-size:15px;">
+            <div style="font-size:34px;margin-bottom:10px;">📦</div>
+            <div style="font-size:16px;font-weight:600;color:#94a3b8;margin-bottom:4px;">No orders yet</div>
             <div>Click "Pull orders from eBay" to sync your sold items.</div>
           </div>
         </div>
@@ -1737,15 +1737,15 @@ select.field-input { background: #fff; color: #0f172a; }
 
       <!-- Currently listed on eBay (second/right) -->
       <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:14px;overflow:hidden;">
-        <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #111827;">
-          <span style="font-size:13px;font-weight:600;">Scheduled listings</span>
+        <div style="padding:20px 24px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #111827;">
+          <span style="font-size:15px;font-weight:600;">Scheduled listings</span>
           <div style="display:flex;align-items:center;gap:10px;">
-            <a href="https://www.ebay.com/sh/lst/scheduled" target="_blank" style="font-size:11px;padding:5px 12px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:#4ade80;border-radius:6px;text-decoration:none;font-weight:600;">View on eBay ↗</a>
-            <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:#4ade80;font-weight:600;"><div style="width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 6px #22c55e;animation:sales-pulse 1.5s infinite;"></div>Live</span>
+            <a href="https://www.ebay.com/sh/lst/scheduled" target="_blank" style="font-size:15px;padding:5px 12px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:#4ade80;border-radius:6px;text-decoration:none;font-weight:600;">View on eBay ↗</a>
+            <span style="display:flex;align-items:center;gap:6px;font-size:15px;color:#4ade80;font-weight:600;"><div style="width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 6px #22c55e;animation:sales-pulse 1.5s infinite;"></div>Live</span>
           </div>
         </div>
         <div id="sales-listings-list" style="padding:0;">
-          <div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;">Loading listings...</div>
+          <div style="padding:40px;text-align:center;color:var(--muted);font-size:15px;">Loading listings...</div>
         </div>
       </div>
 
@@ -1759,12 +1759,12 @@ select.field-input { background: #fff; color: #0f172a; }
   <div class="tab-content" id="tab-messages">
     <div style="max-width:760px;margin:0 auto;">
       <div style="margin-bottom:18px;">
-        <div style="font-size:22px;font-weight:800;margin-bottom:4px;">💬 Support Chat</div>
-        <div style="font-size:13px;color:var(--muted);">Send us a message — we typically reply within a few hours.</div>
+        <div style="font-size:32px;font-weight:800;margin-bottom:4px;">💬 Support Chat</div>
+        <div style="font-size:15px;color:var(--muted);">Send us a message — we typically reply within a few hours.</div>
       </div>
       <div class="acct-card" style="padding:0;display:flex;flex-direction:column;height:calc(100vh - 220px);min-height:440px;">
-        <div id="user-thread-view" style="flex:1;background:var(--bg);padding:18px;overflow-y:auto;border-radius:12px 12px 0 0;border-bottom:1px solid var(--border);">
-          <div style="text-align:center;color:var(--muted);font-size:12px;padding:24px 0;">Loading...</div>
+        <div id="user-thread-view" style="flex:1;background:var(--bg);padding:22px;overflow-y:auto;border-radius:12px 12px 0 0;border-bottom:1px solid var(--border);">
+          <div style="text-align:center;color:var(--muted);font-size:16px;padding:24px 0;">Loading...</div>
         </div>
         <div style="display:flex;gap:8px;padding:12px;background:#0a0f18;border-radius:0 0 12px 12px;">
           <textarea class="acct-input" id="user-thread-input" rows="2" style="flex:1;resize:none;font-family:inherit;" placeholder="Type your message..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendUserThreadMessage();}"></textarea>
@@ -1809,7 +1809,7 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
       <div>
         <div class="field-label">eBay Description</div>
-        <textarea class="field-input" id="modal-desc-input" rows="4" oninput="modalDirty=true" style="resize:vertical;font-size:12px;line-height:1.5;"></textarea>
+        <textarea class="field-input" id="modal-desc-input" rows="4" oninput="modalDirty=true" style="resize:vertical;font-size:16px;line-height:1.5;"></textarea>
       </div>
       <button class="btn" onclick="pushToShopify()" id="modal-shopify-btn" style="background:#5a8e3b;color:#fff;border-color:#5a8e3b;width:100%;padding:11px;margin-top:8px;font-weight:700;">🛍️ Push to Shopify</button>
       <button class="modal-close" onclick="saveModal()">💾 Save & Close</button>
@@ -5440,8 +5440,8 @@ function updatePriceByCondition() {
 <div id="save-batch-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
   <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:24px;min-width:360px;max-width:90vw;">
     <div style="font-size:16px;font-weight:700;margin-bottom:16px;color:var(--text);">💾 Save Current Batch</div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Folder name</div>
-    <input id="save-batch-name" type="text" placeholder="e.g. Roller Auction 4-28" style="width:100%;padding:10px;background:var(--bg);border:1px solid #1a2332;border-radius:6px;color:var(--text);font-size:14px;margin-bottom:16px;" />
+    <div style="font-size:16px;color:var(--muted);margin-bottom:8px;">Folder name</div>
+    <input id="save-batch-name" type="text" placeholder="e.g. Roller Auction 4-28" style="width:100%;padding:10px;background:var(--bg);border:1px solid #1a2332;border-radius:6px;color:var(--text);font-size:16px;margin-bottom:16px;" />
     <div style="display:flex;gap:8px;justify-content:flex-end;">
       <button class="btn" onclick="closeSaveBatchModal()">Cancel</button>
       <button class="btn btn-primary" onclick="confirmSaveBatch()" id="save-batch-confirm-btn">Save</button>
@@ -5760,7 +5760,7 @@ async function reportBadScan(id) {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
       <div>
         <h2 style="margin:0;">Choose Your Plan</h2>
-        <div style="font-size:12px;color:var(--muted);margin-top:3px;">Switch anytime, no contracts</div>
+        <div style="font-size:16px;color:var(--muted);margin-top:3px;">Switch anytime, no contracts</div>
       </div>
       <button class="btn-sm" style="background:#0a0f18;color:#94a3b8;padding:6px 12px;" onclick="closePlansModal()">Close</button>
     </div>
@@ -5931,7 +5931,7 @@ function renderEbayModal() {
       return '<option value="' + c + '"' + sel + '>' + label + '</option>';
     }).join('');
 
-    html += '<div style="border-bottom:1px solid #0d1117;padding:18px 22px;">';
+    html += '<div style="border-bottom:1px solid #0d1117;padding:22px 22px;">';
     html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">';
     html += '<div style="width:8px;height:8px;border-radius:50%;background:' + statusColor + ';flex-shrink:0;"></div>';
     html += '<div style="flex:1;font-size:13px;font-weight:700;color:#f1f5f9;">Item ' + (i+1) + '</div>';
@@ -6166,7 +6166,7 @@ function renderSalesListings() {
     var photoHtml = it.photo_url
       ? '<img src="' + it.photo_url + '" style="width:48px;height:48px;object-fit:cover;border-radius:8px;flex-shrink:0;" />'
       : '<div style="width:48px;height:48px;border-radius:8px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px;">📷</div>';
-    return '<div style="display:flex;align-items:center;gap:12px;padding:10px 20px;border-bottom:1px solid #111827;">'
+    return '<div style="display:flex;align-items:center;gap:12px;padding:14px 24px;border-bottom:1px solid #111827;">'
       + photoHtml
       + '<div style="flex:1;min-width:0;">'
       +   '<div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(it.title||'Untitled') + '</div>'
@@ -6182,7 +6182,7 @@ function renderSalesListings() {
       + '</div>';
   }).join('');
   var toggleBtn = salesListingsAll.length > 3
-    ? '<div onclick="salesListingsExpanded=!salesListingsExpanded;renderSalesListings();" style="padding:10px 20px;text-align:center;font-size:12px;color:#4ade80;cursor:pointer;font-weight:600;border-top:1px solid #111827;">'
+    ? '<div onclick="salesListingsExpanded=!salesListingsExpanded;renderSalesListings();" style="padding:14px 24px;text-align:center;font-size:12px;color:#4ade80;cursor:pointer;font-weight:600;border-top:1px solid #111827;">'
       + (salesListingsExpanded ? '▲ Show less' : '▼ See all ' + salesListingsAll.length + ' listings')
       + '</div>'
     : '';
@@ -6212,7 +6212,7 @@ async function loadSalesListings() {
         var photoHtml = it.photo_url
           ? '<img src="' + it.photo_url + '" style="width:48px;height:48px;object-fit:cover;border-radius:8px;flex-shrink:0;" />'
           : '<div style="width:48px;height:48px;border-radius:8px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px;">📷</div>';
-        return '<div style="display:flex;align-items:center;gap:12px;padding:10px 20px;border-bottom:1px solid #111827;">'
+        return '<div style="display:flex;align-items:center;gap:12px;padding:14px 24px;border-bottom:1px solid #111827;">'
           + photoHtml
           + '<div style="flex:1;min-width:0;">'
           +   '<div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(it.title||'Untitled') + '</div>'
@@ -6227,7 +6227,7 @@ async function loadSalesListings() {
           + '</div>';
       }).join('');
       var toggleBtn = salesListingsAll.length > 3
-        ? '<div onclick="salesListingsExpanded=!salesListingsExpanded;renderSalesListings();" style="padding:10px 20px;text-align:center;font-size:12px;color:#4ade80;cursor:pointer;font-weight:600;border-top:1px solid #111827;">'
+        ? '<div onclick="salesListingsExpanded=!salesListingsExpanded;renderSalesListings();" style="padding:14px 24px;text-align:center;font-size:12px;color:#4ade80;cursor:pointer;font-weight:600;border-top:1px solid #111827;">'
           + (salesListingsExpanded ? '▲ Show less' : '▼ See all ' + salesListingsAll.length + ' listings')
           + '</div>'
         : '';
@@ -6266,7 +6266,7 @@ async function loadSalesOrders() {
     list.innerHTML = orders.map(function(o) {
       var date = o.created ? new Date(o.created).toLocaleDateString() : '';
       return (o.items||[]).map(function(item) {
-        return '<div style="display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid #111827;">'
+        return '<div style="display:flex;align-items:center;gap:14px;padding:20px 24px;border-bottom:1px solid #111827;">'
           + '<div style="width:64px;height:64px;border-radius:10px;background:rgba(168,85,247,0.08);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#a855f7;">📦</div>'
           + '<div style="flex:1;min-width:0;">'
           +   '<div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px;">' + escapeHtml(item.title||'Item') + '</div>'
@@ -6336,16 +6336,16 @@ window.addEventListener('load', function() {
 <div id="lot-cost-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
   <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:24px;min-width:380px;max-width:90vw;">
     <div style="font-size:16px;font-weight:600;margin-bottom:6px;">Add Lot Cost</div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:16px;" id="lot-cost-target">Splits across selected items</div>
-    <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;font-weight:600;">Total Cost ($)</div>
-    <input id="lot-cost-input" type="number" step="0.01" placeholder="50.00" style="width:100%;padding:10px;background:var(--bg);border:1px solid #1a2332;border-radius:6px;color:var(--text);font-size:14px;margin-bottom:14px;font-family:inherit;outline:none;"/>
-    <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;font-weight:600;">Distribution</div>
+    <div style="font-size:16px;color:var(--muted);margin-bottom:16px;" id="lot-cost-target">Splits across selected items</div>
+    <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;font-weight:600;">Total Cost ($)</div>
+    <input id="lot-cost-input" type="number" step="0.01" placeholder="50.00" style="width:100%;padding:10px;background:var(--bg);border:1px solid #1a2332;border-radius:6px;color:var(--text);font-size:16px;margin-bottom:14px;font-family:inherit;outline:none;"/>
+    <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;font-weight:600;">Distribution</div>
     <div style="display:flex;gap:6px;margin-bottom:18px;">
-      <label style="flex:1;display:flex;align-items:center;gap:6px;padding:10px;background:var(--bg);border:1px solid #1a2332;border-radius:6px;cursor:pointer;font-size:12px;">
+      <label style="flex:1;display:flex;align-items:center;gap:6px;padding:10px;background:var(--bg);border:1px solid #1a2332;border-radius:6px;cursor:pointer;font-size:16px;">
         <input type="radio" name="lot-method" value="even" checked style="margin:0;"/>
         Even split
       </label>
-      <label style="flex:1;display:flex;align-items:center;gap:6px;padding:10px;background:var(--bg);border:1px solid #1a2332;border-radius:6px;cursor:pointer;font-size:12px;">
+      <label style="flex:1;display:flex;align-items:center;gap:6px;padding:10px;background:var(--bg);border:1px solid #1a2332;border-radius:6px;cursor:pointer;font-size:16px;">
         <input type="radio" name="lot-method" value="weighted" style="margin:0;"/>
         By price
       </label>
@@ -6364,7 +6364,7 @@ window.addEventListener('load', function() {
       <img id="inv-edit-img" src="" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:14px 14px 0 0;background:#161925;cursor:zoom-in;" onclick="window.open(this.src)"/>
       <button onclick="closeInvEditModal()" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.6);border:none;color:#fff;width:32px;height:32px;border-radius:50%;font-size:18px;cursor:pointer;">×</button>
     </div>
-    <div style="padding:18px;">
+    <div style="padding:22px;">
       <div class="acct-field-label">Title</div>
       <input id="inv-edit-title" class="acct-input" style="margin-bottom:12px;"/>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
@@ -6393,7 +6393,7 @@ window.addEventListener('load', function() {
         </div>
       </div>
       <div id="inv-edit-sold-fields" style="display:none;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);border-radius:8px;padding:12px;margin-bottom:12px;">
-        <div style="font-size:11px;color:#f59e0b;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px;">Sold Details</div>
+        <div style="font-size:15px;color:#f59e0b;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px;">Sold Details</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
           <div>
             <div class="acct-field-label">Sold For</div>
@@ -6442,7 +6442,7 @@ window.addEventListener('load', function() {
 <div id="bulk-loc-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
   <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:22px;min-width:380px;max-width:90vw;">
     <div style="font-size:16px;font-weight:600;margin-bottom:6px;">Set Storage Location</div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:16px;" id="bulk-loc-target">Apply to selected items</div>
+    <div style="font-size:16px;color:var(--muted);margin-bottom:16px;" id="bulk-loc-target">Apply to selected items</div>
     <div class="acct-field-label">Location</div>
     <input id="bulk-loc-input" class="acct-input" list="inv-locations-list" placeholder="e.g. Garage Shelf A" style="margin-bottom:16px;"/>
     <div style="display:flex;gap:8px;justify-content:flex-end;">
@@ -6458,7 +6458,7 @@ window.addEventListener('load', function() {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
       <div>
         <div style="font-size:18px;font-weight:700;">Generate Barcodes</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:2px;" id="barcode-target">—</div>
+        <div style="font-size:16px;color:var(--muted);margin-top:2px;" id="barcode-target">—</div>
       </div>
       <button class="btn" onclick="closeBarcodeModal()">Close</button>
     </div>
@@ -6503,11 +6503,11 @@ window.addEventListener('load', function() {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
       <div>
         <div style="font-size:18px;font-weight:700;">Scan Barcode</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:2px;">Point camera at a QR code</div>
+        <div style="font-size:16px;color:var(--muted);margin-top:2px;">Point camera at a QR code</div>
       </div>
       <button class="btn" onclick="closeScanBarcodeModal()">Close</button>
     </div>
-    <div id="scan-status" style="background:var(--bg);border:1px solid #1a2332;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:var(--muted);text-align:center;">Starting camera...</div>
+    <div id="scan-status" style="background:var(--bg);border:1px solid #1a2332;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:16px;color:var(--muted);text-align:center;">Starting camera...</div>
     <div style="position:relative;background:#000;border-radius:10px;overflow:hidden;aspect-ratio:1;">
       <video id="scan-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;"></video>
       <canvas id="scan-canvas" style="display:none;"></canvas>
@@ -6526,12 +6526,12 @@ window.addEventListener('load', function() {
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
       <div>
         <div style="font-size:18px;font-weight:700;">Review Detected Items</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:2px;" id="multi-review-summary">—</div>
+        <div style="font-size:16px;color:var(--muted);margin-top:2px;" id="multi-review-summary">—</div>
       </div>
       <div style="display:flex;gap:6px;">
-        <button class="btn" style="font-size:12px;padding:7px 12px;" onclick="multiSelectAll()">Select all</button>
-        <button class="btn" style="font-size:12px;padding:7px 12px;" onclick="multiDeselectAll()">Deselect</button>
-        <button class="btn" onclick="closeMultiReview()" style="font-size:12px;padding:7px 12px;">Cancel</button>
+        <button class="btn" style="font-size:16px;padding:7px 12px;" onclick="multiSelectAll()">Select all</button>
+        <button class="btn" style="font-size:16px;padding:7px 12px;" onclick="multiDeselectAll()">Deselect</button>
+        <button class="btn" onclick="closeMultiReview()" style="font-size:16px;padding:7px 12px;">Cancel</button>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 320px;gap:16px;">
@@ -6540,19 +6540,19 @@ window.addEventListener('load', function() {
         <svg id="multi-review-svg" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" preserveAspectRatio="none"></svg>
       </div>
       <div style="background:var(--bg);border:1px solid #1a2332;border-radius:10px;padding:10px;max-height:60vh;overflow-y:auto;">
-        <div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Detected items</div>
+        <div style="font-size:15px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Detected items</div>
         <div id="multi-review-list"></div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:10px;margin-top:16px;flex-wrap:wrap;">
       <div style="display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid #1a2332;border-radius:7px;padding:5px 10px;">
-        <span style="font-size:11px;color:var(--muted);font-weight:600;">Condition:</span>
-        <select id="multi-review-condition" class="acct-input" style="width:auto;padding:3px 8px;font-size:12px;">
+        <span style="font-size:15px;color:var(--muted);font-weight:600;">Condition:</span>
+        <select id="multi-review-condition" class="acct-input" style="width:auto;padding:3px 8px;font-size:16px;">
           <option value="used">Used</option>
           <option value="new">New</option>
         </select>
       </div>
-      <button class="btn btn-primary" id="multi-submit-btn" onclick="submitMultiScan()" style="margin-left:auto;font-size:13px;padding:9px 18px;">Scan <span id="multi-submit-count">0</span> Items</button>
+      <button class="btn btn-primary" id="multi-submit-btn" onclick="submitMultiScan()" style="margin-left:auto;font-size:15px;padding:9px 18px;">Scan <span id="multi-submit-count">0</span> Items</button>
     </div>
   </div>
 </div>
@@ -6562,29 +6562,29 @@ window.addEventListener('load', function() {
   <div style="max-width:920px;margin:0 auto;background:#0d0f14;border-radius:14px;overflow:hidden;border:1px solid #0d1117;">
     <div style="background:#090b0f;padding:16px 22px;border-bottom:1px solid #0d1117;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
       <div style="display:flex;align-items:center;gap:12px;">
-        <div style="width:32px;height:32px;background:#0064D2;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:14px;">eB</div>
+        <div style="width:32px;height:32px;background:#0064D2;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px;">eB</div>
         <div>
           <div style="font-size:17px;font-weight:800;color:#f1f5f9;">eBay Draft Review</div>
-          <div id="ebay-modal-subtitle" style="font-size:11px;color:#4a6080;margin-top:1px;">Loading items...</div>
+          <div id="ebay-modal-subtitle" style="font-size:15px;color:#4a6080;margin-top:1px;">Loading items...</div>
         </div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <div style="display:flex;align-items:center;gap:6px;background:#0f1420;border:1px solid #0d1117;padding:6px 12px;border-radius:8px;">
-          <span style="font-size:11px;color:#4a6080;">Duration</span>
-          <select id="ebay-bulk-duration" style="background:transparent;border:none;color:#f1f5f9;font-size:11px;font-family:inherit;outline:none;cursor:pointer;">
+          <span style="font-size:15px;color:#4a6080;">Duration</span>
+          <select id="ebay-bulk-duration" style="background:transparent;border:none;color:#f1f5f9;font-size:15px;font-family:inherit;outline:none;cursor:pointer;">
             <option value="GTC">Good Till Cancelled</option>
             <option value="DAYS_7">7 Days</option>
             <option value="DAYS_30">30 Days</option>
           </select>
         </div>
-        <button onclick="closeEbayModal()" style="background:transparent;border:1px solid #0d1117;color:#4a6080;border-radius:8px;padding:8px 14px;font-size:12px;cursor:pointer;font-family:inherit;">Cancel</button>
-        <button onclick="submitEbayDrafts()" id="ebay-send-btn" style="background:#0064D2;border:none;color:#fff;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">Send Drafts</button>
+        <button onclick="closeEbayModal()" style="background:transparent;border:1px solid #0d1117;color:#4a6080;border-radius:8px;padding:8px 14px;font-size:16px;cursor:pointer;font-family:inherit;">Cancel</button>
+        <button onclick="submitEbayDrafts()" id="ebay-send-btn" style="background:#0064D2;border:none;color:#fff;border-radius:8px;padding:8px 16px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;">Send Drafts</button>
       </div>
     </div>
     <div id="ebay-modal-items" style="max-height:70vh;overflow-y:auto;"></div>
     <div style="padding:14px 22px;border-top:1px solid #0d1117;background:#090b0f;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-      <div style="font-size:12px;color:#4a6080;">Sent as drafts in eBay Seller Hub</div>
-      <button onclick="submitEbayDrafts()" style="background:#0064D2;border:none;color:#fff;border-radius:8px;padding:10px 20px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">Send Drafts to eBay</button>
+      <div style="font-size:16px;color:#4a6080;">Sent as drafts in eBay Seller Hub</div>
+      <button onclick="submitEbayDrafts()" style="background:#0064D2;border:none;color:#fff;border-radius:8px;padding:14px 24px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;">Send Drafts to eBay</button>
     </div>
   </div>
 </div>
