@@ -6144,6 +6144,36 @@ function initSalesPeriodBtns() {
   });
 }
 
+function renderSalesListings() {
+  var list = document.getElementById('sales-listings-list');
+  if (!list) return;
+  var visible = salesListingsExpanded ? salesListingsAll : salesListingsAll.slice(0, 3);
+  var rows = visible.map(function(it) {
+    var photoHtml = it.photo_url
+      ? '<img src="' + it.photo_url + '" style="width:48px;height:48px;object-fit:cover;border-radius:8px;flex-shrink:0;" />'
+      : '<div style="width:48px;height:48px;border-radius:8px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px;">📷</div>';
+    return '<div style="display:flex;align-items:center;gap:12px;padding:10px 20px;border-bottom:1px solid rgba(255,255,255,0.04);">'
+      + photoHtml
+      + '<div style="flex:1;min-width:0;">'
+      +   '<div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(it.title||'Untitled') + '</div>'
+      +   '<div style="font-size:10px;color:var(--muted);margin-top:2px;">'
+      +     (it.ebay_item_id ? 'ID: ' + it.ebay_item_id : '')
+      +   '</div>'
+      + '</div>'
+      + '<div style="text-align:right;flex-shrink:0;">'
+      +   '<div style="font-size:13px;font-weight:700;color:#4ade80;">$' + parseFloat(it.price||0).toFixed(2) + '</div>'
+      +   '<div style="font-size:10px;color:#3b82f6;font-weight:600;margin-top:2px;">Scheduled</div>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+  var toggleBtn = salesListingsAll.length > 3
+    ? '<div onclick="salesListingsExpanded=!salesListingsExpanded;renderSalesListings();" style="padding:10px 20px;text-align:center;font-size:12px;color:#4ade80;cursor:pointer;font-weight:600;border-top:1px solid rgba(255,255,255,0.04);">'
+      + (salesListingsExpanded ? '▲ Show less' : '▼ See all ' + salesListingsAll.length + ' listings')
+      + '</div>'
+    : '';
+  list.innerHTML = rows + toggleBtn;
+}
+
 var salesListingsAll = [];
 var salesListingsExpanded = false;
 async function loadSalesListings() {
