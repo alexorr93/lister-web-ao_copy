@@ -5196,3 +5196,22 @@ async def export_expenses(request: Request, period: str = "month", fmt: str = "c
     except Exception as e:
         raise HTTPException(500, str(e))
 
+
+@app.post("/api/robo/chat")
+async def robo_chat(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Not authenticated")
+    try:
+        body = await request.json()
+        message = body.get("message", "")
+        import google.generativeai as genai
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        model = genai.GenerativeModel("gemini-2.0-flash")
+        system = """You are Robo, an AI assistant built into RoboReseller — a reselling business management app. 
+You help users with: pricing items, writing eBay listings, identifying products, reselling strategies, 
+understanding their inventory, and using the app. Be concise, practical, and friendly. No markdown formatting."""
+        response = model.generate_content(system + "\n\nUser: " + message)
+        return {"ok": True, "reply": response.text}
+    except Exception as e:
+        raise HTTPException(500, str(e))
