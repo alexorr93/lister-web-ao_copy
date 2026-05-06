@@ -5492,6 +5492,7 @@ async def scan_auction_url(request: Request):
         text = ""
         # ── Bidspotter ──
         if "bidspotter.com" in url:
+            print(f"[DEBUG] Bidspotter URL detected: {url}")
             # Extract catalogue path and fetch lots via JSON API
             # URL pattern: /auction-catalogues/{seller}/catalogue-id-{id}/...
             import re as _re
@@ -5500,6 +5501,7 @@ async def scan_auction_url(request: Request):
                 seller, cat_id = m.group(1), m.group(2)
                 # Use Apify actor to scrape Bidspotter
                 apify_key = os.getenv("APIFY_API_KEY", "")
+                print(f"[DEBUG] Apify key present: {bool(apify_key)}")
                 if apify_key:
                     try:
                         import json as _json, time as _time
