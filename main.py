@@ -5314,3 +5314,113 @@ async def robo_chat(request: Request):
     except Exception as e:
         print(f"[Robo chat error] {type(e).__name__}: {e}")
         return {"ok": True, "reply": "I'm having trouble connecting right now. Try again in a moment."}
+
+
+# ── URL AUCTION SCANNER ────────────────────────────────────────── #
+from fastapi.responses import JSONResponse
+
+@app.post("/api/auction/scan")
+async def scan_auction_url(request: Request):
+    """
+    Fetch an auction page URL, extract text, run Gemini lot extraction,
+    return items in same format the frontend expects.
+    """
+    import os, json, re, uuid
+    import google.generativeai as genai
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "Invalid JSON")
+    url = body.get("url", "").strip()
+    if not url:
+        raise HTTPException(400, "url required")
+
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    if not gemini_key:
+        raise HTTPException(400, "GEMINI_API_KEY not set")
+
+    # Fetch page
+    try:
+        import urllib.request
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,*/*",
+        })
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+    except Exception as e:
+        raise HTTPException(502, f"Could not fetch URL: {e}")
+
+    # Strip HTML to text
+    text = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL)
+    text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL)
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    text = text[:12000]  # cap for Gemini
+
+    # Run Gemini lot extraction
+    genai.configure(api_key=gemini_key)
+    model = genai.GenerativeModel("gemini-2.5-flash")
+
+    prompt = """You are an auction catalog parser. Extract every lot from this auction page.
+
+For each lot return a JSON object:
+- lot: lot number as string
+- title: full item title
+- description: one sentence description
+- estimate_low: integer dollar estimate (low)
+- estimate_high: integer dollar estimate (high)
+- your_value: integer best estimate of resale value
+- image_url: image URL if found in the text, otherwise null
+
+Return ONLY a JSON array. No markdown. If no lots found return [].
+
+Example: [{"lot":"5","title":"Sony Headphones","description":"Wireless noise canceling","estimate_low":80,"estimate_high":150,"your_value":100,"image_url":null}]"""
+
+    try:
+        response = model.generate_content(
+            [prompt, f"\nAUCTION PAGE TEXT:\n{text}"],
+            generation_config={"max_output_tokens": 8000}
+        )
+        raw = response.text.strip()
+        if "```" in raw:
+            raw = raw.split("```")[1]
+            if raw.startswith("json"): raw = raw[4:]
+            raw = raw.strip()
+        start = raw.find("[")
+        end = raw.rfind("]") + 1
+        if start >= 0 and end > start:
+            raw = raw[start:end]
+        items = json.loads(raw)
+    except Exception as e:
+        print(f"URL scan Gemini error: {e}")
+        items = []
+
+    # Save session to Supabase
+    session_id = str(uuid.uuid4())[:8]
+    try:
+        supabase.table("auction_research_sessions").insert({
+            "share_id": session_id,
+            "title": url.split("/")[-1][:60] or "URL Scan",
+            "items": items,
+            "results": {}
+        }).execute()
+    except Exception as e:
+        print(f"Session save error: {e}")
+
+    return {"session_id": session_id, "items": items, "total": len(items)}
+
+
+@app.get("/api/auction/items/{session_id}")
+async def get_auction_items(session_id: str):
+    """Poll endpoint — returns items for a session."""
+    try:
+        row = supabase.table("auction_research_sessions") \
+            .select("items") \
+            .eq("share_id", session_id) \
+            .single().execute()
+        if row.data:
+            return row.data.get("items", [])
+        return []
+    except Exception:
+        return []
