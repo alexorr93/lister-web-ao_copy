@@ -181,6 +181,7 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
   #home-bottom-tiles { grid-template-columns: 1fr !important; }
   #home-stats-row { grid-template-columns: 1fr !important; }
   #home-stats-row > div:last-child { grid-column: 1 / -1 !important; }
+  #scan-view-grid, #scan-view-list { display: none !important; }
   .home-hero-btns { margin-left: 0 !important; flex-wrap: wrap !important; width: 100% !important; }
   .home-hero-btns > div { flex: 1 1 calc(50% - 5px) !important; justify-content: center !important; min-width: 120px !important; }
   .upload-grid { grid-template-columns: 1fr !important; }
@@ -2329,6 +2330,7 @@ function closeRoboChat() {
 let scanView = localStorage.getItem("rr_scan_view") || "grid";
 
 function setScanView(v) {
+  if (window.innerWidth < 769) { v = "grid"; }
   scanView = v;
   localStorage.setItem("rr_scan_view", v);
   document.getElementById("scan-view-grid").style.background = v === "grid" ? "var(--accent)" : "transparent";
