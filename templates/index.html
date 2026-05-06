@@ -2357,10 +2357,19 @@ async function loadListings() {
 
 var roboHistory = [];
 function openRoboChat() {
-  var o = document.getElementById("robo-chat-overlay");
-  if (o) { o.style.display = "flex"; setTimeout(function(){ var i = document.getElementById("robo-chat-input"); if(i) i.focus(); }, 100); }
+  if (window.innerWidth <= 768) {
+    if (typeof switchMobileTab === 'function') switchMobileTab('robo');
+    setTimeout(function(){ var i=document.getElementById("robo-tab-input"); if(i) i.focus(); }, 200);
+  } else {
+    var o = document.getElementById("robo-chat-overlay");
+    if (o) { o.style.display = "flex"; setTimeout(function(){ var i = document.getElementById("robo-chat-input"); if(i) i.focus(); }, 100); }
+  }
 }
 function closeRoboChat() {
+  if (window.innerWidth <= 768) {
+    if (typeof switchMobileTab === 'function') switchMobileTab('home');
+    return;
+  }
   var o = document.getElementById("robo-chat-overlay");
   if (o) o.style.display = "none";
 }
