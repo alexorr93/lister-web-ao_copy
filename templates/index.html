@@ -1186,6 +1186,18 @@ select.field-input { background: #fff; color: #0f172a; }
         <div style="display:flex;justify-content:flex-end;margin-top:12px;">
           <button class="btn btn-primary" style="padding:7px 18px;font-size:15px;" onclick="saveAccountInfo()">Save</button>
         </div>
+
+      <!-- Change password -->
+      <div class="acct-card" style="margin-bottom:14px;">
+        <div class="acct-card-header" style="margin-bottom:12px;">
+          <div class="acct-card-title">Change Password</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div><div class="acct-field-label">New Password</div><input type="password" class="acct-input" id="acct-new-password" placeholder="Min 8 characters" style="width:100%;"/></div>
+          <div><div class="acct-field-label">Confirm Password</div><input type="password" class="acct-input" id="acct-confirm-password" placeholder="Repeat new password" style="width:100%;"/></div>
+          <div style="display:flex;justify-content:flex-end;"><button class="btn btn-primary" style="padding:7px 18px;" onclick="changePassword()">Update Password</button></div>
+        </div>
+      </div>
       </div>
 
       <!-- Cost tracking toggle -->
@@ -1234,34 +1246,6 @@ select.field-input { background: #fff; color: #0f172a; }
         </div>
       </div>
 
-      <!-- API keys (collapsible) -->
-      <details class="acct-card" style="margin-bottom:14px;">
-        <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;">
-          <div>
-            <div class="acct-card-title">API Keys & Integrations</div>
-            <div style="font-size:15px;color:var(--muted);margin-top:1px;">Gemini AI, eBay credentials</div>
-          </div>
-          <span style="color:var(--muted);font-size:16px;">▾</span>
-        </summary>
-        <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
-          <div class="acct-field-label">🤖 Google Gemini API Key</div>
-          <div style="display:flex;gap:6px;">
-            <input type="password" class="acct-input" id="set-gemini" placeholder="AIza..." style="flex:1;"/>
-            <button class="btn btn-primary" style="padding:7px 14px;font-size:16px;white-space:nowrap;" onclick="saveSetting('GEMINI_API_KEY','set-gemini')">Save</button>
-          </div>
-          <div style="font-size:15px;color:var(--muted);margin-top:4px;margin-bottom:14px;">Used for AI scanning and value research.</div>
-
-          <div class="acct-field-label" style="margin-top:8px;">🏷️ eBay API Credentials</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-            <input type="text" class="acct-input" id="set-ebay-app" placeholder="App ID"/>
-            <input type="text" class="acct-input" id="set-ebay-dev" placeholder="Dev ID"/>
-            <input type="password" class="acct-input" id="set-ebay-cert" placeholder="Cert ID"/>
-            <input type="password" class="acct-input" id="set-ebay-token" placeholder="User Token"/>
-          </div>
-          <button class="btn btn-primary" style="width:100%;padding:8px;font-size:16px;" onclick="saveEbaySettings()">Save eBay Credentials</button>
-          <div style="font-size:15px;color:var(--muted);margin-top:4px;">Find at developer.ebay.com</div>
-        </div>
-      </details>
 
     </div>
   </div>
