@@ -6862,8 +6862,8 @@ window.addEventListener('load', function() {
       var d = await r.json();
       botDiv.style.color = '#e2e8f0';
       var rply = d.reply || 'Could not analyze image.';
-      var ps = rply.split(/
-+/).filter(function(p){return p.trim();});
+      var ps = rply.split(/\n+/).filter(function(p){return p.trim();});
+      botDiv.style.color = '#4ade80';
       botDiv.innerHTML = ps.map(function(p){return '<p style="margin:0 0 8px;line-height:1.5;">'+p.trim()+'</p>';}).join('');
     } catch(err) { botDiv.textContent = 'Error analyzing image.'; }
     messages.scrollTop = messages.scrollHeight;
