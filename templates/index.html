@@ -549,13 +549,12 @@ select.field-input { background: #fff; color: #0f172a; }
   </div>
 
 
-<!-- MOBILE BOTTOM TAB BAR -->
-
+<!-- tabbar moved to body level via JS -->
 <!-- Saved batches dropdown — global, works from desktop + mobile -->
-<div id="saved-batches-dropdown" style="display:none;position:fixed;bottom:70px;left:12px;right:12px;background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:4px;z-index:1000;box-shadow:0 8px 32px rgba(0,0,0,0.7);">
+<div id="saved-batches-dropdown" style="display:none;position:fixed;bottom:70px;left:12px;right:12px;background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:4px;z-index:10001;box-shadow:0 8px 32px rgba(0,0,0,0.7);">
   <div id="saved-batches-dd-list" style="max-height:280px;overflow-y:auto;"></div>
 </div>
-<div class="mobile-tabbar">
+<div class="mobile-tabbar" id="mobile-tabbar-placeholder">
   <div class="mobile-tabbar-inner" id="mobile-tabbar-inner">
     <!-- rendered by JS -->
   </div>
@@ -5653,6 +5652,10 @@ function closeMobileTabEditor() {
 
 // Init on page load
 document.addEventListener('DOMContentLoaded', function() {
+  // Move mobile tabbar to body level so position:fixed works correctly
+  var tabbar = document.querySelector('.mobile-tabbar');
+  if (tabbar) document.body.appendChild(tabbar);
+
   // Handle browser back/forward button
   window.addEventListener('popstate', function(e) {
     var tab = (e.state && e.state.tab) || (location.hash ? location.hash.slice(1) : null);
