@@ -2347,36 +2347,37 @@ function renderTileRow(l, idx) {
   const isNew = cond === "new";
   const refs = [l.price_used > 0 ? "U:$"+l.price_used.toFixed(0) : "", l.price_new > 0 ? "N:$"+l.price_new.toFixed(0) : ""].filter(Boolean).join("  ");
   const firstThumb = (l.all_photos || (l.thumb_url ? [{thumb:l.thumb_url}] : []))[0]?.thumb || "";
-  const photoHtml = firstThumb ? `<img src="${firstThumb}" style="width:100%;height:100%;object-fit:cover;border-radius:8px 0 0 8px;" loading="lazy"/>` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#334155;font-size:20px;">📷</div>`;
+  const photoHtml = firstThumb ? `<img src="${firstThumb}" style="width:100%;height:100%;object-fit:cover;" loading="lazy"/>` : `<div style="width:100%;height:100%;min-height:100px;display:flex;align-items:center;justify-content:center;color:#1e293b;font-size:24px;">📷</div>`;
   const checkmark = isSel
-    ? `<div class="tile-checkmark" onclick="event.stopPropagation();toggleSelect('${l.id}');" style="width:20px;height:20px;background:var(--accent);border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;"><span style="color:#fff;font-size:12px;font-weight:700;">✓</span></div>`
-    : `<div class="tile-checkmark" onclick="event.stopPropagation();toggleSelect('${l.id}');" style="width:20px;height:20px;background:rgba(15,17,23,0.7);border:1.5px solid #4b5563;border-radius:4px;cursor:pointer;flex-shrink:0;"></div>`;
-  return `<div class="tile${isSel?" selected":""}" id="tile-${l.id}" data-photos='${JSON.stringify(l.all_photos||[])}' data-photo-idx="0" style="position:relative;display:flex;align-items:stretch;background:#0d1117;border:1px solid ${isSel?"#4ade80":"#1a2332"};border-radius:10px;overflow:hidden;margin-bottom:6px;">
-    <div style="width:90px;min-height:80px;flex-shrink:0;position:relative;cursor:pointer;" onclick="openModal('${l.id}')">${photoHtml}</div>
-    <div style="flex:1;padding:10px 12px;min-width:0;">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-        <span style="font-size:10px;color:#475569;font-family:monospace;">#${idx+1}</span>
-        ${checkmark}
-        <input class="tile-title-input" type="text" value="${(l.title||"").replace(/"/g,"&quot;")}" data-id="${l.id}" style="flex:1;background:transparent;border:none;color:#e2e8f0;font-size:13px;font-weight:600;font-family:inherit;outline:none;padding:0;"/>
+    ? `<div class="tile-checkmark" onclick="event.stopPropagation();toggleSelect('${l.id}');" style="width:20px;height:20px;background:#2563eb;border-radius:5px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;"><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><polyline points="2,5 4.5,7.5 8,3" stroke="#fff" stroke-width="1.5"/></svg></div>`
+    : `<div class="tile-checkmark" onclick="event.stopPropagation();toggleSelect('${l.id}');" style="width:20px;height:20px;background:rgba(15,17,23,0.7);border:1.5px solid #334155;border-radius:5px;cursor:pointer;flex-shrink:0;"></div>`;
+  const verified = l.sold_count > 0 ? `<span style="display:inline-flex;align-items:center;gap:3px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.25);color:#4ade80;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;">✓ Verified</span>` : "";
+  const priceRef = refs ? `<span style="font-size:11px;color:#475569;white-space:nowrap;">${refs}</span>` : "";
+  const titleVal = (l.title||"").replace(/"/g,"&quot;");
+  const tid = l.id;
+  return `<div class="tile${isSel?" selected":""}" id="tile-${tid}" data-photos='${JSON.stringify(l.all_photos||[])}' data-photo-idx="0" style="display:flex;align-items:stretch;background:#0d1117;border:1px solid ${isSel?"#4ade80":"#1a2332"};border-radius:10px;overflow:hidden;margin-bottom:6px;">
+    <div style="width:110px;flex-shrink:0;position:relative;cursor:pointer;background:#060810;" onclick="openModal('${tid}')">${photoHtml}<div style="position:absolute;top:6px;left:6px;background:rgba(0,0,0,0.5);color:#475569;font-size:10px;padding:1px 5px;border-radius:3px;font-family:monospace;">#${idx+1}</div><div style="position:absolute;top:6px;right:6px;">${checkmark}</div></div>
+    <div style="flex:1;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0;">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <input class="tile-title-input" type="text" value="${titleVal}" data-id="${tid}" style="flex:1;min-width:200px;background:transparent;border:none;color:#e2e8f0;font-size:15px;font-weight:700;font-family:inherit;outline:none;padding:0;"/>
+        ${verified}${priceRef}
       </div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-        <div class="tile-search-btns" style="display:flex;gap:4px;">
-          <button class="tile-search-btn" onclick="window.open('https://www.google.com/search?q='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value),'popupwin','noopener,width=1200,height=800')">Google</button>
-          <button class="tile-search-btn" onclick="window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value)+'&LH_Sold=1&LH_Complete=1','popupwin','noopener,width=1200,height=800')">eBay Sold</button>
+        <button style="font-size:12px;padding:6px 12px;border-radius:6px;border:1px solid #1a2332;background:#0a0f18;color:#4285F4;cursor:pointer;font-family:inherit;font-weight:700;" onclick="window.open('https://www.google.com/search?q='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${tid}&quot;]').value),'popupwin','noopener,width=1200,height=800')">G Google</button>
+        <button style="font-size:12px;padding:6px 12px;border-radius:6px;border:1px solid #1a2332;background:#0a0f18;cursor:pointer;font-family:inherit;font-weight:700;" onclick="window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${tid}&quot;]').value)+'&LH_Sold=1&LH_Complete=1','popupwin','noopener,width=1200,height=800')"><span style="color:#e53238;">e</span><span style="color:#0064d2;">B</span><span style="color:#f5af02;">a</span><span style="color:#86b817;">y</span> <span style="color:#94a3b8;">Sold</span></button>
+        <span style="color:#475569;font-size:13px;">$</span>
+        <input class="tile-price-input" type="number" step="0.01" value="${l.price.toFixed(2)}" data-id="${tid}" style="width:80px;background:#060810;border:1px solid #1a2332;border-radius:6px;color:#f0fdf4;font-size:15px;font-weight:700;font-family:inherit;outline:none;padding:6px 8px;">
+        <div style="display:flex;border-radius:6px;overflow:hidden;border:1px solid #1a2332;">
+          <button class="tile-cond-btn${isNew?"":" active"}" data-id="${tid}" data-cond="used" style="font-size:12px;padding:6px 12px;border:none;cursor:pointer;font-family:inherit;font-weight:600;background:${isNew?"transparent":"rgba(59,130,246,0.15)"};color:${isNew?"#334155":"#60a5fa"};">Used</button>
+          <button class="tile-cond-btn${isNew?" active":""}" data-id="${tid}" data-cond="new" style="font-size:12px;padding:6px 12px;border:none;cursor:pointer;font-family:inherit;font-weight:600;background:${isNew?"rgba(74,222,128,0.15)":"transparent"};color:${isNew?"#4ade80":"#334155"};">New</button>
         </div>
-        <span style="color:#475569;font-size:12px;">$</span>
-        <input class="tile-price-input" type="number" step="0.01" value="${l.price.toFixed(2)}" data-id="${l.id}" style="width:70px;background:#060810;border:1px solid #1a2332;border-radius:5px;color:#f0fdf4;font-size:13px;font-weight:700;font-family:inherit;outline:none;padding:3px 6px;">
-        <div class="tile-cond-toggle">
-          <button class="tile-cond-btn${isNew?"":" active"}" data-id="${l.id}" data-cond="used">Used</button>
-          <button class="tile-cond-btn${isNew?" active":""}" data-id="${l.id}" data-cond="new">New</button>
+        <div style="display:flex;align-items:center;background:#060810;border:1px solid #1a2332;border-radius:6px;overflow:hidden;">
+          <button style="width:28px;height:32px;background:transparent;border:none;color:#ef4444;cursor:pointer;font-size:18px;font-weight:900;display:flex;align-items:center;justify-content:center;" onclick="changeQty('${tid}',-1)">−</button>
+          <div class="qty-num" id="qty-${tid}" style="font-size:14px;font-weight:700;color:#e2e8f0;min-width:24px;text-align:center;">${qty}</div>
+          <button style="width:28px;height:32px;background:transparent;border:none;color:#4ade80;cursor:pointer;font-size:18px;font-weight:900;display:flex;align-items:center;justify-content:center;" onclick="changeQty('${tid}',1)">+</button>
         </div>
-        <div style="display:flex;align-items:center;gap:3px;background:#060810;border:1px solid #1a2332;border-radius:5px;padding:1px 3px;">
-          <button class="qty-btn minus" onclick="changeQty('${l.id}',-1)">−</button>
-          <div class="qty-num" id="qty-${l.id}">${qty}</div>
-          <button class="qty-btn plus" onclick="changeQty('${l.id}',1)">+</button>
-        </div>
-        <button class="tile-rescan" onclick="rescanItem('${l.id}')" style="margin-left:auto;">↺ Rescan</button>
-        <button class="tile-rescan" style="color:#f59e0b;border-color:#92400e;" onclick="reportBadScan('${l.id}')">⚠</button>
+        <button class="tile-rescan" onclick="rescanItem('${tid}')" style="margin-left:auto;font-size:12px;font-weight:700;padding:6px 12px;border-radius:6px;border:1px solid #1e3a2e;background:transparent;color:#4ade80;cursor:pointer;font-family:inherit;">↺ Rescan</button>
+        <button style="font-size:14px;padding:5px 9px;border-radius:6px;border:1px solid #92400e;background:rgba(245,158,11,0.08);color:#f59e0b;cursor:pointer;" onclick="reportBadScan('${tid}')">⚠</button>
       </div>
     </div>
   </div>`;
