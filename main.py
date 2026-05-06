@@ -2428,10 +2428,11 @@ Return ONLY valid JSON, no markdown:
 pricing_tier values: SOLD_COMPS | ASKING_PRICES | MSRP_ONLY | COMPARABLE_ITEMS | NO_DATA
 weight fields: use null if truly unknown"""
 
-        # Use Gemini with search grounding if available
+        # Use Gemini with search grounding if available — retry on 503
         try:
             from google import genai as _gc
             from google.genai import types as _gt
+            import time as _time
             _client = _gc.Client(api_key=gemini_key)
             _parts = [prompt]
             for img_bytes in images[:2]:
@@ -2440,11 +2441,23 @@ weight fields: use null if truly unknown"""
                 tools=[_gt.Tool(google_search=_gt.GoogleSearch())],
                 max_output_tokens=1500
             )
-            _resp = _client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=_parts,
-                config=_cfg
-            )
+            _resp = None
+            for _model_try, _delay in [("gemini-2.5-flash", 0), ("gemini-2.5-flash", 3), ("gemini-2.0-flash", 2)]:
+                if _delay:
+                    _time.sleep(_delay)
+                try:
+                    _resp = _client.models.generate_content(
+                        model=_model_try,
+                        contents=_parts,
+                        config=_cfg
+                    )
+                    print(f"   Gemini ok: {_model_try}")
+                    break
+                except Exception as _retry_err:
+                    print(f"   Gemini {_model_try} failed: {_retry_err}, retrying...")
+                    continue
+            if _resp is None:
+                raise Exception("All Gemini models unavailable")
             response = _resp
             # Extract grounding from new SDK response
             try:
