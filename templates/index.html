@@ -862,12 +862,17 @@ select.field-input { background: #fff; color: #0f172a; }
           <option value="profit_desc">Profit h→l</option>
           <option value="profit_asc">Profit l→h</option>
         </select>
-        <button class="btn" style="font-size:15px;padding:5px 10px;" onclick="selectAll()">Select all</button>
-        <button class="btn" style="font-size:15px;padding:5px 10px;" onclick="deselectAll()">Deselect</button>
-        <button class="btn" style="font-size:15px;padding:5px 10px;" onclick="openLotCostModal()" id="lot-cost-btn">Lot Cost</button>
-        <button class="btn" style="font-size:15px;padding:5px 10px;background:#1a3a1a;border-color:#2d5a2d;color:#86efac;font-weight:700;" onclick="openSaveBatchModal()">Save Batch</button>
-        <button class="btn btn-danger" id="bulk-delete-btn" style="font-size:15px;padding:5px 10px;display:none;" onclick="bulkDeleteSelected()">Delete selected</button>
-        <button class="btn btn-danger" id="bulk-delete-btn" style="font-size:15px;padding:5px 10px;display:none;" onclick="bulkDeleteSelected()">Delete selected</button>
+        <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="selectAll()">Select all</button>
+        <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="deselectAll()">Deselect</button>
+        <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="openLotCostModal()" id="lot-cost-btn">Lot Cost</button>
+        <button class="btn" style="font-size:16px;padding:8px 14px;background:#1a3a1a;border-color:#2d5a2d;color:#86efac;font-weight:700;" onclick="openSaveBatchModal()">Save Batch</button>
+        <div style="position:relative;">
+          <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="toggleSavedBatchesDropdown()">📂 Saved</button>
+          <div id="saved-batches-dropdown" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;background:#0a0f18;border:1px solid #1a2332;border-radius:8px;padding:4px;min-width:220px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,0.5);" id="saved-batches-dd">
+            <div id="saved-batches-dd-list" style="max-height:240px;overflow-y:auto;"></div>
+          </div>
+        </div>
+        <button class="btn btn-danger" id="bulk-delete-btn" style="font-size:16px;padding:8px 14px;display:none;" onclick="bulkDeleteSelected()">Delete selected</button>
         <div style="position:relative;" id="submit-dropdown-wrap">
           <button class="btn btn-primary" id="submit-batch-btn" style="font-size:16px;padding:7px 14px;display:none;" onclick="toggleSubmitDropdown()">Submit (<span id="submit-count">0</span>) ▾</button>
           <div id="submit-dropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:4px;background:#0a0f18;border:1px solid #1a2332;border-radius:8px;padding:4px;min-width:180px;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,0.4);">
@@ -2514,6 +2519,46 @@ function toggleSelect(id) {
   updateSubmitBtn();
 }
 function selectAll()   { listings.forEach(l => selected.add(l.id)); renderTiles(); }
+function toggleSavedBatchesDropdown() {
+  var dd = document.getElementById('saved-batches-dropdown');
+  if (!dd) return;
+  if (dd.style.display === 'none') {
+    dd.style.display = 'block';
+    loadSavedBatchesDropdown();
+    // Close on outside click
+    setTimeout(function() {
+      document.addEventListener('click', function closeDd(e) {
+        if (!dd.contains(e.target)) { dd.style.display = 'none'; document.removeEventListener('click', closeDd); }
+      });
+    }, 10);
+  } else {
+    dd.style.display = 'none';
+  }
+}
+
+async function loadSavedBatchesDropdown() {
+  var list = document.getElementById('saved-batches-dd-list');
+  if (!list) return;
+  list.innerHTML = '<div style="padding:10px 12px;font-size:13px;color:#475569;">Loading...</div>';
+  try {
+    var r = await fetch('/api/saved-batches', {credentials:'include'});
+    var d = await r.json();
+    var batches = d.batches || [];
+    if (!batches.length) {
+      list.innerHTML = '<div style="padding:10px 12px;font-size:13px;color:#475569;">No saved batches yet</div>';
+      return;
+    }
+    list.innerHTML = batches.map(function(b) {
+      return '<div onclick="loadBatch(''+b.id+'');document.getElementById('saved-batches-dropdown').style.display='none';" style="display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;border-radius:6px;font-size:14px;" onmouseover="this.style.background='#0d1117'" onmouseout="this.style.background='transparent'">'
+        + '<span style="flex:1;color:#e2e8f0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (b.name||'Untitled') + '</span>'
+        + '<span style="font-size:12px;color:#475569;">' + (b.item_count||0) + ' items</span>'
+        + '</div>';
+    }).join('');
+  } catch(e) {
+    list.innerHTML = '<div style="padding:10px 12px;font-size:13px;color:#ef4444;">Failed to load</div>';
+  }
+}
+
 async function bulkDeleteSelected() {
   if (!selected.size) return;
   if (!confirm('Delete ' + selected.size + ' selected item(s)? This cannot be undone.')) return;
