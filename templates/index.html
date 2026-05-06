@@ -7292,7 +7292,7 @@ async function handleRoboImageTab(input) {
     appendRoboTabMessage('user', '[Photo sent]');
     var botDiv = appendRoboTabMessage('bot', 'Analyzing photo...');
     try {
-      var r = await fetch('/api/robo/vision', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({image: b64, history: roboTabHistory})});
+      var r = await fetch('/api/robo/chat', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({message: 'Please identify this item and suggest a price for resale on eBay.', image: b64, image_mime: file.type, history: roboTabHistory})});
       var d = await r.json();
       var reply = d.reply || 'Could not analyze image.';
       if (botDiv) {
