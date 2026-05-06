@@ -2152,7 +2152,17 @@ Respond ONLY in valid JSON format, no markdown:
         t = ' '.join(t.split()).strip().strip(',.').strip()
         words = t.split()
         if len(words) > 6:
-            t = ' '.join(words[:6])
+            # Check if there's a model number beyond word 6 — preserve it
+            import re as _re
+            remaining = words[6:]
+            model_words = []
+            for w in remaining:
+                # Keep words that look like model numbers (contain digits)
+                if _re.search(r'\d', w) or w.lower() in ('model', 'mod', 'no', 'no.', '#'):
+                    model_words.append(w)
+                else:
+                    break
+            t = ' '.join(words[:6] + model_words)
         return t
 
     def gemini_search_grounding(query, gemini_key):
