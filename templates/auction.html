@@ -595,7 +595,7 @@ async function startUrlScan() {
         var ir = await fetch('/api/auction/items/'+sessionId);
         var items = await ir.json();
         if (items && items.length) document.getElementById('url-status').textContent = 'Found '+items.length+' items...';
-        if ((items && items.length > 0) || polls > 15) {
+        if ((items && items.length > 0) || polls > 40) {
           clearInterval(pollInterval);
           if (!items || !items.length) {
             document.getElementById('url-progress').style.display='none';
@@ -621,7 +621,7 @@ async function startUrlScan() {
           }, 800);
         }
       } catch(e) { console.error(e); }
-    }, 3000);
+    }, 4000);
   } catch(e) { alert('Error: '+e.message); document.getElementById('url-progress').style.display='none'; }
 }
 
