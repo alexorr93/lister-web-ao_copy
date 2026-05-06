@@ -4,389 +4,439 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Welcome — RoboSeller</title>
-<link href="https://fonts.googleapis.com/css2?family=VT323&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
+html, body { height:100%; }
 body {
-  background: #1a6b1a;
-  background-image: radial-gradient(ellipse at 30% 40%, #2a8b2a 0%, transparent 50%), radial-gradient(ellipse at 70% 60%, #155015 0%, transparent 50%);
-  min-height: 100vh;
-  display: flex; align-items: center; justify-content: center;
-  padding: 20px 16px 56px;
+  background: #050608;
+  color: #f0f4f8;
   font-family: 'Instrument Sans', sans-serif;
-  position: relative; overflow: hidden;
+  min-height: 100vh;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 24px 16px;
+  overflow: hidden;
 }
+
+/* Background grid */
 body::before {
   content: '';
   position: fixed; inset: 0;
-  background-image: radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px);
-  background-size: 24px 24px;
+  background-image:
+    linear-gradient(rgba(74,222,128,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(74,222,128,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
   pointer-events: none;
 }
-.taskbar {
-  position: fixed; bottom: 0; left: 0; right: 0; height: 36px;
-  background: #c0c0c0; border-top: 2px solid #fff;
-  display: flex; align-items: center; padding: 0 4px; gap: 4px; z-index: 100;
+
+/* Glow */
+.bg-glow {
+  position: fixed;
+  width: 500px; height: 500px;
+  background: radial-gradient(circle, rgba(74,222,128,0.07) 0%, transparent 70%);
+  top: 50%; left: 50%; transform: translate(-50%, -60%);
+  pointer-events: none;
 }
-.start-btn {
-  background: #c0c0c0; border: 2px solid; border-color: #fff #808080 #808080 #fff;
-  padding: 2px 10px; font-family: 'VT323', monospace; font-size: 16px;
-  cursor: pointer; display: flex; align-items: center; gap: 4px; color: #000;
+
+/* Top bar */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; max-width: 560px; margin-bottom: 24px;
+  position: relative; z-index: 1;
 }
-.start-btn:active { border-color: #808080 #fff #fff #808080; }
-.taskbar-item {
-  background: #c0c0c0; border: 2px solid; border-color: #808080 #fff #fff #808080;
-  padding: 2px 14px; font-family: 'VT323', monospace; font-size: 15px; color: #000;
+.logo { display: flex; align-items: center; gap: 8px; text-decoration: none; }
+.logo-text { font-size: 18px; font-weight: 800; }
+.logo-text .g { color: #4ade80; }
+.skip-btn {
+  font-family: 'DM Mono', monospace; font-size: 11px;
+  color: #3a4a5a; background: none; border: none;
+  cursor: pointer; letter-spacing: 0.05em;
+  transition: color 0.2s;
 }
-.taskbar-clock {
-  margin-left: auto; background: #c0c0c0;
-  border: 2px solid; border-color: #808080 #fff #fff #808080;
-  padding: 2px 10px; font-family: 'VT323', monospace; font-size: 16px; color: #000;
+.skip-btn:hover { color: #4ade80; }
+
+/* Step pills */
+.step-pills {
+  display: flex; gap: 6px; margin-bottom: 24px;
+  position: relative; z-index: 1;
 }
-.window {
-  background: #c0c0c0; border: 2px solid; border-color: #fff #808080 #808080 #fff;
-  width: 100%; max-width: 700px; box-shadow: 4px 4px 0 #000;
-  position: relative; z-index: 10;
+.step-pill {
+  height: 3px; border-radius: 2px;
+  background: #1a2030;
+  transition: all 0.4s ease;
+  width: 24px;
 }
-.titlebar {
-  background: linear-gradient(90deg, #000080, #1084d0);
-  padding: 3px 4px; display: flex; align-items: center; justify-content: space-between;
+.step-pill.active { background: #4ade80; width: 40px; }
+.step-pill.done { background: rgba(74,222,128,0.3); }
+
+/* Card */
+.card {
+  background: #0d1018;
+  border: 1px solid #1a2030;
+  border-radius: 20px;
+  width: 100%; max-width: 560px;
+  min-height: 460px;
+  display: flex; flex-direction: column;
+  position: relative; z-index: 1;
+  overflow: hidden;
 }
-.titlebar-left { display: flex; align-items: center; gap: 6px; }
-.titlebar-icon { width: 16px; height: 16px; background: #00aa00; border: 1px solid #fff; display: flex; align-items: center; justify-content: center; font-size: 9px; }
-.titlebar-title { font-family: 'VT323', monospace; font-size: 16px; color: #fff; letter-spacing: 0.05em; }
-.titlebar-btns { display: flex; gap: 2px; }
-.win-btn {
-  width: 18px; height: 16px; background: #c0c0c0;
-  border: 2px solid; border-color: #fff #808080 #808080 #fff;
-  font-family: 'VT323', monospace; font-size: 12px; cursor: pointer; color: #000;
-  display: flex; align-items: center; justify-content: center;
+.card-accent {
+  position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(74,222,128,0.4), transparent);
 }
-.win-btn:active { border-color: #808080 #fff #fff #808080; }
-.menubar {
-  background: #c0c0c0; border-bottom: 1px solid #808080;
-  padding: 2px 4px; display: flex; gap: 2px;
-}
-.menu-item { font-family: 'VT323', monospace; font-size: 15px; color: #000; padding: 1px 8px; cursor: pointer; }
-.menu-item:hover { background: #000080; color: #fff; }
-.window-content { display: flex; min-height: 400px; }
-.robo-sidebar {
-  width: 150px; flex-shrink: 0; background: #008080;
-  border-right: 2px solid #808080;
-  display: flex; flex-direction: column; align-items: center;
-  padding: 16px 10px; gap: 10px;
-}
-.robo-name { font-family: 'VT323', monospace; font-size: 18px; color: #fff; text-align: center; letter-spacing: 0.1em; }
-.robo-status { font-family: 'VT323', monospace; font-size: 13px; color: #00ff00; text-align: center; animation: blink 1s infinite; }
-@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
-.robo-nav { width: 100%; display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
-.robo-nav-item {
-  font-family: 'VT323', monospace; font-size: 14px; color: #c0c0c0;
-  padding: 2px 5px; border: 1px solid transparent; cursor: pointer; text-align: left;
-}
-.robo-nav-item.active { background: #000080; color: #fff; border-color: #aaf; }
-.robo-nav-item.done { color: #00ff00; }
-.content-panel { flex: 1; padding: 14px; background: #c0c0c0; display: flex; flex-direction: column; }
-.slide { display: none; flex-direction: column; flex: 1; }
+
+/* Slides */
+.slide { display: none; flex-direction: column; flex: 1; padding: 36px 36px 28px; animation: slideUp 0.35s ease; }
 .slide.active { display: flex; }
-.speech-bubble {
-  background: #fff; border: 2px solid #000; padding: 9px 13px; margin-bottom: 12px;
-  position: relative; font-family: 'VT323', monospace; font-size: 17px; color: #000; line-height: 1.4;
+@keyframes slideUp { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+
+/* Robo label */
+.robo-label {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: 'DM Mono', monospace; font-size: 11px;
+  color: #4ade80; letter-spacing: 0.1em; text-transform: uppercase;
+  margin-bottom: 20px; align-self: flex-start;
 }
-.speech-bubble::before { content:''; position:absolute; left:-13px; top:11px; border:6px solid transparent; border-right-color:#000; }
-.speech-bubble::after { content:''; position:absolute; left:-10px; top:13px; border:4px solid transparent; border-right-color:#fff; }
-.blink-cursor { animation: blink 0.8s infinite; }
-.content-box {
-  background: #fff; border: 2px solid; border-color: #808080 #fff #fff #808080;
-  padding: 12px; flex: 1; margin-bottom: 10px; overflow-y: auto;
+.robo-label-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #4ade80; box-shadow: 0 0 6px #4ade80;
+  animation: pulse 1.5s infinite;
 }
-.content-box-title { font-family: 'VT323', monospace; font-size: 19px; color: #000080; margin-bottom: 10px; border-bottom: 1px solid #c0c0c0; padding-bottom: 4px; }
-.retro-list { display: flex; flex-direction: column; gap: 7px; }
-.retro-item { display: flex; align-items: flex-start; gap: 7px; }
-.retro-bullet { font-family: 'VT323', monospace; font-size: 17px; color: #000080; flex-shrink: 0; }
-.retro-text { font-size: 13px; color: #000; line-height: 1.5; }
-.retro-text strong { color: #000080; }
-.scan-widget {
-  background: #000; border: 3px solid #00aa00; padding: 14px 18px;
-  text-align: center; margin: 0 auto 12px; box-shadow: 0 0 10px rgba(0,170,0,0.5);
-  max-width: 200px; width: 100%;
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+/* Slide title */
+.slide-title {
+  font-size: clamp(28px, 5vw, 40px);
+  font-weight: 800; line-height: 1.1;
+  color: #fff; margin-bottom: 12px;
 }
-.scan-widget-num { font-family: 'VT323', monospace; font-size: 64px; color: #00ff00; line-height: 1; text-shadow: 0 0 8px #00ff00; }
-.scan-widget-label { font-family: 'VT323', monospace; font-size: 15px; color: #008800; letter-spacing: 0.12em; }
-.retro-scan {
-  background: #000; border: 2px solid #00aa00; padding: 10px;
-  font-family: 'VT323', monospace; font-size: 15px; color: #00ff00; line-height: 1.8; margin-bottom: 10px;
+.slide-title .g { color: #4ade80; }
+.slide-title .a { color: #f59e0b; }
+
+/* Slide desc */
+.slide-desc {
+  font-size: 15px; color: #64748b; line-height: 1.7;
+  margin-bottom: 28px; max-width: 440px;
 }
-.retro-scan .prompt { color: #008800; }
-.platform-row { display: flex; flex-direction: column; gap: 6px; }
-.platform-item {
-  background: #fff; border: 2px solid; border-color: #fff #808080 #808080 #fff;
-  padding: 7px 10px; display: flex; align-items: center; gap: 10px;
-  font-family: 'VT323', monospace; font-size: 16px; color: #000;
+
+/* Visual area */
+.slide-visual {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  margin-bottom: 8px;
 }
-.platform-dot { width: 10px; height: 10px; border: 2px solid #000; flex-shrink: 0; }
-.retro-chart { display: flex; align-items: flex-end; gap: 4px; height: 56px; background: #fff; border: 2px solid; border-color: #808080 #fff #fff #808080; padding: 5px 7px 0; margin-bottom: 6px; }
-.retro-bar { flex: 1; background: #000080; border: 1px solid #0000aa; }
-.qr-wrap { display: inline-block; background: #fff; padding: 7px; border: 3px solid #000; }
-.retro-progress { background: #fff; border: 2px solid; border-color: #808080 #fff #fff #808080; padding: 3px; margin-bottom: 10px; }
-.retro-progress-inner { display: flex; gap: 2px; }
-.retro-progress-block { height: 12px; flex: 1; background: #c0c0c0; border: 1px solid #808080; transition: background 0.3s; }
-.retro-progress-block.filled { background: #000080; border-color: #0000aa; }
-.nav-row { display: flex; gap: 6px; justify-content: flex-end; }
-.retro-btn {
-  background: #c0c0c0; border: 2px solid; border-color: #fff #808080 #808080 #fff;
-  padding: 4px 16px; font-family: 'VT323', monospace; font-size: 18px; color: #000;
-  cursor: pointer; min-width: 80px; text-align: center;
+
+/* Scan counter */
+.counter-display {
+  background: #080b10;
+  border: 1px solid rgba(74,222,128,0.15);
+  border-radius: 16px; padding: 28px 40px;
+  text-align: center;
+  position: relative; overflow: hidden;
 }
-.retro-btn:active { border-color: #808080 #fff #fff #808080; }
-.retro-btn:disabled { color: #808080; cursor: default; }
-.retro-btn-primary { background: #000080; color: #fff; border-color: #4040ff #000020 #000020 #4040ff; }
-.retro-btn-primary:active { border-color: #000020 #4040ff #4040ff #000020; }
-.statusbar { background: #c0c0c0; border-top: 2px solid #808080; padding: 2px 8px; display: flex; gap: 6px; }
-.status-cell { border: 2px solid; border-color: #808080 #fff #fff #808080; padding: 1px 7px; font-family: 'VT323', monospace; font-size: 14px; color: #000; flex: 1; }
-@media (max-width: 520px) {
-  .robo-sidebar { width: 44px; padding: 10px 4px; }
-  .robo-name, .robo-status, .robo-nav { display: none; }
-  .speech-bubble { font-size: 14px; }
-  .scan-widget-num { font-size: 48px; }
+.counter-display::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(circle at 50% 0%, rgba(74,222,128,0.08) 0%, transparent 60%);
+}
+.counter-num {
+  font-family: 'DM Mono', monospace;
+  font-size: 80px; font-weight: 500;
+  color: #4ade80; line-height: 1;
+  text-shadow: 0 0 30px rgba(74,222,128,0.4);
+  position: relative; z-index: 1;
+}
+.counter-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px; color: #2a4a2a;
+  letter-spacing: 0.15em; text-transform: uppercase;
+  margin-top: 6px; position: relative; z-index: 1;
+}
+.counter-sub {
+  font-size: 13px; color: #334155; margin-top: 10px;
+  font-family: 'DM Mono', monospace;
+  position: relative; z-index: 1;
+}
+
+/* Terminal block */
+.terminal-block {
+  background: #080b10; border: 1px solid #1a2a1a;
+  border-radius: 10px; padding: 16px;
+  font-family: 'DM Mono', monospace; font-size: 13px;
+  line-height: 1.9; width: 100%;
+}
+.t-prompt { color: #2a4a2a; }
+.t-item { color: #4ade80; }
+.t-val { color: #f0f4f8; }
+.t-dim { color: #1a3a1a; }
+
+/* Feature pills */
+.feature-pills { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+.feature-pill {
+  display: flex; align-items: center; gap: 14px;
+  background: #080b10; border: 1px solid #1a2030;
+  border-radius: 10px; padding: 12px 16px;
+  transition: border-color 0.2s;
+}
+.feature-pill:hover { border-color: rgba(74,222,128,0.2); }
+.feature-pill-icon {
+  width: 36px; height: 36px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; font-size: 16px;
+}
+.feature-pill-text { flex: 1; }
+.feature-pill-name { font-size: 14px; font-weight: 700; color: #fff; margin-bottom: 2px; }
+.feature-pill-sub { font-size: 12px; color: #4a5568; }
+.feature-pill-arrow { color: #1a2a1a; font-size: 16px; }
+
+/* Stats row */
+.stats-row { display: flex; gap: 10px; width: 100%; }
+.stat-box {
+  flex: 1; background: #080b10; border: 1px solid #1a2030;
+  border-radius: 10px; padding: 16px;
+  text-align: center;
+}
+.stat-box-num { font-size: 28px; font-weight: 800; color: #fff; }
+.stat-box-label { font-size: 11px; color: #4a5568; margin-top: 3px; font-family: 'DM Mono', monospace; letter-spacing: 0.05em; }
+
+/* Chat bubbles */
+.chat-bubbles { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+.bubble { padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.55; max-width: 86%; }
+.bubble.user { background: rgba(74,222,128,0.08); border: 1px solid rgba(74,222,128,0.15); color: #c8e6c8; align-self: flex-end; border-radius: 12px 12px 3px 12px; }
+.bubble.bot { background: #0d1117; border: 1px solid #1a2030; color: #8892a4; align-self: flex-start; border-radius: 12px 12px 12px 3px; }
+.bubble.bot strong { color: #4ade80; }
+
+/* QR block */
+.qr-block {
+  display: flex; align-items: center; gap: 20px;
+  background: #080b10; border: 1px solid #1a2030;
+  border-radius: 12px; padding: 20px; width: 100%;
+}
+.qr-svg-wrap { background: #fff; padding: 10px; border-radius: 8px; flex-shrink: 0; }
+.qr-info { flex: 1; }
+.qr-info-title { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 6px; }
+.qr-info-desc { font-size: 13px; color: #4a5568; line-height: 1.6; }
+
+/* Nav */
+.card-nav {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20px 36px 24px;
+  border-top: 1px solid #0f1520;
+}
+.btn-back {
+  font-family: inherit; font-size: 14px; font-weight: 600;
+  color: #3a4a5a; background: none; border: none;
+  cursor: pointer; transition: color 0.2s; padding: 8px 0;
+}
+.btn-back:hover { color: #fff; }
+.btn-back:disabled { opacity: 0.2; cursor: default; }
+.btn-next {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: #4ade80; color: #000;
+  font-family: inherit; font-size: 15px; font-weight: 800;
+  padding: 12px 28px; border: none; border-radius: 10px;
+  cursor: pointer; transition: background 0.2s, transform 0.1s;
+}
+.btn-next:hover { background: #86efac; }
+.btn-next:active { transform: scale(0.97); }
+
+.step-counter {
+  font-family: 'DM Mono', monospace; font-size: 11px;
+  color: #2a3548; letter-spacing: 0.05em;
+}
+
+@media (max-width: 480px) {
+  .slide { padding: 24px 20px 16px; }
+  .card-nav { padding: 16px 20px 20px; }
+  .counter-num { font-size: 60px; }
+  .slide-title { font-size: 28px; }
+  .stats-row { flex-direction: column; }
+  .qr-block { flex-direction: column; text-align: center; }
 }
 </style>
 </head>
 <body>
-<div class="taskbar">
-  <button class="start-btn">⊞ Start</button>
-  <div class="taskbar-item">📋 RoboSeller Setup</div>
-  <div class="taskbar-clock" id="clock">00:00</div>
+<div class="bg-glow"></div>
+
+<div class="topbar">
+  <div class="logo">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.2" stroke-linecap="round">
+      <line x1="12" y1="2" x2="12" y2="5"/><circle cx="12" cy="2" r="1" fill="#4ade80" stroke="none"/>
+      <rect x="5" y="6" width="14" height="12" rx="2"/>
+      <circle cx="9" cy="11" r="1.4" fill="#4ade80" stroke="none"/>
+      <circle cx="15" cy="11" r="1.4" fill="#4ade80" stroke="none"/>
+      <line x1="3" y1="11" x2="5" y2="11"/><line x1="19" y1="11" x2="21" y2="11"/>
+    </svg>
+    <div class="logo-text"><span class="g">Robo</span>Seller</div>
+  </div>
+  <button class="skip-btn" onclick="finish()">// skip tour</button>
 </div>
 
-<div class="window">
-  <div class="titlebar">
-    <div class="titlebar-left">
-      <div class="titlebar-icon">🤖</div>
-      <div class="titlebar-title">RoboSeller Setup Wizard v1.0</div>
-    </div>
-    <div class="titlebar-btns">
-      <button class="win-btn">_</button>
-      <button class="win-btn">□</button>
-      <button class="win-btn" onclick="finish()">✕</button>
-    </div>
-  </div>
-  <div class="menubar">
-    <div class="menu-item">File</div>
-    <div class="menu-item">Help</div>
-    <div class="menu-item">About</div>
-  </div>
-  <div class="window-content">
+<div class="step-pills" id="step-pills"></div>
 
-    <div class="robo-sidebar">
-      <svg width="72" height="72" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" style="image-rendering:pixelated;">
-        <rect x="7" y="0" width="2" height="2" fill="#00ff00"/>
-        <rect x="6" y="1" width="4" height="1" fill="#00cc00"/>
-        <rect x="3" y="2" width="10" height="8" fill="#00aa00"/>
-        <rect x="3" y="2" width="10" height="1" fill="#00cc00"/>
-        <rect x="3" y="9" width="10" height="1" fill="#006600"/>
-        <rect x="5" y="4" width="2" height="2" fill="#000"/>
-        <rect x="9" y="4" width="2" height="2" fill="#000"/>
-        <rect x="5" y="4" width="1" height="1" fill="#00ff00" id="eye-l"/>
-        <rect x="9" y="4" width="1" height="1" fill="#00ff00" id="eye-r"/>
-        <rect x="5" y="7" width="6" height="1" fill="#006600"/>
-        <rect x="6" y="7" width="4" height="1" fill="#00ff00"/>
-        <rect x="4" y="10" width="8" height="5" fill="#008800"/>
-        <rect x="6" y="11" width="4" height="3" fill="#006600"/>
-        <rect x="7" y="12" width="2" height="1" fill="#00ff00"/>
-        <rect x="1" y="10" width="3" height="2" fill="#006600"/>
-        <rect x="12" y="10" width="3" height="2" fill="#006600"/>
-        <rect x="5" y="15" width="2" height="1" fill="#006600"/>
-        <rect x="9" y="15" width="2" height="1" fill="#006600"/>
-      </svg>
-      <div class="robo-name">R.O.B.O</div>
-      <div class="robo-status">ONLINE</div>
-      <div class="robo-nav" id="robo-nav">
-        <div class="robo-nav-item active">► Welcome</div>
-        <div class="robo-nav-item">  Scanner</div>
-        <div class="robo-nav-item">  Publish</div>
-        <div class="robo-nav-item">  Analytics</div>
-        <div class="robo-nav-item">  Inventory</div>
-        <div class="robo-nav-item">  Launch!</div>
-      </div>
-    </div>
+<div class="card">
+  <div class="card-accent"></div>
 
-    <div class="content-panel">
-
-      <!-- SLIDE 0 -->
-      <div class="slide active" data-index="0">
-        <div class="speech-bubble">GREETINGS, HUMAN! I AM R.O.B.O. YOUR ACCOUNT IS LIVE. LET ME SHOW YOU AROUND.<span class="blink-cursor">█</span></div>
-        <div class="content-box">
-          <div class="content-box-title">► ACCOUNT ACTIVATED</div>
-          <div style="display:flex;justify-content:center;margin-bottom:12px;">
-            <div class="scan-widget">
-              <div class="scan-widget-num">100</div>
-              <div class="scan-widget-label">FREE SCANS</div>
-            </div>
-          </div>
-          <div class="retro-list">
-            <div class="retro-item"><div class="retro-bullet">►</div><div class="retro-text"><strong>100 free AI scans</strong> loaded to your account</div></div>
-            <div class="retro-item"><div class="retro-bullet">►</div><div class="retro-text"><strong>No credit card required</strong> — ever, until you upgrade</div></div>
-            <div class="retro-item"><div class="retro-bullet">►</div><div class="retro-text">All features <strong>fully unlocked</strong> from day one</div></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- SLIDE 1 -->
-      <div class="slide" data-index="1">
-        <div class="speech-bubble">STEP 1: THE SCANNER. SNAP A PHOTO — I DO THE PRICING AND TITLE.<span class="blink-cursor">█</span></div>
-        <div class="content-box">
-          <div class="content-box-title">► AI ITEM SCANNER</div>
-          <div class="retro-scan">
-            <div><span class="prompt">ROBO&gt; </span>analyzing image...</div>
-            <div><span class="prompt">ROBO&gt; </span>item: Nike Air Force 1 '07</div>
-            <div><span class="prompt">ROBO&gt; </span>eBay sold avg: $95 - $110</div>
-            <div><span class="prompt">ROBO&gt; </span>suggested price: $89.00</div>
-            <div><span class="prompt">ROBO&gt; </span>listing title: generated ✓</div>
-          </div>
-          <div class="retro-list">
-            <div class="retro-item"><div class="retro-bullet">►</div><div class="retro-text">Go to <strong>Scanner tab</strong> — upload a photo of any item</div></div>
-            <div class="retro-item"><div class="retro-bullet">►</div><div class="retro-text">Robo suggests a <strong>price from real sold data</strong></div></div>
-            <div class="retro-item"><div class="retro-bullet">►</div><div class="retro-text">Review, adjust, save to batch — then push</div></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- SLIDE 2 -->
-      <div class="slide" data-index="2">
-        <div class="speech-bubble">STEP 2: PUSH TO YOUR PLATFORMS. EBAY, SHOPIFY, OR CSV.<span class="blink-cursor">█</span></div>
-        <div class="content-box">
-          <div class="content-box-title">► PUBLISHING OPTIONS</div>
-          <div class="platform-row">
-            <div class="platform-item"><div class="platform-dot" style="background:#0064d2;border-color:#0064d2;"></div><div><div>eBay Seller Hub</div><div style="font-size:11px;color:#808080;font-family:'DM Mono',monospace;">Schedule listings as drafts</div></div></div>
-            <div class="platform-item"><div class="platform-dot" style="background:#5a8e3b;border-color:#5a8e3b;"></div><div><div>Shopify Store</div><div style="font-size:11px;color:#808080;font-family:'DM Mono',monospace;">Sync inventory automatically</div></div></div>
-            <div class="platform-item"><div class="platform-dot" style="background:#06b6d4;border-color:#06b6d4;"></div><div><div>CSV Export</div><div style="font-size:11px;color:#808080;font-family:'DM Mono',monospace;">Bulk upload anywhere</div></div></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- SLIDE 3 -->
-      <div class="slide" data-index="3">
-        <div class="speech-bubble">STEP 3: TRACK YOUR MONEY. PROFIT IS THE POINT.<span class="blink-cursor">█</span></div>
-        <div class="content-box">
-          <div class="content-box-title">► SALES &amp; EXPENSES</div>
-          <div style="display:flex;gap:8px;margin-bottom:10px;">
-            <div style="flex:1;background:#fff;border:2px solid;border-color:#808080 #fff #fff #808080;padding:9px;text-align:center;">
-              <div style="font-family:'VT323',monospace;font-size:12px;color:#808080;">REVENUE</div>
-              <div style="font-family:'VT323',monospace;font-size:26px;color:#000080;">$3,241</div>
-            </div>
-            <div style="flex:1;background:#fff;border:2px solid;border-color:#808080 #fff #fff #808080;padding:9px;text-align:center;">
-              <div style="font-family:'VT323',monospace;font-size:12px;color:#808080;">PROFIT</div>
-              <div style="font-family:'VT323',monospace;font-size:26px;color:#006600;">$2,349</div>
-            </div>
-          </div>
-          <div class="retro-chart">
-            <div class="retro-bar" style="height:35%;"></div>
-            <div class="retro-bar" style="height:55%;"></div>
-            <div class="retro-bar" style="height:40%;"></div>
-            <div class="retro-bar" style="height:75%;"></div>
-            <div class="retro-bar" style="height:55%;"></div>
-            <div class="retro-bar" style="height:100%;background:#00aa00;"></div>
-          </div>
-          <div style="font-family:'VT323',monospace;font-size:12px;color:#808080;text-align:right;">JAN — JUN 2025</div>
-        </div>
-      </div>
-
-      <!-- SLIDE 4 -->
-      <div class="slide" data-index="4">
-        <div class="speech-bubble">STEP 4: QR CODES FOR EVERY ITEM. SCAN ANY ITEM INSTANTLY.<span class="blink-cursor">█</span></div>
-        <div class="content-box">
-          <div class="content-box-title">► QR CODE GENERATOR &amp; INVENTORY</div>
-          <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;">
-            <div class="qr-wrap">
-              <svg width="60" height="60" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg" style="image-rendering:pixelated;">
-                <rect width="21" height="21" fill="white"/>
-                <rect x="0" y="0" width="7" height="7" fill="#000"/><rect x="1" y="1" width="5" height="5" fill="#fff"/><rect x="2" y="2" width="3" height="3" fill="#000"/>
-                <rect x="14" y="0" width="7" height="7" fill="#000"/><rect x="15" y="1" width="5" height="5" fill="#fff"/><rect x="16" y="2" width="3" height="3" fill="#000"/>
-                <rect x="0" y="14" width="7" height="7" fill="#000"/><rect x="1" y="15" width="5" height="5" fill="#fff"/><rect x="2" y="16" width="3" height="3" fill="#000"/>
-                <rect x="8" y="0" width="1" height="1" fill="#000"/><rect x="10" y="0" width="1" height="1" fill="#000"/><rect x="12" y="0" width="1" height="1" fill="#000"/>
-                <rect x="7" y="2" width="1" height="1" fill="#000"/><rect x="9" y="2" width="2" height="1" fill="#000"/>
-                <rect x="8" y="4" width="2" height="1" fill="#000"/><rect x="11" y="4" width="2" height="1" fill="#000"/>
-                <rect x="0" y="7" width="1" height="1" fill="#000"/><rect x="2" y="7" width="3" height="1" fill="#000"/><rect x="7" y="7" width="1" height="1" fill="#000"/><rect x="9" y="7" width="1" height="1" fill="#000"/><rect x="11" y="7" width="3" height="1" fill="#000"/>
-                <rect x="0" y="9" width="3" height="1" fill="#000"/><rect x="7" y="9" width="2" height="1" fill="#000"/><rect x="11" y="9" width="3" height="1" fill="#000"/>
-                <rect x="7" y="11" width="2" height="1" fill="#000"/><rect x="11" y="11" width="2" height="1" fill="#000"/>
-                <rect x="7" y="14" width="2" height="1" fill="#000"/><rect x="12" y="14" width="2" height="1" fill="#000"/>
-                <rect x="8" y="16" width="2" height="1" fill="#000"/><rect x="13" y="16" width="3" height="1" fill="#000"/>
-                <rect x="7" y="18" width="3" height="1" fill="#000"/><rect x="12" y="18" width="2" height="1" fill="#000"/>
-              </svg>
-            </div>
-            <div style="flex:1;min-width:140px;">
-              <div class="retro-list">
-                <div class="retro-item"><div class="retro-bullet">►</div><div class="retro-text">Generate a <strong>QR code</strong> for every item</div></div>
-                <div class="retro-item"><div class="retro-bullet">►</div><div class="retro-text">Scan to instantly <strong>pull up any listing</strong></div></div>
-                <div class="retro-item"><div class="retro-bullet">►</div><div class="retro-text">Track status, photos, and <strong>prices</strong></div></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- SLIDE 5 -->
-      <div class="slide" data-index="5">
-        <div class="speech-bubble">SETUP COMPLETE! TIME TO MAKE SOME MONEY, HUMAN.<span class="blink-cursor">█</span></div>
-        <div class="content-box">
-          <div class="content-box-title">► ALL SYSTEMS GO</div>
-          <div style="text-align:center;padding:16px 10px;">
-            <div style="font-family:'VT323',monospace;font-size:42px;color:#000080;margin-bottom:6px;">ROBO STANDING BY</div>
-            <div style="font-family:'VT323',monospace;font-size:17px;color:#006600;margin-bottom:18px;">100 SCANS LOADED. GO FIND SOMETHING TO FLIP.</div>
-            <div class="retro-list" style="text-align:left;max-width:320px;margin:0 auto;">
-              <div class="retro-item"><div class="retro-bullet">►</div><div class="retro-text">Head to <strong>Scanner</strong> to snap your first item</div></div>
-              <div class="retro-item"><div class="retro-bullet">►</div><div class="retro-text">Ask <strong>Robo</strong> anything in the Robo tab</div></div>
-              <div class="retro-item"><div class="retro-bullet">►</div><div class="retro-text">Track everything in <strong>Sales &amp; Expenses</strong></div></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="retro-progress"><div class="retro-progress-inner" id="progress-blocks"></div></div>
-      <div class="nav-row">
-        <button class="retro-btn" id="btn-back" onclick="prevSlide()" disabled>◄ Back</button>
-        <button class="retro-btn retro-btn-primary" id="btn-next" onclick="nextSlide()">Next ►</button>
+  <!-- SLIDE 0: Welcome -->
+  <div class="slide active" data-index="0">
+    <div class="robo-label"><div class="robo-label-dot"></div>Account activated</div>
+    <div class="slide-title">You're in.<br><span class="g">Let's get you set up.</span></div>
+    <p class="slide-desc">Your 100 free scans are loaded and every feature is unlocked. Here's a quick tour so you can hit the ground running.</p>
+    <div class="slide-visual">
+      <div class="counter-display">
+        <div class="counter-num">100</div>
+        <div class="counter-label">// free scans ready</div>
+        <div class="counter-sub">no credit card · no expiry</div>
       </div>
     </div>
   </div>
 
-  <div class="statusbar">
-    <div class="status-cell" id="status-step">Step 1 of 6</div>
-    <div class="status-cell" style="flex:2;" id="status-hint">100 free scans loaded and ready</div>
-    <div class="status-cell">ROBO v1.0</div>
+  <!-- SLIDE 1: Scanner -->
+  <div class="slide" data-index="1">
+    <div class="robo-label"><div class="robo-label-dot"></div>01 — Scanner</div>
+    <div class="slide-title">Snap a photo.<br><span class="g">Robo prices it.</span></div>
+    <p class="slide-desc">Upload any item photo in the Scanner tab. Robo identifies it, pulls real eBay sold data, and suggests a price — you review and push.</p>
+    <div class="slide-visual">
+      <div class="terminal-block">
+        <div><span class="t-prompt">robo@scan $ </span><span class="t-val">analyze --photo item_042.jpg</span></div>
+        <div><span class="t-prompt">→ </span><span class="t-item">Nike Air Force 1 '07</span></div>
+        <div><span class="t-prompt">→ </span><span class="t-val">eBay sold avg: </span><span style="color:#f59e0b;">$95 – $110</span></div>
+        <div><span class="t-prompt">→ </span><span class="t-val">suggested price: </span><span class="t-item">$89.00</span></div>
+        <div><span class="t-prompt">→ </span><span class="t-val">title generated </span><span class="t-item">✓</span></div>
+        <div><span class="t-prompt">robo@scan $ </span><span class="t-dim" style="animation:blink 1s infinite;display:inline-block;">█</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 2: Publish -->
+  <div class="slide" data-index="2">
+    <div class="robo-label"><div class="robo-label-dot"></div>02 — Publishing</div>
+    <div class="slide-title">List on your<br><span class="g">platforms.</span></div>
+    <p class="slide-desc">When your batch is ready, push to eBay as drafts, sync to Shopify, or download a CSV — your inventory, your workflow.</p>
+    <div class="slide-visual" style="align-items:stretch;">
+      <div class="feature-pills">
+        <div class="feature-pill">
+          <div class="feature-pill-icon" style="background:rgba(0,100,210,0.1);">
+            <span style="font-size:15px;font-weight:900;color:#0064d2;">e</span>
+          </div>
+          <div class="feature-pill-text">
+            <div class="feature-pill-name">eBay Seller Hub</div>
+            <div class="feature-pill-sub">Schedule listings as drafts</div>
+          </div>
+          <div class="feature-pill-arrow">→</div>
+        </div>
+        <div class="feature-pill">
+          <div class="feature-pill-icon" style="background:rgba(90,142,59,0.1);">🛍</div>
+          <div class="feature-pill-text">
+            <div class="feature-pill-name">Shopify</div>
+            <div class="feature-pill-sub">Sync inventory automatically</div>
+          </div>
+          <div class="feature-pill-arrow">→</div>
+        </div>
+        <div class="feature-pill">
+          <div class="feature-pill-icon" style="background:rgba(6,182,212,0.1);">📄</div>
+          <div class="feature-pill-text">
+            <div class="feature-pill-name">CSV Export</div>
+            <div class="feature-pill-sub">Bulk upload anywhere</div>
+          </div>
+          <div class="feature-pill-arrow">↓</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 3: Analytics -->
+  <div class="slide" data-index="3">
+    <div class="robo-label"><div class="robo-label-dot"></div>03 — Analytics</div>
+    <div class="slide-title">Know your<br><span class="a">numbers.</span></div>
+    <p class="slide-desc">Log expenses, track sales, and see your profit in real time. Sales and Expenses tabs keep everything in one place.</p>
+    <div class="slide-visual" style="flex-direction:column;gap:10px;align-items:stretch;">
+      <div class="stats-row">
+        <div class="stat-box"><div class="stat-box-num" style="color:#4ade80;">$3,241</div><div class="stat-box-label">revenue</div></div>
+        <div class="stat-box"><div class="stat-box-num" style="color:#f59e0b;">$892</div><div class="stat-box-label">expenses</div></div>
+        <div class="stat-box"><div class="stat-box-num">$2,349</div><div class="stat-box-label">profit</div></div>
+      </div>
+      <div style="background:#080b10;border:1px solid #1a2030;border-radius:10px;padding:14px;">
+        <div style="display:flex;align-items:flex-end;gap:5px;height:48px;">
+          <div style="flex:1;background:rgba(74,222,128,0.2);border-radius:3px 3px 0 0;height:35%;"></div>
+          <div style="flex:1;background:rgba(74,222,128,0.3);border-radius:3px 3px 0 0;height:55%;"></div>
+          <div style="flex:1;background:rgba(74,222,128,0.25);border-radius:3px 3px 0 0;height:40%;"></div>
+          <div style="flex:1;background:rgba(74,222,128,0.4);border-radius:3px 3px 0 0;height:75%;"></div>
+          <div style="flex:1;background:rgba(74,222,128,0.35);border-radius:3px 3px 0 0;height:55%;"></div>
+          <div style="flex:1;background:#4ade80;border-radius:3px 3px 0 0;height:100%;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 4: Robo chat -->
+  <div class="slide" data-index="4">
+    <div class="robo-label"><div class="robo-label-dot"></div>04 — Robo AI</div>
+    <div class="slide-title">Your AI<br><span class="g">co-pilot.</span></div>
+    <p class="slide-desc">Tap the Robo tab anytime. Ask if something's worth buying, get title ideas, or figure out pricing. Attach a photo and Robo will take a look.</p>
+    <div class="slide-visual" style="align-items:stretch;">
+      <div class="chat-bubbles">
+        <div class="bubble user">Is this worth $40?</div>
+        <div class="bubble bot"><strong>Yes — solid buy.</strong> Sony WH-1000XM4s are selling $120–$160 used. You're looking at $60–80 profit after fees.</div>
+        <div class="bubble user">Write me a title</div>
+        <div class="bubble bot"><strong style="color:#fff;">Sony WH-1000XM4 Wireless Noise Canceling Headphones — Used Excellent</strong></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 5: Done -->
+  <div class="slide" data-index="5">
+    <div class="robo-label"><div class="robo-label-dot"></div>All set</div>
+    <div class="slide-title">Ready to<br><span class="g">start flipping.</span></div>
+    <p class="slide-desc">Your 100 scans are loaded. Head to the Scanner and snap your first item — it takes about 30 seconds from photo to listing.</p>
+    <div class="slide-visual" style="align-items:stretch;">
+      <div class="feature-pills">
+        <div class="feature-pill">
+          <div class="feature-pill-icon" style="background:rgba(74,222,128,0.1);">⚡</div>
+          <div class="feature-pill-text"><div class="feature-pill-name">Scanner</div><div class="feature-pill-sub">Snap your first item</div></div>
+          <div class="feature-pill-arrow" style="color:#4ade80;">→</div>
+        </div>
+        <div class="feature-pill">
+          <div class="feature-pill-icon" style="background:rgba(74,222,128,0.1);">🤖</div>
+          <div class="feature-pill-text"><div class="feature-pill-name">Robo tab</div><div class="feature-pill-sub">Ask anything</div></div>
+          <div class="feature-pill-arrow" style="color:#4ade80;">→</div>
+        </div>
+        <div class="feature-pill">
+          <div class="feature-pill-icon" style="background:rgba(245,158,11,0.1);">📊</div>
+          <div class="feature-pill-text"><div class="feature-pill-name">Sales & Expenses</div><div class="feature-pill-sub">Track your profit</div></div>
+          <div class="feature-pill-arrow" style="color:#4ade80;">→</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- NAV -->
+  <div class="card-nav">
+    <button class="btn-back" id="btn-back" onclick="prevSlide()" disabled>← Back</button>
+    <div class="step-counter" id="step-counter">1 / 6</div>
+    <button class="btn-next" id="btn-next" onclick="nextSlide()">Next →</button>
   </div>
 </div>
 
 <script>
 var current = 0;
 var total = 6;
-var navLabels = ['Welcome','Scanner','Publish','Analytics','Inventory','Launch!'];
-var hints = ['100 free scans loaded and ready','Upload any photo — Robo does the rest','eBay, Shopify, or CSV — your choice','Track sales, expenses, and profit','Generate QR codes for your inventory','Click Launch to start scanning!'];
-var steps = ['Welcome — Step 1 of 6','Scanner — Step 2 of 6','Publishing — Step 3 of 6','Analytics — Step 4 of 6','Inventory — Step 5 of 6','Complete — Step 6 of 6'];
 
 function updateUI() {
-  // Progress blocks
-  var container = document.getElementById('progress-blocks');
-  container.innerHTML = '';
+  // Pills
+  var pills = document.getElementById('step-pills');
+  pills.innerHTML = '';
   for (var i = 0; i < total; i++) {
-    var b = document.createElement('div');
-    b.className = 'retro-progress-block' + (i <= current ? ' filled' : '');
-    container.appendChild(b);
+    var p = document.createElement('div');
+    p.className = 'step-pill' + (i === current ? ' active' : i < current ? ' done' : '');
+    pills.appendChild(p);
   }
-  // Nav items
-  var items = document.querySelectorAll('.robo-nav-item');
-  items.forEach(function(item, i) {
-    item.className = 'robo-nav-item' + (i === current ? ' active' : (i < current ? ' done' : ''));
-    var prefix = i === current ? '► ' : (i < current ? '✓ ' : '  ');
-    item.textContent = prefix + navLabels[i];
-  });
-  // Status
-  document.getElementById('status-step').textContent = steps[current];
-  document.getElementById('status-hint').textContent = hints[current];
+  // Counter
+  document.getElementById('step-counter').textContent = (current + 1) + ' / ' + total;
   // Buttons
   document.getElementById('btn-back').disabled = current === 0;
-  document.getElementById('btn-next').textContent = current === total - 1 ? '🚀 Launch!' : 'Next ►';
+  var next = document.getElementById('btn-next');
+  next.textContent = current === total - 1 ? '🚀 Start scanning' : 'Next →';
 }
 
 function showSlide(i) {
@@ -399,23 +449,9 @@ function showSlide(i) {
 function nextSlide() { current < total - 1 ? showSlide(current + 1) : finish(); }
 function prevSlide() { if (current > 0) showSlide(current - 1); }
 function finish() {
-  fetch('/api/mark-onboarded', {method:'POST',credentials:'include'}).catch(function(){}).finally(function(){ window.location.href='/'; });
+  fetch('/api/mark-onboarded', {method:'POST',credentials:'include'})
+    .catch(function(){}).finally(function(){ window.location.href = '/'; });
 }
-
-// Clock
-function tick() {
-  var n = new Date();
-  document.getElementById('clock').textContent = String(n.getHours()).padStart(2,'0') + ':' + String(n.getMinutes()).padStart(2,'0');
-}
-tick(); setInterval(tick, 10000);
-
-// Eye blink
-setInterval(function() {
-  ['eye-l','eye-r'].forEach(function(id) {
-    var el = document.getElementById(id);
-    if (el) { el.style.opacity='0'; setTimeout(function(){ el.style.opacity='1'; }, 140); }
-  });
-}, 3500);
 
 updateUI();
 </script>
