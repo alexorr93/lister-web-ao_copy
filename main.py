@@ -3020,6 +3020,54 @@ async def get_page_image(scan_id: str, page_ref: str):
     import fitz
     from fastapi.responses import Response
     try:
+        # Check in-memory cache first (avoids Supabase dependency)
+        cached_pages = _auction_page_cache.get(scan_id)
+
+        # Parse page ref and bbox upfront
+        bbox = None
+        if isinstance(page_ref, str) and page_ref.startswith("p"):
+            parts = page_ref[1:].split("_")
+            try:
+                page_num_thumb = int(parts[0]) - 1
+            except Exception:
+                page_num_thumb = 0
+            if len(parts) == 5:
+                try:
+                    bbox = (float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4]))
+                except Exception:
+                    bbox = None
+        else:
+            try:
+                page_num_thumb = int(page_ref)
+            except Exception:
+                page_num_thumb = 0
+
+        if cached_pages and page_num_thumb in cached_pages:
+            img_bytes_cached = cached_pages[page_num_thumb]
+            if bbox:
+                # Crop using fitz on the cached jpeg
+                import io
+                doc_cached = fitz.open(stream=img_bytes_cached, filetype="jpeg")
+                page_c = doc_cached[0]
+                pw, ph = page_c.rect.width, page_c.rect.height
+                bx, by, bw, bh = bbox
+                pad = 0.01
+                x0 = max(0.0, bx - pad) * pw
+                y0 = max(0.0, by - pad) * ph
+                x1 = min(1.0, bx + bw + pad) * pw
+                y1 = min(1.0, by + bh + pad) * ph
+                if (x1 - x0) > 10 and (y1 - y0) > 10:
+                    clip = fitz.Rect(x0, y0, x1, y1)
+                    mat = fitz.Matrix(3.0, 3.0)
+                    pix = page_c.get_pixmap(matrix=mat, clip=clip)
+                    doc_cached.close()
+                    return Response(content=pix.tobytes("jpeg"), media_type="image/jpeg",
+                                    headers={"Cache-Control": "public, max-age=3600"})
+                doc_cached.close()
+            return Response(content=img_bytes_cached, media_type="image/jpeg",
+                            headers={"Cache-Control": "public, max-age=3600"})
+
+        # Fall back to Supabase PDF download
         pdf_data = supabase.storage.from_("auction-pdfs").download(f"{scan_id}.pdf")
         doc = fitz.open(stream=pdf_data, filetype="pdf")
         total_pages = len(doc)
@@ -3292,6 +3340,15 @@ Example: [{"lot":"5","title":"Oakton pH Meter","description":"Portable pH/ORP me
             pix = doc_render[pn].get_pixmap(matrix=mat)
             page_rendered[pn] = pix.tobytes("jpeg")
         doc_render.close()
+        # Cache renders so thumbnail endpoint can serve them without Supabase
+        if not scan_id:
+            import uuid as _uuid
+            scan_id = "mem_" + str(_uuid.uuid4())[:8]
+        _auction_page_cache[scan_id] = page_rendered
+        # Evict old entries if cache gets large
+        if len(_auction_page_cache) > 20:
+            oldest = next(iter(_auction_page_cache))
+            del _auction_page_cache[oldest]
 
         def call_gemini_page(page_num, chunk_text, img_bytes, i, total):
             """Send page text + rendered image together — Gemini sees exact layout."""
@@ -5313,6 +5370,9 @@ async def robo_chat(request: Request):
         print(f"[Robo chat error] {type(e).__name__}: {e}")
         return {"ok": True, "reply": "I'm having trouble connecting right now. Try again in a moment."}
 
+
+# In-memory cache for auction page renders (scan_id -> {page_num: jpeg_bytes})
+_auction_page_cache = {}
 
 # ── URL AUCTION SCANNER ────────────────────────────────────────── #
 from fastapi.responses import JSONResponse
