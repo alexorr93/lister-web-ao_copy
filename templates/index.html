@@ -4633,26 +4633,24 @@ function renderExpTable() {
     var merchant = it.merchant || '—';
     var initial = (merchant.charAt(0) || '?').toUpperCase();
     var dateStr = (it.expense_date||'').replace(/^(\d{4})-(\d{2})-(\d{2})$/,'$2/$3/$1');
-    return '<tr style="border-bottom:0.5px solid #111827;" onmouseover="this.style.background=\'rgba(255,255,255,0.02)\'" onmouseout="this.style.background=\'transparent\'">' +
-      '<td style="padding:12px 16px;">' +
+    return '<tr style="border-bottom:1px solid #111827;transition:background 0.1s;" onmouseover="this.style.background=\'rgba(255,255,255,0.02)\'" onmouseout="this.style.background=\'transparent\'">' +
+      '<td style="padding:12px 20px;">' +
         '<div style="display:flex;align-items:center;gap:10px;">' +
-          '<div style="width:30px;height:30px;border-radius:8px;background:' + color + '20;color:' + color + ';display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">' + initial + '</div>' +
-          '<div style="min-width:0;">' +
-            '<div style="font-size:14px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;">' + merchant + '</div>' +
-            (it.notes ? '<div style="font-size:12px;color:#4a6080;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;">' + it.notes + '</div>' : '') +
-          '</div>' +
+          '<div style="width:32px;height:32px;border-radius:8px;background:' + color + '20;color:' + color + ';display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;">' + initial + '</div>' +
+          '<div><div style="font-weight:500;color:var(--text);">' + merchant + '</div>' + (it.notes ? '<div style="font-size:11px;color:var(--muted);margin-top:2px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + it.notes + '</div>' : '') + '</div>' +
         '</div>' +
       '</td>' +
-      '<td style="padding:12px 16px;font-size:13px;color:#94a3b8;white-space:nowrap;font-variant-numeric:tabular-nums;">' + dateStr + '</td>' +
-      '<td style="padding:12px 16px;white-space:nowrap;">' +
-        '<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:500;background:rgba(255,255,255,0.04);color:#94a3b8;">' +
-          '<span style="width:6px;height:6px;border-radius:50%;background:' + color + ';flex-shrink:0;"></span>' + (it.category||'Other') +
+      '<td style="padding:12px 20px;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap;">' + dateStr + '</td>' +
+      '<td style="padding:12px 20px;">' +
+        '<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:500;background:rgba(255,255,255,0.04);color:var(--text);">' +
+          '<span style="width:6px;height:6px;border-radius:50%;background:' + color + ';"></span>' + (it.category||'Other') +
         '</span>' +
       '</td>' +
-      '<td style="padding:12px 16px;text-align:right;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text);white-space:nowrap;">$' + parseFloat(it.amount||0).toFixed(2) + '</td>' +
-      '<td style="padding:12px 16px;text-align:center;">' + (isCogs ? '<span style="font-size:10px;color:#475569;">auto</span>' : '<button onclick="editExpense(\'' + it.id + '\')" style="background:transparent;border:none;color:#4a6080;cursor:pointer;font-size:16px;padding:4px 8px;border-radius:4px;">⋯</button>') + '</td>' +
+      '<td style="padding:12px 20px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text);">$' + parseFloat(it.amount||0).toFixed(2) + '</td>' +
+      '<td style="padding:12px 20px;text-align:center;">' + (isCogs ? '<span style="font-size:10px;color:var(--muted);">COGS</span>' : '<button onclick="editExpense(\'' + it.id + '\')" style="background:transparent;border:none;color:#4a6080;cursor:pointer;font-size:14px;padding:4px 8px;" onmouseover="this.style.color=\'#94a3b8\'" onmouseout="this.style.color=\'#475569\'" title="Edit">⋯</button>') + '</td>' +
       '</tr>';
   }).join('');
+}
 
 // ── ADD / EDIT MODAL ──
 function openExpenseModal(prefill) {
