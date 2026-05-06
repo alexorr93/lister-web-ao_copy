@@ -324,7 +324,7 @@ async function startScan(input) {
     var fd = new FormData();
     fd.append('file', file);
     var endpoint = file.name.toLowerCase().endsWith('.txt') ? '/api/auction/scan-txt' : '/api/auction/scan-pdf';
-    var r = await fetch(endpoint, {method:'POST', body:fd});
+    var r = await fetch(endpoint, {method:'POST', body:fd, credentials:'include'});
     if (!r.ok) {
       var err = await r.json().catch(function(){return{};});
       alert('Scan failed: ' + (err.detail || 'Unknown error'));
