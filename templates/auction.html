@@ -510,10 +510,28 @@ async function exportExcel() {
   a.click();
 }
 
+function stripAuctionTitle(title) {
+  if (!title) return '';
+  var t = title;
+  // Cut at voltage/phase specs (common auction noise)
+  t = t.replace(/,?\s*\d+\/\d+\/?\d*V[^,]*/gi, '');
+  t = t.replace(/,?\s*\d+\s*(?:volt|amp|phase|hz|kva|kw|hp).*/gi, '');
+  // Cut at "with", "and", connector words mid-title
+  t = t.replace(/\s+(?:with|w\/|including|incl\.?|and|plus|\+)\s+.*/gi, '');
+  // Remove parentheticals
+  t = t.replace(/[\(\[{][^\)\]]*[\)\]}]/g, '');
+  // Remove common auction junk
+  t = t.replace(/,?\s*(?:single|three|3)\s*phase.*/gi, '');
+  t = t.replace(/[,!?*#]+/g, ' ').replace(/\s+/g, ' ').trim();
+  // Cap at 5 words — brand + model is almost always first 3-5
+  return t.split(' ').filter(Boolean).slice(0, 5).join(' ');
+}
+
 function openGemini(title, imgUrl) {
   title = title.replace(/QTY[^,]*/gi,'').replace(/[(][0-9]+[)]/g,'').replace(/,+$/,'').trim();
   var prompt = 'I am evaluating this auction item for resale. Research and give me:\\n\\nItem: ' + title + '\\n\\n1. Current eBay sold prices\\n2. Typical resale value range\\n3. Key value factors\\n4. Buy recommendation';
-  window.open('https://www.google.com/search?q=' + encodeURIComponent(title + ' resale value sold price'), '_blank', 'noopener,width=1000,height=800');
+  var q = stripAuctionTitle(title);
+  window.open('https://www.google.com/search?q=' + encodeURIComponent(q + ' resale value eBay sold'), '_blank', 'noopener,width=1000,height=800');
 }
 
 async function startUrlScan() {
