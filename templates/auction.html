@@ -238,7 +238,7 @@ async function loadHistory() {
   var el = document.getElementById('scan-history');
   el.innerHTML = '<div style="font-size:11px;color:#475569;text-align:center;padding:8px;">Loading...</div>';
   try {
-    var r = await fetch('/api/auction/scans');
+    var r = await fetch('/api/auction/scans', {credentials: 'include'});
     var data = await r.json();
     var scans = data.scans || [];
     if (!scans.length) {
@@ -263,6 +263,7 @@ async function saveCurrentScan() {
   try {
     await fetch('/api/auction/scans', {
       method: 'POST',
+      credentials: 'include',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({id: currentScanId, name: scanName, items: allItems})
     });
@@ -272,7 +273,7 @@ async function saveCurrentScan() {
 
 async function loadScan(id) {
   try {
-    var r = await fetch('/api/auction/scans/' + id);
+    var r = await fetch('/api/auction/scans/' + id, {credentials: 'include'});
     var scan = await r.json();
     if (!scan || !scan.id) return;
     currentScanId = scan.id;
@@ -290,7 +291,7 @@ async function loadScan(id) {
 
 async function deleteScan(id) {
   try {
-    await fetch('/api/auction/scans/' + id, {method: 'DELETE'});
+    await fetch('/api/auction/scans/' + id, {method: 'DELETE', credentials: 'include'});
     if (currentScanId === id) { currentScanId = null; allItems = []; showUpload(); }
     loadHistory();
   } catch(e) { console.warn('Delete scan failed', e); }
