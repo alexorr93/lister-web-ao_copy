@@ -5492,23 +5492,34 @@ async def scan_auction_url(request: Request):
             m = _re.search(r"/auction-catalogues/([^/]+)/catalogue-id-([^/]+)/", url)
             if m:
                 seller, cat_id = m.group(1), m.group(2)
-                api_url = f"https://www.bidspotter.com/en-us/auction-catalogues/{seller}/catalogue-id-{cat_id}/lots.json?page=1&per_page=100"
-                try:
-                    raw_json = fetch_url(api_url, {"Accept": "application/json"})
-                    import json as _json
-                    data = _json.loads(raw_json)
-                    lots = data.get("lots") or data.get("items") or data.get("results") or []
-                    if lots:
-                        lines = []
-                        for lot in lots:
-                            lot_num = lot.get("lot_number") or lot.get("lot") or ""
-                            title = lot.get("title") or lot.get("name") or lot.get("description") or ""
-                            est = lot.get("estimate") or lot.get("high_estimate") or ""
-                            img = lot.get("image_url") or lot.get("thumbnail") or ""
-                            lines.append(f"Lot {lot_num}: {title} | Estimate: {est} | Image: {img}")
-                        text = "\n".join(lines)
-                except Exception as api_err:
-                    print(f"Bidspotter API error: {api_err}")
+                # Try multiple Bidspotter API patterns
+                _api_patterns = [
+                    f"https://www.bidspotter.com/en-us/auction-catalogues/{seller}/catalogue-id-{cat_id}/lots.json?page=1&per_page=200",
+                    f"https://www.bidspotter.com/api/v1/catalogues/{cat_id}/lots?per_page=200",
+                    f"https://api.bidspotter.com/catalogues/{cat_id}/lots",
+                ]
+                for api_url in _api_patterns:
+                    try:
+                        raw_json = fetch_url(api_url, {"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"})
+                        if not raw_json.strip().startswith(("[", "{")):
+                            print(f"Bidspotter non-JSON from {api_url}: {raw_json[:100]}")
+                            continue
+                        import json as _json
+                        data = _json.loads(raw_json)
+                        lots = data.get("lots") or data.get("items") or data.get("results") or (data if isinstance(data, list) else [])
+                        if lots:
+                            lines = []
+                            for lot in lots:
+                                lot_num = lot.get("lot_number") or lot.get("lotNumber") or lot.get("lot") or ""
+                                title = lot.get("title") or lot.get("name") or lot.get("description") or ""
+                                est = lot.get("estimate") or lot.get("high_estimate") or lot.get("highEstimate") or ""
+                                img = lot.get("image_url") or lot.get("imageUrl") or lot.get("thumbnail") or ""
+                                lines.append(f"Lot {lot_num}: {title} | Estimate: {est} | Image: {img}")
+                            text = "\n".join(lines)
+                            print(f"Bidspotter: got {len(lots)} lots from {api_url}")
+                            break
+                    except Exception as api_err:
+                        print(f"Bidspotter API error ({api_url}): {api_err}")
 
             if not text:
                 # Fallback: fetch HTML and extract lot data from script tags
