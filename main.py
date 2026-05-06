@@ -3380,6 +3380,7 @@ Example: [{"lot":"5","title":"Oakton pH Meter","description":"Portable pH/ORP me
             page_rendered[pn] = pix.tobytes("jpeg")
         doc_render.close()
         # Cache renders so thumbnail endpoint can serve them without Supabase
+        nonlocal scan_id
         if not scan_id:
             import uuid as _uuid
             scan_id = "mem_" + str(_uuid.uuid4())[:8]
