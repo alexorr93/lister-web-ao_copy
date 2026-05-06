@@ -6029,21 +6029,27 @@ async function loadUserThread() {
 
 async function sendUserThreadMessage() {
   var input = document.getElementById('user-thread-input');
-  var text = input.value.trim();
+  var text = input ? input.value.trim() : '';
   if (!text) return;
+  input.value = '';
+  var view = document.getElementById('user-thread-view');
+  var now = new Date();
+  var ts = now.toLocaleTimeString();
+  if (view) {
+    view.innerHTML += '<div style="display:flex;justify-content:flex-end;margin-top:8px;"><div style="background:#003300;border:1px solid #00ff41;border-radius:6px 0 6px 6px;padding:10px 14px;font-size:13px;color:#00ff41;line-height:1.6;max-width:85%;"><div style="font-size:10px;color:#00ff4166;letter-spacing:0.15em;margin-bottom:4px;text-align:right;">YOU // ' + ts + '</div>' + text + '</div></div>';
+    view.scrollTop = view.scrollHeight;
+  }
   try {
-    var r = await fetch('/api/support/send', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
+    await fetch('/api/support/thread/message', {
+      method: 'POST', credentials: 'include',
+      headers: {'Content-Type':'application/json'},
       body: JSON.stringify({body: text})
     });
-    if (!r.ok) throw new Error('Failed');
-    input.value = '';
-    loadUserThread();
   } catch(e) {
-    if (typeof toast === 'function') toast('Failed: ' + e.message, 'error');
+    if (view) view.innerHTML += '<div style="color:#ef4444;font-size:12px;margin-top:4px;">&gt; SEND FAILED</div>';
   }
 }
+
 
 async function refreshUserMailboxBadge() {
   try {
