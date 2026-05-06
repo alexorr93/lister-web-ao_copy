@@ -5495,11 +5495,12 @@ function switchMobileTab(tabId) {
     setTimeout(function(){ var i=document.getElementById('robo-tab-input'); if(i) i.focus(); }, 200);
     return;
   }
-  // Hide robo tab when switching to anything else
+  // Hide robo tab and clear ALL inline display styles so CSS classes work
+  document.querySelectorAll('.tab-content').forEach(function(t) {
+    t.style.display = '';
+  });
   var rt = document.getElementById('tab-robo');
   if (rt) { rt.style.display = 'none'; rt.classList.remove('active'); }
-  var main = document.querySelector('.main') || document.getElementById('main');
-  if (main) main.style.visibility = 'visible';
   var main = document.querySelector('.main') || document.getElementById('main');
   if (main) main.style.visibility = 'visible';
 
