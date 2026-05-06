@@ -601,7 +601,7 @@ select.field-input { background: #fff; color: #0f172a; }
 
       <!-- STATS ROW -->
       <div id="home-stats-row" style="display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:14px;margin-bottom:14px;">
-        <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:20px 24px;display:flex;justify-content:space-between;align-items:center;">
+        <div onclick="document.querySelector('.nav-btn[data-tab=inventory]').click()" style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:20px 24px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;">
           <div>
             <div style="font-size:16px;color:#4a6080;text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:6px;">Items in inventory</div>
             <div id="home-total-items" style="font-size:36px;font-weight:700;line-height:1;letter-spacing:-0.02em;color:#4ade80;">0</div>
