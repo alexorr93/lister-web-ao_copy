@@ -2008,6 +2008,8 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     if (rt) { rt.style.display = 'none'; rt.classList.remove('active'); }
     var main = document.querySelector('.main') || document.getElementById('main');
     if (main) main.style.visibility = 'visible';
+    var main = document.querySelector('.main') || document.getElementById('main');
+    if (main) main.style.visibility = 'visible';
     try { localStorage.setItem('rr_active_tab', tab); } catch(e) {}
     // Push history state so browser back button navigates within app
     try { history.pushState({ tab: tab }, '', '#' + tab); } catch(e) {}
@@ -5496,6 +5498,8 @@ function switchMobileTab(tabId) {
   // Hide robo tab when switching to anything else
   var rt = document.getElementById('tab-robo');
   if (rt) { rt.style.display = 'none'; rt.classList.remove('active'); }
+  var main = document.querySelector('.main') || document.getElementById('main');
+  if (main) main.style.visibility = 'visible';
   var main = document.querySelector('.main') || document.getElementById('main');
   if (main) main.style.visibility = 'visible';
 
