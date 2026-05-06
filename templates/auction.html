@@ -497,15 +497,24 @@ function goToResearch() {
   var watched = allItems.filter(function(i) { return i._watch; });
   if (!watched.length) { alert('No watchlisted items. Check the watch column on items first.'); return; }
   var scanId = currentScanId || ('scan-' + Date.now());
-  // Save to Supabase so any user/device can load it
-  fetch('/api/auction/save-research', {
+  // Save full scan first so we can return to it, then save research items
+  var saveFullScan = allItems.length ? fetch('/api/auction/scans', {
     method: 'POST',
+    credentials: 'include',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({share_id: scanId, title: 'Scan ' + scanId, items: watched, results: {}})
+    body: JSON.stringify({id: scanId, name: scanName, items: allItems})
+  }) : Promise.resolve();
+
+  saveFullScan.then(function() {
+    return fetch('/api/auction/save-research', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({share_id: scanId, title: scanName || ('Scan ' + scanId), items: watched, results: {}})
+    });
   }).then(function(){
     window.location.href = '/auction/research?scan=' + encodeURIComponent(scanId);
   }).catch(function(){
-    // Fallback to localStorage if save fails
     localStorage.setItem('auction_research_items', JSON.stringify(watched));
     localStorage.setItem('auction_research_scan_id', scanId);
     window.location.href = '/auction/research';
