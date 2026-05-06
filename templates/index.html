@@ -251,11 +251,10 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 @media (max-width: 768px) {
   #tab-robo.active {
     position: fixed !important;
-    top: 0; left: 0; right: 0; bottom: 56px;
-    z-index: 98;
-    overflow: hidden;
+    top: 0 !important; left: 0 !important; right: 0 !important; bottom: 56px !important;
+    z-index: 98 !important;
+    overflow: hidden !important;
   }
-  #tab-robo.active ~ * { display: none; }
 }
 
 /* STATS */
@@ -2007,6 +2006,8 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     // Always hide robo fixed tab when switching via desktop nav
     var rt = document.getElementById('tab-robo');
     if (rt) { rt.style.display = 'none'; rt.classList.remove('active'); }
+    var main = document.querySelector('.main') || document.getElementById('main');
+    if (main) main.style.visibility = 'visible';
     try { localStorage.setItem('rr_active_tab', tab); } catch(e) {}
     // Push history state so browser back button navigates within app
     try { history.pushState({ tab: tab }, '', '#' + tab); } catch(e) {}
@@ -5495,6 +5496,8 @@ function switchMobileTab(tabId) {
   // Hide robo tab when switching to anything else
   var rt = document.getElementById('tab-robo');
   if (rt) { rt.style.display = 'none'; rt.classList.remove('active'); }
+  var main = document.querySelector('.main') || document.getElementById('main');
+  if (main) main.style.visibility = 'visible';
 
   var btn = document.querySelector('.nav-btn[data-tab="' + tabId + '"]');
   if (btn) btn.click();
