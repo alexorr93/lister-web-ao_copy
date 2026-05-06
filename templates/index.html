@@ -7058,6 +7058,27 @@ window.addEventListener('load', function() {
   </div>
 </div>
 
+
+<!-- Robo tab (mobile full page) -->
+<div id="tab-robo" class="tab-content" style="display:none;flex-direction:column;height:100%;background:#000;padding-bottom:70px;">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;border-bottom:1px solid #0d1117;">
+    <div style="display:flex;align-items:center;gap:8px;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2"><rect x="5" y="6" width="14" height="12" rx="2"/><line x1="12" y1="2" x2="12" y2="5"/><circle cx="12" cy="2" r="1" fill="#4ade80"/><circle cx="9" cy="11" r="1.5" fill="#4ade80" stroke="none"/><circle cx="15" cy="11" r="1.5" fill="#4ade80" stroke="none"/><line x1="3" y1="11" x2="5" y2="11"/><line x1="19" y1="11" x2="21" y2="11"/></svg>
+      <span style="font-size:14px;font-weight:700;color:#4ade80;font-family:monospace;">ROBO</span>
+    </div>
+    <button onclick="clearRoboHistory()" style="font-size:11px;color:#334155;background:none;border:1px solid #1a2332;border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit;">Clear</button>
+  </div>
+  <div id="robo-tab-messages" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px;min-height:0;"></div>
+  <div style="padding:10px 12px;border-top:1px solid #0d1117;display:flex;align-items:center;gap:8px;background:#060810;">
+    <label style="cursor:pointer;color:#334155;flex-shrink:0;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+      <input type="file" accept="image/*" style="display:none;" onchange="handleRoboImageTab(this)"/>
+    </label>
+    <input id="robo-tab-input" type="text" placeholder="ask anything..." style="flex:1;background:transparent;border:none;color:#4ade80;font-family:monospace;font-size:13px;outline:none;caret-color:#4ade80;" onkeydown="if(event.key==='Enter')sendRoboMessageTab()"/>
+    <button onclick="sendRoboMessageTab()" style="background:#4ade80;color:#052e16;border:none;border-radius:7px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer;font-family:monospace;">Send</button>
+  </div>
+</div>
+
 <div id="robo-chat-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;align-items:center;justify-content:center;padding:24px;">
   <div style="background:#000;border:2px solid #4ade80;border-radius:12px;width:100%;max-width:640px;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 0 40px rgba(74,222,128,0.15);overflow:hidden;">
     <div style="background:#0a1a0a;border-bottom:1px solid #1a3a1a;padding:14px 18px;display:flex;align-items:center;gap:12px;">
@@ -7096,8 +7117,17 @@ window.addEventListener('load', function() {
     </div>
   </div>
 </div>
-<button onclick="openRoboChat()" style="position:fixed;bottom:80px;right:24px;width:48px;height:48px;border-radius:50%;background:#4ade80;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(74,222,128,0.4);z-index:9998;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#052e16" stroke-width="2.5"><rect x="5" y="6" width="14" height="12" rx="2"/><line x1="12" y1="2" x2="12" y2="5"/><circle cx="12" cy="2" r="1" fill="#052e16"/><circle cx="9" cy="11" r="1.5" fill="#052e16"/><circle cx="15" cy="11" r="1.5" fill="#052e16"/><line x1="3" y1="11" x2="5" y2="11"/><line x1="19" y1="11" x2="21" y2="11"/></svg></button>
-<script>document.addEventListener("DOMContentLoaded",function(){var inp=document.getElementById("robo-chat-input");var btn=document.getElementById("robo-send-btn");if(inp)inp.addEventListener("keydown",function(e){if(e.key==="Enter")sendRoboMessage();});if(btn)btn.addEventListener("click",sendRoboMessage);});function openRoboChat(){var o=document.getElementById("robo-chat-overlay");o.style.display="flex";setTimeout(function(){document.getElementById("robo-chat-input").focus();},100);}function closeRoboChat(){document.getElementById("robo-chat-overlay").style.display="none";}async function handleRoboImage(input) {
+<button id="robo-fab" onclick="openRoboChat()" style="position:fixed;bottom:80px;right:24px;width:48px;height:48px;border-radius:50%;background:#4ade80;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(74,222,128,0.4);z-index:9998;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#052e16" stroke-width="2.5"><rect x="5" y="6" width="14" height="12" rx="2"/><line x1="12" y1="2" x2="12" y2="5"/><circle cx="12" cy="2" r="1" fill="#052e16"/><circle cx="9" cy="11" r="1.5" fill="#052e16"/><circle cx="15" cy="11" r="1.5" fill="#052e16"/><line x1="3" y1="11" x2="5" y2="11"/><line x1="19" y1="11" x2="21" y2="11"/></svg></button>
+<script>document.addEventListener("DOMContentLoaded",function(){var inp=document.getElementById("robo-chat-input");var btn=document.getElementById("robo-send-btn");if(inp)inp.addEventListener("keydown",function(e){if(e.key==="Enter")sendRoboMessage();});if(btn)btn.addEventListener("click",sendRoboMessage);});function openRoboChat(){
+  if (window.innerWidth <= 768) {
+    // Mobile: switch to robo tab (keeps nav bar visible)
+    if (typeof switchMobileTab === 'function') switchMobileTab('robo');
+    setTimeout(function(){ var i=document.getElementById("robo-tab-input"); if(i) i.focus(); }, 200);
+  } else {
+    var o=document.getElementById("robo-chat-overlay");
+    if (o) { o.style.display="flex"; setTimeout(function(){var i=document.getElementById("robo-chat-input"); if(i) i.focus();},100); }
+  }
+}function closeRoboChat(){document.getElementById("robo-chat-overlay").style.display="none";}async function handleRoboImage(input) {
   var file = input.files[0];
   if (!file) return;
   var reader = new FileReader();
@@ -7129,6 +7159,82 @@ window.addEventListener('load', function() {
   input.value = '';
 }
 
-async function sendRoboMessage(){var input=document.getElementById("robo-chat-input");var msg=input.value.trim();if(!msg)return;input.value="";var messages=document.getElementById("robo-chat-messages");var userDiv=document.createElement("div");userDiv.style.cssText="background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.2);border-radius:10px 10px 3px 10px;padding:10px 12px;font-size:13px;color:#e2e8f0;max-width:90%;align-self:flex-end;margin-left:auto;";userDiv.textContent=msg;messages.appendChild(userDiv);var botDiv=document.createElement("div");botDiv.style.cssText="background:#0d1117;border:1px solid #1a2332;border-radius:10px 10px 10px 3px;padding:10px 12px;font-size:13px;color:#4a6080;max-width:90%;";botDiv.textContent="Thinking...";messages.appendChild(botDiv);messages.scrollTop=messages.scrollHeight;try{var r=await fetch("/api/robo/chat",{method:"POST",headers:{"Content-Type":"application/json"},credentials:"include",body:JSON.stringify({message:msg, history:roboHistory})});var d=await r.json();botDiv.style.color="#e2e8f0";var rply=d.reply||"Sorry, I had trouble with that.";var ps=rply.split(/\n+/).filter(function(p){return p.trim();});botDiv.innerHTML=ps.map(function(p){return "<p style=\"margin:0 0 8px;line-height:1.5;\">"+p.trim()+"</p>";}).join("");}catch(e){botDiv.textContent="Connection error. Try again.";}messages.scrollTop=messages.scrollHeight;}</script>
+async function sendRoboMessage(){var input=document.getElementById("robo-chat-input");var msg=input.value.trim();if(!msg)return;input.value="";var messages=document.getElementById("robo-chat-messages");var userDiv=document.createElement("div");userDiv.style.cssText="background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.2);border-radius:10px 10px 3px 10px;padding:10px 12px;font-size:13px;color:#e2e8f0;max-width:90%;align-self:flex-end;margin-left:auto;";userDiv.textContent=msg;messages.appendChild(userDiv);var botDiv=document.createElement("div");botDiv.style.cssText="background:#0d1117;border:1px solid #1a2332;border-radius:10px 10px 10px 3px;padding:10px 12px;font-size:13px;color:#4a6080;max-width:90%;";botDiv.textContent="Thinking...";messages.appendChild(botDiv);messages.scrollTop=messages.scrollHeight;try{var r=await fetch("/api/robo/chat",{method:"POST",headers:{"Content-Type":"application/json"},credentials:"include",body:JSON.stringify({message:msg, history:roboHistory})});var d=await r.json();botDiv.style.color="#e2e8f0";var rply=d.reply||"Sorry, I had trouble with that.";var ps=rply.split(/\n+/).filter(function(p){return p.trim();});botDiv.innerHTML=ps.map(function(p){return "<p style=\"margin:0 0 8px;line-height:1.5;\">"+p.trim()+"</p>";}).join("");}catch(e){botDiv.textContent="Connection error. Try again.";}messages.scrollTop=messages.scrollHeight;}
+// ── Robo tab (mobile full page) ──
+var roboTabHistory = [];
+
+function appendRoboTabMessage(role, text) {
+  var messages = document.getElementById('robo-tab-messages');
+  if (!messages) return;
+  var div = document.createElement('div');
+  if (role === 'user') {
+    div.style.cssText = 'background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.2);border-radius:10px 10px 3px 10px;padding:10px 12px;font-size:13px;color:#e2e8f0;max-width:88%;align-self:flex-end;margin-left:auto;';
+    div.textContent = text;
+  } else {
+    div.style.cssText = 'background:#0d1117;border:1px solid #1a2332;border-radius:10px 10px 10px 3px;padding:10px 12px;font-size:13px;color:#e2e8f0;max-width:88%;line-height:1.5;';
+    div.innerHTML = text.split(/\n+/).filter(function(p){return p.trim();}).map(function(p){return '<p style="margin:0 0 6px;">'+p+'</p>';}).join('');
+  }
+  messages.appendChild(div);
+  messages.scrollTop = messages.scrollHeight;
+  return div;
+}
+
+async function sendRoboMessageTab() {
+  var input = document.getElementById('robo-tab-input');
+  var msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  appendRoboTabMessage('user', msg);
+  roboTabHistory.push({role:'user', content: msg});
+  var botDiv = appendRoboTabMessage('bot', '...');
+  if (botDiv) botDiv.style.color = '#4a6080';
+  try {
+    var r = await fetch('/api/robo/chat', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({message: msg, history: roboTabHistory})});
+    var d = await r.json();
+    var reply = d.reply || 'Sorry, had trouble with that.';
+    if (botDiv) {
+      botDiv.style.color = '#e2e8f0';
+      botDiv.innerHTML = reply.split(/\n+/).filter(function(p){return p.trim();}).map(function(p){return '<p style="margin:0 0 6px;">'+p+'</p>';}).join('');
+    }
+    roboTabHistory.push({role:'assistant', content: reply});
+  } catch(e) {
+    if (botDiv) botDiv.textContent = 'Connection error. Try again.';
+  }
+  var messages = document.getElementById('robo-tab-messages');
+  if (messages) messages.scrollTop = messages.scrollHeight;
+}
+
+async function handleRoboImageTab(input) {
+  if (!input.files || !input.files[0]) return;
+  var file = input.files[0];
+  var reader = new FileReader();
+  reader.onload = async function(e) {
+    var b64 = e.target.result.split(',')[1];
+    appendRoboTabMessage('user', '[Photo sent]');
+    var botDiv = appendRoboTabMessage('bot', 'Analyzing photo...');
+    try {
+      var r = await fetch('/api/robo/vision', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({image: b64, history: roboTabHistory})});
+      var d = await r.json();
+      var reply = d.reply || 'Could not analyze image.';
+      if (botDiv) {
+        botDiv.style.color = '#e2e8f0';
+        botDiv.innerHTML = reply.split(/\n+/).filter(function(p){return p.trim();}).map(function(p){return '<p style="margin:0 0 6px;">'+p+'</p>';}).join('');
+      }
+      roboTabHistory.push({role:'assistant', content: reply});
+    } catch(e) {
+      if (botDiv) botDiv.textContent = 'Connection error.';
+    }
+  };
+  reader.readAsDataURL(file);
+  input.value = '';
+}
+
+function clearRoboHistory() {
+  roboTabHistory = [];
+  var messages = document.getElementById('robo-tab-messages');
+  if (messages) messages.innerHTML = '';
+}
+
+</script>
 </body>
 </html>
