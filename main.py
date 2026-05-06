@@ -2606,15 +2606,34 @@ weight fields: use null if truly unknown"""
                 if not images and item.get("_page_img"):
                     try:
                         img_url = item["_page_img"]
-                        # Extract scan_id and img_index from URL like /api/auction/page-image/{scan_id}/{idx}
+                        # Parse new URL format: /api/auction/page-image/{scan_id}/p{N} or p{N}_{bbox}
                         parts_url = img_url.strip("/").split("/")
                         if len(parts_url) >= 2:
                             sid = parts_url[-2]
-                            idx = int(parts_url[-1])
-                            stored_pdf = supabase.storage.from_("auction-pdfs").download(f"{sid}.pdf")
-                            images = await loop.run_in_executor(
-                                executor, lambda: extract_single_image(stored_pdf, idx)
-                            )
+                            page_ref = parts_url[-1]
+                            # Check memory cache first
+                            cached = _auction_page_cache.get(sid)
+                            if cached:
+                                if page_ref.startswith("p"):
+                                    pnum = int(page_ref[1:].split("_")[0]) - 1
+                                    if pnum in cached:
+                                        images = [cached[pnum]]
+                            if not images:
+                                # Fall back to Supabase PDF
+                                stored_pdf = supabase.storage.from_("auction-pdfs").download(f"{sid}.pdf")
+                                if page_ref.startswith("p"):
+                                    pnum = int(page_ref[1:].split("_")[0]) - 1
+                                    images = await loop.run_in_executor(
+                                        executor, extract_page_image, stored_pdf, pnum+1, pnum+1
+                                    )
+                                else:
+                                    try:
+                                        idx = int(page_ref)
+                                        images = await loop.run_in_executor(
+                                            executor, lambda: extract_single_image(stored_pdf, idx)
+                                        )
+                                    except Exception:
+                                        pass
                     except Exception as img_e:
                         print(f"Auto image fetch error: {img_e}")
                 result = await loop.run_in_executor(executor, research_item, item, images)
