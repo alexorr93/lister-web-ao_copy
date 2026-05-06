@@ -248,6 +248,15 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 .tab-content { display: none; }
 .tab-content.active { display: block; }
 #tab-robo.active { display: flex !important; }
+@media (max-width: 768px) {
+  #tab-robo.active {
+    position: fixed !important;
+    top: 0; left: 0; right: 0; bottom: 56px;
+    z-index: 98;
+    overflow: hidden;
+  }
+  #tab-robo.active ~ * { display: none; }
+}
 
 /* STATS */
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
@@ -7076,7 +7085,7 @@ window.addEventListener('load', function() {
 
 
 <!-- Robo tab (mobile full page) -->
-<div id="tab-robo" class="tab-content" style="display:none;flex-direction:column;position:fixed;top:0;left:0;right:0;bottom:56px;background:#000;z-index:100;overflow:hidden;">
+<div id="tab-robo" class="tab-content" style="display:none;flex-direction:column;background:#000;">
   <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;border-bottom:1px solid #0d1117;">
     <div style="display:flex;align-items:center;gap:8px;">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2"><rect x="5" y="6" width="14" height="12" rx="2"/><line x1="12" y1="2" x2="12" y2="5"/><circle cx="12" cy="2" r="1" fill="#4ade80"/><circle cx="9" cy="11" r="1.5" fill="#4ade80" stroke="none"/><circle cx="15" cy="11" r="1.5" fill="#4ade80" stroke="none"/><line x1="3" y1="11" x2="5" y2="11"/><line x1="19" y1="11" x2="21" y2="11"/></svg>
