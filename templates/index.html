@@ -1993,6 +1993,8 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     document.getElementById('tab-' + tab).classList.add('active');
     activeTab = tab;
     try { localStorage.setItem('rr_active_tab', tab); } catch(e) {}
+    // Push history state so browser back button navigates within app
+    try { history.pushState({ tab: tab }, '', '#' + tab); } catch(e) {}
     if (tab === 'dashboard') { loadListings(); loadDashboardSummary(); }
     if (tab === 'detailed') { loadDetailedAnalytics(); }
     if (tab === 'inventory') { loadInventory(); }
@@ -5570,12 +5572,25 @@ function closeMobileTabEditor() {
 
 // Init on page load
 document.addEventListener('DOMContentLoaded', function() {
+  // Handle browser back/forward button
+  window.addEventListener('popstate', function(e) {
+    var tab = (e.state && e.state.tab) || (location.hash ? location.hash.slice(1) : null);
+    if (!tab) return;
+    // Try desktop nav btn first
+    var btn = document.querySelector('.nav-btn[data-tab="' + tab + '"]');
+    if (btn) { btn.click(); return; }
+    // Try mobile switch
+    if (typeof switchMobileTab === 'function') switchMobileTab(tab);
+  });
+
   // Restore last active tab
   try {
     var savedTab = localStorage.getItem('rr_mobile_tab') || localStorage.getItem('rr_active_tab');
     if (savedTab) {
       var btn = document.querySelector('.nav-btn[data-tab="' + savedTab + '"]');
       if (btn) { btn.click(); }
+      // Replace so the restored tab is the base history entry
+      try { history.replaceState({ tab: savedTab }, '', '#' + savedTab); } catch(e) {}
     }
   } catch(e) {}
   renderMobileTabBar();
@@ -5586,6 +5601,7 @@ document.addEventListener('DOMContentLoaded', function() {
       if (tabId && tabId !== 'detailed') {
         currentMobileTab = tabId;
         try { localStorage.setItem('rr_mobile_tab', tabId); } catch(e) {}
+        try { history.pushState({ tab: tabId }, '', '#' + tabId); } catch(e) {}
         renderMobileTabBar();
       }
     });
