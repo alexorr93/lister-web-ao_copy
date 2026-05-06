@@ -5254,10 +5254,14 @@ async def robo_chat(request: Request):
                 # Build contents with conversation history
                 contents = []
                 for h in history:
-                    if h.get("role") == "user":
-                        contents.append(_gt.Content(role="user", parts=[_gt.Part(text=h.get("text",""))]))
-                    elif h.get("role") == "robo":
-                        contents.append(_gt.Content(role="model", parts=[_gt.Part(text=h.get("text",""))]))
+                    role = h.get("role", "")
+                    text = h.get("content") or h.get("text") or ""
+                    if not text:
+                        continue
+                    if role == "user":
+                        contents.append(_gt.Content(role="user", parts=[_gt.Part(text=text)]))
+                    elif role in ("assistant", "robo", "model"):
+                        contents.append(_gt.Content(role="model", parts=[_gt.Part(text=text)]))
                 if image_b64:
                     import base64 as _b64
                     img_bytes = _b64.b64decode(image_b64)
