@@ -2312,6 +2312,15 @@ async function loadListings() {
   } catch(e) { toast('Failed to load listings', 'error'); }
 }
 
+function openRoboChat() {
+  var o = document.getElementById("robo-chat-overlay");
+  if (o) { o.style.display = "flex"; setTimeout(function(){ var i = document.getElementById("robo-chat-input"); if(i) i.focus(); }, 100); }
+}
+function closeRoboChat() {
+  var o = document.getElementById("robo-chat-overlay");
+  if (o) o.style.display = "none";
+}
+
 function renderTiles() {
   const grid = document.getElementById('tile-grid');
   const empty = document.getElementById('dash-empty');
