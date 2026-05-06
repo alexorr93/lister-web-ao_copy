@@ -5226,6 +5226,9 @@ async def robo_chat(request: Request):
     try:
         body = await request.json()
         message = body.get("message", "")
+        history = body.get("history", [])
+        image_b64 = body.get("image", None)
+        image_mime = body.get("image_mime", "image/jpeg")
         image_b64 = body.get("image", None)
         image_mime = body.get("image_mime", "image/jpeg")
         gemini_key = os.getenv("GEMINI_API_KEY", "")
@@ -5234,7 +5237,14 @@ async def robo_chat(request: Request):
         from google import genai as _genai
         from google.genai import types as _gt
         client = _genai.Client(api_key=gemini_key)
-        system = """You are Robo, the AI reselling expert built into RoboReseller. You have real, practical knowledge about:
+        system = """You are Robo, an expert AI reselling assistant. Rules you must follow:
+
+1. NEVER guess or hallucinate brand names, model numbers, or specific product details. If you cannot clearly read a tag or confirm a brand with certainty, say "I cannot confirm the brand from this photo" and describe only what you can actually see.
+2. Only state prices for items you can actually identify. If unsure, give a general category range and say you cannot confirm the specific item.
+3. Maintain full context of the conversation. Remember everything discussed including any photos analyzed.
+4. When analyzing photos: describe what you actually see (colors, visible text, style) before making any identification. If a tag is not clearly readable, say so.
+5. Be direct and practical. Give real price ranges when you know the item. Use line breaks between points. Plain text only, no markdown.
+6. If a user corrects you, immediately acknowledge the correction and adjust your analysis."""
 - eBay selling: how to write titles that rank, item specifics that matter, pricing to sell fast vs maximize profit, fee structures, shipping strategies
 - What sells well right now: trending categories, seasonal patterns, what to look for at thrift stores and garage sales
 - Pricing: how to read sold comps, condition impact on price, what makes an item worth more or less
@@ -5245,7 +5255,22 @@ When someone asks a question, give a real answer with specifics. If they ask abo
         for _m in ["gemini-2.5-flash", "gemini-2.5-flash-preview-04-17"]:
             try:
                 _cfg = _gt.GenerateContentConfig(system_instruction=system, temperature=0.7)
+                # Build contents with conversation history
+                contents = []
+                for h in history:
+                    if h.get("role") == "user":
+                        contents.append(_gt.Content(role="user", parts=[_gt.Part(text=h.get("text",""))]))
+                    elif h.get("role") == "robo":
+                        contents.append(_gt.Content(role="model", parts=[_gt.Part(text=h.get("text",""))]))
                 if image_b64:
+                    import base64 as _b64
+                    img_bytes = _b64.b64decode(image_b64)
+                    prompt = message or "Analyze this item carefully. Describe what you actually see. Only identify brand/model if you can clearly confirm it. Give eBay resell price range, condition notes, and sell speed."
+                    cur_parts = [_gt.Part(inline_data=_gt.Blob(mime_type=image_mime, data=img_bytes)), _gt.Part(text=prompt)]
+                else:
+                    cur_parts = [_gt.Part(text=message)]
+                contents.append(_gt.Content(role="user", parts=cur_parts))
+                _resp = client.models.generate_content(model=_m, contents=contents, config=_cfg)
                     import base64 as _b64
                     img_bytes = _b64.b64decode(image_b64)
                     prompt = message or "Identify this item. Give brand, model, eBay resell price range (used/new), what to look for (variants, fakes, condition issues), and how fast it sells."
