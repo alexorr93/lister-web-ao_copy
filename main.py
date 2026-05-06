@@ -5496,7 +5496,7 @@ async def scan_auction_url(request: Request):
             # Extract catalogue path and fetch lots via JSON API
             # URL pattern: /auction-catalogues/{seller}/catalogue-id-{id}/...
             import re as _re
-            m = _re.search(r"/auction-catalogues/([^/]+)/catalogue-id-([^/]+)/", url)
+            m = _re.search(r"/auction-catalogues/([^/]+)/catalogue-id-([^/?]+)", url)
             if m:
                 seller, cat_id = m.group(1), m.group(2)
                 # Use Apify actor to scrape Bidspotter
