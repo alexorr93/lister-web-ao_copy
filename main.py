@@ -5435,24 +5435,77 @@ async def scan_auction_url(request: Request):
     if not gemini_key:
         raise HTTPException(400, "GEMINI_API_KEY not set")
 
-    # Fetch page
-    try:
-        import urllib.request
-        req = urllib.request.Request(url, headers={
+    # Fetch page — with special handling for known auction platforms
+    import urllib.request, urllib.parse
+
+    def fetch_url(u, headers=None):
+        h = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,*/*",
-        })
+            "Accept": "text/html,application/xhtml+xml,application/json,*/*",
+        }
+        if headers:
+            h.update(headers)
+        req = urllib.request.Request(u, headers=h)
         with urllib.request.urlopen(req, timeout=20) as resp:
-            html = resp.read().decode("utf-8", errors="ignore")
+            return resp.read().decode("utf-8", errors="ignore")
+
+    try:
+        text = ""
+        # ── Bidspotter ──
+        if "bidspotter.com" in url:
+            # Extract catalogue path and fetch lots via JSON API
+            # URL pattern: /auction-catalogues/{seller}/catalogue-id-{id}/...
+            import re as _re
+            m = _re.search(r"/auction-catalogues/([^/]+)/catalogue-id-([^/]+)/", url)
+            if m:
+                seller, cat_id = m.group(1), m.group(2)
+                api_url = f"https://www.bidspotter.com/en-us/auction-catalogues/{seller}/catalogue-id-{cat_id}/lots.json?page=1&per_page=100"
+                try:
+                    raw_json = fetch_url(api_url, {"Accept": "application/json"})
+                    import json as _json
+                    data = _json.loads(raw_json)
+                    lots = data.get("lots") or data.get("items") or data.get("results") or []
+                    if lots:
+                        lines = []
+                        for lot in lots:
+                            lot_num = lot.get("lot_number") or lot.get("lot") or ""
+                            title = lot.get("title") or lot.get("name") or lot.get("description") or ""
+                            est = lot.get("estimate") or lot.get("high_estimate") or ""
+                            img = lot.get("image_url") or lot.get("thumbnail") or ""
+                            lines.append(f"Lot {lot_num}: {title} | Estimate: {est} | Image: {img}")
+                        text = "\n".join(lines)
+                except Exception as api_err:
+                    print(f"Bidspotter API error: {api_err}")
+
+            if not text:
+                # Fallback: fetch HTML and extract lot data from script tags
+                html = fetch_url(url)
+                # Look for JSON embedded in page
+                json_match = re.search(r'window\.__INITIAL_STATE__\s*=\s*({.*?});', html, re.DOTALL)
+                if not json_match:
+                    json_match = re.search(r'window\.lots\s*=\s*(\[.*?\]);', html, re.DOTALL)
+                if json_match:
+                    try:
+                        import json as _json
+                        embedded = _json.loads(json_match.group(1))
+                        text = str(embedded)[:12000]
+                    except Exception:
+                        pass
+                if not text:
+                    text = re.sub(r'<[^>]+>', ' ', html)
+                    text = re.sub(r'\s+', ' ', text).strip()[:12000]
+
+        # ── Generic fallback ──
+        else:
+            html = fetch_url(url)
+            text = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL)
+            text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL)
+            text = re.sub(r'<[^>]+>', ' ', text)
+            text = re.sub(r'\s+', ' ', text).strip()
+            text = text[:12000]
+
     except Exception as e:
         raise HTTPException(502, f"Could not fetch URL: {e}")
-
-    # Strip HTML to text
-    text = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL)
-    text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL)
-    text = re.sub(r'<[^>]+>', ' ', text)
-    text = re.sub(r'\s+', ' ', text).strip()
-    text = text[:12000]  # cap for Gemini
 
     # Run Gemini lot extraction
     from google import genai as _genai3
