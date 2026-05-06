@@ -2128,6 +2128,12 @@ Respond ONLY in valid JSON format, no markdown:
         """Strip address fragments, company boilerplate, and catalog noise from auction titles."""
         import re
         t = raw_title
+        # Strip to brand+model: cut at "with"/accessories, voltage specs, phase info
+        t = re.sub(r'\s+(?:with|w/|including|incl\.?|and|plus|&)\s+.*', '', t, flags=re.IGNORECASE)
+        t = re.sub(r',?\s*\d+[/\\]\d+[/\\]?\d*\s*[Vv][^,]*', '', t)
+        t = re.sub(r',?\s*\d+\s*(?:volt|amp|phase|hz|kva|kw|hp|vac|vdc)\b.*', '', t, flags=re.IGNORECASE)
+        t = re.sub(r',?\s*(?:single|three|3|1)\s*phase\b.*', '', t, flags=re.IGNORECASE)
+        # Cap at 6 words after cleaning
         # Remove street addresses like "Siemensstrasse 7", "123 Main St"
         t = re.sub(r'\d+\s+[A-Z][a-z]+(?:strasse|street|ave|blvd|rd|st|dr|ln|way)', '', t, flags=re.IGNORECASE)
         t = re.sub(r'[A-Z][a-z]+(?:strasse|gasse|platz|weg)\s+\d+', '', t, flags=re.IGNORECASE)
@@ -2143,7 +2149,10 @@ Respond ONLY in valid JSON format, no markdown:
         # Remove # symbol (breaks eBay search)
         t = t.replace('#', '')
         # Collapse extra whitespace
-        t = ' '.join(t.split()).strip().strip(',').strip()
+        t = ' '.join(t.split()).strip().strip(',.').strip()
+        words = t.split()
+        if len(words) > 6:
+            t = ' '.join(words[:6])
         return t
 
     def gemini_search_grounding(query, gemini_key):
