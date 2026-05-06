@@ -2544,11 +2544,41 @@ async function changeQty(id, delta) {
 }
 
 async function rescanItem(id) {
+  var tile = document.getElementById('tile-' + id);
+  var btn = tile ? tile.querySelector('.tile-rescan') : null;
+  if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
   try {
     await api('POST', `/api/listings/${id}/rescan`);
-    toast('Resubmitted to scanner ✓');
-    setTimeout(loadListings, 1500);
-  } catch(e) { toast('Re-scan failed', 'error'); }
+    toast('Rescanning...');
+    // Poll until status changes from processing
+    var attempts = 0;
+    var poll = setInterval(async function() {
+      attempts++;
+      if (attempts > 20) { clearInterval(poll); loadListings(); return; }
+      try {
+        var r = await fetch('/api/listings/' + id, {credentials:'include'});
+        var d = await r.json();
+        var item = d.listing || d;
+        if (item && item.status !== 'processing') {
+          clearInterval(poll);
+          // Update tile in place
+          var idx = listings.findIndex(function(l){ return l.id == id; });
+          if (idx >= 0) {
+            listings[idx] = Object.assign(listings[idx], item);
+            var newTile = document.createElement('div');
+            newTile.innerHTML = renderSingleTile(listings[idx], idx);
+            var oldTile = document.getElementById('tile-' + id);
+            if (oldTile && newTile.firstChild) oldTile.replaceWith(newTile.firstChild);
+          } else {
+            loadListings();
+          }
+        }
+      } catch(pe) { clearInterval(poll); loadListings(); }
+    }, 2000);
+  } catch(e) {
+    if (btn) { btn.textContent = '↺ Rescan'; btn.disabled = false; }
+    toast('Re-scan failed', 'error');
+  }
 }
 
 async function confirmClearBatch() {
