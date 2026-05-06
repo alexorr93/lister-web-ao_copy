@@ -858,7 +858,9 @@ select.field-input { background: #fff; color: #0f172a; }
     </div>
 
     <!-- Current Batch header + actions -->
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap;">
+
+    <!-- DESKTOP toolbar -->
+    <div class="batch-toolbar-desktop" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap;">
       <div style="display:flex;align-items:baseline;gap:10px;">
         <div style="font-size:15px;font-weight:700;color:var(--text);">Current Batch</div>
         <div style="font-size:16px;color:var(--muted);" id="batch-summary">—</div>
@@ -881,8 +883,8 @@ select.field-input { background: #fff; color: #0f172a; }
         <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="openLotCostModal()" id="lot-cost-btn">Lot Cost</button>
         <button class="btn" style="font-size:16px;padding:8px 14px;background:#1a3a1a;border-color:#2d5a2d;color:#86efac;font-weight:700;" onclick="openSaveBatchModal()">Save Batch</button>
         <div style="position:relative;">
-          <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="toggleSavedBatchesDropdown()">📂 Saved</button>
-          <div id="saved-batches-dropdown" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;background:#0a0f18;border:1px solid #1a2332;border-radius:8px;padding:4px;min-width:220px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,0.5);" id="saved-batches-dd">
+          <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="toggleSavedBatchesDropdown()">🗂 Saved</button>
+          <div id="saved-batches-dropdown" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;background:#0a0f18;border:1px solid #1a2332;border-radius:8px;padding:4px;min-width:220px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,0.5);">
             <div id="saved-batches-dd-list" style="max-height:240px;overflow-y:auto;"></div>
           </div>
         </div>
@@ -890,21 +892,52 @@ select.field-input { background: #fff; color: #0f172a; }
         <div style="position:relative;" id="submit-dropdown-wrap">
           <button class="btn btn-primary" id="submit-batch-btn" style="font-size:16px;padding:7px 14px;display:none;" onclick="toggleSubmitDropdown()">Submit (<span id="submit-count">0</span>) ▾</button>
           <div id="submit-dropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:4px;background:#0a0f18;border:1px solid #1a2332;border-radius:8px;padding:4px;min-width:180px;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,0.4);">
-            <button onclick="openEbayModal();closeSubmitDropdown();" style="display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;color:var(--text);font-size:16px;padding:8px 10px;cursor:pointer;font-family:inherit;text-align:left;border-radius:6px;">
-              <span style="display:inline-block;width:7px;height:7px;background:#2563eb;border-radius:50%;"></span>
-              Submit to eBay
-            </button>
-            <button onclick="submitToShopify();closeSubmitDropdown();" style="display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;color:var(--text);font-size:16px;padding:8px 10px;cursor:pointer;font-family:inherit;text-align:left;border-radius:6px;">
-              <span style="display:inline-block;width:7px;height:7px;background:#5a8e3b;border-radius:50%;"></span>
-              Push to Shopify
-            </button>
-            <button onclick="window.location.href='/api/export/ebay-csv';closeSubmitDropdown();" style="display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;color:var(--text);font-size:16px;padding:8px 10px;cursor:pointer;font-family:inherit;text-align:left;border-radius:6px;">
-              <span style="display:inline-block;width:7px;height:7px;background:#06b6d4;border-radius:50%;"></span>
-              Export eBay CSV
-            </button>
+            <button onclick="openEbayModal();closeSubmitDropdown();" style="display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;color:var(--text);font-size:16px;padding:8px 10px;cursor:pointer;font-family:inherit;text-align:left;border-radius:6px;"><span style="display:inline-block;width:7px;height:7px;background:#2563eb;border-radius:50%;"></span>Submit to eBay</button>
+            <button onclick="submitToShopify();closeSubmitDropdown();" style="display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;color:var(--text);font-size:16px;padding:8px 10px;cursor:pointer;font-family:inherit;text-align:left;border-radius:6px;"><span style="display:inline-block;width:7px;height:7px;background:#5a8e3b;border-radius:50%;"></span>Push to Shopify</button>
+            <button onclick="window.location.href='/api/export/ebay-csv';closeSubmitDropdown();" style="display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;color:var(--text);font-size:16px;padding:8px 10px;cursor:pointer;font-family:inherit;text-align:left;border-radius:6px;"><span style="display:inline-block;width:7px;height:7px;background:#06b6d4;border-radius:50%;"></span>Export eBay CSV</button>
           </div>
         </div>
         <button class="btn btn-danger" style="font-size:15px;padding:5px 10px;" onclick="confirmClearBatch()">Clear</button>
+      </div>
+    </div>
+
+    <!-- MOBILE toolbar -->
+    <div class="batch-toolbar-mobile" style="display:none;margin-bottom:12px;background:#141419;border-radius:12px;border:1px solid rgba(255,255,255,0.07);overflow:hidden;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:11px 14px 6px;">
+        <div style="font-size:13px;font-weight:600;color:var(--text);">Current Batch</div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <select id="dash-sort-mobile" onchange="document.getElementById('dash-sort')&&(document.getElementById('dash-sort').value=this.value);changeDashSort();" style="font-size:11px;color:#888;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:4px 7px;cursor:pointer;font-family:inherit;outline:none;">
+            <option value="batch_desc">Newest ▾</option>
+            <option value="batch_asc">Oldest ▾</option>
+            <option value="price_desc">Price ↓</option>
+            <option value="price_asc">Price ↑</option>
+            <option value="profit_desc">Profit ↓</option>
+            <option value="profit_asc">Profit ↑</option>
+          </select>
+          <div style="position:relative;">
+            <button onclick="toggleMobileOverflow(this)" style="width:28px;height:28px;border-radius:7px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;cursor:pointer;gap:2px;padding:0;box-sizing:border-box;">
+              <span style="width:3px;height:3px;border-radius:50%;background:#888;display:inline-block;flex-shrink:0;"></span>
+              <span style="width:3px;height:3px;border-radius:50%;background:#888;display:inline-block;flex-shrink:0;"></span>
+              <span style="width:3px;height:3px;border-radius:50%;background:#888;display:inline-block;flex-shrink:0;"></span>
+            </button>
+            <div id="mobile-overflow-dd" style="display:none;position:absolute;right:0;top:34px;background:#1e1e28;border:1px solid rgba(255,255,255,0.1);border-radius:10px;min-width:160px;z-index:300;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,0.5);">
+              <button onclick="openLotCostModal();closeMobileOverflow();" style="display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;color:#ccc;font-size:13px;padding:10px 14px;cursor:pointer;font-family:inherit;text-align:left;">💰 Lot Cost</button>
+              <button onclick="toggleSavedBatchesDropdown();closeMobileOverflow();" style="display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;color:#ccc;font-size:13px;padding:10px 14px;cursor:pointer;font-family:inherit;text-align:left;border-top:1px solid rgba(255,255,255,0.06);">🗂 Saved Batches</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="batch-summary-mobile" style="padding:0 14px 9px;font-size:11.5px;color:#555;">—</div>
+      <div style="height:1px;background:rgba(255,255,255,0.05);margin:0 14px;"></div>
+      <div style="display:flex;align-items:center;gap:8px;padding:9px 14px;">
+        <button onclick="toggleMobileSelectMode(this)" id="mobile-select-btn" style="display:flex;align-items:center;gap:5px;font-size:12px;color:#888;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:7px 11px;cursor:pointer;font-family:inherit;">
+          <span style="width:13px;height:13px;border:1.5px solid #555;border-radius:3px;display:inline-block;flex-shrink:0;" id="mobile-select-check"></span>
+          Select
+        </button>
+        <button onclick="openSaveBatchModal()" style="display:flex;align-items:center;gap:5px;font-size:13px;font-weight:600;color:#86efac;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.25);border-radius:8px;padding:8px 16px;cursor:pointer;font-family:inherit;margin-left:auto;">↑ Save</button>
+      </div>
+      <div style="padding:0 14px 9px;">
+        <button onclick="confirmClearBatch()" style="font-size:11px;color:#e05252;background:none;border:none;cursor:pointer;padding:0;font-family:inherit;">Clear batch</button>
       </div>
     </div>
 
@@ -2329,6 +2362,80 @@ function closeRoboChat() {
 
 let scanView = localStorage.getItem("rr_scan_view") || "grid";
 
+
+// Strip item title to brand+model for cleaner eBay/Google searches
+function stripSearchTitle(title) {
+  if (!title) return '';
+  var t = title;
+  // Cut at common condition/separator markers
+  t = t.replace(/\s*[-|]{1,2}\s*(used|like new|new|excellent|good|fair|poor|works|great|bundle|lot|set|oem|authentic|genuine|free\s*ship|fast\s*ship|tested|parts only|as.?is|see desc|read desc).*/gi, '');
+  // Cut trailing fluff
+  t = t.replace(/\s+(w\/|with\s+case|incl\.?|includes|bundle|lot|set|size\s*\d|sealed|nib|nwt|nwob|htf|vhtf|rare|great condition|clean|works great).*/gi, '');
+  // Remove parentheticals
+  t = t.replace(/[\(\[{][^\)\]]*[\)\]}]/g, '');
+  // Clean up
+  t = t.replace(/[,!?*#]+/g, ' ').replace(/\s+/g, ' ').trim();
+  // Cap at 5 words
+  return t.split(' ').filter(Boolean).slice(0, 5).join(' ');
+}
+
+// Mobile overflow menu
+function toggleMobileOverflow(btn) {
+  var dd = document.getElementById('mobile-overflow-dd');
+  if (!dd) return;
+  var isOpen = dd.style.display === 'block';
+  dd.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) {
+    setTimeout(function() {
+      document.addEventListener('click', function closeDd(e) {
+        if (!btn.parentElement.contains(e.target)) {
+          dd.style.display = 'none';
+          document.removeEventListener('click', closeDd);
+        }
+      });
+    }, 10);
+  }
+}
+function closeMobileOverflow() {
+  var dd = document.getElementById('mobile-overflow-dd');
+  if (dd) dd.style.display = 'none';
+}
+
+// Mobile select toggle
+var _mobileSelectActive = false;
+function toggleMobileSelectMode(btn) {
+  _mobileSelectActive = !_mobileSelectActive;
+  var chk = document.getElementById('mobile-select-check');
+  if (_mobileSelectActive) {
+    btn.style.color = '#4ade80';
+    btn.style.borderColor = 'rgba(34,197,94,0.3)';
+    btn.style.background = 'rgba(34,197,94,0.08)';
+    if (chk) { chk.style.borderColor = '#4ade80'; chk.style.background = 'rgba(34,197,94,0.15)'; }
+    if (typeof selectAll === 'function') selectAll();
+  } else {
+    btn.style.color = '#888';
+    btn.style.borderColor = 'rgba(255,255,255,0.1)';
+    btn.style.background = 'rgba(255,255,255,0.05)';
+    if (chk) { chk.style.borderColor = '#555'; chk.style.background = 'transparent'; }
+    if (typeof deselectAll === 'function') deselectAll();
+  }
+}
+
+// Keep mobile batch-summary-mobile in sync
+var _origUpdateBatchSummary = null;
+(function() {
+  var interval = setInterval(function() {
+    var bs = document.getElementById('batch-summary');
+    var bsm = document.getElementById('batch-summary-mobile');
+    if (bs && bsm) {
+      var observer = new MutationObserver(function() { bsm.textContent = bs.textContent; });
+      observer.observe(bs, {childList:true, characterData:true, subtree:true});
+      bsm.textContent = bs.textContent;
+      clearInterval(interval);
+    }
+  }, 300);
+})();
+
 function setScanView(v) {
   if (window.innerWidth < 769) { v = "grid"; }
   scanView = v;
@@ -3391,7 +3498,7 @@ function appendPdfItems(items) {
     pdfAllItems.push(item);
     const val = parseInt(item.your_value) || 0;
     const color = val > 100 ? 'pdf-value-high' : val > 0 ? 'pdf-value-low' : '';
-    const ebayUrl = 'https://www.ebay.com/sch/i.html?_nkw=' + encodeURIComponent(item.title || '') + '&LH_Sold=1&LH_Complete=1';
+    const ebayUrl = 'https://www.ebay.com/sch/i.html?_nkw=' + encodeURIComponent(stripSearchTitle(item.title || '')) + '&LH_Sold=1&LH_Complete=1';
     tbody.innerHTML += '<tr>' +
       '<td style="color:var(--muted);white-space:nowrap">' + (item.lot||'') + '</td>' +
       '<td style="max-width:200px"><a href="' + ebayUrl + '" target="_blank" style="color:var(--accent);font-weight:600;font-size:12px;">' + (item.title||'') + '</a></td>' +
@@ -5760,6 +5867,15 @@ function updatePriceByCondition() {
 .sb-item img { width:36px; height:36px; object-fit:cover; border-radius:4px; flex-shrink:0; }
 .sb-item .sb-item-title { flex:1; font-size:11px; color:var(--text); line-height:1.3; }
 .sb-item .sb-item-price { font-size:11px; color:#86efac; font-weight:600; white-space:nowrap; }
+
+/* Batch toolbar responsive */
+@media (max-width: 768px) {
+  .batch-toolbar-desktop { display: none !important; }
+  .batch-toolbar-mobile { display: block !important; }
+}
+@media (min-width: 769px) {
+  .batch-toolbar-mobile { display: none !important; }
+}
 </style>
 
 <script>
