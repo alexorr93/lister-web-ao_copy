@@ -429,7 +429,7 @@ function renderItems() {
     var cls = 'tbl-row' + (isHv ? ' hv' : '') + (item._watch ? ' watched' : '');
     var valCls = isHv ? 'val-pill val-high' : 'val-pill val-normal';
     var deepBadge = item._deep ? '<span class="badge-deep">Deep scan</span>' : '';
-    var cleanTitle = (item.title||'').replace(/\s*,?\s*QTY\s*\(?\d*\)?/gi,'').replace(/\s*,?\s*\(\d+\)/g,'').replace(/\bLOT OF \d+/gi,'').replace(/,\s*$/,'').trim();
+    var cleanTitle = stripAuctionTitle(item.title||'');
     var ebayUrl = 'https://www.ebay.com/sch/i.html?_nkw=' + encodeURIComponent(cleanTitle) + '&LH_Sold=1&LH_Complete=1';
     return '<div class="' + cls + '" id="row-' + item._id + '">' +
       '<div class="lot">#' + esc(item.lot||'') + '</div>' +
