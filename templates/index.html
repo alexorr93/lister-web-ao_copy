@@ -247,6 +247,7 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 /* MAIN — see sidebar CSS above */
 .tab-content { display: none; }
 .tab-content.active { display: block; }
+#tab-robo.active { display: flex !important; }
 
 /* STATS */
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
@@ -5468,12 +5469,12 @@ function switchMobileTab(tabId) {
   try { history.pushState({ tab: tabId }, '', '#' + tabId); } catch(e) {}
 
   if (tabId === 'robo') {
-    // Robo has no nav-btn — show tab-robo directly
     document.querySelectorAll('.tab-content').forEach(function(t) {
       t.style.display = 'none'; t.classList.remove('active');
     });
     var roboTab = document.getElementById('tab-robo');
-    if (roboTab) { roboTab.style.display = 'flex'; roboTab.classList.add('active'); }
+    if (roboTab) { roboTab.style.cssText = roboTab.style.cssText.replace('display:none','display:flex'); roboTab.style.display = 'flex'; roboTab.classList.add('active'); }
+    currentMobileTab = 'robo';
     renderMobileTabBar();
     closeMobileMore();
     setTimeout(function(){ var i=document.getElementById('robo-tab-input'); if(i) i.focus(); }, 200);
