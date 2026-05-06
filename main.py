@@ -3354,31 +3354,21 @@ async def scan_pdf_auction(file: UploadFile = File(...)):
 
     prompt_template = """You are a world-class auction appraiser with deep expertise in industrial equipment, lab instruments, and commercial goods.
 
-Extract EVERY auction lot from this catalog section.
-
-For each lot return a JSON object:
-- lot: lot number as string
-- title: full item title as written
-- description: one sentence description
-- estimate_low: integer dollar amount
-- estimate_high: integer dollar amount
-- your_value: integer (your single best estimate - total lot value)
-- notes: brief market note with price source
+Extract EVERY auction lot from the provided catalog page.
 
 EXPERT AUCTION TITLE INTERPRETATION:
 - Quantities: "(2)", "QTY (3)", "SET OF 4", "PAIR", "x3" = price TOTAL for ALL units combined
 - Vague lots: "SHELF OF...", "PALLET OF...", "BOX OF..." = estimate total resale of all contents
-- Condition notes like "AS-IS", "UNTESTED", "ACTIVATION NOT GUARANTEED" = still price as normal working condition
-- Always search for the SPECIFIC brand + model for accurate pricing
-- Ignore auction house names, catalog numbers, location references in titles
+- Condition notes: "AS-IS", "UNTESTED", "ACTIVATION NOT GUARANTEED" = still price as normal working condition for baseline valuation
+- Ignore auction house names, catalog numbers, and location references in titles
 
 PRICING RULES:
-- All values MUST be plain integers (no $, no text)
-- Base on ACTUAL used market values from eBay sold listings
-- If no lots found, return: []
-- Return ONLY a JSON array, no markdown
+- Base estimates on your internal knowledge of secondary market values and historical eBay sold data
+- All values MUST be plain integers (e.g., 500, not $500)
+- If no lots found on the page, return an empty array
 
-ADDITIONALLY — for each lot, return the bounding box of just the item's photo/image on the page as a fraction of page dimensions (0.0 to 1.0):
+BOUNDING BOXES:
+For each lot, return the spatial bounding box of just the item photo on the page as a fraction of total page dimensions (0.00 to 1.00):
 - bbox_x: left edge of item photo (0.0 = left side of page)
 - bbox_y: top edge of item photo (0.0 = top of page)
 - bbox_w: width of item photo as fraction of page width
@@ -3487,7 +3477,13 @@ Example: [{"lot":"5","title":"Oakton pH Meter","description":"Portable pH/ORP me
                         by = item.get("bbox_y")
                         bw = item.get("bbox_w")
                         bh = item.get("bbox_h")
-                        if bx is not None and by is not None and bw and bh:
+                        # Validate bbox — reject if out of range or implausibly large
+                        bbox_valid = (
+                            bx is not None and by is not None and bw and bh and
+                            0.0 <= bx <= 1.0 and 0.0 <= by <= 1.0 and
+                            0.0 < bw <= 1.0 and 0.0 < bh <= 1.0
+                        )
+                        if bbox_valid:
                             bbox_str = f"{bx:.3f}_{by:.3f}_{bw:.3f}_{bh:.3f}"
                             item["_page_img"] = f"/api/auction/page-image/{scan_id}/p{i+1}_{bbox_str}"
                         else:
