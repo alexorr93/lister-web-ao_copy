@@ -134,8 +134,8 @@ nav.scrolled {
 }
 .hero-title {
   font-family: 'Bebas Neue', sans-serif;
-  font-size: clamp(64px, 12vw, 140px);
-  line-height: 0.9;
+  font-size: clamp(80px, 14vw, 160px);
+  line-height: 0.88;
   letter-spacing: -0.01em;
   position: relative; z-index: 1;
   margin-bottom: 8px;
@@ -144,9 +144,9 @@ nav.scrolled {
 .hero-title .line2 { color: var(--green); display: block; }
 .hero-title .line3 { color: var(--amber); display: block; }
 .hero-sub {
-  font-size: clamp(16px, 2.5vw, 20px);
+  font-size: clamp(18px, 2.5vw, 22px);
   color: var(--muted2);
-  max-width: 560px;
+  max-width: 600px;
   line-height: 1.6;
   margin: 24px auto 40px;
   position: relative; z-index: 1;
@@ -223,8 +223,8 @@ nav.scrolled {
 
 /* ── SECTION BASE ── */
 section {
-  padding: 100px 24px;
-  max-width: 1200px; margin: 0 auto;
+  padding: 120px 32px;
+  max-width: 1300px; margin: 0 auto;
 }
 .section-label {
   font-family: 'DM Mono', monospace;
@@ -234,13 +234,13 @@ section {
 }
 .section-title {
   font-family: 'Bebas Neue', sans-serif;
-  font-size: clamp(40px, 7vw, 80px);
-  line-height: 0.95;
-  margin-bottom: 20px;
+  font-size: clamp(52px, 8vw, 96px);
+  line-height: 0.92;
+  margin-bottom: 24px;
 }
 .section-sub {
-  font-size: 17px; color: var(--muted2); line-height: 1.6;
-  max-width: 540px;
+  font-size: 19px; color: var(--muted2); line-height: 1.6;
+  max-width: 560px;
 }
 
 /* ── TICKER ── */
@@ -267,19 +267,19 @@ section {
 .ticker-item span.amb { color: var(--amber); }
 
 /* ── FEATURES GRID ── */
-.features-section { padding: 100px 24px; }
+.features-section { padding: 120px 32px; }
 .features-header { text-align: center; max-width: 700px; margin: 0 auto 70px; }
 .features-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: 20px;
-  max-width: 1200px; margin: 0 auto;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: 24px;
+  max-width: 1300px; margin: 0 auto;
 }
 .feature-card {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 28px;
+  border-radius: 20px;
+  padding: 36px;
   transition: border-color 0.2s, transform 0.2s;
   cursor: default;
   position: relative;
@@ -313,11 +313,11 @@ section {
   margin-bottom: 12px; letter-spacing: 0.08em; text-transform: uppercase;
 }
 .feature-name {
-  font-size: 22px; font-weight: 800;
-  color: #fff; margin-bottom: 10px; line-height: 1.2;
+  font-size: 26px; font-weight: 800;
+  color: #fff; margin-bottom: 12px; line-height: 1.2;
 }
 .feature-desc {
-  font-size: 14px; color: var(--muted2); line-height: 1.65;
+  font-size: 16px; color: var(--muted2); line-height: 1.7;
 }
 .feature-mockup {
   margin-top: 24px;
@@ -387,7 +387,7 @@ section {
 .mock-msg.bot strong { color: var(--green); }
 
 /* ── HOW IT WORKS ── */
-.how-section { padding: 100px 24px; background: var(--surface); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.how-section { padding: 120px 32px; background: var(--surface); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 .steps-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0; max-width: 1000px; margin: 60px auto 0; }
 .step { padding: 32px 28px; position: relative; }
 .step:not(:last-child)::after {
@@ -401,18 +401,18 @@ section {
   color: rgba(74,222,128,0.15); line-height: 1;
   margin-bottom: 8px;
 }
-.step-title { font-size: 18px; font-weight: 800; color: #fff; margin-bottom: 8px; }
-.step-desc { font-size: 14px; color: var(--muted2); line-height: 1.6; }
+.step-title { font-size: 22px; font-weight: 800; color: #fff; margin-bottom: 10px; }
+.step-desc { font-size: 16px; color: var(--muted2); line-height: 1.65; }
 
 /* ── SOCIAL PROOF ── */
-.proof-section { padding: 80px 24px; max-width: 1100px; margin: 0 auto; }
+.proof-section { padding: 100px 32px; max-width: 1300px; margin: 0 auto; }
 .proof-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 48px; }
 .proof-card {
   background: var(--card); border: 1px solid var(--border);
   border-radius: 14px; padding: 24px;
 }
 .proof-stars { color: var(--amber); font-size: 14px; margin-bottom: 12px; letter-spacing: 2px; }
-.proof-text { font-size: 15px; color: var(--muted2); line-height: 1.65; margin-bottom: 16px; font-style: italic; }
+.proof-text { font-size: 17px; color: var(--muted2); line-height: 1.7; margin-bottom: 16px; font-style: italic; }
 .proof-author { display: flex; align-items: center; gap: 10px; }
 .proof-avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; }
 .proof-name { font-size: 14px; font-weight: 700; color: #fff; }
@@ -435,8 +435,8 @@ section {
 .cta-section p { font-size: 18px; color: var(--muted2); max-width: 480px; margin: 16px auto 40px; }
 .cta-box {
   background: var(--card); border: 1px solid rgba(74,222,128,0.2);
-  border-radius: 20px; padding: 40px;
-  max-width: 480px; margin: 0 auto;
+  border-radius: 24px; padding: 48px;
+  max-width: 540px; margin: 0 auto;
   position: relative; z-index: 1;
   box-shadow: 0 0 60px rgba(74,222,128,0.06);
 }
@@ -634,7 +634,7 @@ footer {
   <div class="features-header fade-in">
     <div class="section-label">// what's inside</div>
     <h2 class="section-title" style="color:#fff;">Five tools.<br><span style="color:var(--green);">One suite.</span></h2>
-    <p style="font-size:17px;color:var(--muted2);line-height:1.6;max-width:500px;margin:16px auto 0;">Everything you need to run a lean, fast reselling operation — from garage find to sold listing in minutes.</p>
+    <p style="font-size:19px;color:var(--muted2);line-height:1.65;max-width:560px;margin:16px auto 0;">Whether you're selling from your garage or running a warehouse operation — RoboSeller has every tool you need.</p>
   </div>
 
   <div class="features-grid">
@@ -704,7 +704,7 @@ footer {
     <div class="feature-card fade-in" onmousemove="trackMouse(event,this)">
       <div class="feature-tag" style="background:rgba(59,130,246,0.1);color:#60a5fa;">Multi-Platform</div>
       <div class="feature-name">Instant Push to eBay, Shopify, or CSV</div>
-      <div class="feature-desc">Schedule listings to eBay as drafts, sync to Shopify, or download a formatted CSV for bulk upload — your inventory, your way.</div>
+      <div class="feature-desc">Push to eBay as scheduled listings, sync to Shopify, or download a formatted CSV for bulk upload — your inventory, your workflow.</div>
       <div class="feature-mockup mock-push">
         <div class="mock-dest">
           <div class="mock-dest-icon" style="background:rgba(0,100,210,0.15);">
@@ -712,7 +712,7 @@ footer {
           </div>
           <div>
             <div class="mock-dest-name">eBay Seller Hub</div>
-            <div class="mock-dest-sub">Push as drafts · 29 items ready</div>
+            <div class="mock-dest-sub">Scheduled listings · 29 items ready</div>
           </div>
           <div class="mock-dest-arrow">→</div>
         </div>
@@ -915,7 +915,6 @@ footer {
       <span class="cta-perk">100 free scans</span>
       <span class="cta-perk">No credit card</span>
       <span class="cta-perk">All features included</span>
-      <span class="cta-perk">Cancel anytime</span>
     </div>
   </div>
 </div>
