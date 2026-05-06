@@ -190,8 +190,8 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
   .main-wrapper { margin-left: 0 !important; }
   .mobile-tabbar { display: flex; }
   #robo-fab { display: none !important; }
-  .mobile-tabbar { position: fixed !important; bottom: 0 !important; left: 0 !important; right: 0 !important; z-index: 999 !important; }
-  html, body { overflow-x: hidden !important; max-width: 100vw !important; position: relative !important; }
+  .mobile-tabbar { position: fixed !important; bottom: 0 !important; left: 0 !important; right: 0 !important; z-index: 999 !important; -webkit-transform: translate3d(0,0,0); transform: translate3d(0,0,0); will-change: transform; }
+  html, body { overflow-x: hidden !important; max-width: 100vw !important; }
   * { box-sizing: border-box; }
   html, body { overflow-x: hidden !important; max-width: 100vw !important; }
 }
@@ -1992,6 +1992,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.classList.add('active');
     document.getElementById('tab-' + tab).classList.add('active');
     activeTab = tab;
+    try { localStorage.setItem('rr_active_tab', tab); } catch(e) {}
     if (tab === 'dashboard') { loadListings(); loadDashboardSummary(); }
     if (tab === 'detailed') { loadDetailedAnalytics(); }
     if (tab === 'inventory') { loadInventory(); }
@@ -5569,6 +5570,14 @@ function closeMobileTabEditor() {
 
 // Init on page load
 document.addEventListener('DOMContentLoaded', function() {
+  // Restore last active tab
+  try {
+    var savedTab = localStorage.getItem('rr_mobile_tab') || localStorage.getItem('rr_active_tab');
+    if (savedTab) {
+      var btn = document.querySelector('.nav-btn[data-tab="' + savedTab + '"]');
+      if (btn) { btn.click(); }
+    }
+  } catch(e) {}
   renderMobileTabBar();
   // Keep mobile tab bar in sync when desktop nav buttons are clicked
   document.querySelectorAll('.nav-btn[data-tab]').forEach(function(btn) {
@@ -5576,6 +5585,7 @@ document.addEventListener('DOMContentLoaded', function() {
       var tabId = this.dataset.tab;
       if (tabId && tabId !== 'detailed') {
         currentMobileTab = tabId;
+        try { localStorage.setItem('rr_mobile_tab', tabId); } catch(e) {}
         renderMobileTabBar();
       }
     });
