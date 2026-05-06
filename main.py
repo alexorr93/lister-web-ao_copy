@@ -2020,8 +2020,30 @@ async def deep_research_full(request: Request):
     if pdf_file and hasattr(pdf_file, "read"):
         pdf_bytes = await pdf_file.read()
 
-    genai.configure(api_key=gemini_key)
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    from google import genai as _dgenai
+    from google.genai import types as _dgt
+    _dclient = _dgenai.Client(api_key=gemini_key)
+    # Wrap in a compat shim so downstream code calling model.generate_content still works
+    class _ModelShim:
+        def generate_content(self, parts, generation_config=None):
+            max_tok = (generation_config or {}).get("max_output_tokens", 1500)
+            contents = []
+            for p in parts:
+                if isinstance(p, str):
+                    contents.append(p)
+                elif isinstance(p, dict) and p.get("mime_type"):
+                    contents.append(_dgt.Part.from_bytes(data=p["data"], mime_type=p["mime_type"]))
+                else:
+                    contents.append(str(p))
+            resp = _dclient.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=contents,
+                config=_dgt.GenerateContentConfig(max_output_tokens=max_tok)
+            )
+            class _R:
+                text = resp.text
+            return _R()
+    model = _ModelShim()
     loop = asyncio.get_event_loop()
     executor = ThreadPoolExecutor(max_workers=1)
 
