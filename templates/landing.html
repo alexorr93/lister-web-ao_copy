@@ -779,42 +779,174 @@ footer {
     </div>
 
     <!-- Feature 5: Robo Chat — full width -->
-    <div class="feature-card fade-in" style="grid-column: 1 / -1;" onmousemove="trackMouse(event,this)">
-      <div style="display:flex;gap:32px;flex-wrap:wrap;align-items:center;">
-        <div style="flex:1;min-width:260px;">
-          <div class="feature-tag" style="background:rgba(74,222,128,0.1);color:var(--green);">AI Assistant</div>
-          <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
-            <div style="width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#052e16,#0d4a22);border:1px solid rgba(74,222,128,0.3);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round"><line x1="12" y1="2" x2="12" y2="5"/><circle cx="12" cy="2" r="1" fill="#4ade80" stroke="none"/><rect x="5" y="6" width="14" height="12" rx="2"/><circle cx="9" cy="11" r="1.4" fill="#4ade80" stroke="none"/><circle cx="15" cy="11" r="1.4" fill="#4ade80" stroke="none"/><line x1="3" y1="11" x2="5" y2="11"/><line x1="19" y1="11" x2="21" y2="11"/></svg>
+    <!-- Robo card — full width, interactive -->
+    <div class="feature-card fade-in" id="robo-feature-card" style="grid-column: 1 / -1;background:linear-gradient(135deg,#080b10 0%,#0a120a 50%,#080b10 100%);border-color:rgba(74,222,128,0.15);overflow:hidden;position:relative;" onmousemove="trackMouse(event,this)">
+
+      <!-- Animated background glow -->
+      <div style="position:absolute;width:400px;height:400px;background:radial-gradient(circle,rgba(74,222,128,0.08) 0%,transparent 70%);top:-100px;right:-100px;pointer-events:none;animation:robo-glow-move 6s ease-in-out infinite alternate;"></div>
+      <div style="position:absolute;width:300px;height:300px;background:radial-gradient(circle,rgba(74,222,128,0.05) 0%,transparent 70%);bottom:-80px;left:10%;pointer-events:none;animation:robo-glow-move 8s ease-in-out infinite alternate-reverse;"></div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:center;position:relative;z-index:1;">
+
+        <!-- Left: Robo intro -->
+        <div>
+          <div style="display:inline-flex;align-items:center;gap:8px;background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.2);border-radius:100px;padding:5px 14px;font-family:'DM Mono',monospace;font-size:11px;color:var(--green);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:24px;">
+            <span style="width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse 1.5s infinite;display:inline-block;"></span>
+            AI Assistant — always online
+          </div>
+
+          <!-- Robo avatar -->
+          <div style="display:flex;align-items:center;gap:20px;margin-bottom:20px;">
+            <div style="position:relative;flex-shrink:0;">
+              <div style="width:72px;height:72px;border-radius:18px;background:linear-gradient(135deg,#052e16,#0d3a18);border:1px solid rgba(74,222,128,0.3);display:flex;align-items:center;justify-content:center;box-shadow:0 0 30px rgba(74,222,128,0.15);">
+                <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="1.8" stroke-linecap="round"><line x1="12" y1="2" x2="12" y2="5"/><circle cx="12" cy="2" r="1" fill="#4ade80" stroke="none"/><rect x="5" y="6" width="14" height="12" rx="2"/><circle cx="9" cy="11" r="1.4" fill="#4ade80" stroke="none" id="robo-eye-l"/><circle cx="15" cy="11" r="1.4" fill="#4ade80" stroke="none" id="robo-eye-r"/><line x1="3" y1="11" x2="5" y2="11"/><line x1="19" y1="11" x2="21" y2="11"/><path d="M9 15 Q12 16.5 15 15" stroke="#4ade80" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+              </div>
+              <div style="position:absolute;bottom:-4px;right:-4px;width:20px;height:20px;background:#4ade80;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid #080b10;">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
             </div>
-            <div class="feature-name" style="font-size:28px;margin-bottom:0;">Meet Robo.</div>
+            <div>
+              <div style="font-size:36px;font-weight:800;color:#fff;line-height:1;">Meet Robo.</div>
+              <div style="font-size:14px;color:var(--green);font-family:'DM Mono',monospace;margin-top:4px;">// your reselling co-pilot</div>
+            </div>
           </div>
-          <div style="font-size:13px;color:var(--green);font-family:'DM Mono',monospace;letter-spacing:0.05em;margin-bottom:10px;">// your AI reselling co-pilot</div>
-          <div class="feature-desc" style="font-size:15px;">Robo lives inside the app and knows reselling inside out. Ask if something's worth buying, get a title suggestion, check what's selling right now — Robo's always on, always honest, and never judges you for buying 14 pairs of shoes at a garage sale.</div>
-          <div style="margin-top:20px;display:flex;flex-wrap:wrap;gap:8px;">
-            <div style="font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:100px;padding:5px 12px;color:var(--muted2);">"Is this worth $40?"</div>
-            <div style="font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:100px;padding:5px 12px;color:var(--muted2);">"Write me a title"</div>
-            <div style="font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:100px;padding:5px 12px;color:var(--muted2);">"What's this selling for?"</div>
-            <div style="font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:100px;padding:5px 12px;color:var(--muted2);">"Best shipping option?"</div>
-          </div>
-        </div>
-        <div class="feature-mockup mock-chat" style="flex:1;min-width:280px;max-width:400px;">
-          <div class="mock-msg user">Is this Sony headset worth buying for $45?</div>
-          <div class="mock-msg bot">
-            <strong>Yes — solid buy.</strong> Sony WH-1000XM4s are selling on eBay for <strong style="color:var(--amber);">$120–$160</strong> used. At $45 you're looking at a <strong style="color:var(--green);">$60–90 profit</strong> after fees. Grab it.
-          </div>
-          <div class="mock-msg user">What title should I use?</div>
-          <div class="mock-msg bot">
-            <strong style="color:var(--green);">Sony WH-1000XM4 Wireless Noise Canceling Headphones — Used Excellent</strong><br>
-            <span style="color:var(--muted);">Hits all the eBay keywords. Should rank well.</span>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:10px;">
-            <div style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;">ask robo anything...</div>
-            <div style="background:var(--green);border-radius:8px;padding:8px 12px;font-size:11px;font-weight:800;color:#000;cursor:pointer;">Send</div>
+
+          <div style="font-size:18px;color:var(--muted2);line-height:1.7;margin-bottom:28px;">Robo lives inside the app, knows reselling inside out, and never judges you for buying 14 pairs of shoes at a garage sale. Ask anything — pricing, titles, shipping, what to look out for.</div>
+
+          <!-- Clickable prompt pills -->
+          <div style="display:flex;flex-wrap:wrap;gap:8px;" id="robo-pills">
+            <button onclick="roboDemo('Is this Sony headset worth buying for $45?')" style="font-size:13px;background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.2);border-radius:100px;padding:7px 16px;color:var(--muted2);cursor:pointer;font-family:inherit;transition:all 0.2s;" onmouseover="this.style.color='#4ade80';this.style.borderColor='rgba(74,222,128,0.5)'" onmouseout="this.style.color='#8892a4';this.style.borderColor='rgba(74,222,128,0.2)'">"Is this worth $45?"</button>
+            <button onclick="roboDemo('Write me an eBay title for Nike Air Force 1')" style="font-size:13px;background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.2);border-radius:100px;padding:7px 16px;color:var(--muted2);cursor:pointer;font-family:inherit;transition:all 0.2s;" onmouseover="this.style.color='#4ade80';this.style.borderColor='rgba(74,222,128,0.5)'" onmouseout="this.style.color='#8892a4';this.style.borderColor='rgba(74,222,128,0.2)'">"Write me a title"</button>
+            <button onclick="roboDemo('What does a vintage Pyrex Gooseberry pattern sell for?')" style="font-size:13px;background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.2);border-radius:100px;padding:7px 16px;color:var(--muted2);cursor:pointer;font-family:inherit;transition:all 0.2s;" onmouseover="this.style.color='#4ade80';this.style.borderColor='rgba(74,222,128,0.5)'" onmouseout="this.style.color='#8892a4';this.style.borderColor='rgba(74,222,128,0.2)'">"What's this selling for?"</button>
+            <button onclick="roboDemo('Best way to ship a turntable?')" style="font-size:13px;background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.2);border-radius:100px;padding:7px 16px;color:var(--muted2);cursor:pointer;font-family:inherit;transition:all 0.2s;" onmouseover="this.style.color='#4ade80';this.style.borderColor='rgba(74,222,128,0.5)'" onmouseout="this.style.color='#8892a4';this.style.borderColor='rgba(74,222,128,0.2)'">"How do I ship this?"</button>
           </div>
         </div>
+
+        <!-- Right: Live demo chat -->
+        <div style="background:#050810;border:1px solid rgba(74,222,128,0.1);border-radius:16px;overflow:hidden;">
+          <!-- Chat header -->
+          <div style="padding:14px 18px;border-bottom:1px solid rgba(74,222,128,0.08);display:flex;align-items:center;gap:10px;">
+            <div style="width:8px;height:8px;border-radius:50%;background:#4ade80;box-shadow:0 0 8px #4ade80;animation:pulse 1.5s infinite;"></div>
+            <span style="font-family:'DM Mono',monospace;font-size:12px;color:var(--green);">ROBO — online</span>
+            <span style="margin-left:auto;font-size:11px;color:#1a3a1a;font-family:'DM Mono',monospace;">ask anything ↓</span>
+          </div>
+
+          <!-- Messages -->
+          <div id="robo-demo-msgs" style="padding:16px;display:flex;flex-direction:column;gap:12px;min-height:240px;max-height:320px;overflow-y:auto;">
+            <div style="background:#0d1117;border:1px solid #1a2030;border-radius:12px 12px 12px 3px;padding:12px 14px;font-size:14px;color:#8892a4;max-width:88%;line-height:1.55;">
+              Hey — ask me anything about reselling. Tap a question on the left or type your own.
+            </div>
+          </div>
+
+          <!-- Input -->
+          <div style="padding:12px 14px;border-top:1px solid rgba(74,222,128,0.08);display:flex;gap:8px;">
+            <input id="robo-demo-input" type="text" placeholder="ask robo anything..." onkeydown="if(event.key==='Enter'){var v=this.value.trim();if(v){roboDemo(v);this.value=''}}" style="flex:1;background:transparent;border:none;color:#4ade80;font-family:'DM Mono',monospace;font-size:13px;outline:none;caret-color:#4ade80;" />
+            <button onclick="var v=document.getElementById('robo-demo-input').value.trim();if(v){roboDemo(v);document.getElementById('robo-demo-input').value=''}" style="background:#4ade80;color:#000;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit;">Send</button>
+          </div>
+        </div>
+
       </div>
     </div>
+
+<style>
+@keyframes robo-glow-move {
+  0% { transform: translate(0,0) scale(1); }
+  100% { transform: translate(30px, 20px) scale(1.1); }
+}
+.robo-msg-user {
+  background: rgba(74,222,128,0.08);
+  border: 1px solid rgba(74,222,128,0.15);
+  color: #c8e6c8;
+  align-self: flex-end;
+  border-radius: 12px 12px 3px 12px;
+  padding: 10px 14px;
+  font-size: 14px;
+  max-width: 85%;
+  margin-left: auto;
+}
+.robo-msg-bot {
+  background: #0d1117;
+  border: 1px solid #1a2030;
+  color: #8892a4;
+  border-radius: 12px 12px 12px 3px;
+  padding: 10px 14px;
+  font-size: 14px;
+  max-width: 88%;
+  line-height: 1.55;
+}
+.robo-msg-bot strong { color: #4ade80; }
+.robo-msg-bot .amb { color: #f59e0b; }
+.robo-typing {
+  display: flex; gap: 4px; align-items: center; padding: 14px;
+}
+.robo-typing span {
+  width: 6px; height: 6px; border-radius: 50%; background: #4ade80;
+  animation: typing-bounce 1.2s infinite;
+}
+.robo-typing span:nth-child(2) { animation-delay: 0.2s; }
+.robo-typing span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typing-bounce {
+  0%,60%,100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-6px); opacity: 1; }
+}
+</style>
+
+<script>
+var roboDemoConversation = [
+  {
+    q: "Is this Sony headset worth buying for $45?",
+    a: "<strong>Yes — grab it.</strong> Sony WH-1000XM4s are selling on eBay for <span class='amb'>$120–$160</span> used. At $45 you're looking at a <strong>$60–90 profit</strong> after fees. Easy buy."
+  },
+  {
+    q: "Write me an eBay title for Nike Air Force 1",
+    a: "<strong>Nike Air Force 1 '07 Low White Men's Sneakers — Used Good Condition</strong><br><span style='color:#4a5568;font-size:12px;'>Hits all the search keywords. Should rank well on mobile.</span>"
+  },
+  {
+    q: "What does a vintage Pyrex Gooseberry pattern sell for?",
+    a: "<strong>Gooseberry is one of the better patterns.</strong> Complete sets go <span class='amb'>$60–$200+</span> depending on pieces. Individual casseroles sell <span class='amb'>$25–$60</span>. Check for chips — they kill value fast."
+  },
+  {
+    q: "Best way to ship a turntable?",
+    a: "Double-box it. Remove the platter and belt, wrap them separately. Use at least 3 inches of foam on all sides. Ship UPS Ground — FedEx throws stuff. Insure it for full value. Takes 15 mins to pack right."
+  }
+];
+
+function roboDemo(question) {
+  var msgs = document.getElementById('robo-demo-msgs');
+  if (!msgs) return;
+
+  // Add user message
+  var userDiv = document.createElement('div');
+  userDiv.className = 'robo-msg-user';
+  userDiv.textContent = question;
+  msgs.appendChild(userDiv);
+  msgs.scrollTop = msgs.scrollHeight;
+
+  // Add typing indicator
+  var typingDiv = document.createElement('div');
+  typingDiv.className = 'robo-msg-bot robo-typing';
+  typingDiv.innerHTML = '<span></span><span></span><span></span>';
+  msgs.appendChild(typingDiv);
+  msgs.scrollTop = msgs.scrollHeight;
+
+  // Find matching response or use generic
+  var match = roboDemoConversation.find(function(c) {
+    return c.q.toLowerCase().indexOf(question.toLowerCase().slice(0,15)) >= 0 ||
+           question.toLowerCase().indexOf(c.q.toLowerCase().slice(0,15)) >= 0;
+  });
+
+  var reply = match ? match.a : "Good question. That really depends on the condition and what similar items have actually sold for recently. Check eBay completed listings — that's always your best source of truth.";
+
+  setTimeout(function() {
+    msgs.removeChild(typingDiv);
+    var botDiv = document.createElement('div');
+    botDiv.className = 'robo-msg-bot';
+    botDiv.innerHTML = reply;
+    msgs.appendChild(botDiv);
+    msgs.scrollTop = msgs.scrollHeight;
+  }, 1200 + Math.random() * 600);
+}
+</script>
 
   </div>
 </div>
