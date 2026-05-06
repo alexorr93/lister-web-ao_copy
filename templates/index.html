@@ -1995,6 +1995,9 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.classList.add('active');
     document.getElementById('tab-' + tab).classList.add('active');
     activeTab = tab;
+    // Always hide robo fixed tab when switching via desktop nav
+    var rt = document.getElementById('tab-robo');
+    if (rt) { rt.style.display = 'none'; rt.classList.remove('active'); }
     try { localStorage.setItem('rr_active_tab', tab); } catch(e) {}
     // Push history state so browser back button navigates within app
     try { history.pushState({ tab: tab }, '', '#' + tab); } catch(e) {}
@@ -5473,13 +5476,16 @@ function switchMobileTab(tabId) {
       t.style.display = 'none'; t.classList.remove('active');
     });
     var roboTab = document.getElementById('tab-robo');
-    if (roboTab) { roboTab.style.cssText = roboTab.style.cssText.replace('display:none','display:flex'); roboTab.style.display = 'flex'; roboTab.classList.add('active'); }
+    if (roboTab) { roboTab.style.display = 'flex'; roboTab.classList.add('active'); }
     currentMobileTab = 'robo';
     renderMobileTabBar();
     closeMobileMore();
     setTimeout(function(){ var i=document.getElementById('robo-tab-input'); if(i) i.focus(); }, 200);
     return;
   }
+  // Hide robo tab when switching to anything else
+  var rt = document.getElementById('tab-robo');
+  if (rt) { rt.style.display = 'none'; rt.classList.remove('active'); }
 
   var btn = document.querySelector('.nav-btn[data-tab="' + tabId + '"]');
   if (btn) btn.click();
@@ -7078,7 +7084,15 @@ window.addEventListener('load', function() {
     </div>
     <button onclick="clearRoboHistory()" style="font-size:11px;color:#334155;background:none;border:1px solid #1a2332;border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit;">Clear</button>
   </div>
-  <div id="robo-tab-messages" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px;min-height:0;"></div>
+  <div id="robo-tab-messages" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px;min-height:0;">
+    <div id="robo-tab-placeholder" style="display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;gap:16px;padding:40px 20px;">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#1a3a2a" stroke-width="1.5"><rect x="5" y="6" width="14" height="12" rx="2"/><line x1="12" y1="2" x2="12" y2="5"/><circle cx="12" cy="2" r="1" fill="#1a3a2a"/><circle cx="9" cy="11" r="1.5" fill="#1a3a2a" stroke="none"/><circle cx="15" cy="11" r="1.5" fill="#1a3a2a" stroke="none"/><line x1="3" y1="11" x2="5" y2="11"/><line x1="19" y1="11" x2="21" y2="11"/></svg>
+      <div style="text-align:center;">
+        <div style="font-size:15px;font-weight:700;color:#1a3a2a;font-family:monospace;margin-bottom:6px;">ROBO is ready</div>
+        <div style="font-size:12px;color:#1a2a1a;font-family:monospace;line-height:1.6;">Ask about pricing, listings,<br>or drop a photo to identify an item</div>
+      </div>
+    </div>
+  </div>
   <div style="padding:10px 12px;border-top:1px solid #0d1117;display:flex;align-items:center;gap:8px;background:#060810;">
     <label style="cursor:pointer;color:#334155;flex-shrink:0;">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
@@ -7194,6 +7208,8 @@ async function sendRoboMessageTab() {
   var msg = input.value.trim();
   if (!msg) return;
   input.value = '';
+  var ph = document.getElementById('robo-tab-placeholder');
+  if (ph) ph.style.display = 'none';
   appendRoboTabMessage('user', msg);
   roboTabHistory.push({role:'user', content: msg});
   var botDiv = appendRoboTabMessage('bot', '...');
