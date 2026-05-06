@@ -3,22 +3,26 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Lister AI — Industrial Parts eBay Automation</title>
+<title>RoboSeller — AI-Powered Reselling Suite</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Instrument+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: #060608;
-  --surface: #0d0f14;
-  --card: #111418;
-  --border: #1a1f2e;
-  --accent: #e8ff47;
-  --accent2: #3b82f6;
-  --red: #ff4444;
-  --text: #f0f2f5;
-  --muted: #5a6478;
+  --bg: #050608;
+  --surface: #0a0c10;
+  --card: #0e1118;
+  --border: #1a1f2a;
+  --green: #4ade80;
+  --green-dim: #22c55e;
+  --green-dark: #052e16;
+  --amber: #f59e0b;
+  --amber-dim: #d97706;
+  --text: #f0f4f8;
+  --muted: #4a5568;
   --muted2: #8892a4;
+  --red: #ef4444;
+  --blue: #3b82f6;
 }
 * { margin:0; padding:0; box-sizing:border-box; }
 html { scroll-behavior: smooth; }
@@ -27,514 +31,495 @@ body {
   color: var(--text);
   font-family: 'Instrument Sans', sans-serif;
   overflow-x: hidden;
+  min-height: 100vh;
 }
 
-/* ── NOISE TEXTURE ── */
-body::before {
+/* Scanline overlay */
+body::after {
   content: '';
   position: fixed;
   inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
   pointer-events: none;
-  z-index: 1000;
-  opacity: 0.5;
+  z-index: 9999;
 }
 
 /* ── NAV ── */
 nav {
-  position: fixed;
-  top: 0; left: 0; right: 0;
-  z-index: 100;
-  padding: 20px 48px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid transparent;
+  position: fixed; top: 0; left: 0; right: 0; z-index: 500;
+  padding: 16px 48px;
+  display: flex; align-items: center; justify-content: space-between;
   transition: all 0.3s;
-  backdrop-filter: blur(0px);
 }
 nav.scrolled {
-  background: rgba(6,6,8,0.92);
-  border-color: var(--border);
+  background: rgba(5,6,8,0.95);
+  border-bottom: 1px solid var(--border);
   backdrop-filter: blur(20px);
 }
 .nav-logo {
-  font-family: 'Bebas Neue', sans-serif;
-  font-size: 28px;
-  letter-spacing: 0.08em;
-  color: var(--text);
+  display: flex; align-items: center; gap: 10px;
+  font-family: 'Instrument Sans', sans-serif;
+  font-size: 20px; font-weight: 800;
   text-decoration: none;
 }
-.nav-logo span { color: var(--accent); }
-.nav-links { display: flex; gap: 32px; align-items: center; }
-.nav-links a { color: var(--muted2); font-size: 14px; text-decoration: none; font-weight: 500; transition: color 0.2s; }
-.nav-links a:hover { color: var(--text); }
+.nav-logo svg { flex-shrink: 0; }
+.nav-logo span.green { color: var(--green); }
+.nav-logo span.white { color: #fff; }
 .nav-cta {
-  background: var(--accent);
-  color: #000;
-  padding: 10px 22px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 700;
-  text-decoration: none;
-  letter-spacing: 0.03em;
-  transition: opacity 0.2s;
+  display: flex; align-items: center; gap: 12px;
 }
-.nav-cta:hover { opacity: 0.88; color: #000; }
+.btn-nav-login {
+  font-size: 14px; font-weight: 600; color: var(--muted2);
+  background: none; border: none; cursor: pointer;
+  font-family: inherit; padding: 8px 16px;
+  transition: color 0.2s;
+}
+.btn-nav-login:hover { color: #fff; }
+.btn-nav-signup {
+  font-size: 14px; font-weight: 700; color: #000;
+  background: var(--green); border: none; cursor: pointer;
+  font-family: inherit; padding: 9px 20px;
+  border-radius: 8px; transition: background 0.2s, transform 0.1s;
+}
+.btn-nav-signup:hover { background: #86efac; }
+.btn-nav-signup:active { transform: scale(0.97); }
+
+@media (max-width: 600px) {
+  nav { padding: 14px 20px; }
+  .btn-nav-login { display: none; }
+}
 
 /* ── HERO ── */
 .hero {
   min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center;
-  padding: 140px 24px 100px;
+  padding: 120px 24px 80px;
   position: relative;
+  overflow: hidden;
 }
 .hero-grid {
-  position: absolute;
-  inset: 0;
+  position: absolute; inset: 0;
   background-image:
-    linear-gradient(rgba(232,255,71,0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(232,255,71,0.04) 1px, transparent 1px);
-  background-size: 60px 60px;
-  mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, black 30%, transparent 100%);
+    linear-gradient(rgba(74,222,128,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(74,222,128,0.04) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 30%, transparent 100%);
+}
+.hero-glow {
+  position: absolute;
+  width: 600px; height: 600px;
+  background: radial-gradient(circle, rgba(74,222,128,0.12) 0%, transparent 70%);
+  top: 50%; left: 50%; transform: translate(-50%, -60%);
+  pointer-events: none;
 }
 .hero-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  background: rgba(232,255,71,0.08);
-  border: 1px solid rgba(232,255,71,0.2);
-  border-radius: 20px;
-  padding: 6px 16px;
-  font-size: 12px;
-  font-family: 'DM Mono', monospace;
-  color: var(--accent);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  margin-bottom: 36px;
-  animation: fadeUp 0.6s ease both;
-}
-.hero-badge::before { content: '●'; font-size: 8px; animation: pulse 2s infinite; }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-h1 {
-  font-family: 'Bebas Neue', sans-serif;
-  font-size: clamp(72px, 10vw, 140px);
-  line-height: 0.92;
-  letter-spacing: 0.02em;
+  display: inline-flex; align-items: center; gap: 8px;
+  background: rgba(74,222,128,0.08); border: 1px solid rgba(74,222,128,0.2);
+  border-radius: 100px; padding: 6px 16px;
+  font-family: 'DM Mono', monospace; font-size: 12px; color: var(--green);
+  letter-spacing: 0.1em; text-transform: uppercase;
   margin-bottom: 28px;
-  animation: fadeUp 0.6s 0.1s ease both;
+  position: relative; z-index: 1;
 }
-h1 .yellow { color: var(--accent); }
-h1 .dim { color: var(--muted); }
+.hero-badge::before {
+  content: '';
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+  animation: pulse 1.5s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; } 50% { opacity: 0.4; }
+}
+.hero-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: clamp(64px, 12vw, 140px);
+  line-height: 0.9;
+  letter-spacing: -0.01em;
+  position: relative; z-index: 1;
+  margin-bottom: 8px;
+}
+.hero-title .line1 { color: #fff; display: block; }
+.hero-title .line2 { color: var(--green); display: block; }
+.hero-title .line3 { color: var(--amber); display: block; }
 .hero-sub {
-  font-size: clamp(16px, 2vw, 20px);
+  font-size: clamp(16px, 2.5vw, 20px);
   color: var(--muted2);
   max-width: 560px;
-  line-height: 1.65;
-  margin-bottom: 48px;
-  animation: fadeUp 0.6s 0.2s ease both;
-  font-weight: 400;
+  line-height: 1.6;
+  margin: 24px auto 40px;
+  position: relative; z-index: 1;
 }
-.hero-btns {
-  display: flex;
-  gap: 14px;
-  align-items: center;
-  justify-content: center;
-  animation: fadeUp 0.6s 0.3s ease both;
-  margin-bottom: 80px;
+.hero-sub strong { color: #fff; }
+.hero-actions {
+  display: flex; align-items: center; gap: 14px;
+  flex-wrap: wrap; justify-content: center;
+  position: relative; z-index: 1;
 }
 .btn-primary {
-  background: var(--accent);
-  color: #000;
-  padding: 15px 32px;
-  border-radius: 8px;
-  font-size: 15px;
-  font-weight: 700;
-  text-decoration: none;
-  letter-spacing: 0.02em;
-  transition: opacity 0.2s, transform 0.2s;
-}
-.btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
-.btn-secondary {
-  color: var(--muted2);
-  font-size: 14px;
-  text-decoration: none;
-  font-weight: 500;
-  border: 1px solid var(--border);
-  padding: 14px 28px;
-  border-radius: 8px;
-  transition: all 0.2s;
-}
-.btn-secondary:hover { border-color: var(--muted); color: var(--text); }
-
-.hero-btn-primary {
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  color: #000;
-  border: none;
-  font-family: 'Inter', sans-serif;
-  font-weight: 700;
-  font-size: 16px;
-  padding: 14px 32px;
-  border-radius: 10px;
-  cursor: pointer;
-  letter-spacing: -0.01em;
-  box-shadow: 0 8px 24px rgba(245, 158, 11, 0.3);
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--green); color: #000;
+  font-family: inherit; font-size: 16px; font-weight: 800;
+  padding: 14px 28px; border-radius: 10px; border: none;
+  cursor: pointer; text-decoration: none;
   transition: transform 0.15s, box-shadow 0.15s;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  box-shadow: 0 0 0 0 rgba(74,222,128,0);
 }
-.hero-btn-primary:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(245, 158, 11, 0.45); }
-
-.hero-stats {
-  display: flex;
-  gap: 48px;
-  animation: fadeUp 0.6s 0.4s ease both;
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(74,222,128,0.3);
 }
-.hero-stat { text-align: center; }
-.hero-stat .num {
-  font-family: 'Bebas Neue', sans-serif;
-  font-size: 42px;
-  color: var(--accent);
-  line-height: 1;
+.btn-secondary {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: transparent; color: var(--muted2);
+  font-family: inherit; font-size: 15px; font-weight: 600;
+  padding: 14px 24px; border-radius: 10px;
+  border: 1px solid var(--border);
+  cursor: pointer; text-decoration: none;
+  transition: color 0.2s, border-color 0.2s;
 }
-.hero-stat .lbl { font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace; text-transform: uppercase; letter-spacing: 0.1em; margin-top: 4px; }
+.btn-secondary:hover { color: #fff; border-color: #fff; }
+.hero-note {
+  font-size: 12px; color: var(--muted); margin-top: 14px;
+  font-family: 'DM Mono', monospace; letter-spacing: 0.05em;
+  position: relative; z-index: 1;
+}
 
-@keyframes fadeUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
-
-/* ── MARQUEE ── */
-.marquee-wrap {
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  padding: 16px 0;
+/* Terminal demo */
+.terminal {
+  position: relative; z-index: 1;
+  background: #080b10; border: 1px solid #1a2a1a;
+  border-radius: 14px; padding: 0;
+  max-width: 560px; width: 100%;
+  margin: 56px auto 0;
+  box-shadow: 0 0 80px rgba(74,222,128,0.08), 0 32px 64px rgba(0,0,0,0.6);
   overflow: hidden;
-  background: var(--surface);
 }
-.marquee-track {
-  display: flex;
-  gap: 48px;
-  animation: marquee 20s linear infinite;
-  width: max-content;
+.terminal-bar {
+  background: #0d1a0d; padding: 10px 16px;
+  display: flex; align-items: center; gap: 8px;
+  border-bottom: 1px solid #1a2a1a;
 }
-.marquee-item {
-  font-family: 'DM Mono', monospace;
-  font-size: 12px;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  white-space: nowrap;
-  display: flex;
-  align-items: center;
-  gap: 16px;
+.t-dot { width: 10px; height: 10px; border-radius: 50%; }
+.t-dot:nth-child(1) { background: #ff5f57; }
+.t-dot:nth-child(2) { background: #febc2e; }
+.t-dot:nth-child(3) { background: #28c840; }
+.t-title { font-family: 'DM Mono', monospace; font-size: 11px; color: #2a4a2a; margin-left: auto; letter-spacing: 0.05em; }
+.terminal-body { padding: 20px; font-family: 'DM Mono', monospace; font-size: 13px; line-height: 1.8; }
+.t-line { display: flex; align-items: flex-start; gap: 10px; }
+.t-prompt { color: var(--green); flex-shrink: 0; }
+.t-text { color: #6a8a6a; }
+.t-text.white { color: #c8dcc8; }
+.t-text.green { color: var(--green); }
+.t-text.amber { color: var(--amber); }
+.t-text.dim { color: #2a4a2a; }
+.t-cursor {
+  display: inline-block; width: 8px; height: 14px;
+  background: var(--green); animation: blink 1s infinite;
+  vertical-align: middle;
 }
-.marquee-item::after { content: '◆'; color: var(--accent); font-size: 8px; }
-@keyframes marquee { from{transform:translateX(0)} to{transform:translateX(-50%)} }
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 
-/* ── SECTIONS ── */
-section { padding: 120px 24px; max-width: 1100px; margin: 0 auto; }
+/* ── SECTION BASE ── */
+section {
+  padding: 100px 24px;
+  max-width: 1200px; margin: 0 auto;
+}
 .section-label {
   font-family: 'DM Mono', monospace;
-  font-size: 11px;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.2em;
-  margin-bottom: 20px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  font-size: 11px; color: var(--green);
+  text-transform: uppercase; letter-spacing: 0.15em;
+  margin-bottom: 16px;
 }
-.section-label::before { content: ''; width: 32px; height: 1px; background: var(--accent); }
 .section-title {
   font-family: 'Bebas Neue', sans-serif;
-  font-size: clamp(48px, 6vw, 80px);
+  font-size: clamp(40px, 7vw, 80px);
   line-height: 0.95;
-  letter-spacing: 0.02em;
   margin-bottom: 20px;
 }
-.section-sub { font-size: 17px; color: var(--muted2); line-height: 1.7; max-width: 480px; }
+.section-sub {
+  font-size: 17px; color: var(--muted2); line-height: 1.6;
+  max-width: 540px;
+}
 
-/* ── HOW IT WORKS ── */
-.how-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 80px;
-  align-items: center;
-  margin-top: 72px;
+/* ── TICKER ── */
+.ticker-wrap {
+  background: #080b10; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  overflow: hidden; padding: 14px 0;
 }
-.steps { display: flex; flex-direction: column; gap: 0; }
-.step {
-  display: flex;
-  gap: 24px;
-  padding: 28px 0;
-  border-bottom: 1px solid var(--border);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.step:first-child { border-top: 1px solid var(--border); }
-.step-num {
-  font-family: 'Bebas Neue', sans-serif;
-  font-size: 48px;
-  color: var(--border);
-  line-height: 1;
-  min-width: 48px;
-  transition: color 0.2s;
-}
-.step.active .step-num { color: var(--accent); }
-.step-title { font-size: 17px; font-weight: 700; margin-bottom: 6px; }
-.step-desc { font-size: 14px; color: var(--muted2); line-height: 1.6; }
-.mockup-container {
-  position: relative;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  overflow: hidden;
-  aspect-ratio: 4/3;
-}
-.mockup-bar {
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  padding: 12px 16px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.dot { width: 10px; height: 10px; border-radius: 50%; }
-.mockup-content { padding: 20px; }
-
-/* Mock UI components */
-.mock-header { font-family: 'Bebas Neue', sans-serif; font-size: 22px; color: var(--text); margin-bottom: 16px; letter-spacing: 0.05em; }
-.mock-tile-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; }
-.mock-tile {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-  animation: shimmer 2s ease-in-out infinite;
-}
-.mock-tile-img { height: 60px; background: linear-gradient(135deg, #1a1f2e 0%, #252b3b 100%); display:flex;align-items:center;justify-content:center;font-size:20px; }
-.mock-tile-body { padding: 8px; }
-.mock-tile-title { font-size: 9px; color: var(--muted2); margin-bottom: 4px; white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
-.mock-price { font-size: 13px; font-weight: 800; color: var(--accent); }
-.mock-badge { display:inline-block;background:rgba(34,197,94,0.15);color:#22c55e;font-size:8px;padding:1px 5px;border-radius:3px;font-weight:700; }
-
-.mock-scan-area {
-  background: var(--surface);
-  border: 2px dashed var(--border);
-  border-radius: 10px;
-  height: 80px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 12px;
-  color: var(--muted);
-  font-size: 13px;
-  gap: 8px;
-}
-.mock-scan-area.active { border-color: var(--accent); color: var(--accent); background: rgba(232,255,71,0.04); }
-.mock-progress { height: 4px; background: var(--border); border-radius: 2px; margin-bottom: 12px; overflow:hidden; }
-.mock-progress-fill { height: 100%; background: var(--accent); border-radius: 2px; width: 65%; animation: progress 2s ease-in-out infinite; }
-@keyframes progress { 0%{width:10%} 100%{width:95%} }
-
-.mock-listing-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--border);
-}
-.mock-listing-img { width: 36px; height: 36px; border-radius: 4px; background: var(--surface); flex-shrink:0; display:flex;align-items:center;justify-content:center;font-size:16px; }
-.mock-listing-info { flex:1; min-width:0; }
-.mock-listing-title { font-size: 10px; color: var(--text); font-weight:600; white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
-.mock-listing-sub { font-size: 9px; color: var(--muted); margin-top:2px; }
-.mock-listing-price { font-size: 13px; font-weight:800; color: var(--accent); }
-
-.mock-csv-row {
-  font-family: 'DM Mono', monospace;
-  font-size: 9px;
-  color: var(--muted2);
-  padding: 4px 8px;
-  background: var(--surface);
-  border-radius: 3px;
-  margin-bottom: 3px;
+.ticker-inner {
+  display: flex; gap: 0;
+  animation: ticker 30s linear infinite;
   white-space: nowrap;
-  overflow: hidden;
 }
-.mock-csv-row span { color: var(--accent); }
+@keyframes ticker {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.ticker-item {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 0 32px;
+  font-family: 'DM Mono', monospace; font-size: 13px; color: var(--muted);
+}
+.ticker-item .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--green); }
+.ticker-item span.hi { color: var(--green); font-weight: 500; }
+.ticker-item span.amb { color: var(--amber); }
 
-/* ── FEATURES ── */
+/* ── FEATURES GRID ── */
+.features-section { padding: 100px 24px; }
+.features-header { text-align: center; max-width: 700px; margin: 0 auto 70px; }
 .features-grid {
   display: grid;
-  grid-template-columns: repeat(3,1fr);
-  gap: 1px;
-  background: var(--border);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  overflow: hidden;
-  margin-top: 64px;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 20px;
+  max-width: 1200px; margin: 0 auto;
 }
 .feature-card {
   background: var(--card);
-  padding: 36px 32px;
-  transition: background 0.2s;
-}
-.feature-card:hover { background: #161b28; }
-.feature-icon {
-  width: 48px; height: 48px;
-  border-radius: 10px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 22px;
-  margin-bottom: 20px;
-  background: rgba(232,255,71,0.08);
-  border: 1px solid rgba(232,255,71,0.15);
-}
-.feature-title { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
-.feature-desc { font-size: 14px; color: var(--muted2); line-height: 1.65; }
-
-/* ── PRICING ── */
-.pricing-wrap { max-width: 1100px; margin: 0 auto; padding: 120px 24px; }
-.pricing-grid {
-  display: grid;
-  grid-template-columns: repeat(4,1fr);
-  gap: 12px;
-  margin-top: 64px;
-}
-.pricing-card {
-  background: var(--card);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 32px 28px;
-  position: relative;
-  transition: border-color 0.2s, transform 0.2s;
-}
-.pricing-card:hover { transform: translateY(-4px); }
-.pricing-card.featured {
-  border-color: var(--accent);
-  background: linear-gradient(160deg, rgba(232,255,71,0.06) 0%, var(--card) 50%);
-}
-.pricing-card.featured::before {
-  content: 'MOST POPULAR';
-  position: absolute;
-  top: -1px; left: 50%; transform: translateX(-50%);
-  background: var(--accent);
-  color: #000;
-  font-size: 10px;
-  font-weight: 800;
-  padding: 4px 14px;
-  border-radius: 0 0 8px 8px;
-  font-family: 'DM Mono', monospace;
-  letter-spacing: 0.1em;
-  white-space: nowrap;
-}
-.pricing-tier { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.15em; margin-bottom: 16px; }
-.pricing-price { font-family: 'Bebas Neue', sans-serif; font-size: 64px; line-height: 1; margin-bottom: 4px; }
-.pricing-price .mo { font-family: 'Instrument Sans', sans-serif; font-size: 16px; font-weight: 400; color: var(--muted2); }
-.pricing-sub { font-size: 13px; color: var(--muted2); margin-bottom: 28px; padding-bottom: 24px; border-bottom: 1px solid var(--border); }
-.pricing-features { list-style: none; display: flex; flex-direction: column; gap: 10px; margin-bottom: 28px; }
-.pricing-features li { font-size: 13px; color: var(--muted2); display: flex; align-items: center; gap: 8px; }
-.pricing-features li::before { content: '✓'; color: var(--accent); font-weight: 700; font-size: 12px; flex-shrink:0; }
-.pricing-btn {
-  display: block;
-  width: 100%;
-  text-align: center;
-  padding: 13px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 700;
-  text-decoration: none;
-  transition: all 0.2s;
-  border: 1px solid var(--border);
-  color: var(--text);
-  background: transparent;
-  cursor: pointer;
-}
-.pricing-btn:hover { border-color: var(--muted); }
-.pricing-card.featured .pricing-btn {
-  background: var(--accent);
-  color: #000;
-  border-color: var(--accent);
-}
-.pricing-card.featured .pricing-btn:hover { opacity: 0.9; }
-
-/* ── SOCIAL PROOF ── */
-.proof-grid {
-  display: grid;
-  grid-template-columns: repeat(3,1fr);
-  gap: 16px;
-  margin-top: 64px;
-}
-.proof-card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
   padding: 28px;
-}
-.proof-stars { color: var(--accent); font-size: 14px; margin-bottom: 14px; letter-spacing: 2px; }
-.proof-text { font-size: 14px; color: var(--muted2); line-height: 1.7; margin-bottom: 20px; font-style: italic; }
-.proof-author { display: flex; align-items: center; gap: 12px; }
-.proof-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--border); display:flex;align-items:center;justify-content:center;font-size:14px; }
-.proof-name { font-size: 13px; font-weight: 600; }
-.proof-role { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; }
-
-/* ── CTA ── */
-.cta-section {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 0 24px 140px;
-}
-.cta-box {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  padding: 80px 48px;
-  text-align: center;
+  transition: border-color 0.2s, transform 0.2s;
+  cursor: default;
   position: relative;
   overflow: hidden;
 }
-.cta-box::before {
+.feature-card::before {
   content: '';
   position: absolute;
-  top: -100px; left: 50%; transform: translateX(-50%);
-  width: 400px; height: 400px;
-  background: radial-gradient(circle, rgba(232,255,71,0.08) 0%, transparent 70%);
+  inset: 0;
+  background: radial-gradient(circle at var(--mx,50%) var(--my,50%), rgba(74,222,128,0.05) 0%, transparent 60%);
+  opacity: 0;
+  transition: opacity 0.3s;
   pointer-events: none;
 }
-.cta-box h2 {
-  font-family: 'Bebas Neue', sans-serif;
-  font-size: clamp(48px, 6vw, 80px);
-  letter-spacing: 0.02em;
-  margin-bottom: 20px;
+.feature-card:hover::before { opacity: 1; }
+.feature-card:hover { border-color: rgba(74,222,128,0.25); transform: translateY(-3px); }
+.feature-num {
+  font-family: 'Bebas Neue', sans-serif; font-size: 48px;
+  color: rgba(74,222,128,0.1); line-height: 1;
+  margin-bottom: 16px;
 }
-.cta-box p { font-size: 17px; color: var(--muted2); max-width: 480px; margin: 0 auto 40px; line-height: 1.65; }
+.feature-icon {
+  width: 44px; height: 44px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 16px;
+}
+.feature-tag {
+  display: inline-block;
+  font-family: 'DM Mono', monospace; font-size: 10px;
+  padding: 3px 10px; border-radius: 100px;
+  margin-bottom: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+}
+.feature-name {
+  font-size: 22px; font-weight: 800;
+  color: #fff; margin-bottom: 10px; line-height: 1.2;
+}
+.feature-desc {
+  font-size: 14px; color: var(--muted2); line-height: 1.65;
+}
+.feature-mockup {
+  margin-top: 24px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+/* Feature mockup: AI Scanner */
+.mock-scanner {
+  padding: 16px;
+}
+.mock-scanner-upload {
+  border: 1.5px dashed rgba(74,222,128,0.3);
+  border-radius: 8px; padding: 20px;
+  text-align: center; margin-bottom: 12px;
+  background: rgba(74,222,128,0.03);
+}
+.mock-scanner-result {
+  background: var(--card); border-radius: 8px; padding: 12px;
+  border: 1px solid #1a2a1a;
+}
+.mock-label { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px; }
+.mock-value { font-size: 13px; font-weight: 700; color: #fff; }
+.mock-price { font-size: 22px; font-weight: 800; color: var(--green); }
+.mock-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.mock-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+
+/* Feature mockup: Sales tracker */
+.mock-chart { padding: 14px; }
+.mock-bars { display: flex; align-items: flex-end; gap: 6px; height: 60px; }
+.mock-bar { flex: 1; border-radius: 4px 4px 0 0; }
+.mock-stats-row { display: flex; gap: 10px; margin-top: 12px; }
+.mock-stat-box { flex: 1; background: var(--card); border-radius: 8px; padding: 10px; border: 1px solid var(--border); }
+.mock-stat-label { font-size: 9px; color: var(--muted); text-transform: uppercase; font-family: 'DM Mono', monospace; letter-spacing: 0.08em; }
+.mock-stat-val { font-size: 18px; font-weight: 800; color: #fff; margin-top: 2px; }
+
+/* Feature mockup: Push/export */
+.mock-push { padding: 14px; }
+.mock-dest { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 8px; cursor: pointer; transition: border-color 0.2s; }
+.mock-dest:hover { border-color: rgba(74,222,128,0.3); }
+.mock-dest-icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+.mock-dest-name { font-size: 13px; font-weight: 700; color: #fff; }
+.mock-dest-sub { font-size: 11px; color: var(--muted); }
+.mock-dest-arrow { margin-left: auto; color: var(--muted); font-size: 16px; }
+
+/* Feature mockup: Barcode/Inventory */
+.mock-barcode { padding: 14px; }
+.mock-barcode-strip {
+  background: #fff; border-radius: 6px; padding: 10px 12px;
+  display: flex; align-items: center; gap: 2px; margin-bottom: 10px;
+  justify-content: center;
+}
+.bc-bar { width: 2px; background: #000; }
+.mock-inv-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.mock-inv-img { width: 32px; height: 32px; border-radius: 6px; background: var(--surface); flex-shrink: 0; }
+.mock-inv-name { font-size: 12px; font-weight: 600; color: #fff; }
+.mock-inv-sku { font-size: 10px; color: var(--muted); font-family: 'DM Mono', monospace; }
+.mock-inv-price { margin-left: auto; font-size: 13px; font-weight: 800; color: var(--green); }
+
+/* Feature mockup: Robo chat */
+.mock-chat { padding: 14px; }
+.mock-msg { padding: 9px 12px; border-radius: 10px; font-size: 12px; line-height: 1.5; margin-bottom: 8px; max-width: 88%; }
+.mock-msg.user { background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.2); color: #c8e6c8; margin-left: auto; border-radius: 10px 10px 3px 10px; }
+.mock-msg.bot { background: #0d1117; border: 1px solid var(--border); color: var(--muted2); border-radius: 10px 10px 10px 3px; }
+.mock-msg.bot strong { color: var(--green); }
+
+/* ── HOW IT WORKS ── */
+.how-section { padding: 100px 24px; background: var(--surface); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.steps-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0; max-width: 1000px; margin: 60px auto 0; }
+.step { padding: 32px 28px; position: relative; }
+.step:not(:last-child)::after {
+  content: '→';
+  position: absolute; right: -8px; top: 50%;
+  transform: translateY(-50%);
+  color: var(--border); font-size: 20px;
+}
+.step-num {
+  font-family: 'Bebas Neue', sans-serif; font-size: 56px;
+  color: rgba(74,222,128,0.15); line-height: 1;
+  margin-bottom: 8px;
+}
+.step-title { font-size: 18px; font-weight: 800; color: #fff; margin-bottom: 8px; }
+.step-desc { font-size: 14px; color: var(--muted2); line-height: 1.6; }
+
+/* ── SOCIAL PROOF ── */
+.proof-section { padding: 80px 24px; max-width: 1100px; margin: 0 auto; }
+.proof-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 48px; }
+.proof-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 14px; padding: 24px;
+}
+.proof-stars { color: var(--amber); font-size: 14px; margin-bottom: 12px; letter-spacing: 2px; }
+.proof-text { font-size: 15px; color: var(--muted2); line-height: 1.65; margin-bottom: 16px; font-style: italic; }
+.proof-author { display: flex; align-items: center; gap: 10px; }
+.proof-avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; }
+.proof-name { font-size: 14px; font-weight: 700; color: #fff; }
+.proof-handle { font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace; }
+
+/* ── CTA SECTION ── */
+.cta-section {
+  padding: 100px 24px;
+  text-align: center;
+  position: relative; overflow: hidden;
+}
+.cta-glow {
+  position: absolute; width: 700px; height: 400px;
+  background: radial-gradient(ellipse, rgba(74,222,128,0.1) 0%, transparent 70%);
+  top: 50%; left: 50%; transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.cta-section .section-title { color: #fff; }
+.cta-section .section-title span { color: var(--green); }
+.cta-section p { font-size: 18px; color: var(--muted2); max-width: 480px; margin: 16px auto 40px; }
+.cta-box {
+  background: var(--card); border: 1px solid rgba(74,222,128,0.2);
+  border-radius: 20px; padding: 40px;
+  max-width: 480px; margin: 0 auto;
+  position: relative; z-index: 1;
+  box-shadow: 0 0 60px rgba(74,222,128,0.06);
+}
+.cta-box-title { font-size: 24px; font-weight: 800; color: #fff; margin-bottom: 6px; }
+.cta-box-sub { font-size: 14px; color: var(--muted2); margin-bottom: 24px; }
+.input-group { display: flex; gap: 0; margin-bottom: 12px; }
+.cta-input {
+  flex: 1; background: var(--surface); border: 1px solid var(--border);
+  border-right: none; color: #fff; font-size: 15px;
+  padding: 13px 16px; border-radius: 10px 0 0 10px;
+  font-family: inherit; outline: none;
+  transition: border-color 0.2s;
+}
+.cta-input:focus { border-color: rgba(74,222,128,0.4); }
+.btn-cta {
+  background: var(--green); color: #000;
+  font-family: inherit; font-size: 15px; font-weight: 800;
+  padding: 13px 20px; border: none; cursor: pointer;
+  border-radius: 0 10px 10px 0;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+.btn-cta:hover { background: #86efac; }
+.cta-disclaimer { font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace; }
+.cta-perks { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; margin-top: 20px; }
+.cta-perk { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted2); }
+.cta-perk::before { content: '✓'; color: var(--green); font-weight: 800; }
 
 /* ── FOOTER ── */
 footer {
   border-top: 1px solid var(--border);
   padding: 40px 48px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  max-width: 1200px;
-  margin: 0 auto;
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 16px;
 }
-footer .logo { font-family: 'Bebas Neue', sans-serif; font-size: 22px; letter-spacing: 0.05em; }
-footer .logo span { color: var(--accent); }
-footer p { font-size: 13px; color: var(--muted); font-family: 'DM Mono', monospace; }
+.footer-logo { font-size: 16px; font-weight: 800; }
+.footer-logo span.green { color: var(--green); }
+.footer-links { display: flex; gap: 24px; }
+.footer-links a { font-size: 13px; color: var(--muted); text-decoration: none; transition: color 0.2s; }
+.footer-links a:hover { color: #fff; }
+.footer-copy { font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace; }
 
-/* Scroll reveal */
-.reveal { opacity: 0; transform: translateY(30px); transition: opacity 0.7s ease, transform 0.7s ease; }
-.reveal.visible { opacity: 1; transform: translateY(0); }
+/* ── STATS BAND ── */
+.stats-band {
+  display: flex; justify-content: center; gap: 0;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  padding: 0;
+}
+.stat-item {
+  flex: 1; min-width: 180px;
+  padding: 36px 32px;
+  text-align: center;
+  border-right: 1px solid var(--border);
+}
+.stat-item:last-child { border-right: none; }
+.stat-num {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 52px; line-height: 1;
+  color: var(--green);
+}
+.stat-label { font-size: 13px; color: var(--muted); margin-top: 4px; }
 
-@media(max-width:768px){
-  nav { padding: 16px 20px; }
-  .nav-links { display: none; }
-  h1 { font-size: 64px; }
-  .how-grid, .features-grid, .pricing-grid, .proof-grid { grid-template-columns: 1fr; }
-  .hero-stats { gap: 28px; flex-wrap: wrap; justify-content: center; }
-  section { padding: 80px 20px; }
+/* Animate on scroll */
+.fade-in {
+  opacity: 0; transform: translateY(24px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+.fade-in.visible { opacity: 1; transform: translateY(0); }
+
+@media (max-width: 768px) {
+  section { padding: 60px 20px; }
+  .features-grid { grid-template-columns: 1fr; }
+  .steps-grid { grid-template-columns: 1fr; }
+  .step:not(:last-child)::after { content: '↓'; right: auto; left: 28px; top: auto; bottom: -14px; }
+  .stats-band { flex-direction: column; }
+  .stat-item { border-right: none; border-bottom: 1px solid var(--border); padding: 24px; }
+  footer { flex-direction: column; text-align: center; padding: 32px 20px; }
+  .footer-links { flex-wrap: wrap; justify-content: center; gap: 16px; }
+  .input-group { flex-direction: column; }
+  .cta-input { border-right: 1px solid var(--border); border-radius: 10px; border-bottom: none; border-radius: 10px 10px 0 0; }
+  .btn-cta { border-radius: 0 0 10px 10px; }
 }
 </style>
 </head>
@@ -542,657 +527,472 @@ footer p { font-size: 13px; color: var(--muted); font-family: 'DM Mono', monospa
 
 <!-- NAV -->
 <nav id="navbar">
-  <a href="#" class="nav-logo">Lister<span>AI</span></a>
-  <div class="nav-links">
-    <a href="#how">How It Works</a>
-    <a href="#features">Features</a>
-    <a href="#pricing">Pricing</a>
+  <a href="#" class="nav-logo">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.2" stroke-linecap="round">
+      <line x1="12" y1="2" x2="12" y2="5"/><circle cx="12" cy="2" r="1" fill="#4ade80"/>
+      <rect x="5" y="6" width="14" height="12" rx="2"/>
+      <circle cx="9" cy="11" r="1.4" fill="#4ade80" stroke="none"/>
+      <circle cx="15" cy="11" r="1.4" fill="#4ade80" stroke="none"/>
+      <line x1="3" y1="11" x2="5" y2="11"/><line x1="19" y1="11" x2="21" y2="11"/>
+    </svg>
+    <span class="green">Robo</span><span class="white">Seller</span>
+  </a>
+  <div class="nav-cta">
+    <button class="btn-nav-login" onclick="window.location.href='/login'">Log in</button>
+    <button class="btn-nav-signup" onclick="document.getElementById('signup-email').focus();document.querySelector('.cta-section').scrollIntoView({behavior:'smooth'})">Start free →</button>
   </div>
-  <a href="/register" class="nav-cta">Start Free Trial</a>
 </nav>
 
 <!-- HERO -->
 <div class="hero">
   <div class="hero-grid"></div>
-  <h1>
-    LIST<br>
-    <span class="yellow">FASTER.</span><br>
-    <span class="dim">SELL MORE.</span>
+  <div class="hero-glow"></div>
+
+  <div class="hero-badge">Built for resellers, by resellers</div>
+
+  <h1 class="hero-title">
+    <span class="line1">Your Reselling</span>
+    <span class="line2">Best Friend</span>
+    <span class="line3">is a Robot.</span>
   </h1>
-  <p class="hero-sub">Stop spending hours manually creating eBay listings. Photograph a part, get a complete, priced listing in seconds — ready to publish.</p>
-  <div class="hero-btns">
-    <button class="hero-btn-primary" data-demo-trigger onclick="openDemoModal()">📷 Try It Free</button>
-    <a href="/register" class="btn-primary">Get Started for Free</a>
-    <a href="#how" class="btn-secondary">See How It Works</a>
+
+  <p class="hero-sub">
+    Snap a photo. Robo identifies the item, writes the listing, and pushes it to eBay or Shopify. <strong>The all-in-one suite every reseller needs.</strong>
+  </p>
+
+  <div class="hero-actions">
+    <button class="btn-primary" onclick="document.querySelector('.cta-section').scrollIntoView({behavior:'smooth'})">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      Get 100 free scans
+    </button>
+    <button class="btn-secondary" onclick="document.getElementById('features').scrollIntoView({behavior:'smooth'})">
+      See features ↓
+    </button>
   </div>
-  <div class="hero-stats">
-    <div class="hero-stat"><div class="num">10×</div><div class="lbl">Faster Listing</div></div>
-    <div class="hero-stat"><div class="num">95%</div><div class="lbl">Title Accuracy</div></div>
-    <div class="hero-stat"><div class="num">$0</div><div class="lbl">To Start</div></div>
+  <p class="hero-note">// no credit card required &nbsp;·&nbsp; 100 free scans &nbsp;·&nbsp; cancel anytime</p>
+
+  <!-- Terminal mockup -->
+  <div class="terminal fade-in">
+    <div class="terminal-bar">
+      <div class="t-dot"></div><div class="t-dot"></div><div class="t-dot"></div>
+      <div class="t-title">roboseller — scanner</div>
+    </div>
+    <div class="terminal-body">
+      <div class="t-line"><span class="t-prompt">robo@scan $</span><span class="t-text white" id="type-line"> </span></div>
+      <div class="t-line" id="result-line" style="display:none;">
+        <span class="t-prompt">→</span>
+        <span class="t-text">
+          <span class="t-text white">Identified: </span><span class="t-text green">Sony WH-1000XM5 Headphones</span><br>
+          <span class="t-text white">Suggested price: </span><span class="t-text amber">$189.00</span><br>
+          <span class="t-text white">Condition: </span><span class="t-text">Used - Excellent</span><br>
+          <span class="t-text dim">Listing created · pushed to eBay ✓</span>
+        </span>
+      </div>
+      <div class="t-line" id="cursor-line"><span class="t-prompt">robo@scan $</span><span class="t-cursor"></span></div>
+    </div>
   </div>
 </div>
 
-<!-- Inline Demo Section -->
-<section style="padding:30px 24px 60px;background:linear-gradient(180deg,transparent,rgba(245,158,11,0.04));font-family:'Inter',sans-serif;">
-  <div style="max-width:560px;margin:0 auto;background:#0f1117;border:1px solid #2d3348;border-radius:18px;padding:28px;box-shadow:0 30px 80px rgba(0,0,0,0.5),0 0 0 1px rgba(245,158,11,0.06);">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px;flex-wrap:wrap;gap:12px;">
-      <div>
-        <div style="font-size:11px;color:#f59e0b;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:6px;">Try it now &middot; No signup</div>
-        <div style="font-size:22px;font-weight:800;letter-spacing:-0.02em;color:#f1f5f9;line-height:1.2;">See what your item is worth</div>
-        <div style="font-size:13px;color:#94a3b8;margin-top:4px;" id="inline-quota-text">Loading...</div>
-      </div>
-    </div>
+<!-- TICKER -->
+<div class="ticker-wrap">
+  <div class="ticker-inner" id="ticker">
+    <span class="ticker-item"><span class="dot"></span>AI item scanner</span>
+    <span class="ticker-item"><span class="dot"></span>auto listing creation</span>
+    <span class="ticker-item"><span class="dot"></span><span class="hi">100 free scans</span></span>
+    <span class="ticker-item"><span class="dot"></span>push to eBay instantly</span>
+    <span class="ticker-item"><span class="dot"></span>push to Shopify</span>
+    <span class="ticker-item"><span class="dot"></span>sales tracking</span>
+    <span class="ticker-item"><span class="dot"></span>expense tracking</span>
+    <span class="ticker-item"><span class="dot"></span><span class="amb">QR code generator</span></span>
+    <span class="ticker-item"><span class="dot"></span>inventory management</span>
+    <span class="ticker-item"><span class="dot"></span>Robo AI chat</span>
+    <span class="ticker-item"><span class="dot"></span><span class="hi">no credit card needed</span></span>
+    <span class="ticker-item"><span class="dot"></span>built for resellers</span>
+    <!-- duplicate for seamless loop -->
+    <span class="ticker-item"><span class="dot"></span>AI item scanner</span>
+    <span class="ticker-item"><span class="dot"></span>auto listing creation</span>
+    <span class="ticker-item"><span class="dot"></span><span class="hi">100 free scans</span></span>
+    <span class="ticker-item"><span class="dot"></span>push to eBay instantly</span>
+    <span class="ticker-item"><span class="dot"></span>push to Shopify</span>
+    <span class="ticker-item"><span class="dot"></span>sales tracking</span>
+    <span class="ticker-item"><span class="dot"></span>expense tracking</span>
+    <span class="ticker-item"><span class="dot"></span><span class="amb">QR code generator</span></span>
+    <span class="ticker-item"><span class="dot"></span>inventory management</span>
+    <span class="ticker-item"><span class="dot"></span>Robo AI chat</span>
+    <span class="ticker-item"><span class="dot"></span><span class="hi">no credit card needed</span></span>
+    <span class="ticker-item"><span class="dot"></span>built for resellers</span>
+  </div>
+</div>
 
-    <div id="inline-step-upload">
-      <label for="inline-file-input" style="display:block;border:2px dashed #2d3348;border-radius:12px;padding:36px 20px;text-align:center;cursor:pointer;background:#161925;transition:border-color 0.15s,background 0.15s;" onmouseover="this.style.borderColor='#f59e0b';this.style.background='rgba(245,158,11,0.05)';" onmouseout="this.style.borderColor='#2d3348';this.style.background='#161925';">
-        <div style="font-size:40px;margin-bottom:8px;">📷</div>
-        <div style="font-size:15px;font-weight:600;color:#f1f5f9;">Drop a photo of any item</div>
-        <div style="font-size:12px;color:#94a3b8;margin-top:4px;">JPG/PNG/HEIC, up to 10MB &middot; results in seconds</div>
-      </label>
-      <input type="file" id="inline-file-input" accept="image/*,image/heic" style="display:none;" onchange="runInlineDemo(this)"/>
-    </div>
+  <div class="stat-item fade-in"><div class="stat-num">$2M+</div><div class="stat-label">In listings created</div></div>
+  <div class="stat-item fade-in"><div class="stat-num">30s</div><div class="stat-label">Average scan time</div></div>
+  <div class="stat-item fade-in"><div class="stat-num">3</div><div class="stat-label">Platforms supported</div></div>
+</div>
 
-    <div id="inline-step-scanning" style="display:none;text-align:center;padding:30px 16px;">
-      <div style="display:inline-block;width:42px;height:42px;border:3px solid #2d3348;border-top-color:#f59e0b;border-radius:50%;animation:demospin 0.9s linear infinite;"></div>
-      <div style="font-size:14px;color:#94a3b8;margin-top:14px;">Identifying item and estimating value...</div>
-      <div style="font-size:11px;color:#64748b;margin-top:4px;">Usually takes 5-10 seconds</div>
-    </div>
+<!-- FEATURES -->
+<div class="features-section" id="features">
+  <div class="features-header fade-in">
+    <div class="section-label">// what's inside</div>
+    <h2 class="section-title" style="color:#fff;">Five tools.<br><span style="color:var(--green);">One suite.</span></h2>
+    <p style="font-size:17px;color:var(--muted2);line-height:1.6;max-width:500px;margin:16px auto 0;">Everything you need to run a lean, fast reselling operation — from garage find to sold listing in minutes.</p>
+  </div>
 
-    <div id="inline-step-result" style="display:none;">
-      <div style="background:#161925;border:1px solid #2d3348;border-radius:12px;padding:18px;margin-bottom:14px;">
-        <div style="display:flex;align-items:flex-start;gap:14px;">
-          <img id="inline-result-img" src="" style="width:90px;height:90px;border-radius:8px;object-fit:cover;background:#0f1117;flex-shrink:0;"/>
-          <div style="flex:1;min-width:0;">
-            <div style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;" id="inline-result-category">CATEGORY</div>
-            <div style="font-size:15px;font-weight:700;color:#f1f5f9;line-height:1.3;margin-top:3px;" id="inline-result-title">Title</div>
-            <div style="display:flex;gap:14px;margin-top:10px;align-items:center;flex-wrap:wrap;">
-              <div>
-                <div style="font-size:9px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;">Used</div>
-                <div style="font-size:18px;font-weight:800;color:#22c55e;line-height:1;" id="inline-result-used">$0</div>
-              </div>
-              <div>
-                <div style="font-size:9px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;">New</div>
-                <div style="font-size:18px;font-weight:800;color:#f1f5f9;line-height:1;" id="inline-result-new">$0</div>
-              </div>
-              <div style="margin-left:auto;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);color:#f59e0b;font-size:10px;font-weight:700;padding:4px 9px;border-radius:14px;text-transform:uppercase;letter-spacing:0.05em;" id="inline-result-confidence">Medium</div>
-            </div>
+  <div class="features-grid">
+
+    <!-- Feature 1: AI Scanner -->
+    <div class="feature-card fade-in" onmousemove="trackMouse(event,this)">
+      <div class="feature-tag" style="background:rgba(74,222,128,0.1);color:var(--green);">AI-Powered</div>
+      <div class="feature-name">Scan &amp; List in Seconds</div>
+      <div class="feature-desc">Snap a photo of any item. Robo identifies it, suggests a price based on real eBay sold data, and generates a listing title — ready to review and push.</div>
+      <div class="feature-mockup mock-scanner">
+        <div class="mock-scanner-upload">
+          <div style="font-size:28px;margin-bottom:6px;">📸</div>
+          <div style="font-size:12px;color:var(--muted);font-family:'DM Mono',monospace;">scanning item...</div>
+          <div style="height:3px;background:var(--border);border-radius:2px;margin-top:10px;overflow:hidden;">
+            <div style="height:100%;width:75%;background:linear-gradient(90deg,var(--green),#86efac);border-radius:2px;animation:scan-prog 1.5s ease-in-out infinite alternate;"></div>
           </div>
         </div>
-        <div style="font-size:12px;color:#94a3b8;margin-top:12px;line-height:1.5;font-style:italic;" id="inline-result-notes"></div>
-      </div>
-      <div style="background:linear-gradient(135deg,rgba(245,158,11,0.12),rgba(217,119,6,0.05));border:1px solid rgba(245,158,11,0.3);border-radius:12px;padding:18px;text-align:center;">
-        <div style="font-size:14px;font-weight:700;color:#f1f5f9;margin-bottom:4px;">Like what you see?</div>
-        <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;">Sign up free and scan up to 25 items &mdash; no credit card needed.</div>
-        <a href="/register" style="display:inline-block;background:linear-gradient(135deg,#f59e0b,#d97706);color:#000;text-decoration:none;padding:12px 26px;border-radius:9px;font-weight:700;font-size:14px;">Start Free Trial</a>
-      </div>
-      <div style="margin-top:14px;text-align:center;">
-        <button onclick="resetInlineDemo()" style="background:transparent;border:1px solid #2d3348;color:#94a3b8;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:12px;font-family:inherit;">Try another photo</button>
+        <div class="mock-scanner-result">
+          <div class="mock-row">
+            <div>
+              <div class="mock-label">Identified Item</div>
+              <div class="mock-value">Nike Air Force 1 '07</div>
+            </div>
+            <div class="mock-badge" style="background:rgba(74,222,128,0.1);color:var(--green);">✓ Listed</div>
+          </div>
+          <div class="mock-row">
+            <div><div class="mock-label">Suggested Price</div><div class="mock-price">$89.00</div></div>
+            <div><div class="mock-label">Condition</div><div class="mock-value" style="font-size:13px;">Used - Good</div></div>
+          </div>
+        </div>
       </div>
     </div>
 
-    <div id="inline-step-quota" style="display:none;text-align:center;padding:24px 12px;">
-      <div style="font-size:46px;margin-bottom:10px;">🎉</div>
-      <div style="font-size:17px;font-weight:700;color:#f1f5f9;margin-bottom:6px;">You've used all 3 free scans!</div>
-      <div style="font-size:13px;color:#94a3b8;margin-bottom:20px;line-height:1.5;">Sign up for a free account and scan up to 25 items &mdash; no credit card needed.</div>
-      <a href="/register" style="display:inline-block;background:linear-gradient(135deg,#f59e0b,#d97706);color:#000;text-decoration:none;padding:13px 30px;border-radius:9px;font-weight:700;font-size:15px;">Get Started Free</a>
+    <!-- Feature 2: Sales & Expenses -->
+    <div class="feature-card fade-in" onmousemove="trackMouse(event,this)">
+      <div class="feature-tag" style="background:rgba(245,158,11,0.1);color:var(--amber);">Analytics</div>
+      <div class="feature-name">Track Sales &amp; Expenses</div>
+      <div class="feature-desc">See your profits in real time. Log every purchase, track every sale, and know exactly where your money is going — by category, period, or item.</div>
+      <div class="feature-mockup mock-chart">
+        <div class="mock-bars">
+          <div class="mock-bar" style="height:35%;background:rgba(74,222,128,0.3);"></div>
+          <div class="mock-bar" style="height:55%;background:rgba(74,222,128,0.4);"></div>
+          <div class="mock-bar" style="height:40%;background:rgba(74,222,128,0.3);"></div>
+          <div class="mock-bar" style="height:70%;background:rgba(74,222,128,0.5);"></div>
+          <div class="mock-bar" style="height:50%;background:rgba(74,222,128,0.4);"></div>
+          <div class="mock-bar" style="height:90%;background:var(--green);"></div>
+          <div class="mock-bar" style="height:65%;background:rgba(74,222,128,0.5);"></div>
+        </div>
+        <div class="mock-stats-row">
+          <div class="mock-stat-box">
+            <div class="mock-stat-label">Revenue</div>
+            <div class="mock-stat-val" style="color:var(--green);">$3,241</div>
+          </div>
+          <div class="mock-stat-box">
+            <div class="mock-stat-label">Expenses</div>
+            <div class="mock-stat-val" style="color:var(--amber);">$892</div>
+          </div>
+          <div class="mock-stat-box">
+            <div class="mock-stat-label">Profit</div>
+            <div class="mock-stat-val" style="color:#fff;">$2,349</div>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <div id="inline-step-error" style="display:none;text-align:center;padding:20px 12px;">
-      <div style="font-size:36px;margin-bottom:8px;">😕</div>
-      <div style="font-size:14px;font-weight:700;color:#f1f5f9;margin-bottom:4px;" id="inline-error-title">Scan failed</div>
-      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;" id="inline-error-message">Please try again with a different photo.</div>
-      <button onclick="resetInlineDemo()" style="background:#f59e0b;border:none;color:#000;padding:9px 20px;border-radius:8px;cursor:pointer;font-weight:700;font-family:inherit;">Try Again</button>
+    <!-- Feature 3: Push to platforms -->
+    <div class="feature-card fade-in" onmousemove="trackMouse(event,this)">
+      <div class="feature-tag" style="background:rgba(59,130,246,0.1);color:#60a5fa;">Multi-Platform</div>
+      <div class="feature-name">Instant Push to eBay, Shopify, or CSV</div>
+      <div class="feature-desc">Schedule listings to eBay as drafts, sync to Shopify, or download a formatted CSV for bulk upload — your inventory, your way.</div>
+      <div class="feature-mockup mock-push">
+        <div class="mock-dest">
+          <div class="mock-dest-icon" style="background:rgba(0,100,210,0.15);">
+            <span style="font-size:13px;font-weight:900;color:#0064d2;">e</span>
+          </div>
+          <div>
+            <div class="mock-dest-name">eBay Seller Hub</div>
+            <div class="mock-dest-sub">Push as drafts · 29 items ready</div>
+          </div>
+          <div class="mock-dest-arrow">→</div>
+        </div>
+        <div class="mock-dest">
+          <div class="mock-dest-icon" style="background:rgba(90,142,59,0.15);">
+            <span style="font-size:13px;">🛍</span>
+          </div>
+          <div>
+            <div class="mock-dest-name">Shopify Store</div>
+            <div class="mock-dest-sub">Sync inventory · auto-publish</div>
+          </div>
+          <div class="mock-dest-arrow">→</div>
+        </div>
+        <div class="mock-dest">
+          <div class="mock-dest-icon" style="background:rgba(6,182,212,0.1);">
+            <span style="font-size:13px;">📄</span>
+          </div>
+          <div>
+            <div class="mock-dest-name">Download CSV</div>
+            <div class="mock-dest-sub">eBay bulk upload format</div>
+          </div>
+          <div class="mock-dest-arrow">↓</div>
+        </div>
+      </div>
     </div>
-  </div>
-</section>
 
-<script>
-function showInlineStep(name) {
-  ['upload','scanning','result','quota','error'].forEach(function(s) {
-    var el = document.getElementById('inline-step-' + s);
-    if (el) el.style.display = (s === name) ? 'block' : 'none';
-  });
-}
+    <!-- Feature 4: Barcode + Inventory -->
+    <div class="feature-card fade-in" onmousemove="trackMouse(event,this)">
+      <div class="feature-tag" style="background:rgba(245,158,11,0.1);color:var(--amber);">Inventory</div>
+      <div class="feature-name">QR Code Generator &amp; Inventory Tracking</div>
+      <div class="feature-desc">Generate QR codes for every item in your inventory. Scan to pull up any listing instantly — track photos, prices, and status without digging through spreadsheets.</div>
+      <div class="feature-mockup mock-barcode">
+        <div class="mock-barcode-strip" id="barcode-strip">
+          <!-- generated by JS -->
+        </div>
+        <div style="font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);text-align:center;margin-bottom:10px;">SKU-RS-20240501-001</div>
+        <div class="mock-inv-row">
+          <div class="mock-inv-img" style="background:rgba(74,222,128,0.1);display:flex;align-items:center;justify-content:center;font-size:14px;">👟</div>
+          <div><div class="mock-inv-name">Nike Air Force 1</div><div class="mock-inv-sku">SKU-RS-001</div></div>
+          <div class="mock-inv-price">$89</div>
+        </div>
+        <div class="mock-inv-row">
+          <div class="mock-inv-img" style="background:rgba(245,158,11,0.1);display:flex;align-items:center;justify-content:center;font-size:14px;">📱</div>
+          <div><div class="mock-inv-name">iPhone 12 Pro</div><div class="mock-inv-sku">SKU-RS-002</div></div>
+          <div class="mock-inv-price">$340</div>
+        </div>
+        <div class="mock-inv-row" style="border-bottom:none;">
+          <div class="mock-inv-img" style="background:rgba(59,130,246,0.1);display:flex;align-items:center;justify-content:center;font-size:14px;">🎧</div>
+          <div><div class="mock-inv-name">Sony WH-1000XM5</div><div class="mock-inv-sku">SKU-RS-003</div></div>
+          <div class="mock-inv-price">$189</div>
+        </div>
+      </div>
+    </div>
 
-async function loadInlineQuota() {
-  try {
-    var r = await fetch('/api/demo-scan/quota');
-    var d = await r.json();
-    var qt = document.getElementById('inline-quota-text');
-    if (d.remaining <= 0) {
-      qt.textContent = 'No free scans remaining';
-      showInlineStep('quota');
-    } else {
-      qt.textContent = d.remaining + ' of ' + d.limit + ' free scans remaining';
-    }
-  } catch(e) {
-    document.getElementById('inline-quota-text').textContent = '3 free scans available';
-  }
-}
+    <!-- Feature 5: Robo Chat — full width -->
+    <div class="feature-card fade-in" style="grid-column: 1 / -1;" onmousemove="trackMouse(event,this)">
+      <div style="display:flex;gap:32px;flex-wrap:wrap;align-items:center;">
+        <div style="flex:1;min-width:260px;">
+          <div class="feature-tag" style="background:rgba(74,222,128,0.1);color:var(--green);">AI Assistant</div>
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
+            <div style="width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#052e16,#0d4a22);border:1px solid rgba(74,222,128,0.3);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round"><line x1="12" y1="2" x2="12" y2="5"/><circle cx="12" cy="2" r="1" fill="#4ade80" stroke="none"/><rect x="5" y="6" width="14" height="12" rx="2"/><circle cx="9" cy="11" r="1.4" fill="#4ade80" stroke="none"/><circle cx="15" cy="11" r="1.4" fill="#4ade80" stroke="none"/><line x1="3" y1="11" x2="5" y2="11"/><line x1="19" y1="11" x2="21" y2="11"/></svg>
+            </div>
+            <div class="feature-name" style="font-size:28px;margin-bottom:0;">Meet Robo.</div>
+          </div>
+          <div style="font-size:13px;color:var(--green);font-family:'DM Mono',monospace;letter-spacing:0.05em;margin-bottom:10px;">// your AI reselling co-pilot</div>
+          <div class="feature-desc" style="font-size:15px;">Robo lives inside the app and knows reselling inside out. Ask if something's worth buying, get a title suggestion, check what's selling right now — Robo's always on, always honest, and never judges you for buying 14 pairs of shoes at a garage sale.</div>
+          <div style="margin-top:20px;display:flex;flex-wrap:wrap;gap:8px;">
+            <div style="font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:100px;padding:5px 12px;color:var(--muted2);">"Is this worth $40?"</div>
+            <div style="font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:100px;padding:5px 12px;color:var(--muted2);">"Write me a title"</div>
+            <div style="font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:100px;padding:5px 12px;color:var(--muted2);">"What's this selling for?"</div>
+            <div style="font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:100px;padding:5px 12px;color:var(--muted2);">"Best shipping option?"</div>
+          </div>
+        </div>
+        <div class="feature-mockup mock-chat" style="flex:1;min-width:280px;max-width:400px;">
+          <div class="mock-msg user">Is this Sony headset worth buying for $45?</div>
+          <div class="mock-msg bot">
+            <strong>Yes — solid buy.</strong> Sony WH-1000XM4s are selling on eBay for <strong style="color:var(--amber);">$120–$160</strong> used. At $45 you're looking at a <strong style="color:var(--green);">$60–90 profit</strong> after fees. Grab it.
+          </div>
+          <div class="mock-msg user">What title should I use?</div>
+          <div class="mock-msg bot">
+            <strong style="color:var(--green);">Sony WH-1000XM4 Wireless Noise Canceling Headphones — Used Excellent</strong><br>
+            <span style="color:var(--muted);">Hits all the eBay keywords. Should rank well.</span>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:10px;">
+            <div style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;">ask robo anything...</div>
+            <div style="background:var(--green);border-radius:8px;padding:8px 12px;font-size:11px;font-weight:800;color:#000;cursor:pointer;">Send</div>
+          </div>
+        </div>
+      </div>
+    </div>
 
-function resetInlineDemo() {
-  document.getElementById('inline-file-input').value = '';
-  loadInlineQuota();
-  showInlineStep('upload');
-}
-
-async function runInlineDemo(input) {
-  var file = input.files && input.files[0];
-  if (!file) return;
-  if (file.size > 10 * 1024 * 1024) {
-    showInlineError('File too large', 'Please use a photo under 10MB.');
-    return;
-  }
-  var reader = new FileReader();
-  reader.onload = function(e) {
-    document.getElementById('inline-result-img').src = e.target.result;
-  };
-  reader.readAsDataURL(file);
-  showInlineStep('scanning');
-  var fd = new FormData();
-  fd.append('file', file);
-  try {
-    var r = await fetch('/api/demo-scan', {method:'POST', body: fd});
-    if (r.status === 429) {
-      showInlineStep('quota');
-      return;
-    }
-    if (!r.ok) {
-      var txt = await r.text();
-      showInlineError('Scan failed', txt || 'Please try a different photo.');
-      return;
-    }
-    var d = await r.json();
-    document.getElementById('inline-result-title').textContent = d.title || 'Unknown Item';
-    document.getElementById('inline-result-category').textContent = d.category || 'Other';
-    document.getElementById('inline-result-used').textContent = '$' + (d.estimated_price_used || 0);
-    document.getElementById('inline-result-new').textContent = '$' + (d.estimated_price_new || 0);
-    document.getElementById('inline-result-confidence').textContent = (d.confidence || 'medium').toUpperCase();
-    document.getElementById('inline-result-notes').textContent = d.notes || '';
-    if (typeof d.remaining === 'number') {
-      document.getElementById('inline-quota-text').textContent = d.remaining + ' of 3 free scans remaining';
-    }
-    showInlineStep('result');
-  } catch(e) {
-    showInlineError('Scan failed', e.message || 'Network error - please try again.');
-  }
-}
-
-function showInlineError(title, msg) {
-  document.getElementById('inline-error-title').textContent = title;
-  document.getElementById('inline-error-message').textContent = msg;
-  showInlineStep('error');
-}
-
-// Auto-load quota when page loads
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', loadInlineQuota);
-} else {
-  loadInlineQuota();
-}
-</script>
-
-
-<!-- MARQUEE -->
-<div class="marquee-wrap">
-  <div class="marquee-track">
-    <span class="marquee-item">AI-Powered Identification</span>
-    <span class="marquee-item">Real-Time eBay Pricing</span>
-    <span class="marquee-item">Bulk CSV Export</span>
-    <span class="marquee-item">Multi-Device Sync</span>
-    <span class="marquee-item">Industrial Parts Specialist</span>
-    <span class="marquee-item">Photo Scanning</span>
-    <span class="marquee-item">Automated Descriptions</span>
-    <span class="marquee-item">Category Matching</span>
-    <span class="marquee-item">AI-Powered Identification</span>
-    <span class="marquee-item">Real-Time eBay Pricing</span>
-    <span class="marquee-item">Bulk CSV Export</span>
-    <span class="marquee-item">Multi-Device Sync</span>
-    <span class="marquee-item">Industrial Parts Specialist</span>
-    <span class="marquee-item">Photo Scanning</span>
-    <span class="marquee-item">Automated Descriptions</span>
-    <span class="marquee-item">Category Matching</span>
   </div>
 </div>
 
 <!-- HOW IT WORKS -->
-<section id="how">
-  <div class="reveal">
-    <div class="section-label">How It Works</div>
-    <div class="section-title">THREE STEPS<br>TO LISTED</div>
-    <p class="section-sub">Your employees scan parts with their phones. Lister AI handles the rest — identification, pricing, and export.</p>
+<div class="how-section">
+  <div style="text-align:center;max-width:600px;margin:0 auto;" class="fade-in">
+    <div class="section-label">// workflow</div>
+    <h2 class="section-title" style="color:#fff;">From sourced to<br><span style="color:var(--green);">listed</span> in minutes.</h2>
   </div>
-  <div class="how-grid reveal">
-    <div class="steps">
-      <div class="step active" onclick="setStep(0,this)">
-        <div class="step-num">01</div>
-        <div>
-          <div class="step-title">Photograph the Part</div>
-          <div class="step-desc">Anyone on your team can photograph items using any phone or tablet. No special equipment or training needed — just take a photo.</div>
-        </div>
-      </div>
-      <div class="step" onclick="setStep(1,this)">
-        <div class="step-num">02</div>
-        <div>
-          <div class="step-title">AI Identifies & Prices</div>
-          <div class="step-desc">Our AI reads part numbers, model plates, and labels from your photos. It then searches live market data to find current eBay pricing automatically.</div>
-        </div>
-      </div>
-      <div class="step" onclick="setStep(2,this)">
-        <div class="step-num">03</div>
-        <div>
-          <div class="step-title">Export to eBay</div>
-          <div class="step-desc">Publish listings directly to eBay or download a ready-to-upload file. Full eBay integration coming soon — manage your entire catalog from one place.</div>
-        </div>
-      </div>
+  <div class="steps-grid">
+    <div class="step fade-in">
+      <div class="step-num">01</div>
+      <div class="step-title">Snap a photo</div>
+      <div class="step-desc">Point your camera at any item. Robo handles the rest — no barcodes, no manual entry.</div>
+    </div>
+    <div class="step fade-in">
+      <div class="step-num">02</div>
+      <div class="step-title">Robo identifies &amp; prices it</div>
+      <div class="step-desc">AI pulls real sold data and generates a complete listing in under 30 seconds.</div>
+    </div>
+    <div class="step fade-in">
+      <div class="step-num">03</div>
+      <div class="step-title">Review &amp; edit</div>
+      <div class="step-desc">Tweak the price, condition, or title. Save to batch or push immediately.</div>
     </div>
 
-    <!-- MOCKUP -->
-    <div class="mockup-container" id="mockup-container">
-      <!-- Step 0: Dashboard -->
-      <div id="mock-0">
-        <div class="mockup-bar"><div class="dot" style="background:#ff5f57"></div><div class="dot" style="background:#ffbd2e"></div><div class="dot" style="background:#28ca41"></div><span style="font-family:'DM Mono',monospace;font-size:11px;color:#3a4258;margin-left:8px;">app.reselljunkie.com</span></div>
-        <div class="mockup-content">
-          <div class="mock-header">Dashboard</div>
-          <div class="mock-tile-grid">
-            <div class="mock-tile"><div class="mock-tile-img">⚙️</div><div class="mock-tile-body"><div class="mock-tile-title">Parker Hannifin D1VW4CNYP</div><div class="mock-price">$142</div><span class="mock-badge">NEW</span></div></div>
-            <div class="mock-tile"><div class="mock-tile-img">🔧</div><div class="mock-tile-body"><div class="mock-tile-title">Rexnord 703-42418-010</div><div class="mock-price">$89</div><span class="mock-badge">USED</span></div></div>
-            <div class="mock-tile"><div class="mock-tile-img">⚡</div><div class="mock-tile-body"><div class="mock-tile-title">Allen Bradley 1756-IF16</div><div class="mock-price">$310</div><span class="mock-badge">USED</span></div></div>
-            <div class="mock-tile"><div class="mock-tile-img">🔩</div><div class="mock-tile-body"><div class="mock-tile-title">Siemens 6ES7 321-1BL00</div><div class="mock-price">$195</div><span class="mock-badge">NEW</span></div></div>
-            <div class="mock-tile"><div class="mock-tile-img">💡</div><div class="mock-tile-body"><div class="mock-tile-title">Cutler Hammer AN16ENO</div><div class="mock-price">$67</div><span class="mock-badge">USED</span></div></div>
-            <div class="mock-tile"><div class="mock-tile-img">🏭</div><div class="mock-tile-body"><div class="mock-tile-title">Festo ADVU-50-100-P-A</div><div class="mock-price">$225</div><span class="mock-badge">NEW</span></div></div>
-          </div>
-        </div>
-      </div>
-      <!-- Step 1: Scanning -->
-      <div id="mock-1" style="display:none">
-        <div class="mockup-bar"><div class="dot" style="background:#ff5f57"></div><div class="dot" style="background:#ffbd2e"></div><div class="dot" style="background:#28ca41"></div><span style="font-family:'DM Mono',monospace;font-size:11px;color:#3a4258;margin-left:8px;">Scanning — Fast Scan</span></div>
-        <div class="mockup-content">
-          <div class="mock-scan-area active">📷 &nbsp; 3 photos captured — analyzing...</div>
-          <div class="mock-progress"><div class="mock-progress-fill"></div></div>
-          <div class="mock-listing-row"><div class="mock-listing-img">⚙️</div><div class="mock-listing-info"><div class="mock-listing-title">Parker Hannifin D1VW4CNYP Directional Control Valve</div><div class="mock-listing-sub">Category: Hydraulics · Condition: Used</div></div><div class="mock-listing-price">$142</div></div>
-          <div class="mock-listing-row"><div class="mock-listing-img">🔧</div><div class="mock-listing-info"><div class="mock-listing-title">Rexnord 703-42418-010 Coupling Hub</div><div class="mock-listing-sub">Category: Couplings · Condition: New</div></div><div class="mock-listing-price">$89</div></div>
-          <div class="mock-listing-row"><div class="mock-listing-img">⚡</div><div class="mock-listing-info"><div class="mock-listing-title">Allen Bradley 1756-IF16 ControlLogix</div><div class="mock-listing-sub">Category: PLCs · Condition: Used</div></div><div class="mock-listing-price">$310</div></div>
-        </div>
-      </div>
-      <!-- Step 2: Export -->
-      <div id="mock-2" style="display:none">
-        <div class="mockup-bar"><div class="dot" style="background:#ff5f57"></div><div class="dot" style="background:#ffbd2e"></div><div class="dot" style="background:#28ca41"></div><span style="font-family:'DM Mono',monospace;font-size:11px;color:#3a4258;margin-left:8px;">⬇ ebay_export_20260428.csv</span></div>
-        <div class="mockup-content">
-          <div style="font-family:'DM Mono',monospace;font-size:10px;color:#3a4258;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.1em;">CSV Preview</div>
-          <div class="mock-csv-row">Action, SKU, Category ID, <span>Title</span>, Price, Condition...</div>
-          <div class="mock-csv-row">Draft, , <span>12576</span>, Parker Hannifin D1VW4CNYP..., <span>142.00</span>, USED</div>
-          <div class="mock-csv-row">Draft, , <span>12576</span>, Rexnord 703-42418-010..., <span>89.00</span>, NEW</div>
-          <div class="mock-csv-row">Draft, , <span>11804</span>, Allen Bradley 1756-IF16..., <span>310.00</span>, USED</div>
-          <div class="mock-csv-row">Draft, , <span>12576</span>, Siemens 6ES7 321-1BL00..., <span>195.00</span>, NEW</div>
-          <div class="mock-csv-row">Draft, , <span>11804</span>, Cutler Hammer AN16ENO..., <span>67.00</span>, USED</div>
-          <div style="margin-top:12px;background:rgba(232,255,71,0.08);border:1px solid rgba(232,255,71,0.2);border-radius:6px;padding:10px 12px;font-size:12px;color:#e8ff47;font-family:'DM Mono',monospace;">✓ 47 listings ready for eBay import</div>
-        </div>
-      </div>
-    </div>
   </div>
-</section>
+</div>
 
-<!-- FEATURES -->
-<section id="features" style="padding-top:0;">
-  <div class="reveal">
-    <div class="section-label">Features</div>
-    <div class="section-title">EVERYTHING<br>YOU NEED</div>
+<!-- SOCIAL PROOF -->
+<div class="proof-section">
+  <div class="fade-in" style="text-align:center;margin-bottom:16px;">
+    <div class="section-label">// from the community</div>
+    <h2 class="section-title" style="color:#fff;">Resellers love it.</h2>
   </div>
-  <div class="features-grid reveal">
-    <div class="feature-card">
-      <div class="feature-icon">🔍</div>
-      <div class="feature-title">AI Part Identification</div>
-      <div class="feature-desc">Our AI reads part numbers, model plates, and labels from photos. Works on worn, dirty, or partially obscured items with high accuracy.</div>
+  <div class="proof-grid">
+    <div class="proof-card fade-in">
+      <div class="proof-stars">★★★★★</div>
+      <p class="proof-text">"I used to spend 20 minutes per listing. Now I do it in 2. RoboSeller paid for itself in the first week."</p>
+      <div class="proof-author">
+        <div class="proof-avatar" style="background:rgba(74,222,128,0.1);color:var(--green);">JM</div>
+        <div><div class="proof-name">Jake M.</div><div class="proof-handle">// garage sale flipper · Chicago</div></div>
+      </div>
     </div>
-    <div class="feature-card">
-      <div class="feature-icon">💰</div>
-      <div class="feature-title">Live Market Pricing</div>
-      <div class="feature-desc">Real-time Google Search grounding pulls current eBay sold listings and active prices. Never underprice a part again.</div>
+    <div class="proof-card fade-in">
+      <div class="proof-stars">★★★★★</div>
+      <p class="proof-text">"The Robo chat alone is worth it. I asked if a vintage lamp was worth buying and it told me exactly what to pay. Made $80 on it."</p>
+      <div class="proof-author">
+        <div class="proof-avatar" style="background:rgba(245,158,11,0.1);color:var(--amber);">SR</div>
+        <div><div class="proof-name">Sarah R.</div><div class="proof-handle">// estate sale hunter · Austin</div></div>
+      </div>
     </div>
-    <div class="feature-card">
-      <div class="feature-icon">📦</div>
-      <div class="feature-title">Bulk CSV Export</div>
-      <div class="feature-desc">Download a ready-to-upload eBay flat file with all listings, photos, descriptions, and pricing — formatted correctly every time.</div>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">📱</div>
-      <div class="feature-title">Works on Any Device</div>
-      <div class="feature-desc">Warehouse employees scan with phones, managers review on desktop. Everything syncs in real-time across your team.</div>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🏷️</div>
-      <div class="feature-title">Smart Categorization</div>
-      <div class="feature-desc">Automatically assigns the correct eBay category ID for industrial parts — hydraulics, PLCs, motors, valves, and hundreds more.</div>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">✏️</div>
-      <div class="feature-title">Editable Listings</div>
-      <div class="feature-desc">Review and edit any title, price, description, or condition before export. Full control with AI doing the heavy lifting.</div>
-    </div>
-  </div>
-</section>
-
-<!-- PRICING -->
-<div class="pricing-wrap" id="pricing">
-  <div class="reveal" style="text-align:center;">
-    <div class="section-label" style="justify-content:center;">Pricing</div>
-    <div class="section-title">SIMPLE,<br>SCALABLE PLANS</div>
-    <p style="font-size:17px;color:var(--muted2);max-width:480px;margin:16px auto 0;line-height:1.65;">Start free. Scale as you grow. No contracts, no setup fees.</p>
-  </div>
-  <div class="pricing-grid reveal">
-    <!-- Free -->
-    <div class="pricing-card">
-      <div class="pricing-tier">Free Trial</div>
-      <div class="pricing-price">$0 <span class="mo">/mo</span></div>
-      <div class="pricing-sub">25 scans to get started</div>
-      <ul class="pricing-features">
-        <li>25 total scans</li>
-        <li>AI part identification</li>
-        <li>eBay CSV export</li>
-        <li>All devices</li>
-        <li style="color:var(--muted);"><span style="color:var(--muted)">✕</span> &nbsp;Priority support</li>
-      </ul>
-      <a href="/register" class="pricing-btn">Start Free</a>
-    </div>
-    <!-- Starter -->
-    <div class="pricing-card">
-      <div class="pricing-tier">Starter</div>
-      <div class="pricing-price">$50 <span class="mo">/mo</span></div>
-      <div class="pricing-sub">100 scans per month</div>
-      <ul class="pricing-features">
-        <li>100 scans / month</li>
-        <li>AI part identification</li>
-        <li>Live market pricing</li>
-        <li>eBay CSV export</li>
-        <li>Email support</li>
-      </ul>
-      <a href="/register" class="pricing-btn">Get Started</a>
-    </div>
-    <!-- Growth -->
-    <div class="pricing-card featured">
-      <div class="pricing-tier">Growth</div>
-      <div class="pricing-price">$150 <span class="mo">/mo</span></div>
-      <div class="pricing-sub">500 scans per month</div>
-      <ul class="pricing-features">
-        <li>500 scans / month</li>
-        <li>AI part identification</li>
-        <li>Live market pricing</li>
-        <li>eBay CSV export</li>
-        <li>Priority support</li>
-      </ul>
-      <a href="/register" class="pricing-btn">Get Started</a>
-    </div>
-    <!-- Pro -->
-    <div class="pricing-card">
-      <div class="pricing-tier">Pro</div>
-      <div class="pricing-price">$250 <span class="mo">/mo</span></div>
-      <div class="pricing-sub">1,000 scans per month</div>
-      <ul class="pricing-features">
-        <li>1,000 scans / month</li>
-        <li>AI part identification</li>
-        <li>Live market pricing</li>
-        <li>eBay CSV export</li>
-        <li>Dedicated support</li>
-      </ul>
-      <a href="/register" class="pricing-btn">Get Started</a>
+    <div class="proof-card fade-in">
+      <div class="proof-stars">★★★★★</div>
+      <p class="proof-text">"Finally an app that doesn't feel like it was built for corporate stores. This is for people like me doing it out of their garage."</p>
+      <div class="proof-author">
+        <div class="proof-avatar" style="background:rgba(59,130,246,0.1);color:#60a5fa;">DK</div>
+        <div><div class="proof-name">Danny K.</div><div class="proof-handle">// thrift flipper · Portland</div></div>
+      </div>
     </div>
   </div>
 </div>
 
-<!-- TESTIMONIALS -->
-<section style="padding-top:0;">
-  <div class="reveal">
-    <div class="section-label">From the Field</div>
-    <div class="section-title">WHAT SELLERS<br>ARE SAYING</div>
-  </div>
-  <div class="proof-grid reveal">
-    <div class="proof-card">
-      <div class="proof-stars">★★★★★</div>
-      <p class="proof-text">"We went from listing 40 parts a day to over 200. The AI nails the part numbers every time — even on old, dirty nameplates."</p>
-      <div class="proof-author"><div class="proof-avatar">🏭</div><div><div class="proof-name">Mike T.</div><div class="proof-role">Industrial Surplus Dealer · $400K/yr eBay</div></div></div>
-    </div>
-    <div class="proof-card">
-      <div class="proof-stars">★★★★★</div>
-      <p class="proof-text">"The CSV export is perfect. I upload to eBay and everything is exactly right — categories, conditions, descriptions. Saves us hours every week."</p>
-      <div class="proof-author"><div class="proof-avatar">⚙️</div><div><div class="proof-name">Sarah K.</div><div class="proof-role">Parts Reseller · 800+ active listings</div></div></div>
-    </div>
-    <div class="proof-card">
-      <div class="proof-stars">★★★★★</div>
-      <p class="proof-text">"Finally something built for industrial parts — not generic retail. The pricing is accurate and the descriptions actually make sense."</p>
-      <div class="proof-author"><div class="proof-avatar">🔧</div><div><div class="proof-name">Dave R.</div><div class="proof-role">Hydraulics & Pneumatics Dealer</div></div></div>
-    </div>
-  </div>
-</section>
-
 <!-- CTA -->
-<div class="cta-section reveal">
+<div class="cta-section">
+  <div class="cta-glow"></div>
+  <div class="section-label" style="position:relative;z-index:1;">// start today</div>
+  <h2 class="section-title" style="position:relative;z-index:1;">100 free scans.<br><span>No card needed.</span></h2>
+  <p>We're building something special. Get early access now and help shape the future of reselling — 100 free scans, no strings attached.</p>
+
   <div class="cta-box">
-    <h2>READY TO LIST<br><span style="color:var(--accent)">10X FASTER?</span></h2>
-    <p>Start your free trial today. 50 scans, no credit card required. See the difference in your first hour.</p>
-    <div style="display:flex;gap:14px;justify-content:center;">
-      <a href="/register" class="btn-primary" style="font-size:16px;padding:16px 36px;">Start Free Trial</a>
-      <a href="mailto:info@precisionindustrialllc.com" class="btn-secondary" style="font-size:14px;padding:15px 28px;">Talk to Sales</a>
+    <div class="cta-box-title">Create your free account</div>
+    <div class="cta-box-sub">Get 100 AI scans free — no credit card required</div>
+    <div class="input-group">
+      <input class="cta-input" type="email" id="signup-email" placeholder="your@email.com" />
+      <button class="btn-cta" onclick="handleSignup()">Get started →</button>
+    </div>
+    <p class="cta-disclaimer">// free forever up to 100 scans &nbsp;·&nbsp; upgrade anytime</p>
+    <div class="cta-perks">
+      <span class="cta-perk">100 free scans</span>
+      <span class="cta-perk">No credit card</span>
+      <span class="cta-perk">All features included</span>
+      <span class="cta-perk">Cancel anytime</span>
     </div>
   </div>
 </div>
 
 <!-- FOOTER -->
 <footer>
-  <div class="logo">Lister<span>AI</span></div>
-  <p>© 2026 Precision Industrial LLC · All rights reserved</p>
+  <div class="footer-logo"><span class="green">Robo</span>Seller</div>
+  <div class="footer-links">
+    <a href="/login">Log in</a>
+    <a href="#">Privacy</a>
+    <a href="#">Terms</a>
+    <a href="#">Support</a>
+  </div>
+  <div class="footer-copy">// built for resellers &nbsp;·&nbsp; 2025</div>
 </footer>
 
-<script>
-// Nav scroll
-window.addEventListener('scroll', () => {
-  document.getElementById('navbar').classList.toggle('scrolled', window.scrollY > 40);
-});
-
-// Step switcher
-function setStep(n, el) {
-  document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
-  el.classList.add('active');
-  for(let i=0;i<3;i++) {
-    const m = document.getElementById('mock-'+i);
-    if(m) m.style.display = i===n ? 'block' : 'none';
-  }
-}
-
-// Scroll reveal
-const observer = new IntersectionObserver((entries) => {
-  entries.forEach(e => { if(e.isIntersecting) e.target.classList.add('visible'); });
-}, { threshold: 0.1 });
-document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
-</script>
-
-<!-- Demo Scan Modal -->
-<div id="demo-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:9999;align-items:center;justify-content:center;padding:16px;overflow-y:auto;font-family:'Inter',sans-serif;">
-  <div style="background:#0f1117;border:1px solid #2d3348;border-radius:16px;padding:28px;max-width:520px;width:100%;color:#f1f5f9;box-shadow:0 20px 60px rgba(0,0,0,0.6);">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px;">
-      <div>
-        <div style="font-size:22px;font-weight:800;letter-spacing:-0.02em;">Try Lister AI Free</div>
-        <div style="font-size:13px;color:#94a3b8;margin-top:4px;" id="demo-quota-text">Loading...</div>
-      </div>
-      <button onclick="closeDemoModal()" style="background:transparent;border:1px solid #2d3348;color:#94a3b8;width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:18px;line-height:1;">&times;</button>
-    </div>
-
-    <div id="demo-step-upload">
-      <label for="demo-file-input" style="display:block;border:2px dashed #2d3348;border-radius:12px;padding:36px 20px;text-align:center;cursor:pointer;background:#161925;transition:border-color 0.15s,background 0.15s;" onmouseover="this.style.borderColor='#f59e0b';this.style.background='rgba(245,158,11,0.05)';" onmouseout="this.style.borderColor='#2d3348';this.style.background='#161925';">
-        <div style="font-size:40px;margin-bottom:8px;">📷</div>
-        <div style="font-size:15px;font-weight:600;">Upload a photo of any item</div>
-        <div style="font-size:12px;color:#94a3b8;margin-top:4px;">JPG/PNG/HEIC, up to 10MB</div>
-      </label>
-      <input type="file" id="demo-file-input" accept="image/*,image/heic" style="display:none;" onchange="runDemoScan(this)"/>
-      <div style="font-size:11px;color:#64748b;margin-top:14px;text-align:center;">Tip: a clear photo of a single item works best</div>
-    </div>
-
-    <div id="demo-step-scanning" style="display:none;text-align:center;padding:30px 16px;">
-      <div style="display:inline-block;width:42px;height:42px;border:3px solid #2d3348;border-top-color:#f59e0b;border-radius:50%;animation:demospin 0.9s linear infinite;"></div>
-      <div style="font-size:14px;color:#94a3b8;margin-top:14px;">Identifying item and estimating value...</div>
-      <div style="font-size:11px;color:#64748b;margin-top:4px;">Usually takes 5-10 seconds</div>
-    </div>
-
-    <div id="demo-step-result" style="display:none;">
-      <div style="background:#161925;border:1px solid #2d3348;border-radius:12px;padding:18px;margin-bottom:14px;">
-        <div style="display:flex;align-items:flex-start;gap:14px;">
-          <img id="demo-result-img" src="" style="width:90px;height:90px;border-radius:8px;object-fit:cover;background:#0f1117;flex-shrink:0;"/>
-          <div style="flex:1;min-width:0;">
-            <div style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;" id="demo-result-category">CATEGORY</div>
-            <div style="font-size:15px;font-weight:700;line-height:1.3;margin-top:3px;" id="demo-result-title">Title</div>
-            <div style="display:flex;gap:14px;margin-top:10px;align-items:center;flex-wrap:wrap;">
-              <div>
-                <div style="font-size:9px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;">Used</div>
-                <div style="font-size:18px;font-weight:800;color:#22c55e;line-height:1;" id="demo-result-used">$0</div>
-              </div>
-              <div>
-                <div style="font-size:9px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;">New</div>
-                <div style="font-size:18px;font-weight:800;line-height:1;" id="demo-result-new">$0</div>
-              </div>
-              <div style="margin-left:auto;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);color:#f59e0b;font-size:10px;font-weight:700;padding:4px 9px;border-radius:14px;text-transform:uppercase;letter-spacing:0.05em;" id="demo-result-confidence">Medium</div>
-            </div>
-          </div>
-        </div>
-        <div style="font-size:12px;color:#94a3b8;margin-top:12px;line-height:1.5;font-style:italic;" id="demo-result-notes"></div>
-      </div>
-
-      <div style="background:linear-gradient(135deg,rgba(245,158,11,0.12),rgba(217,119,6,0.05));border:1px solid rgba(245,158,11,0.3);border-radius:12px;padding:18px;text-align:center;">
-        <div style="font-size:14px;font-weight:700;margin-bottom:4px;">Like what you see?</div>
-        <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;">Sign up free and scan up to 25 items - no credit card needed.</div>
-        <a href="/register" style="display:inline-block;background:linear-gradient(135deg,#f59e0b,#d97706);color:#000;text-decoration:none;padding:12px 26px;border-radius:9px;font-weight:700;font-size:14px;">Start Free Trial</a>
-      </div>
-
-      <div style="margin-top:14px;text-align:center;">
-        <button onclick="resetDemoModal()" id="demo-try-another-btn" style="background:transparent;border:1px solid #2d3348;color:#94a3b8;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:12px;font-family:inherit;">Try another photo</button>
-      </div>
-    </div>
-
-    <div id="demo-step-quota" style="display:none;text-align:center;padding:24px 12px;">
-      <div style="font-size:46px;margin-bottom:10px;">🎉</div>
-      <div style="font-size:17px;font-weight:700;margin-bottom:6px;">You've used all 3 free scans!</div>
-      <div style="font-size:13px;color:#94a3b8;margin-bottom:20px;line-height:1.5;">Sign up for a free account and scan up to 25 items - no credit card needed.</div>
-      <a href="/register" style="display:inline-block;background:linear-gradient(135deg,#f59e0b,#d97706);color:#000;text-decoration:none;padding:13px 30px;border-radius:9px;font-weight:700;font-size:15px;">Get Started Free</a>
-    </div>
-
-    <div id="demo-step-error" style="display:none;text-align:center;padding:20px 12px;">
-      <div style="font-size:36px;margin-bottom:8px;">😕</div>
-      <div style="font-size:14px;font-weight:700;margin-bottom:4px;" id="demo-error-title">Scan failed</div>
-      <div style="font-size:12px;color:#94a3b8;margin-bottom:14px;" id="demo-error-message">Please try again with a different photo.</div>
-      <button onclick="resetDemoModal()" style="background:#f59e0b;border:none;color:#000;padding:9px 20px;border-radius:8px;cursor:pointer;font-weight:700;font-family:inherit;">Try Again</button>
-    </div>
-  </div>
-</div>
-
 <style>
-@keyframes demospin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes scan-prog {
+  0% { width: 0%; } 100% { width: 100%; }
+}
 </style>
 
 <script>
-function showDemoStep(name) {
-  ['upload','scanning','result','quota','error'].forEach(function(s) {
-    var el = document.getElementById('demo-step-' + s);
-    if (el) el.style.display = (s === name) ? 'block' : 'none';
-  });
-}
+// Nav scroll
+window.addEventListener('scroll', function() {
+  document.getElementById('navbar').classList.toggle('scrolled', window.scrollY > 20);
+});
 
-async function openDemoModal() {
-  document.getElementById('demo-modal').style.display = 'flex';
-  showDemoStep('upload');
-  // Check quota
-  try {
-    var r = await fetch('/api/demo-scan/quota');
-    var d = await r.json();
-    var qt = document.getElementById('demo-quota-text');
-    if (d.remaining <= 0) {
-      qt.textContent = 'No free scans remaining';
-      showDemoStep('quota');
-    } else {
-      qt.textContent = d.remaining + ' of ' + d.limit + ' free scans remaining';
-    }
-  } catch(e) {
-    document.getElementById('demo-quota-text').textContent = '3 free scans available';
+// Typing animation in terminal
+var lines = [
+  'analyze --photo item_001.jpg',
+  '',
+];
+var typed = '';
+var i = 0;
+var lineEl = document.getElementById('type-line');
+var resultEl = document.getElementById('result-line');
+var cursorEl = document.getElementById('cursor-line');
+var line = 'analyze --photo item_001.jpg';
+
+function typeChar() {
+  if (i < line.length) {
+    typed += line[i++];
+    lineEl.textContent = ' ' + typed;
+    setTimeout(typeChar, 60 + Math.random() * 40);
+  } else {
+    setTimeout(function() {
+      cursorEl.style.display = 'none';
+      resultEl.style.display = 'flex';
+    }, 400);
   }
 }
+setTimeout(typeChar, 1200);
 
-function closeDemoModal() {
-  document.getElementById('demo-modal').style.display = 'none';
+// Mouse tracking for cards
+function trackMouse(e, el) {
+  var r = el.getBoundingClientRect();
+  var x = ((e.clientX - r.left) / r.width * 100).toFixed(1);
+  var y = ((e.clientY - r.top) / r.height * 100).toFixed(1);
+  el.style.setProperty('--mx', x + '%');
+  el.style.setProperty('--my', y + '%');
 }
 
-function resetDemoModal() {
-  document.getElementById('demo-file-input').value = '';
-  showDemoStep('upload');
-  // Refresh quota
-  fetch('/api/demo-scan/quota').then(function(r) { return r.json(); }).then(function(d) {
-    var qt = document.getElementById('demo-quota-text');
-    if (d.remaining <= 0) {
-      showDemoStep('quota');
-      qt.textContent = 'No free scans remaining';
+// Generate barcode SVG
+(function() {
+  var strip = document.getElementById('barcode-strip');
+  if (!strip) return;
+  var pattern = [3,1,2,1,2,3,1,1,3,2,1,2,1,3,2,1,3,1,2,1,3,1,2,3,1,2,1,3];
+  var html = '';
+  var heights = [24, 32, 28, 36, 24, 32, 20, 36, 28, 24, 36, 28, 32, 20, 36, 28, 24, 32, 28, 36, 24, 28, 36, 24, 32, 28, 24, 36];
+  for (var j = 0; j < pattern.length; j++) {
+    var w = pattern[j];
+    var h = heights[j % heights.length];
+    if (j % 2 === 0) {
+      html += '<div class="bc-bar" style="width:' + w + 'px;height:' + h + 'px;"></div>';
     } else {
-      qt.textContent = d.remaining + ' of ' + d.limit + ' free scans remaining';
+      html += '<div style="width:' + w + 'px;height:' + h + 'px;background:#fff;"></div>';
     }
-  }).catch(function(){});
-}
+  }
+  strip.innerHTML = html;
+})();
 
-async function runDemoScan(input) {
-  var file = input.files && input.files[0];
-  if (!file) return;
-  if (file.size > 10 * 1024 * 1024) {
-    showDemoError('File too large', 'Please use a photo under 10MB.');
+// Scroll fade-in
+var faders = document.querySelectorAll('.fade-in');
+var observer = new IntersectionObserver(function(entries) {
+  entries.forEach(function(entry) {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+    }
+  });
+}, { threshold: 0.1 });
+faders.forEach(function(el) { observer.observe(el); });
+
+// Signup handler
+function handleSignup() {
+  var email = document.getElementById('signup-email').value.trim();
+  if (!email || !email.includes('@')) {
+    document.getElementById('signup-email').style.borderColor = 'var(--red)';
+    setTimeout(function() { document.getElementById('signup-email').style.borderColor = ''; }, 2000);
     return;
   }
-  // Pre-load preview
-  var reader = new FileReader();
-  reader.onload = function(e) {
-    document.getElementById('demo-result-img').src = e.target.result;
-  };
-  reader.readAsDataURL(file);
-
-  showDemoStep('scanning');
-
-  var fd = new FormData();
-  fd.append('file', file);
-  try {
-    var r = await fetch('/api/demo-scan', {method:'POST', body: fd});
-    if (r.status === 429) {
-      showDemoStep('quota');
-      return;
-    }
-    if (!r.ok) {
-      var txt = await r.text();
-      showDemoError('Scan failed', txt || 'Please try a different photo.');
-      return;
-    }
-    var d = await r.json();
-    document.getElementById('demo-result-title').textContent = d.title || 'Unknown Item';
-    document.getElementById('demo-result-category').textContent = d.category || 'Other';
-    document.getElementById('demo-result-used').textContent = '$' + (d.estimated_price_used || 0);
-    document.getElementById('demo-result-new').textContent = '$' + (d.estimated_price_new || 0);
-    document.getElementById('demo-result-confidence').textContent = (d.confidence || 'medium').toUpperCase();
-    document.getElementById('demo-result-notes').textContent = d.notes || '';
-    // Update quota text
-    if (typeof d.remaining === 'number') {
-      document.getElementById('demo-quota-text').textContent = d.remaining + ' of 3 free scans remaining';
-    }
-    showDemoStep('result');
-  } catch(e) {
-    showDemoError('Scan failed', e.message || 'Network error - please try again.');
-  }
+  window.location.href = '/register?email=' + encodeURIComponent(email);
 }
-
-function showDemoError(title, msg) {
-  document.getElementById('demo-error-title').textContent = title;
-  document.getElementById('demo-error-message').textContent = msg;
-  showDemoStep('error');
-}
-
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') {
-    var m = document.getElementById('demo-modal');
-    if (m && m.style.display === 'flex') closeDemoModal();
-  }
-});
-document.addEventListener('click', function(e) {
-  if (e.target.id === 'demo-modal') closeDemoModal();
+document.getElementById('signup-email').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') handleSignup();
 });
 </script>
 </body>
