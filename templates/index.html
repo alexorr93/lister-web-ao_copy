@@ -4466,7 +4466,7 @@ async function loadExpenses() {
     renderExpTable();
     // Load COGS toggle state
     try {
-      var br = await fetch('/api/account', {credentials:'include'});
+      var br = await fetch('/api/account/info', {credentials:'include'});
       var bd = await br.json();
       var tog = document.getElementById('exp-cogs-toggle');
       if (tog && bd.cogs_import_enabled) tog.checked = true;
