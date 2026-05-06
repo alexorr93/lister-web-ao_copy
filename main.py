@@ -5224,7 +5224,22 @@ When someone asks a question, give a real answer with specifics. If they ask abo
                 _cfg = _gt.GenerateContentConfig(system_instruction=system, temperature=0.7)
                 _resp = client.models.generate_content(model=_m, contents=message, config=_cfg)
                 print("[Robo] ok:", _m)
-                return {"ok": True, "reply": _resp.text}
+                # Format response for readability
+                raw = _resp.text.strip()
+                # Split into sentences and group into short paragraphs
+                import re
+                sentences = re.split(r'(?<=[.!?])\s+', raw)
+                chunks = []
+                current = []
+                for s in sentences:
+                    current.append(s)
+                    if len(current) >= 2:
+                        chunks.append(' '.join(current))
+                        current = []
+                if current:
+                    chunks.append(' '.join(current))
+                formatted = '\n\n'.join(chunks)
+                return {"ok": True, "reply": formatted}
             except Exception as _me:
                 print("[Robo] failed:", _m, _me)
                 continue
