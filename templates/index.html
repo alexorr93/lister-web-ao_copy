@@ -1499,14 +1499,14 @@ select.field-input { background: #fff; color: #0f172a; }
         <div style="font-size:17px;font-weight:800;" id="exp-modal-title">Add Expense</div>
         <button onclick="closeExpenseModal()" style="background:transparent;border:1px solid #1a2332;color:var(--muted);width:30px;height:30px;border-radius:6px;cursor:pointer;font-size:16px;">×</button>
       </div>
-      <div style="display:flex;flex-direction:column;gap:12px;">
+      <div style="display:flex;flex-direction:column;gap:10px;">
         <div>
           <label style="font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:5px;">Amount *</label>
           <input id="exp-f-amount" type="number" step="0.01" placeholder="0.00" class="acct-input" style="width:100%;font-size:20px;font-weight:700;">
         </div>
         <div>
-          <label style="font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:5px;">Merchant / Vendor</label>
-          <input id="exp-f-merchant" type="text" placeholder="e.g. Costco, USPS, Amazon" class="acct-input" style="width:100%;">
+          <label style="font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px;">Merchant</label>
+          <input id="exp-f-merchant" type="text" placeholder="Costco, USPS..." class="acct-input" style="width:100%;font-size:14px;padding:8px 12px;">
         </div>
         <div>
           <label style="font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:5px;">Category</label>
@@ -4541,15 +4541,15 @@ function renderExpChart() {
       datasets: [{
         data: data,
         backgroundColor: colors,
-        borderColor: '#0d0f14',
-        borderWidth: 3,
+        borderColor: '#0a0c10',
+        borderWidth: 2,
         hoverOffset: 6
       }]
     },
     options: {
       responsive: false,
       maintainAspectRatio: false,
-      cutout: '70%',
+      cutout: '78%',
       plugins: {
         legend: { display: false },
         tooltip: {
