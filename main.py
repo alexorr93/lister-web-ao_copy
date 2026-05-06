@@ -5226,6 +5226,8 @@ async def robo_chat(request: Request):
     try:
         body = await request.json()
         message = body.get("message", "")
+        image_b64 = body.get("image", None)
+        image_mime = body.get("image_mime", "image/jpeg")
         gemini_key = os.getenv("GEMINI_API_KEY", "")
         if not gemini_key:
             return {"ok": False, "reply": "Gemini API key not configured."}
@@ -5243,7 +5245,14 @@ When someone asks a question, give a real answer with specifics. If they ask abo
         for _m in ["gemini-2.5-flash", "gemini-2.5-flash-preview-04-17"]:
             try:
                 _cfg = _gt.GenerateContentConfig(system_instruction=system, temperature=0.7)
-                _resp = client.models.generate_content(model=_m, contents=message, config=_cfg)
+                if image_b64:
+                    import base64 as _b64
+                    img_bytes = _b64.b64decode(image_b64)
+                    prompt = message or "Identify this item. Give brand, model, eBay resell price range (used/new), what to look for (variants, fakes, condition issues), and how fast it sells."
+                    contents = [_gt.Part.from_bytes(data=img_bytes, mime_type=image_mime), prompt]
+                    _resp = client.models.generate_content(model=_m, contents=contents, config=_cfg)
+                else:
+                    _resp = client.models.generate_content(model=_m, contents=message, config=_cfg)
                 print("[Robo] ok:", _m)
                 # Format response for readability
                 raw = _resp.text.strip()
