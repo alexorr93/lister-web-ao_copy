@@ -5222,7 +5222,7 @@ async def robo_chat(request: Request):
 You are direct, practical and knowledgeable — like a seasoned reseller mentor. Give specific actionable advice. When asked about pricing, give actual price ranges based on your knowledge. When asked about a product, identify it confidently and assess its resale value. Keep responses short and punchy — 2-4 sentences max per point. Use line breaks between separate points. No markdown, no bullet symbols, plain text only.""",
             temperature=0.7
         )
-        for model_name in ["gemini-2.5-flash-preview-04-17", "gemini-2.0-flash-lite", "gemini-1.5-flash-8b"]:
+        for model_name in ["gemini-2.5-flash-preview-04-17", "gemini-2.0-flash", "gemini-1.5-flash"]:
             try:
                 response = client.models.generate_content(
                     model=model_name,
