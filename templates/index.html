@@ -5967,23 +5967,7 @@ async function loadSavedBatches() {
   } catch(e) { console.error('loadSavedBatches failed', e); }
 }
 
-function toggleSavedBatchesDropdown(e) {
-  if (e) { e.preventDefault(); e.stopPropagation(); }
-  const dd = document.getElementById('saved-batches-dropdown');
-  if (!dd) return;
-  const isOpen = dd.style.display === 'block';
-  dd.style.display = isOpen ? 'none' : 'block';
-  if (!isOpen) loadSavedBatches();
-}
-
-// Close dropdown on outside click
-document.addEventListener('click', (e) => {
-  const dd = document.getElementById('saved-batches-dropdown');
-  const trig = document.getElementById('saved-batches-trigger');
-  if (!dd || dd.style.display !== 'block') return;
-  if (dd.contains(e.target) || (trig && trig.contains(e.target))) return;
-  dd.style.display = 'none';
-});
+// duplicate toggleSavedBatchesDropdown removed
 
 async function toggleSavedBatch(batchId, rowEl) {
   try {
