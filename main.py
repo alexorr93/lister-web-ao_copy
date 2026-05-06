@@ -3574,7 +3574,10 @@ async def register_submit(request: Request):
         res = supabase.table("businesses").insert({
             "name": business_name,
             "email": email,
-            "password_hash": password_hash
+            "password_hash": password_hash,
+            "scan_limit": 100,
+            "scan_count": 0,
+            "onboarded": False
         }).execute()
         business_id = res.data[0]["id"]
         token = secrets.token_hex(32)

@@ -3,360 +3,452 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Welcome to Lister AI</title>
-<link rel="icon" type="image/png" href="/static/favicon.png">
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Instrument+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<title>Welcome to RoboSeller</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
-body { background:#060608; color:#f0f2f5; font-family:'Instrument Sans',sans-serif; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px 16px; }
-.shell { max-width:640px; width:100%; }
+body {
+  background: #050608;
+  color: #f0f4f8;
+  font-family: 'Instrument Sans', sans-serif;
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px 16px;
+}
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image:
+    linear-gradient(rgba(74,222,128,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(74,222,128,0.025) 1px, transparent 1px);
+  background-size: 48px 48px;
+  pointer-events: none;
+}
 
-.topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
-.logo { font-family:'Bebas Neue',sans-serif; font-size:24px; letter-spacing:0.08em; }
-.logo span { color:#e8ff47; }
-.skip { background:transparent; border:1px solid #1a1f2e; color:#8892a4; padding:7px 14px; border-radius:8px; font-size:12px; cursor:pointer; font-family:inherit; transition:0.15s; }
-.skip:hover { color:#e8ff47; border-color:#e8ff47; }
+.shell { max-width: 580px; width: 100%; position: relative; z-index: 1; }
 
-.dots { display:flex; justify-content:center; gap:6px; margin-bottom:18px; }
-.dot { width:30px; height:4px; border-radius:2px; background:#1a1f2e; transition:background 0.3s; }
-.dot.active { background:#e8ff47; }
-.dot.done { background:rgba(232,255,71,0.4); }
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 24px;
+}
+.logo { display: flex; align-items: center; gap: 8px; text-decoration: none; }
+.logo-text { font-size: 18px; font-weight: 800; }
+.logo-text .green { color: #4ade80; }
+.skip-btn {
+  background: transparent; border: 1px solid #1a2030;
+  color: #4a5568; padding: 7px 16px; border-radius: 8px;
+  font-size: 12px; cursor: pointer; font-family: inherit;
+  transition: 0.2s;
+}
+.skip-btn:hover { color: #4ade80; border-color: rgba(74,222,128,0.3); }
 
-.card { background:#111418; border:1px solid #1a1f2e; border-radius:18px; padding:36px 32px; position:relative; overflow:hidden; min-height:480px; display:flex; flex-direction:column; }
-.card::before { content:''; position:absolute; top:-80px; left:50%; transform:translateX(-50%); width:300px; height:300px; background:radial-gradient(circle, rgba(232,255,71,0.06) 0%, transparent 70%); pointer-events:none; }
-.slide { display:none; flex-direction:column; flex:1; animation:fadeIn 0.35s ease; }
-.slide.active { display:flex; }
-@keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+/* Progress dots */
+.progress { display: flex; justify-content: center; gap: 8px; margin-bottom: 20px; }
+.progress-dot {
+  height: 4px; border-radius: 2px;
+  background: #1a2030;
+  transition: width 0.3s, background 0.3s;
+}
+.progress-dot.active { background: #4ade80; width: 28px !important; }
+.progress-dot.done { background: rgba(74,222,128,0.35); }
 
-.illus { display:flex; justify-content:center; align-items:center; margin-bottom:22px; min-height:180px; }
-.illus svg { max-width:100%; height:auto; }
+/* Card */
+.card {
+  background: #0d1018;
+  border: 1px solid #1a2030;
+  border-radius: 20px;
+  padding: 36px 32px;
+  min-height: 500px;
+  display: flex; flex-direction: column;
+  position: relative; overflow: hidden;
+  box-shadow: 0 0 80px rgba(74,222,128,0.04);
+}
+.card-glow {
+  position: absolute; width: 400px; height: 300px;
+  background: radial-gradient(ellipse, rgba(74,222,128,0.06) 0%, transparent 70%);
+  top: -100px; left: 50%; transform: translateX(-50%);
+  pointer-events: none;
+}
 
-h1 { font-family:'Bebas Neue',sans-serif; font-size:42px; letter-spacing:0.02em; line-height:1; margin-bottom:14px; text-align:center; }
-h1 .yel { color:#e8ff47; }
-.lede { font-size:15px; color:#8892a4; line-height:1.6; text-align:center; margin-bottom:24px; max-width:480px; margin-left:auto; margin-right:auto; }
+/* Slides */
+.slide { display: none; flex-direction: column; flex: 1; animation: fadeUp 0.35s ease; }
+.slide.active { display: flex; }
+@keyframes fadeUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
 
-.points { list-style:none; display:flex; flex-direction:column; gap:12px; max-width:440px; margin:0 auto 24px; }
-.point { display:flex; align-items:flex-start; gap:14px; }
-.point-icon { width:28px; height:28px; border-radius:7px; background:rgba(232,255,71,0.1); border:1px solid rgba(232,255,71,0.3); display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0; }
-.point-text { flex:1; padding-top:3px; }
-.point-text strong { font-size:14px; font-weight:700; display:block; margin-bottom:2px; }
-.point-text span { font-size:12px; color:#8892a4; line-height:1.5; }
+/* Slide illustration area */
+.illus {
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 28px;
+  min-height: 160px;
+}
 
-.nav { margin-top:auto; display:flex; gap:10px; padding-top:18px; border-top:1px solid #1a1f2e; }
-.btn { flex:1; padding:13px 22px; border-radius:10px; font-size:14px; font-weight:700; cursor:pointer; transition:0.15s; font-family:inherit; border:1px solid #1a1f2e; background:transparent; color:#8892a4; }
-.btn:hover:not(:disabled) { border-color:#3a4258; color:#f0f2f5; }
-.btn:disabled { opacity:0.4; cursor:not-allowed; }
-.btn-next { background:#e8ff47; color:#000; border-color:#e8ff47; flex:2; }
-.btn-next:hover { opacity:0.92; color:#000; }
+/* Badge */
+.slide-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: 'DM Mono', monospace; font-size: 10px;
+  text-transform: uppercase; letter-spacing: 0.1em;
+  padding: 4px 12px; border-radius: 100px;
+  align-self: center; margin-bottom: 14px;
+}
 
-.tip { background:#0d0f14; border:1px solid #1a1f2e; border-radius:8px; padding:10px 14px; font-size:11px; font-family:'DM Mono',monospace; color:#5a6478; max-width:440px; margin:0 auto 0; text-align:center; }
-.badge { display:inline-block; background:rgba(232,255,71,0.1); border:1px solid rgba(232,255,71,0.3); color:#e8ff47; font-size:10px; font-weight:700; padding:3px 9px; border-radius:10px; letter-spacing:0.06em; text-transform:uppercase; margin-bottom:12px; align-self:center; }
+/* Slide title */
+.slide-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 48px; line-height: 0.95;
+  text-align: center; margin-bottom: 14px;
+}
+.slide-title .green { color: #4ade80; }
+.slide-title .amber { color: #f59e0b; }
+
+/* Slide desc */
+.slide-desc {
+  font-size: 15px; color: #8892a4; line-height: 1.65;
+  text-align: center; max-width: 440px; margin: 0 auto 24px;
+}
+
+/* Feature list */
+.feature-list { display: flex; flex-direction: column; gap: 12px; max-width: 440px; margin: 0 auto 24px; }
+.feature-item { display: flex; align-items: flex-start; gap: 14px; }
+.feature-icon {
+  width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px;
+}
+.feature-text strong { font-size: 14px; font-weight: 700; color: #fff; display: block; margin-bottom: 2px; }
+.feature-text span { font-size: 12px; color: #64748b; line-height: 1.5; }
+
+/* Mock UI elements */
+.mock-scan-card {
+  background: #111827; border: 1px solid #1a2a1a; border-radius: 12px;
+  padding: 16px; width: 100%; max-width: 360px;
+  display: flex; gap: 14px; align-items: center;
+}
+.mock-photo {
+  width: 64px; height: 64px; border-radius: 8px;
+  background: linear-gradient(135deg, #0d2a0d, #1a3a1a);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px; flex-shrink: 0;
+}
+.mock-info { flex: 1; }
+.mock-item-name { font-size: 14px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+.mock-price { font-size: 22px; font-weight: 800; color: #4ade80; }
+.mock-label { font-size: 10px; color: #4a5568; font-family: 'DM Mono', monospace; text-transform: uppercase; letter-spacing: 0.08em; }
+.mock-progress {
+  width: 100%; max-width: 360px;
+  background: #111827; border-radius: 8px; padding: 12px 16px;
+  margin-top: 10px; display: flex; align-items: center; gap: 10px;
+}
+.mock-prog-bar { flex: 1; height: 6px; background: #1a2a1a; border-radius: 3px; overflow: hidden; }
+.mock-prog-fill { height: 100%; background: linear-gradient(90deg, #4ade80, #86efac); border-radius: 3px; animation: prog 2s ease-in-out infinite alternate; }
+@keyframes prog { 0%{width:20%} 100%{width:95%} }
+.mock-prog-label { font-size: 11px; color: #4ade80; font-family: 'DM Mono', monospace; white-space: nowrap; }
+
+/* Platform buttons */
+.mock-platforms { display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 340px; }
+.mock-platform {
+  display: flex; align-items: center; gap: 12px;
+  background: #111827; border: 1px solid #1a2a1a; border-radius: 10px;
+  padding: 12px 16px;
+}
+.mock-platform-icon { width: 32px; height: 32px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+.mock-platform-name { font-size: 14px; font-weight: 700; color: #fff; }
+.mock-platform-sub { font-size: 11px; color: #4a5568; }
+.mock-platform-arrow { margin-left: auto; color: #4ade80; font-size: 16px; }
+
+/* Robo chat mock */
+.mock-chat { display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 360px; }
+.mock-bubble { padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.5; max-width: 88%; }
+.mock-bubble.user { background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.2); color: #c8e6c8; align-self: flex-end; border-radius: 12px 12px 3px 12px; }
+.mock-bubble.bot { background: #111827; border: 1px solid #1a2a1a; color: #8892a4; align-self: flex-start; border-radius: 12px 12px 12px 3px; }
+.mock-bubble.bot strong { color: #4ade80; }
+
+/* Scan counter */
+.scan-counter {
+  background: linear-gradient(135deg, #0a1f0a, #0d2a0d);
+  border: 1px solid rgba(74,222,128,0.2);
+  border-radius: 16px; padding: 24px;
+  text-align: center; width: 100%; max-width: 300px;
+}
+.scan-num {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 80px; line-height: 1;
+  color: #4ade80;
+}
+.scan-label { font-size: 13px; color: #4a8a4a; font-family: 'DM Mono', monospace; letter-spacing: 0.08em; text-transform: uppercase; }
+.scan-sub { font-size: 12px; color: #2a4a2a; margin-top: 8px; }
+
+/* Nav */
+.nav {
+  margin-top: auto; display: flex; gap: 10px;
+  padding-top: 24px; border-top: 1px solid #1a2030;
+}
+.btn-back {
+  flex: 1; padding: 13px; border-radius: 10px;
+  font-size: 14px; font-weight: 700; cursor: pointer;
+  font-family: inherit; border: 1px solid #1a2030;
+  background: transparent; color: #4a5568;
+  transition: 0.2s;
+}
+.btn-back:hover { color: #fff; border-color: #2a3548; }
+.btn-back:disabled { opacity: 0.3; cursor: not-allowed; }
+.btn-next {
+  flex: 2; padding: 13px; border-radius: 10px;
+  font-size: 15px; font-weight: 800; cursor: pointer;
+  font-family: inherit; border: none;
+  background: #4ade80; color: #000;
+  transition: background 0.2s, transform 0.1s;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+.btn-next:hover { background: #86efac; }
+.btn-next:active { transform: scale(0.98); }
+
+@media (max-width: 480px) {
+  .card { padding: 24px 20px; }
+  .slide-title { font-size: 38px; }
+  .scan-num { font-size: 64px; }
+}
 </style>
 </head>
 <body>
 <div class="shell">
+
   <div class="topbar">
-    <div class="logo">Lister<span>AI</span></div>
-    <button class="skip" onclick="skipOnboarding()">Skip →</button>
+    <div class="logo">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.2" stroke-linecap="round">
+        <line x1="12" y1="2" x2="12" y2="5"/><circle cx="12" cy="2" r="1" fill="#4ade80" stroke="none"/>
+        <rect x="5" y="6" width="14" height="12" rx="2"/>
+        <circle cx="9" cy="11" r="1.4" fill="#4ade80" stroke="none"/>
+        <circle cx="15" cy="11" r="1.4" fill="#4ade80" stroke="none"/>
+        <line x1="3" y1="11" x2="5" y2="11"/><line x1="19" y1="11" x2="21" y2="11"/>
+      </svg>
+      <div class="logo-text"><span class="green">Robo</span>Seller</div>
+    </div>
+    <button class="skip-btn" onclick="finish()">Skip tour →</button>
   </div>
 
-  <div class="dots" id="dots"></div>
+  <div class="progress" id="progress"></div>
 
   <div class="card">
+    <div class="card-glow"></div>
 
-    <!-- SLIDE 1: Welcome -->
-    <div class="slide active" data-slide="1">
+    <!-- SLIDE 1: You're in -->
+    <div class="slide active" data-index="0">
       <div class="illus">
-        <svg width="160" height="160" viewBox="0 0 160 160" fill="none">
-          <circle cx="80" cy="80" r="70" fill="rgba(232,255,71,0.06)" stroke="rgba(232,255,71,0.3)" stroke-width="2"/>
-          <circle cx="80" cy="80" r="50" fill="rgba(232,255,71,0.1)"/>
-          <path d="M55 80L72 97L107 62" stroke="#e8ff47" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        <div class="scan-counter">
+          <div class="scan-num">100</div>
+          <div class="scan-label">Free Scans</div>
+          <div class="scan-sub">// loaded and ready to use</div>
+        </div>
       </div>
-      <span class="badge">Welcome aboard</span>
-      <h1>YOU'RE <span class="yel">IN.</span></h1>
-      <p class="lede">Lister AI turns photos into ready-to-publish listings in seconds. Here's a 60-second tour of how it works.</p>
-      <div class="tip">📬 We sent a confirmation email — check your inbox</div>
+      <div class="slide-badge" style="background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.2);color:#4ade80;">🎉 You're in</div>
+      <div class="slide-title">Welcome to <span class="green">Robo</span>Seller.</div>
+      <p class="slide-desc">Your account is live and your 100 free scans are loaded. Let's take a 60-second tour so you can hit the ground running.</p>
     </div>
 
-    <!-- SLIDE 2: Fast Scan -->
-    <div class="slide" data-slide="2">
-      <div class="illus">
-        <svg width="240" height="180" viewBox="0 0 240 180" fill="none">
-          <!-- Phone frame -->
-          <rect x="80" y="20" width="80" height="140" rx="12" fill="#1a1f2e" stroke="#2d3348" stroke-width="2"/>
-          <rect x="86" y="32" width="68" height="100" rx="4" fill="#0d0f14"/>
-          <!-- Camera lens -->
-          <circle cx="120" cy="148" r="6" fill="#2d3348"/>
-          <!-- Item silhouette in viewfinder -->
-          <rect x="98" y="50" width="44" height="60" rx="3" fill="#2d3348"/>
-          <rect x="104" y="60" width="32" height="3" rx="1" fill="#e8ff47" opacity="0.6"/>
-          <rect x="104" y="68" width="22" height="3" rx="1" fill="#e8ff47" opacity="0.4"/>
-          <!-- Scan beam -->
-          <rect x="86" y="76" width="68" height="2" fill="#e8ff47" opacity="0.7">
-            <animate attributeName="y" from="36" to="116" dur="2s" repeatCount="indefinite"/>
-          </rect>
-          <!-- AI sparkle -->
-          <g transform="translate(180, 50)">
-            <circle r="14" fill="rgba(232,255,71,0.15)" stroke="#e8ff47" stroke-width="1.5"/>
-            <text y="5" text-anchor="middle" fill="#e8ff47" font-size="14" font-weight="700">AI</text>
-          </g>
-          <!-- Arrow -->
-          <path d="M165 90 L195 90 M188 84 L195 90 L188 96" stroke="#e8ff47" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-          <!-- Result tag -->
-          <rect x="195" y="82" width="38" height="16" rx="3" fill="rgba(34,197,94,0.15)" stroke="rgba(34,197,94,0.5)" stroke-width="1"/>
-          <text x="214" y="93" text-anchor="middle" fill="#22c55e" font-size="9" font-weight="700">$45</text>
-        </svg>
+    <!-- SLIDE 2: AI Scanner -->
+    <div class="slide" data-index="1">
+      <div class="illus" style="flex-direction:column;gap:10px;">
+        <div class="mock-scan-card">
+          <div class="mock-photo">👟</div>
+          <div class="mock-info">
+            <div class="mock-label">Identified</div>
+            <div class="mock-item-name">Nike Air Force 1 '07</div>
+            <div class="mock-price">$89.00</div>
+          </div>
+        </div>
+        <div class="mock-progress">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          <div class="mock-prog-bar"><div class="mock-prog-fill"></div></div>
+          <div class="mock-prog-label">Scanning...</div>
+        </div>
       </div>
-      <h1>FAST <span class="yel">SCAN.</span></h1>
-      <p class="lede">Snap a photo. Our AI identifies the item, finds market prices, and drafts a listing — all in about 30 seconds.</p>
-      <ul class="points">
-        <li class="point">
-          <div class="point-icon">📷</div>
-          <div class="point-text"><strong>One photo per item</strong><span>Each photo becomes its own listing automatically</span></div>
-        </li>
-        <li class="point">
-          <div class="point-icon">⚡</div>
-          <div class="point-text"><strong>Multi-item mode</strong><span>Growth+ plans can scan up to 20 items in a single photo</span></div>
-        </li>
-        <li class="point">
-          <div class="point-icon">🎯</div>
-          <div class="point-text"><strong>Used or new pricing</strong><span>Toggle between conditions to see both market values</span></div>
-        </li>
-      </ul>
+      <div class="slide-badge" style="background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.2);color:#4ade80;">01 — AI Scanner</div>
+      <div class="slide-title">Snap. <span class="green">Scan.</span> Sell.</div>
+      <p class="slide-desc">Go to the Scanner tab and upload a photo of any item. Robo identifies it and suggests a price based on real eBay sold data — then you review and push.</p>
+      <div class="feature-list">
+        <div class="feature-item">
+          <div class="feature-icon" style="background:rgba(74,222,128,0.1);">📸</div>
+          <div class="feature-text"><strong>Upload from your camera roll</strong><span>Drop photos directly from your phone or desktop</span></div>
+        </div>
+        <div class="feature-item">
+          <div class="feature-icon" style="background:rgba(74,222,128,0.1);">⚡</div>
+          <div class="feature-text"><strong>Under 30 seconds per item</strong><span>Robo works fast so you can batch through a haul quickly</span></div>
+        </div>
+      </div>
     </div>
 
-    <!-- SLIDE 3: Inventory + Barcodes -->
-    <div class="slide" data-slide="3">
+    <!-- SLIDE 3: Push to platforms -->
+    <div class="slide" data-index="2">
       <div class="illus">
-        <svg width="240" height="180" viewBox="0 0 240 180" fill="none">
-          <!-- Inventory grid -->
-          <g transform="translate(20, 20)">
-            <rect x="0" y="0" width="56" height="64" rx="6" fill="#1a1f2e" stroke="#2d3348" stroke-width="1.5"/>
-            <rect x="6" y="6" width="44" height="34" rx="3" fill="#2d3348"/>
-            <rect x="6" y="46" width="32" height="3" rx="1" fill="#e8ff47" opacity="0.7"/>
-            <rect x="6" y="53" width="22" height="3" rx="1" fill="#8892a4" opacity="0.5"/>
-
-            <rect x="64" y="0" width="56" height="64" rx="6" fill="#1a1f2e" stroke="#2d3348" stroke-width="1.5"/>
-            <rect x="70" y="6" width="44" height="34" rx="3" fill="#2d3348"/>
-            <rect x="70" y="46" width="32" height="3" rx="1" fill="#e8ff47" opacity="0.7"/>
-            <rect x="70" y="53" width="22" height="3" rx="1" fill="#8892a4" opacity="0.5"/>
-
-            <rect x="0" y="72" width="56" height="64" rx="6" fill="#1a1f2e" stroke="#2d3348" stroke-width="1.5"/>
-            <rect x="6" y="78" width="44" height="34" rx="3" fill="#2d3348"/>
-            <rect x="6" y="118" width="32" height="3" rx="1" fill="#e8ff47" opacity="0.7"/>
-            <rect x="6" y="125" width="22" height="3" rx="1" fill="#8892a4" opacity="0.5"/>
-
-            <rect x="64" y="72" width="56" height="64" rx="6" fill="#1a1f2e" stroke="#2d3348" stroke-width="1.5"/>
-            <rect x="70" y="78" width="44" height="34" rx="3" fill="#2d3348"/>
-            <rect x="70" y="118" width="32" height="3" rx="1" fill="#e8ff47" opacity="0.7"/>
-            <rect x="70" y="125" width="22" height="3" rx="1" fill="#8892a4" opacity="0.5"/>
-          </g>
-          <!-- QR code -->
-          <g transform="translate(155, 50)">
-            <rect width="60" height="60" rx="6" fill="#fff"/>
-            <g fill="#000">
-              <rect x="6" y="6" width="14" height="14"/>
-              <rect x="40" y="6" width="14" height="14"/>
-              <rect x="6" y="40" width="14" height="14"/>
-              <rect x="9" y="9" width="8" height="8" fill="#fff"/>
-              <rect x="43" y="9" width="8" height="8" fill="#fff"/>
-              <rect x="9" y="43" width="8" height="8" fill="#fff"/>
-              <rect x="11" y="11" width="4" height="4"/>
-              <rect x="45" y="11" width="4" height="4"/>
-              <rect x="11" y="45" width="4" height="4"/>
-              <rect x="24" y="6" width="4" height="4"/>
-              <rect x="32" y="10" width="4" height="4"/>
-              <rect x="24" y="16" width="4" height="4"/>
-              <rect x="22" y="22" width="6" height="4"/>
-              <rect x="32" y="24" width="4" height="4"/>
-              <rect x="40" y="26" width="4" height="4"/>
-              <rect x="22" y="32" width="4" height="4"/>
-              <rect x="28" y="32" width="6" height="4"/>
-              <rect x="36" y="36" width="4" height="4"/>
-              <rect x="44" y="36" width="6" height="4"/>
-              <rect x="22" y="40" width="4" height="4"/>
-              <rect x="30" y="44" width="4" height="4"/>
-              <rect x="40" y="46" width="4" height="4"/>
-              <rect x="48" y="44" width="6" height="6"/>
-              <rect x="22" y="50" width="6" height="4"/>
-            </g>
-            <text x="30" y="75" text-anchor="middle" fill="#e8ff47" font-size="9" font-weight="700" font-family="monospace">LSTR-001</text>
-          </g>
-        </svg>
+        <div class="mock-platforms">
+          <div class="mock-platform">
+            <div class="mock-platform-icon" style="background:rgba(0,100,210,0.12);">
+              <span style="font-size:14px;font-weight:900;color:#0064d2;">e</span>
+            </div>
+            <div>
+              <div class="mock-platform-name">eBay</div>
+              <div class="mock-platform-sub">Schedule as drafts · Seller Hub</div>
+            </div>
+            <div class="mock-platform-arrow">→</div>
+          </div>
+          <div class="mock-platform">
+            <div class="mock-platform-icon" style="background:rgba(90,142,59,0.12);">🛍</div>
+            <div>
+              <div class="mock-platform-name">Shopify</div>
+              <div class="mock-platform-sub">Sync to your store</div>
+            </div>
+            <div class="mock-platform-arrow">→</div>
+          </div>
+          <div class="mock-platform">
+            <div class="mock-platform-icon" style="background:rgba(6,182,212,0.1);">📄</div>
+            <div>
+              <div class="mock-platform-name">CSV Export</div>
+              <div class="mock-platform-sub">Bulk upload anywhere</div>
+            </div>
+            <div class="mock-platform-arrow">↓</div>
+          </div>
+        </div>
       </div>
-      <h1>SMART <span class="yel">INVENTORY.</span></h1>
-      <p class="lede">Every scan goes into your inventory automatically. Search, sort, and track items from shelf to sold.</p>
-      <ul class="points">
-        <li class="point">
-          <div class="point-icon">📍</div>
-          <div class="point-text"><strong>Storage locations</strong><span>Tag where each item lives — never lose anything again</span></div>
-        </li>
-        <li class="point">
-          <div class="point-icon">🏷️</div>
-          <div class="point-text"><strong>QR labels</strong><span>Generate printable barcodes for any item or batch</span></div>
-        </li>
-        <li class="point">
-          <div class="point-icon">📷</div>
-          <div class="point-text"><strong>Scan to find</strong><span>Point your phone at a label to instantly pull up the item</span></div>
-        </li>
-      </ul>
+      <div class="slide-badge" style="background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);color:#60a5fa;">02 — Publishing</div>
+      <div class="slide-title">List on <span class="green">your</span> platforms.</div>
+      <p class="slide-desc">Once your batch is ready, schedule listings to eBay as drafts, push to Shopify, or download a CSV. Your inventory, your workflow.</p>
     </div>
 
-    <!-- SLIDE 4: Dashboard + Profit -->
-    <div class="slide" data-slide="4">
-      <div class="illus">
-        <svg width="240" height="180" viewBox="0 0 240 180" fill="none">
-          <!-- Profit card -->
-          <rect x="20" y="30" width="100" height="60" rx="8" fill="#1a1f2e" stroke="#2d3348" stroke-width="1.5"/>
-          <text x="32" y="48" fill="#5a6478" font-size="9" font-weight="700" letter-spacing="0.08em">PROFIT</text>
-          <text x="32" y="74" fill="#22c55e" font-size="22" font-weight="800">+$2,847</text>
-          <text x="32" y="86" fill="#8892a4" font-size="9">$1,243 cost · $4,090 listed</text>
-          <!-- Items card -->
-          <rect x="124" y="30" width="100" height="60" rx="8" fill="#1a1f2e" stroke="#2d3348" stroke-width="1.5"/>
-          <text x="136" y="48" fill="#5a6478" font-size="9" font-weight="700" letter-spacing="0.08em">ITEMS</text>
-          <text x="136" y="74" fill="#f0f2f5" font-size="22" font-weight="800">47</text>
-          <text x="136" y="86" fill="#8892a4" font-size="9">63 total units</text>
-          <!-- Tiny chart -->
-          <g transform="translate(20, 110)">
-            <rect width="204" height="50" rx="6" fill="#0d0f14" stroke="#1a1f2e" stroke-width="1"/>
-            <g transform="translate(8, 8)">
-              <rect x="0" y="20" width="14" height="14" fill="#22c55e" opacity="0.7" rx="1"/>
-              <rect x="20" y="14" width="14" height="20" fill="#22c55e" opacity="0.8" rx="1"/>
-              <rect x="40" y="8" width="14" height="26" fill="#22c55e" opacity="0.85" rx="1"/>
-              <rect x="60" y="2" width="14" height="32" fill="#22c55e" rx="1"/>
-              <rect x="80" y="10" width="14" height="24" fill="#22c55e" opacity="0.85" rx="1"/>
-              <rect x="100" y="6" width="14" height="28" fill="#22c55e" opacity="0.9" rx="1"/>
-              <rect x="120" y="18" width="14" height="16" fill="#22c55e" opacity="0.7" rx="1"/>
-              <rect x="140" y="0" width="14" height="34" fill="#22c55e" rx="1"/>
-              <rect x="160" y="12" width="14" height="22" fill="#22c55e" opacity="0.85" rx="1"/>
-              <rect x="180" y="4" width="14" height="30" fill="#22c55e" opacity="0.95" rx="1"/>
-            </g>
-          </g>
-        </svg>
+    <!-- SLIDE 4: Track everything -->
+    <div class="slide" data-index="3">
+      <div class="illus" style="flex-direction:column;gap:8px;width:100%;max-width:360px;">
+        <div style="display:flex;gap:8px;">
+          <div style="flex:1;background:#111827;border:1px solid #1a2a1a;border-radius:10px;padding:16px;">
+            <div style="font-size:10px;color:#4a5568;font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Revenue</div>
+            <div style="font-size:24px;font-weight:800;color:#4ade80;">$3,241</div>
+          </div>
+          <div style="flex:1;background:#111827;border:1px solid #1a2a1a;border-radius:10px;padding:16px;">
+            <div style="font-size:10px;color:#4a5568;font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Profit</div>
+            <div style="font-size:24px;font-weight:800;color:#fff;">$2,349</div>
+          </div>
+        </div>
+        <div style="background:#111827;border:1px solid #1a2a1a;border-radius:10px;padding:16px;">
+          <div style="font-size:10px;color:#4a5568;font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Monthly sales</div>
+          <div style="display:flex;align-items:flex-end;gap:5px;height:50px;">
+            <div style="flex:1;background:rgba(74,222,128,0.25);border-radius:3px 3px 0 0;height:40%;"></div>
+            <div style="flex:1;background:rgba(74,222,128,0.35);border-radius:3px 3px 0 0;height:60%;"></div>
+            <div style="flex:1;background:rgba(74,222,128,0.3);border-radius:3px 3px 0 0;height:45%;"></div>
+            <div style="flex:1;background:rgba(74,222,128,0.5);border-radius:3px 3px 0 0;height:80%;"></div>
+            <div style="flex:1;background:rgba(74,222,128,0.4);border-radius:3px 3px 0 0;height:65%;"></div>
+            <div style="flex:1;background:#4ade80;border-radius:3px 3px 0 0;height:100%;"></div>
+          </div>
+        </div>
       </div>
-      <h1>KNOW YOUR <span class="yel">PROFIT.</span></h1>
-      <p class="lede">Track cost vs. listed value across every item. Know exactly what you're making per scan, per day, per month.</p>
-      <ul class="points">
-        <li class="point">
-          <div class="point-icon">💰</div>
-          <div class="point-text"><strong>Cost tracking</strong><span>Add cost per item or split a lot price across many — see profit instantly</span></div>
-        </li>
-        <li class="point">
-          <div class="point-icon">📊</div>
-          <div class="point-text"><strong>Detailed analytics</strong><span>Day, week, month, year — see what's actually working</span></div>
-        </li>
-      </ul>
+      <div class="slide-badge" style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.2);color:#f59e0b;">03 — Analytics</div>
+      <div class="slide-title">Know your <span class="amber">numbers.</span></div>
+      <p class="slide-desc">Log expenses, track sales, and see your profit in real time. The Sales and Expenses tabs keep everything in one place so you always know where you stand.</p>
     </div>
 
-    <!-- SLIDE 5: Connect & Sell -->
-    <div class="slide" data-slide="5">
+    <!-- SLIDE 5: Meet Robo -->
+    <div class="slide" data-index="4">
       <div class="illus">
-        <svg width="240" height="180" viewBox="0 0 240 180" fill="none">
-          <!-- Center hub -->
-          <circle cx="120" cy="90" r="34" fill="rgba(232,255,71,0.1)" stroke="#e8ff47" stroke-width="2"/>
-          <text x="120" y="86" text-anchor="middle" fill="#e8ff47" font-family="'Bebas Neue', sans-serif" font-size="14" letter-spacing="0.05em">LISTER</text>
-          <text x="120" y="100" text-anchor="middle" fill="#e8ff47" font-family="'Bebas Neue', sans-serif" font-size="14" letter-spacing="0.05em">AI</text>
-          <!-- eBay node -->
-          <g>
-            <line x1="86" y1="90" x2="48" y2="90" stroke="#e8ff47" stroke-width="2" stroke-dasharray="3,3" opacity="0.6"/>
-            <circle cx="32" cy="90" r="22" fill="#1a1f2e" stroke="#2d3348" stroke-width="2"/>
-            <text x="32" y="94" text-anchor="middle" fill="#f0f2f5" font-size="9" font-weight="700">eBay</text>
-          </g>
-          <!-- Shopify node -->
-          <g>
-            <line x1="154" y1="90" x2="192" y2="90" stroke="#e8ff47" stroke-width="2" stroke-dasharray="3,3" opacity="0.6"/>
-            <circle cx="208" cy="90" r="22" fill="#1a1f2e" stroke="#2d3348" stroke-width="2"/>
-            <text x="208" y="94" text-anchor="middle" fill="#5a8e3b" font-size="9" font-weight="700">Shopify</text>
-          </g>
-          <!-- Bottom node: CSV -->
-          <g>
-            <line x1="120" y1="124" x2="120" y2="148" stroke="#e8ff47" stroke-width="2" stroke-dasharray="3,3" opacity="0.6"/>
-            <rect x="100" y="148" width="40" height="22" rx="4" fill="#1a1f2e" stroke="#2d3348" stroke-width="2"/>
-            <text x="120" y="163" text-anchor="middle" fill="#8892a4" font-size="9" font-weight="700">CSV</text>
-          </g>
-        </svg>
+        <div class="mock-chat">
+          <div class="mock-bubble user">Is this worth $40?</div>
+          <div class="mock-bubble bot"><strong>Yes — grab it.</strong> Sony WH-1000XM4s are selling for $120–$160 used. You're looking at a solid $60–80 profit after fees.</div>
+          <div class="mock-bubble user">Write me a listing title</div>
+          <div class="mock-bubble bot"><strong style="color:#fff;">Sony WH-1000XM4 Wireless Noise Canceling Headphones — Used Excellent</strong></div>
+        </div>
       </div>
-      <h1>SELL <span class="yel">EVERYWHERE.</span></h1>
-      <p class="lede">Push listings live with one click. eBay, Shopify, or download CSV for any platform.</p>
-      <ul class="points">
-        <li class="point">
-          <div class="point-icon">🔌</div>
-          <div class="point-text"><strong>Direct integrations</strong><span>Connect eBay and Shopify in your account settings</span></div>
-        </li>
-        <li class="point">
-          <div class="point-icon">📤</div>
-          <div class="point-text"><strong>Bulk submit</strong><span>Select items and send them all to your platform of choice</span></div>
-        </li>
-        <li class="point">
-          <div class="point-icon">📥</div>
-          <div class="point-text"><strong>CSV export</strong><span>Works with any platform that supports bulk uploads</span></div>
-        </li>
-      </ul>
+      <div class="slide-badge" style="background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.2);color:#4ade80;">04 — Robo AI</div>
+      <div class="slide-title">Your AI <span class="green">co-pilot.</span></div>
+      <p class="slide-desc">Tap the Robo tab anytime. Ask if something's worth buying, get title suggestions, or check what's selling. Robo's always on and never judges your hauls.</p>
     </div>
 
+    <!-- SLIDE 6: Let's go -->
+    <div class="slide" data-index="5">
+      <div class="illus">
+        <svg width="140" height="140" viewBox="0 0 140 140" fill="none">
+          <circle cx="70" cy="70" r="65" fill="rgba(74,222,128,0.06)" stroke="rgba(74,222,128,0.2)" stroke-width="1.5"/>
+          <circle cx="70" cy="70" r="45" fill="rgba(74,222,128,0.08)"/>
+          <circle cx="70" cy="70" r="25" fill="rgba(74,222,128,0.12)"/>
+          <path d="M58 70L67 79L84 62" stroke="#4ade80" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="slide-badge" style="background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.2);color:#4ade80;">Ready</div>
+      <div class="slide-title">Let's <span class="green">get</span> to work.</div>
+      <p class="slide-desc">Your 100 free scans are loaded. Head to the Scanner and snap your first item — it takes about 30 seconds. Welcome to RoboSeller.</p>
+    </div>
+
+    <!-- NAV BUTTONS -->
+    <div class="nav">
+      <button class="btn-back" id="btn-back" onclick="prevSlide()" disabled>← Back</button>
+      <button class="btn-next" id="btn-next" onclick="nextSlide()">
+        Next <span id="next-label">→</span>
+      </button>
+    </div>
   </div>
 
-  <div class="nav">
-    <button class="btn" id="back-btn" onclick="prevSlide()" disabled>← Back</button>
-    <button class="btn btn-next" id="next-btn" onclick="nextSlide()">Next →</button>
-  </div>
 </div>
 
 <script>
-var TOTAL = 5;
-var current = 1;
+var slides = document.querySelectorAll('.slide');
+var total = slides.length;
+var current = 0;
 
-function renderDots() {
-  var dots = document.getElementById('dots');
-  dots.innerHTML = '';
-  for (var i = 1; i <= TOTAL; i++) {
-    var d = document.createElement('div');
-    d.className = 'dot' + (i === current ? ' active' : (i < current ? ' done' : ''));
-    dots.appendChild(d);
+function buildProgress() {
+  var container = document.getElementById('progress');
+  container.innerHTML = '';
+  for (var i = 0; i < total; i++) {
+    var dot = document.createElement('div');
+    dot.className = 'progress-dot';
+    dot.style.width = '20px';
+    container.appendChild(dot);
+  }
+  updateProgress();
+}
+
+function updateProgress() {
+  var dots = document.querySelectorAll('.progress-dot');
+  dots.forEach(function(dot, i) {
+    dot.classList.remove('active', 'done');
+    if (i === current) dot.classList.add('active');
+    else if (i < current) dot.classList.add('done');
+  });
+  document.getElementById('btn-back').disabled = current === 0;
+  var nextBtn = document.getElementById('btn-next');
+  var nextLabel = document.getElementById('next-label');
+  if (current === total - 1) {
+    nextBtn.style.background = '#4ade80';
+    nextLabel.textContent = '';
+    nextBtn.innerHTML = '🚀 Start scanning';
+  } else {
+    nextBtn.innerHTML = 'Next <span id="next-label">→</span>';
   }
 }
 
-function showSlide(n) {
-  document.querySelectorAll('.slide').forEach(function(s) { s.classList.remove('active'); });
-  var target = document.querySelector('.slide[data-slide="' + n + '"]');
-  if (target) target.classList.add('active');
-  current = n;
-  renderDots();
-  document.getElementById('back-btn').disabled = (n === 1);
-  document.getElementById('next-btn').textContent = (n === TOTAL) ? 'Get Started →' : 'Next →';
+function showSlide(index) {
+  slides.forEach(function(s) { s.classList.remove('active'); });
+  slides[index].classList.add('active');
+  current = index;
+  updateProgress();
 }
 
 function nextSlide() {
-  if (current < TOTAL) {
+  if (current < total - 1) {
     showSlide(current + 1);
   } else {
-    finishOnboarding();
+    finish();
   }
 }
 
 function prevSlide() {
-  if (current > 1) showSlide(current - 1);
+  if (current > 0) showSlide(current - 1);
 }
 
-function skipOnboarding() {
-  finishOnboarding();
+function finish() {
+  fetch('/api/mark-onboarded', { method: 'POST', credentials: 'include' })
+    .catch(function() {})
+    .finally(function() {
+      window.location.href = '/';
+    });
 }
 
-async function finishOnboarding() {
-  try {
-    await fetch('/api/welcome/complete', {method:'POST'});
-  } catch(e) {}
-  window.location.href = '/checkout';
-}
-
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'ArrowRight') nextSlide();
-  if (e.key === 'ArrowLeft') prevSlide();
-  if (e.key === 'Escape') skipOnboarding();
-});
-
-renderDots();
+buildProgress();
 </script>
 </body>
 </html>
