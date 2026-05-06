@@ -3282,8 +3282,9 @@ Example: [{"lot":"5","title":"Oakton pH Meter","description":"Portable pH/ORP me
         executor = ThreadPoolExecutor(max_workers=1)
         all_items = []
 
-        # Always render every page as image (ensures thumbnails always available)
-        doc_render = fitz.open(stream=contents, filetype="pdf")
+        try:
+          # Always render every page as image (ensures thumbnails always available)
+          doc_render = fitz.open(stream=contents, filetype="pdf")
         page_rendered = {}
         for pn in range(total_pages):
             mat = fitz.Matrix(2.0, 2.0)
@@ -3364,7 +3365,12 @@ Example: [{"lot":"5","title":"Oakton pH Meter","description":"Portable pH/ORP me
                 print(f"Page {i+1} error: {e}")
             await asyncio.sleep(0.1)
 
-        yield {"data": json.dumps({"done": True, "total": len(all_items), "scan_id": scan_id})}
+          yield {"data": json.dumps({"done": True, "total": len(all_items), "scan_id": scan_id})}
+        except Exception as gen_err:
+            import traceback
+            print(f"[scan-pdf] FATAL generate() error: {gen_err}")
+            traceback.print_exc()
+            yield {"data": json.dumps({"error": str(gen_err), "done": True, "total": 0})}
 
     return EventSourceResponse(generate())
 
