@@ -512,6 +512,11 @@ select.field-input { background: #fff; color: #0f172a; }
 
 
 <!-- MOBILE BOTTOM TAB BAR -->
+
+<!-- Saved batches dropdown — global, works from desktop + mobile -->
+<div id="saved-batches-dropdown" style="display:none;position:fixed;bottom:70px;left:12px;right:12px;background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:4px;z-index:1000;box-shadow:0 8px 32px rgba(0,0,0,0.7);">
+  <div id="saved-batches-dd-list" style="max-height:280px;overflow-y:auto;"></div>
+</div>
 <div class="mobile-tabbar">
   <div class="mobile-tabbar-inner" id="mobile-tabbar-inner">
     <!-- rendered by JS -->
@@ -884,9 +889,6 @@ select.field-input { background: #fff; color: #0f172a; }
         <button class="btn" style="font-size:16px;padding:8px 14px;background:#1a3a1a;border-color:#2d5a2d;color:#86efac;font-weight:700;" onclick="openSaveBatchModal()">Save Batch</button>
         <div style="position:relative;">
           <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="toggleSavedBatchesDropdown()">🗂 Saved</button>
-          <div id="saved-batches-dropdown" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;background:#0a0f18;border:1px solid #1a2332;border-radius:8px;padding:4px;min-width:220px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,0.5);">
-            <div id="saved-batches-dd-list" style="max-height:240px;overflow-y:auto;"></div>
-          </div>
         </div>
         <button class="btn btn-danger" id="bulk-delete-btn" style="font-size:16px;padding:8px 14px;display:none;" onclick="bulkDeleteSelected()">Delete selected</button>
         <div style="position:relative;" id="submit-dropdown-wrap">
