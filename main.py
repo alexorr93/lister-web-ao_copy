@@ -5218,7 +5218,7 @@ async def robo_chat(request: Request):
 - Product ID: recognizing brands, models, authenticity tells, valuable variations
 - Business basics: profit margins, cost of goods, expense tracking, scaling a reselling operation
 
-When someone asks a question, give a real answer with specifics. If they ask about reselling viability, give real numbers and categories. If they ask about a product, give actual price ranges. Be conversational but packed with useful info. 2-4 sentences per point, use line breaks between different points. No markdown, plain text only.""""
+When someone asks a question, give a real answer with specifics. If they ask about reselling viability, give real numbers and categories. If they ask about a product, give actual price ranges. Be conversational but packed with useful info. 2-4 sentences per point, use line breaks between different points. No markdown, plain text only."""
         for _m in ["gemini-2.5-flash", "gemini-2.5-flash-preview-04-17"]:
             try:
                 _cfg = _gt.GenerateContentConfig(system_instruction=system, temperature=0.7)
