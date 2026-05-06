@@ -2362,9 +2362,9 @@ function renderTileRow(l, idx) {
     <div style="flex:1;padding:22px 24px;display:flex;flex-direction:column;gap:16px;min-width:0;">
       <div style="display:flex;align-items:flex-start;gap:10px;">
         ${checkmark}
-        <input class="tile-title-input" type="text" value="${titleVal}" data-id="${tid}" style="flex:1;background:transparent;border:none;color:#f0fdf4;font-size:20px;font-weight:700;font-family:inherit;outline:none;padding:0;line-height:1.4;"/>
+        <input class="tile-title-input" type="text" value="${titleVal}" data-id="${tid}" style="flex:1;min-width:0;background:transparent;border:none;color:#f0fdf4;font-size:18px;font-weight:700;font-family:inherit;outline:none;padding:0;line-height:1.4;"/>
       </div>
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span style="color:#475569;font-size:13px;">$</span>
         <input class="tile-price-input" type="number" step="0.01" value="${l.price.toFixed(2)}" data-id="${tid}" style="width:110px;background:#060810;border:1px solid #1a2332;border-radius:8px;color:#f0fdf4;font-size:20px;font-weight:800;font-family:inherit;outline:none;padding:10px 12px;">
         <div style="display:flex;border-radius:7px;overflow:hidden;border:1px solid #1a2332;flex-shrink:0;">
