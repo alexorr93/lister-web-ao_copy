@@ -5197,6 +5197,27 @@ async def export_expenses(request: Request, period: str = "month", fmt: str = "c
         raise HTTPException(500, str(e))
 
 
+
+@app.post("/api/account/change-password")
+async def change_password(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Not authenticated")
+    try:
+        body = await request.json()
+        password = body.get("password", "")
+        if not password or len(password) < 8:
+            raise HTTPException(400, "Password must be at least 8 characters")
+        user_id = request.session.get("user_id")
+        if not user_id:
+            raise HTTPException(401, "Not authenticated")
+        supabase.auth.admin.update_user_by_id(user_id, {"password": password})
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 @app.post("/api/robo/chat")
 async def robo_chat(request: Request):
     business_id = require_auth(request)
