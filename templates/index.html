@@ -1808,16 +1808,26 @@ select.field-input { background: #fff; color: #0f172a; }
   <div class="tab-content" id="tab-messages">
     <div style="max-width:760px;margin:0 auto;">
       <div style="margin-bottom:18px;">
-        <div style="font-size:32px;font-weight:800;margin-bottom:4px;">💬 Support Chat</div>
-        <div style="font-size:15px;color:var(--muted);">Send us a message — we typically reply within a few hours.</div>
+        <div style="font-size:32px;font-weight:800;margin-bottom:4px;">Support</div>
+        <div style="font-size:15px;color:var(--muted);">Secure channel to RoboReseller support.</div>
       </div>
-      <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:0;display:flex;flex-direction:column;">
-        <div id="user-thread-view" style="height:480px;background:var(--bg);padding:22px;overflow-y:auto;border-radius:12px 12px 0 0;border-bottom:1px solid var(--border);">
-          <div style="text-align:center;color:var(--muted);font-size:16px;padding:24px 0;">Loading...</div>
+      <div style="background:#000;border:2px solid #00ff41;border-radius:6px;overflow:hidden;box-shadow:0 0 20px rgba(0,255,65,0.2);">
+        <div style="background:#00ff41;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-family:monospace;font-size:13px;font-weight:700;color:#000;letter-spacing:0.1em;">ROBORESELLER // SUPPORT UPLINK</span>
+          <div style="display:flex;align-items:center;gap:6px;"><div style="width:7px;height:7px;border-radius:50%;background:#000;box-shadow:0 0 4px #000;"></div><span style="font-family:monospace;font-size:11px;color:#000;font-weight:700;" id="msg-status">CONNECTING...</span></div>
         </div>
-        <div style="display:flex;gap:8px;padding:12px;background:#0a0f18;border-radius:0 0 12px 12px;">
-          <textarea class="acct-input" id="user-thread-input" rows="2" style="flex:1;resize:none;font-family:inherit;" placeholder="Type your message..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendUserThreadMessage();}"></textarea>
-          <button class="btn btn-primary" style="padding:0 22px;font-weight:700;" onclick="sendUserThreadMessage()">Send</button>
+        <div style="background:#001a00;border-bottom:1px solid #00ff4122;padding:5px 16px;font-family:monospace;font-size:11px;color:#00ff4199;letter-spacing:0.12em;display:flex;gap:16px;">
+          <span>SESSION: <strong style="color:#00ff41;" id="msg-session">—</strong></span>
+          <span>ENC: <strong style="color:#00ff41;">AES-256</strong></span>
+          <span>STATUS: <strong style="color:#00ff41;" id="msg-conn-status">SECURE</strong></span>
+        </div>
+        <div id="user-thread-view" style="height:400px;background:#000;padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:12px;font-family:monospace;">
+          <div style="color:#00ff4166;font-size:12px;letter-spacing:0.08em;">&gt; ESTABLISHING SECURE CHANNEL...</div>
+        </div>
+        <div style="background:#001a00;border-top:1px solid #00ff4122;padding:10px 16px;display:flex;gap:10px;align-items:center;">
+          <span style="font-family:monospace;font-size:13px;color:#00ff41;white-space:nowrap;" id="msg-prompt">USR &gt; </span>
+          <input id="user-thread-input" type="text" placeholder="TYPE YOUR MESSAGE..." style="flex:1;background:transparent;border:none;color:#00ff41;font-family:monospace;font-size:13px;outline:none;caret-color:#00ff41;" onkeydown="if(event.key==='Enter'){event.preventDefault();sendUserThreadMessage();}"/>
+          <button onclick="sendUserThreadMessage()" style="background:transparent;border:1px solid #00ff41;color:#00ff41;font-family:monospace;font-size:12px;padding:6px 14px;cursor:pointer;letter-spacing:0.1em;border-radius:3px;white-space:nowrap;">SEND ↵</button>
         </div>
       </div>
     </div>
@@ -5981,31 +5991,39 @@ function openUserMailbox() {
 function closeUserMailbox() { /* no-op now that messages is a tab */ }
 
 async function loadUserThread() {
-  // Hide alert banner since user opened the chat
   var banner = document.getElementById('support-alert');
   if (banner) banner.style.display = 'none';
   refreshUserMailboxBadge();
-
+  var view = document.getElementById('user-thread-view');
+  var status = document.getElementById('msg-status');
+  var session = document.getElementById('msg-session');
+  if (status) status.textContent = 'ONLINE';
+  if (session) session.textContent = 'USR_' + Math.random().toString(36).substr(2,4).toUpperCase();
+  if (!view) return;
   try {
     var r = await fetch('/api/support/thread');
     var d = await r.json();
-    var view = document.getElementById('user-thread-view');
-    if (!view) return;
-    if (!d.messages || !d.messages.length) {
-      view.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:12px;padding:24px 0;">No messages yet — say hi!</div>';
-      return;
+    var msgs = d.messages || [];
+    var now = new Date();
+    var ts = now.toUTCString().replace(' GMT','');
+    view.innerHTML = '<div style="color:#00ff4166;font-size:12px;letter-spacing:0.08em;">&gt; SECURE CHANNEL ESTABLISHED — ' + ts + '</div>';
+    if (!msgs.length) {
+      view.innerHTML += '<div style="color:#00ff4166;font-size:12px;letter-spacing:0.08em;margin-top:8px;">&gt; NO MESSAGES IN QUEUE — SEND ONE BELOW</div>';
+      view.innerHTML += '<div style="display:flex;gap:10px;align-items:flex-start;margin-top:16px;"><div style="width:32px;height:32px;border:1px solid #00ff41;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#00ff41;font-size:16px;background:#001a00;">🤖</div><div style="background:#001a00;border:1px solid #00ff4144;border-radius:0 6px 6px 6px;padding:10px 14px;font-size:13px;color:#00ff41;line-height:1.6;"><div style="font-size:10px;color:#00ff4166;letter-spacing:0.15em;margin-bottom:4px;">ROBO_SUPPORT</div>Hey! You've reached RoboReseller support. Send us a message and we'll get back to you within a few hours.</div></div>';
+    } else {
+      msgs.forEach(function(m) {
+        var isUser = m.sender === 'user';
+        var mts = new Date(m.created_at).toLocaleTimeString();
+        if (isUser) {
+          view.innerHTML += '<div style="display:flex;justify-content:flex-end;margin-top:8px;"><div style="background:#003300;border:1px solid #00ff41;border-radius:6px 0 6px 6px;padding:10px 14px;font-size:13px;color:#00ff41;line-height:1.6;max-width:85%;"><div style="font-size:10px;color:#00ff4166;letter-spacing:0.15em;margin-bottom:4px;text-align:right;">YOU // ' + mts + '</div>' + m.body + '</div></div>';
+        } else {
+          view.innerHTML += '<div style="display:flex;gap:10px;align-items:flex-start;margin-top:8px;"><div style="width:32px;height:32px;border:1px solid #00ff41;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#00ff41;font-size:16px;background:#001a00;">🤖</div><div style="background:#001a00;border:1px solid #00ff4144;border-radius:0 6px 6px 6px;padding:10px 14px;font-size:13px;color:#00ff41;line-height:1.6;max-width:85%;"><div style="font-size:10px;color:#00ff4166;letter-spacing:0.15em;margin-bottom:4px;">ROBO_SUPPORT // ' + mts + '</div>' + m.body + '</div></div>';
+        }
+      });
     }
-    view.innerHTML = d.messages.map(function(m) {
-      var isUser = m.sender === 'user';
-      var date = new Date(m.created_at).toLocaleString();
-      return '<div style="margin-bottom:10px;display:flex;flex-direction:column;align-items:' + (isUser ? 'flex-end' : 'flex-start') + ';">'
-        + '<div style="background:' + (isUser ? 'var(--accent)' : '#0a0f18') + ';color:' + (isUser ? '#fff' : 'var(--text)') + ';padding:9px 13px;border-radius:14px;max-width:75%;font-size:13px;line-height:1.5;white-space:pre-wrap;">' + escapeHtmlMsg(m.body) + '</div>'
-        + '<div style="font-size:10px;color:var(--muted);margin-top:3px;">' + (isUser ? 'You' : 'Support') + ' — ' + date + '</div>'
-        + '</div>';
-    }).join('');
     view.scrollTop = view.scrollHeight;
   } catch(e) {
-    document.getElementById('user-thread-view').innerHTML = '<div style="color:var(--red);font-size:12px;text-align:center;padding:20px;">Failed to load</div>';
+    if (view) view.innerHTML += '<div style="color:#ef4444;font-size:12px;margin-top:8px;">&gt; CONNECTION ERROR: ' + e.message + '</div>';
   }
 }
 
