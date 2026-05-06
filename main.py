@@ -3234,7 +3234,14 @@ PRICING RULES:
 - If no lots found, return: []
 - Return ONLY a JSON array, no markdown
 
-Example: [{"lot":"5","title":"Oakton pH Meter","description":"Portable pH/ORP meter with case","estimate_low":80,"estimate_high":150,"your_value":100,"notes":"Sells $80-150 used on eBay"}]"""
+ADDITIONALLY — for each lot, return the bounding box of just the item's photo/image on the page as a fraction of page dimensions (0.0 to 1.0):
+- bbox_x: left edge of item photo (0.0 = left side of page)
+- bbox_y: top edge of item photo (0.0 = top of page)
+- bbox_w: width of item photo as fraction of page width
+- bbox_h: height of item photo as fraction of page height
+If no photo exists for a lot, set all bbox fields to null.
+
+Example: [{"lot":"5","title":"Oakton pH Meter","description":"Portable pH/ORP meter with case","estimate_low":80,"estimate_high":150,"your_value":100,"notes":"Sells $80-150 used on eBay","bbox_x":0.02,"bbox_y":0.05,"bbox_w":0.25,"bbox_h":0.28}]"""
 
     def call_gemini(chunk_text, i, total):
         response = model.generate_content(
