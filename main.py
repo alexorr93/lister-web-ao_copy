@@ -3010,50 +3010,65 @@ async def export_excel(request: Request):
 
 # ── API: AUCTION PAGE IMAGE ───────────────────────────────────── #
 
-@app.get("/api/auction/page-image/{scan_id}/{img_index}")
-async def get_page_image(scan_id: str, img_index: int):
+@app.get("/api/auction/page-image/{scan_id}/{page_ref:path}")
+async def get_page_image(scan_id: str, page_ref: str):
+    """
+    Render a PDF page as JPEG, optionally cropped to a bbox.
+    page_ref formats:
+      p{N}              — full page N (1-indexed)
+      p{N}_{x}_{y}_{w}_{h} — cropped to fractional bbox
+      {int}             — legacy numeric index, maps to page
+    """
     import fitz
     from fastapi.responses import Response
     try:
         pdf_data = supabase.storage.from_("auction-pdfs").download(f"{scan_id}.pdf")
         doc = fitz.open(stream=pdf_data, filetype="pdf")
-        # Collect all large embedded images (skip logos/watermarks < 5KB)
-        all_images = []
-        seen_xrefs = set()
-        for page in doc:
-            for img in page.get_images(full=True):
-                xref = img[0]
-                if xref in seen_xrefs:
-                    continue
-                seen_xrefs.add(xref)
+        total_pages = len(doc)
+        bbox = None
+
+        if isinstance(page_ref, str) and page_ref.startswith("p"):
+            parts = page_ref[1:].split("_")
+            try:
+                page_num = int(parts[0]) - 1
+            except Exception:
+                page_num = 0
+            if len(parts) == 5:
                 try:
-                    base_image = doc.extract_image(xref)
-                    if base_image and base_image.get("image") and len(base_image["image"]) > 8000:
-                        all_images.append(base_image)
-                except Exception as search_err:
-                    print(f"   Search grounding failed: {search_err}")
-                    pass
-        # Fallback: render page and crop item image area for image-only PDFs
-        if not all_images or img_index < 0 or img_index >= len(all_images):
-            doc2 = fitz.open(stream=pdf_data, filetype="pdf")
-            items_per_page = 3
-            page_num = img_index // items_per_page
-            slot = img_index % items_per_page
-            if page_num >= len(doc2):
-                page_num = len(doc2) - 1
-            page = doc2[page_num]
-            pw, ph = page.rect.width, page.rect.height
-            slot_h = ph / items_per_page
-            clip = fitz.Rect(0, slot * slot_h, pw * 0.28, (slot + 1) * slot_h)
-            mat = fitz.Matrix(2.0, 2.0)
-            pix = page.get_pixmap(matrix=mat, clip=clip)
-            doc2.close()
-            return Response(content=pix.tobytes("jpeg"), media_type="image/jpeg",
-                          headers={"Cache-Control": "public, max-age=86400"})
-        img_data = all_images[img_index]
-        ext = img_data.get("ext", "jpeg")
-        mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/" + ext
-        return Response(content=img_data["image"], media_type=mime, headers={"Cache-Control": "public, max-age=86400"})
+                    bbox = (float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4]))
+                except Exception:
+                    bbox = None
+        else:
+            try:
+                page_num = int(page_ref)
+            except Exception:
+                page_num = 0
+
+        page_num = max(0, min(page_num, total_pages - 1))
+        page = doc[page_num]
+        pw, ph = page.rect.width, page.rect.height
+
+        if bbox:
+            bx, by, bw, bh = bbox
+            pad = 0.01
+            x0 = max(0.0, bx - pad) * pw
+            y0 = max(0.0, by - pad) * ph
+            x1 = min(1.0, bx + bw + pad) * pw
+            y1 = min(1.0, by + bh + pad) * ph
+            if (x1 - x0) > 20 and (y1 - y0) > 20:
+                clip = fitz.Rect(x0, y0, x1, y1)
+                mat = fitz.Matrix(3.0, 3.0)
+                pix = page.get_pixmap(matrix=mat, clip=clip)
+                doc.close()
+                return Response(content=pix.tobytes("jpeg"), media_type="image/jpeg",
+                                headers={"Cache-Control": "public, max-age=86400"})
+
+        # Full page render
+        mat = fitz.Matrix(2.0, 2.0)
+        pix = page.get_pixmap(matrix=mat)
+        doc.close()
+        return Response(content=pix.tobytes("jpeg"), media_type="image/jpeg",
+                        headers={"Cache-Control": "public, max-age=86400"})
     except HTTPException:
         raise
     except Exception as e:
