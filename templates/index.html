@@ -871,6 +871,10 @@ select.field-input { background: #fff; color: #0f172a; }
           <option value="profit_desc">Profit h→l</option>
           <option value="profit_asc">Profit l→h</option>
         </select>
+        <div style="display:flex;background:#0a0f18;border:1px solid #1a2332;border-radius:6px;overflow:hidden;">
+          <button id="scan-view-grid" onclick="setScanView('grid')" style="font-size:13px;padding:6px 12px;border:none;background:var(--accent);color:#052e16;cursor:pointer;font-family:inherit;font-weight:700;">Grid</button>
+          <button id="scan-view-list" onclick="setScanView('list')" style="font-size:13px;padding:6px 12px;border:none;background:transparent;color:var(--muted);cursor:pointer;font-family:inherit;">List</button>
+        </div>
         <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="selectAll()">Select all</button>
         <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="deselectAll()">Deselect</button>
         <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="openLotCostModal()" id="lot-cost-btn">Lot Cost</button>
@@ -2322,6 +2326,62 @@ function closeRoboChat() {
   if (o) o.style.display = "none";
 }
 
+let scanView = localStorage.getItem("rr_scan_view") || "grid";
+
+function setScanView(v) {
+  scanView = v;
+  localStorage.setItem("rr_scan_view", v);
+  document.getElementById("scan-view-grid").style.background = v === "grid" ? "var(--accent)" : "transparent";
+  document.getElementById("scan-view-grid").style.color = v === "grid" ? "#052e16" : "var(--muted)";
+  document.getElementById("scan-view-grid").style.fontWeight = v === "grid" ? "700" : "400";
+  document.getElementById("scan-view-list").style.background = v === "list" ? "var(--accent)" : "transparent";
+  document.getElementById("scan-view-list").style.color = v === "list" ? "#052e16" : "var(--muted)";
+  document.getElementById("scan-view-list").style.fontWeight = v === "list" ? "700" : "400";
+  renderTiles();
+}
+
+function renderTileRow(l, idx) {
+  const qty = quantities[l.id] ?? l.quantity;
+  const isSel = selected.has(l.id);
+  const cond = (l.condition || "used").toString().toLowerCase().trim();
+  const isNew = cond === "new";
+  const refs = [l.price_used > 0 ? "U:$"+l.price_used.toFixed(0) : "", l.price_new > 0 ? "N:$"+l.price_new.toFixed(0) : ""].filter(Boolean).join("  ");
+  const firstThumb = (l.all_photos || (l.thumb_url ? [{thumb:l.thumb_url}] : []))[0]?.thumb || "";
+  const photoHtml = firstThumb ? `<img src="${firstThumb}" style="width:100%;height:100%;object-fit:cover;border-radius:8px 0 0 8px;" loading="lazy"/>` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#334155;font-size:20px;">📷</div>`;
+  const checkmark = isSel
+    ? `<div class="tile-checkmark" onclick="event.stopPropagation();toggleSelect('${l.id}');" style="width:20px;height:20px;background:var(--accent);border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;"><span style="color:#fff;font-size:12px;font-weight:700;">✓</span></div>`
+    : `<div class="tile-checkmark" onclick="event.stopPropagation();toggleSelect('${l.id}');" style="width:20px;height:20px;background:rgba(15,17,23,0.7);border:1.5px solid #4b5563;border-radius:4px;cursor:pointer;flex-shrink:0;"></div>`;
+  return `<div class="tile${isSel?" selected":""}" id="tile-${l.id}" data-photos='${JSON.stringify(l.all_photos||[])}' data-photo-idx="0" style="position:relative;display:flex;align-items:stretch;background:#0d1117;border:1px solid ${isSel?"#4ade80":"#1a2332"};border-radius:10px;overflow:hidden;margin-bottom:6px;">
+    <div style="width:90px;min-height:80px;flex-shrink:0;position:relative;cursor:pointer;" onclick="openModal('${l.id}')">${photoHtml}</div>
+    <div style="flex:1;padding:10px 12px;min-width:0;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+        <span style="font-size:10px;color:#475569;font-family:monospace;">#${idx+1}</span>
+        ${checkmark}
+        <input class="tile-title-input" type="text" value="${(l.title||"").replace(/"/g,"&quot;")}" data-id="${l.id}" style="flex:1;background:transparent;border:none;color:#e2e8f0;font-size:13px;font-weight:600;font-family:inherit;outline:none;padding:0;"/>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <div class="tile-search-btns" style="display:flex;gap:4px;">
+          <button class="tile-search-btn" onclick="window.open('https://www.google.com/search?q='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value),'popupwin','noopener,width=1200,height=800')">Google</button>
+          <button class="tile-search-btn" onclick="window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value)+'&LH_Sold=1&LH_Complete=1','popupwin','noopener,width=1200,height=800')">eBay Sold</button>
+        </div>
+        <span style="color:#475569;font-size:12px;">$</span>
+        <input class="tile-price-input" type="number" step="0.01" value="${l.price.toFixed(2)}" data-id="${l.id}" style="width:70px;background:#060810;border:1px solid #1a2332;border-radius:5px;color:#f0fdf4;font-size:13px;font-weight:700;font-family:inherit;outline:none;padding:3px 6px;">
+        <div class="tile-cond-toggle">
+          <button class="tile-cond-btn${isNew?"":" active"}" data-id="${l.id}" data-cond="used">Used</button>
+          <button class="tile-cond-btn${isNew?" active":""}" data-id="${l.id}" data-cond="new">New</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:3px;background:#060810;border:1px solid #1a2332;border-radius:5px;padding:1px 3px;">
+          <button class="qty-btn minus" onclick="changeQty('${l.id}',-1)">−</button>
+          <div class="qty-num" id="qty-${l.id}">${qty}</div>
+          <button class="qty-btn plus" onclick="changeQty('${l.id}',1)">+</button>
+        </div>
+        <button class="tile-rescan" onclick="rescanItem('${l.id}')" style="margin-left:auto;">↺ Rescan</button>
+        <button class="tile-rescan" style="color:#f59e0b;border-color:#92400e;" onclick="reportBadScan('${l.id}')">⚠</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 function renderTiles() {
   const grid = document.getElementById('tile-grid');
   const empty = document.getElementById('dash-empty');
@@ -2340,6 +2400,15 @@ function renderTiles() {
   const batchLine = listings.length + ' items · ' + selected.size + ' selected · $' + totalListed.toFixed(0) + ' listed' + (showCost ? ' · $' + totalCost.toFixed(0) + ' cost' : '');
   document.getElementById('batch-summary').textContent = batchLine;
 
+  if (scanView === 'list') {
+    grid.style.display = 'block';
+    grid.innerHTML = listings.map((l, idx) => renderTileRow(l, idx)).join('');
+    updateSubmitBtn();
+    var delBtn = document.getElementById('bulk-delete-btn');
+    if (delBtn) delBtn.style.display = selected.size > 0 ? 'inline-block' : 'none';
+    return;
+  }
+  grid.style.display = 'grid';
   grid.innerHTML = listings.map((l, idx) => {
     const qty = quantities[l.id] ?? l.quantity;
     const isSel = selected.has(l.id);
