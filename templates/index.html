@@ -1956,7 +1956,8 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     if (tab === 'fastscan') { if (typeof checkMultiScanTier === 'function') checkMultiScanTier(); }
     if (tab === 'auction')   loadAuctionSessions();
     if (tab === 'settings')  { loadSettings(); loadAccountInfo(); loadShopifyStatus(); loadEbayOAuthStatus(); loadCostTrackingState(); }
-    if (tab === 'messages')  { loadUserThread(); }
+    if (tab === 'messages')  { loadUserThread(); startMessagePolling(); }
+    else { stopMessagePolling(); }
   });
 });
 
@@ -5991,6 +5992,19 @@ function openUserMailbox() {
   if (btn) btn.click();
 }
 function closeUserMailbox() { /* no-op now that messages is a tab */ }
+
+var _msgPollInterval = null;
+function startMessagePolling() {
+  stopMessagePolling();
+  _msgPollInterval = setInterval(function() {
+    if (document.getElementById('tab-messages') && document.getElementById('tab-messages').classList.contains('active')) {
+      loadUserThread();
+    }
+  }, 10000);
+}
+function stopMessagePolling() {
+  if (_msgPollInterval) { clearInterval(_msgPollInterval); _msgPollInterval = null; }
+}
 
 async function loadUserThread() {
   var banner = document.getElementById('support-alert');
