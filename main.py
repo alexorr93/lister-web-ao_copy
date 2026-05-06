@@ -3267,53 +3267,44 @@ Example: [{"lot":"5","title":"Oakton pH Meter","description":"Portable pH/ORP me
         executor = ThreadPoolExecutor(max_workers=1)
         all_items = []
 
-        # Image-only PDF path
-        if page_images and not page_chunks:
-            total_chunks = len(page_images)
-            for i, (page_num, img_bytes) in enumerate(page_images):
-                try:
-                    raw = await loop.run_in_executor(executor, call_gemini_image, page_num, img_bytes, total_chunks)
-                    raw = " ".join(raw.splitlines())
-                    if "```" in raw:
-                        raw = raw.split("```")[1]
-                        if raw.startswith("json"): raw = raw[4:]
-                        raw = raw.strip()
-                    start = raw.find("[")
-                    end = raw.rfind("]") + 1
-                    if start >= 0 and end > start:
-                        raw = raw[start:end]
-                    try:
-                        items = json.loads(raw)
-                    except Exception:
-                        from json_repair import repair_json
-                        items = json.loads(repair_json(raw))
-                    base_idx = len(all_items)
-                    all_items.extend(items)
-                    for item in items:
-                        item["_page_start"] = page_num + 1
-                        item["_page_end"] = page_num + 1
-                        if scan_id:
-                            item["_page_img"] = f"/api/auction/page-image/{scan_id}/{base_idx + items.index(item)}"
-                    yield {
-                        "data": json.dumps({
-                            "chunk": i + 1,
-                            "total_chunks": total_chunks,
-                            "items": items,
-                            "scan_id": scan_id,
-                            "done": False
-                        }, separators=(',', ':'))
-                    }
-                except Exception as e:
-                    print(f"Image page {page_num+1} error: {e}")
-                await asyncio.sleep(0.1)
-            yield {"data": json.dumps({"done": True, "total": len(all_items), "scan_id": scan_id})}
-            return
+        # Always render every page as image (ensures thumbnails always available)
+        doc_render = fitz.open(stream=contents, filetype="pdf")
+        page_rendered = {}
+        for pn in range(total_pages):
+            mat = fitz.Matrix(2.0, 2.0)
+            pix = doc_render[pn].get_pixmap(matrix=mat)
+            page_rendered[pn] = pix.tobytes("jpeg")
+        doc_render.close()
 
-        total_chunks = len(page_chunks)
-
-        for i, chunk_text in enumerate(page_chunks):
+        def call_gemini_page(page_num, chunk_text, img_bytes, i, total):
+            """Send page text + rendered image together — Gemini sees exact layout."""
+            has_text = bool(chunk_text.strip())
+            content_desc = (
+                f"CATALOG PAGE {page_num+1}/{total} (text + image):\n{chunk_text[:8000]}"
+                if has_text else
+                f"CATALOG PAGE {page_num+1}/{total} (image-only — read directly from image)"
+            )
             try:
-                raw = await loop.run_in_executor(executor, call_gemini, chunk_text, i, total_chunks)
+                response = model.generate_content(
+                    [prompt_template + f"\n\n{content_desc}", {"mime_type": "image/jpeg", "data": img_bytes}],
+                    generation_config={"max_output_tokens": 16000}
+                )
+                return response.text
+            except Exception as e:
+                print(f"   Page {page_num+1} gemini error: {e}")
+                return "[]"
+
+        # Build per-page text list (1 page = 1 chunk — no cross-page lot splits)
+        doc_txt = fitz.open(stream=contents, filetype="pdf")
+        pages_text = [doc_txt[pn].get_text() for pn in range(total_pages)]
+        doc_txt.close()
+        total_chunks = total_pages
+
+        for i in range(total_pages):
+            img_bytes = page_rendered[i]
+            chunk_text = pages_text[i]
+            try:
+                raw = await loop.run_in_executor(executor, call_gemini_page, i, chunk_text, img_bytes, i, total_chunks)
                 raw = " ".join(raw.splitlines())
                 if "```" in raw:
                     raw = raw.split("```")[1]
@@ -3326,19 +3317,25 @@ Example: [{"lot":"5","title":"Oakton pH Meter","description":"Portable pH/ORP me
                     raw = raw[start:end]
                 try:
                     items = json.loads(raw)
-                except Exception as search_err:
-                    print(f"   Search grounding failed: {search_err}")
-                    from json_repair import repair_json
-                    items = json.loads(repair_json(raw))
-                base_idx = len(all_items)
-                all_items.extend(items)
-                page_start = i * chunk_size + 1
-                page_end = min((i + 1) * chunk_size, total_pages)
+                except Exception:
+                    try:
+                        from json_repair import repair_json
+                        items = json.loads(repair_json(raw))
+                    except Exception:
+                        items = []
                 for item in items:
-                    item["_page_start"] = page_start
-                    item["_page_end"] = page_end
+                    item["_page_num"] = i + 1
                     if scan_id:
-                        item["_page_img"] = f"/api/auction/page-image/{scan_id}/{base_idx + items.index(item)}"
+                        bx = item.get("bbox_x")
+                        by = item.get("bbox_y")
+                        bw = item.get("bbox_w")
+                        bh = item.get("bbox_h")
+                        if bx is not None and by is not None and bw and bh:
+                            bbox_str = f"{bx:.3f}_{by:.3f}_{bw:.3f}_{bh:.3f}"
+                            item["_page_img"] = f"/api/auction/page-image/{scan_id}/p{i+1}_{bbox_str}"
+                        else:
+                            item["_page_img"] = f"/api/auction/page-image/{scan_id}/p{i+1}"
+                all_items.extend(items)
                 yield {
                     "data": json.dumps({
                         "chunk": i + 1,
@@ -3349,7 +3346,7 @@ Example: [{"lot":"5","title":"Oakton pH Meter","description":"Portable pH/ORP me
                     }, separators=(',', ':'))
                 }
             except Exception as e:
-                print(f"Chunk {i+1} error: {e}")
+                print(f"Page {i+1} error: {e}")
             await asyncio.sleep(0.1)
 
         yield {"data": json.dumps({"done": True, "total": len(all_items), "scan_id": scan_id})}
