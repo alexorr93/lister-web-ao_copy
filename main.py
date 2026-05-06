@@ -5509,6 +5509,13 @@ async def scan_auction_url(request: Request):
                             "startUrls": [{"url": url}],
                             "maxItems": 500
                         }).encode()
+                        # Strip query params — use catalogue root URL for Apify
+                        import re as _re2
+                        clean_url = url.split("?")[0].split("/search-filter")[0]
+                        run_payload = _json.dumps({
+                            "startUrls": [{"url": clean_url}],
+                            "maxItems": 500
+                        }).encode()
                         run_req = urllib.request.Request(
                             run_url + f"?token={apify_key}",
                             data=run_payload,
@@ -5516,10 +5523,13 @@ async def scan_auction_url(request: Request):
                             method="POST"
                         )
                         with urllib.request.urlopen(run_req, timeout=30) as resp:
-                            run_data = _json.loads(resp.read())
+                            raw_run = resp.read()
+                            run_data = _json.loads(raw_run)
                         run_id = run_data.get("data", {}).get("id")
                         dataset_id = run_data.get("data", {}).get("defaultDatasetId")
-                        print(f"Apify run started: {run_id}")
+                        print(f"Apify run started: {run_id}, dataset: {dataset_id}, url: {clean_url}")
+                        if not run_id:
+                            print(f"Apify run failed: {raw_run[:300]}")
 
                         # Poll for completion (max 90 seconds)
                         for _ in range(18):
