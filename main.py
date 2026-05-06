@@ -5212,7 +5212,7 @@ async def robo_chat(request: Request):
         from google.genai import types as _gt
         client = _genai.Client(api_key=gemini_key)
         system = "You are Robo, an AI reselling expert. Know eBay, pricing, product ID, reselling strategy. Be direct. Short responses, line breaks between points. Plain text only."
-        for _m in ["gemini-2.5-flash-preview-04-17", "gemini-2.0-flash-lite", "gemini-2.0-flash"]:
+        for _m in ["gemini-2.5-flash", "gemini-2.5-flash-preview-04-17"]:
             try:
                 _cfg = _gt.GenerateContentConfig(system_instruction=system, temperature=0.7)
                 _resp = client.models.generate_content(model=_m, contents=message, config=_cfg)
