@@ -5498,7 +5498,7 @@ async def scan_auction_url(request: Request):
             m = _re.search(r"/auction-catalogues/([^/]+)/catalogue-id-([^/]+)/", url)
             if m:
                 seller, cat_id = m.group(1), m.group(2)
-                        # Use Apify actor to scrape Bidspotter
+                # Use Apify actor to scrape Bidspotter
                 apify_key = os.getenv("APIFY_API_KEY", "")
                 if apify_key:
                     try:
