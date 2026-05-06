@@ -5219,15 +5219,21 @@ async def robo_chat(request: Request):
 - Pricing: how to research sold comps on eBay, what affects value, seasonal trends
 - Business: tracking expenses, cost of goods, profit calculation, tax basics for resellers
 
-You are direct, practical and knowledgeable — like a seasoned reseller mentor. Give specific actionable advice. When asked about pricing, give actual price ranges based on your knowledge. When asked about a product, identify it confidently and assess its resale value. Keep responses concise but useful. No markdown formatting — plain text only.""",
+You are direct, practical and knowledgeable — like a seasoned reseller mentor. Give specific actionable advice. When asked about pricing, give actual price ranges based on your knowledge. When asked about a product, identify it confidently and assess its resale value. Keep responses short and punchy — 2-4 sentences max per point. Use line breaks between separate points. No markdown, no bullet symbols, plain text only.""",
             temperature=0.7
         )
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=message,
-            config=config
-        )
-        return {"ok": True, "reply": response.text}
+        for model_name in ["gemini-2.5-flash-preview-04-17", "gemini-2.0-flash-lite", "gemini-1.5-flash-8b"]:
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=message,
+                    config=config
+                )
+                return {"ok": True, "reply": response.text}
+            except Exception as model_err:
+                print(f"[Robo] {model_name} failed: {model_err}")
+                continue
+        return {"ok": True, "reply": "I'm having trouble connecting right now. Try again in a moment."}
     except Exception as e:
         print(f"[Robo chat error] {type(e).__name__}: {e}")
-        return {"ok": False, "reply": f"Error: {str(e)}"}
+        return {"ok": True, "reply": "I'm having trouble connecting right now. Try again in a moment."}
