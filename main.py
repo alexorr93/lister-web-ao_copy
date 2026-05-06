@@ -5264,13 +5264,6 @@ async def robo_chat(request: Request):
                     cur_parts = [_gt.Part(text=message)]
                 contents.append(_gt.Content(role="user", parts=cur_parts))
                 _resp = client.models.generate_content(model=_m, contents=contents, config=_cfg)
-                    import base64 as _b64
-                    img_bytes = _b64.b64decode(image_b64)
-                    prompt = message or "Identify this item. Give brand, model, eBay resell price range (used/new), what to look for (variants, fakes, condition issues), and how fast it sells."
-                    contents = [_gt.Part.from_bytes(data=img_bytes, mime_type=image_mime), prompt]
-                    _resp = client.models.generate_content(model=_m, contents=contents, config=_cfg)
-                else:
-                    _resp = client.models.generate_content(model=_m, contents=message, config=_cfg)
                 print("[Robo] ok:", _m)
                 # Format response for readability
                 raw = _resp.text.strip()
