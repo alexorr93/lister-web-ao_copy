@@ -222,7 +222,7 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
   .app-shell { height: calc(100% - 62px) !important; overflow: hidden !important; }
   .main-wrapper { height: 100% !important; overflow-y: auto !important; -webkit-overflow-scrolling: touch !important; }
   .mobile-tabbar { display: flex; }
-  #robo-fab { display: none !important; }
+  #robo-fab { display: none !important; } /* hidden on mobile — uses tab instead */
   /* mobile-tabbar position handled in base CSS */
   * { box-sizing: border-box; }
   /* overflow handled by .main, not body */
@@ -418,6 +418,7 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 .empty-sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
 
 /* TOAST */
+#robo-fab { display: none !important; } /* hidden on desktop — use Robo tab */
 .toast { position: fixed; bottom: 20px; right: 20px; background:#0a0f18; border:1px solid #1a2332; border-radius: 10px; padding: 12px 16px; font-size: 13px; font-weight: 600; color: var(--text); z-index: 300; transform: translateY(100px); transition: transform 0.3s; max-width: 280px; }
 .toast.show { transform: translateY(0); }
 .toast.success { border-color: var(--green); }
@@ -7182,7 +7183,7 @@ window.addEventListener('load', function() {
       <div style="color:#1a5a2e;font-size:11px;letter-spacing:0.1em;font-family:monospace;">// SECURE SESSION INITIALIZED</div>
       <div style="display:flex;gap:10px;align-items:flex-start;">
         <div style="width:28px;height:28px;border-radius:50%;background:#052e16;border:1px solid #4ade80;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2"><rect x="5" y="6" width="14" height="12" rx="2"/><circle cx="9" cy="11" r="1.5" fill="#4ade80" stroke="none"/><circle cx="15" cy="11" r="1.5" fill="#4ade80" stroke="none"/></svg></div>
-        <div style="position:relative;background:#001a00;border:1px solid #0d3a0d;border-radius:2px 10px 10px 10px;padding:12px 14px 10px;font-size:13px;color:#4ade80;line-height:1.7;font-family:monospace;max-width:85%;"><div style="position:absolute;top:-8px;left:0;font-size:9px;color:#1a5a2e;letter-spacing:0.15em;">ROBO</div>Drop a photo of any item and I will identify it, price it, and tell you what to look for. Or ask me anything about reselling.</div>
+        <div style="position:relative;background:#001a00;border:1px solid #0d3a0d;border-radius:2px 10px 10px 10px;padding:12px 14px 10px;font-size:13px;color:#4ade80;line-height:1.7;font-family:monospace;max-width:85%;"><div style="position:absolute;top:-8px;left:0;font-size:9px;color:#1a5a2e;letter-spacing:0.15em;">ROBO</div>Ask me anything about reselling — pricing, listings, what to buy, how to ship. You can also attach a photo and I'll take a look.</div>
       </div>
     </div>
     <div style="background:#000;border-top:1px solid #0d3a0d;padding:12px 16px;display:flex;gap:8px;align-items:center;">
