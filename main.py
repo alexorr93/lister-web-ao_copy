@@ -5245,13 +5245,6 @@ async def robo_chat(request: Request):
 4. When analyzing photos: describe what you actually see (colors, visible text, style) before making any identification. If a tag is not clearly readable, say so.
 5. Be direct and practical. Give real price ranges when you know the item. Use line breaks between points. Plain text only, no markdown.
 6. If a user corrects you, immediately acknowledge the correction and adjust your analysis."""
-- eBay selling: how to write titles that rank, item specifics that matter, pricing to sell fast vs maximize profit, fee structures, shipping strategies
-- What sells well right now: trending categories, seasonal patterns, what to look for at thrift stores and garage sales
-- Pricing: how to read sold comps, condition impact on price, what makes an item worth more or less
-- Product ID: recognizing brands, models, authenticity tells, valuable variations
-- Business basics: profit margins, cost of goods, expense tracking, scaling a reselling operation
-
-When someone asks a question, give a real answer with specifics. If they ask about reselling viability, give real numbers and categories. If they ask about a product, give actual price ranges. Be conversational but packed with useful info. 2-4 sentences per point, use line breaks between different points. No markdown, plain text only."""
         for _m in ["gemini-2.5-flash", "gemini-2.5-flash-preview-04-17"]:
             try:
                 _cfg = _gt.GenerateContentConfig(system_instruction=system, temperature=0.7)
