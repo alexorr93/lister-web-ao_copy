@@ -2007,7 +2007,6 @@ async def upload_photo(request: Request):
 async def deep_research_full(request: Request):
     import os, json, base64, asyncio, fitz
     from concurrent.futures import ThreadPoolExecutor
-    import google.generativeai as genai
 
     form = await request.form()
     items_json = form.get("items", "[]")
@@ -2908,7 +2907,6 @@ class DeepResearch(BaseModel):
 async def deep_research(body: DeepResearch):
     import os, asyncio, json
     from concurrent.futures import ThreadPoolExecutor
-    import google.generativeai as genai
     gemini_key = os.getenv("GEMINI_API_KEY", "")
     if not gemini_key:
         raise HTTPException(400, "GEMINI_API_KEY not set")
@@ -3081,7 +3079,6 @@ from sse_starlette.sse import EventSourceResponse
 @app.post("/api/auction/scan-txt")
 async def scan_txt_auction(file: UploadFile = File(...)):
     import os, json, asyncio
-    import google.generativeai as genai
 
     contents = await file.read()
     text = contents.decode("utf-8", errors="ignore")
@@ -3090,8 +3087,10 @@ async def scan_txt_auction(file: UploadFile = File(...)):
     if not gemini_key:
         raise HTTPException(400, "GEMINI_API_KEY not set")
 
-    genai.configure(api_key=gemini_key)
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    # Use google-genai SDK (not google.generativeai)
+    from google import genai as _genai
+    from google.genai import types as _gtypes
+    _client = _genai.Client(api_key=gemini_key)
 
     prompt_template = """You are a world-class auction appraiser with deep expertise in industrial equipment, lab instruments, and commercial goods.
 
@@ -3174,7 +3173,6 @@ PRICING RULES:
 @app.post("/api/auction/scan-pdf")
 async def scan_pdf_auction(file: UploadFile = File(...)):
     import os, base64, json, fitz, asyncio, uuid
-    import google.generativeai as genai
 
     contents = await file.read()
     gemini_key = os.getenv("GEMINI_API_KEY", "")
@@ -3220,8 +3218,10 @@ async def scan_pdf_auction(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(500, f"PDF read error: {e}")
 
-    genai.configure(api_key=gemini_key)
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    # Use google-genai SDK (not google.generativeai)
+    from google import genai as _genai
+    from google.genai import types as _gtypes
+    _client = _genai.Client(api_key=gemini_key)
 
     prompt_template = """You are a world-class auction appraiser with deep expertise in industrial equipment, lab instruments, and commercial goods.
 
@@ -3259,21 +3259,23 @@ If no photo exists for a lot, set all bbox fields to null.
 Example: [{"lot":"5","title":"Oakton pH Meter","description":"Portable pH/ORP meter with case","estimate_low":80,"estimate_high":150,"your_value":100,"notes":"Sells $80-150 used on eBay","bbox_x":0.02,"bbox_y":0.05,"bbox_w":0.25,"bbox_h":0.28}]"""
 
     def call_gemini(chunk_text, i, total):
-        response = model.generate_content(
-            [prompt_template, f"\nCATALOG SECTION {i+1}/{total}:\n{chunk_text[:10000]}"],
-            generation_config={"max_output_tokens": 16000}
+        resp = _client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[prompt_template, f"\nCATALOG SECTION {i+1}/{total}:\n{chunk_text[:10000]}"],
+            config=_gtypes.GenerateContentConfig(max_output_tokens=16000)
         )
-        return response.text
+        return resp.text
 
     def call_gemini_image(page_num, img_bytes, total):
         """Send a rendered page image to Gemini Vision for lot extraction."""
         print(f"   Image scan page {page_num+1}/{total}")
         img_prompt = prompt_template + f"\n\nThis is page {page_num+1} of {total} of an auction catalog. Extract all lots visible in this image."
-        response = model.generate_content(
-            [img_prompt, {"mime_type": "image/jpeg", "data": img_bytes}],
-            generation_config={"max_output_tokens": 16000}
+        resp = _client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[img_prompt, _gtypes.Part.from_bytes(data=img_bytes, mime_type="image/jpeg")],
+            config=_gtypes.GenerateContentConfig(max_output_tokens=16000)
         )
-        return response.text
+        return resp.text
 
     async def generate():
         import asyncio
@@ -3300,11 +3302,12 @@ Example: [{"lot":"5","title":"Oakton pH Meter","description":"Portable pH/ORP me
                 f"CATALOG PAGE {page_num+1}/{total} (image-only — read directly from image)"
             )
             try:
-                response = model.generate_content(
-                    [prompt_template + f"\n\n{content_desc}", {"mime_type": "image/jpeg", "data": img_bytes}],
-                    generation_config={"max_output_tokens": 16000}
+                resp = _client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[prompt_template + f"\n\n{content_desc}", _gtypes.Part.from_bytes(data=img_bytes, mime_type="image/jpeg")],
+                    config=_gtypes.GenerateContentConfig(max_output_tokens=16000)
                 )
-                return response.text
+                return resp.text
             except Exception as e:
                 print(f"   Page {page_num+1} gemini error: {e}")
                 return "[]"
@@ -3402,7 +3405,6 @@ async def scan_parts(body: ScanPartsBody):
     part_set = [str(p).strip().upper() for p in body.part_numbers if str(p).strip()]
 
     try:
-        import google.generativeai as genai
         genai.configure(api_key=gemini_key)
         model = genai.GenerativeModel("gemini-2.5-flash")
     except Exception:
@@ -3440,7 +3442,6 @@ Return ONLY a JSON object:
 If no text visible or no matches, still return the JSON with empty arrays."""
 
             try:
-                import google.generativeai as genai
                 genai.configure(api_key=gemini_key)
                 model = genai.GenerativeModel("gemini-2.5-flash")
                 import PIL.Image
@@ -4514,7 +4515,6 @@ async def multi_scan_detect(request: Request):
         contents = await file.read()
 
         # Send full photo to Gemini for detection
-        import google.generativeai as genai
         from PIL import Image
         import io as _io
         gemini_key = os.getenv("GEMINI_API_KEY", "")
@@ -4756,8 +4756,6 @@ async def demo_scan(request: Request):
         contents = await file.read()
         if len(contents) > 10 * 1024 * 1024:
             raise HTTPException(413, "Image too large (10MB max)")
-
-        import google.generativeai as genai
         from PIL import Image, ImageOps
         import io as _io
         import json as _json
@@ -5326,7 +5324,6 @@ async def scan_auction_url(request: Request):
     return items in same format the frontend expects.
     """
     import os, json, re, uuid
-    import google.generativeai as genai
     try:
         body = await request.json()
     except Exception:
@@ -5359,8 +5356,9 @@ async def scan_auction_url(request: Request):
     text = text[:12000]  # cap for Gemini
 
     # Run Gemini lot extraction
-    genai.configure(api_key=gemini_key)
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    from google import genai as _genai3
+    from google.genai import types as _gtypes3
+    _client3 = _genai3.Client(api_key=gemini_key)
 
     prompt = """You are an auction catalog parser. Extract every lot from this auction page.
 
@@ -5378,11 +5376,12 @@ Return ONLY a JSON array. No markdown. If no lots found return [].
 Example: [{"lot":"5","title":"Sony Headphones","description":"Wireless noise canceling","estimate_low":80,"estimate_high":150,"your_value":100,"image_url":null}]"""
 
     try:
-        response = model.generate_content(
-            [prompt, f"\nAUCTION PAGE TEXT:\n{text}"],
-            generation_config={"max_output_tokens": 8000}
+        resp = _client3.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[prompt, f"\nAUCTION PAGE TEXT:\n{text}"],
+            config=_gtypes3.GenerateContentConfig(max_output_tokens=8000)
         )
-        raw = response.text.strip()
+        raw = resp.text.strip()
         if "```" in raw:
             raw = raw.split("```")[1]
             if raw.startswith("json"): raw = raw[4:]
