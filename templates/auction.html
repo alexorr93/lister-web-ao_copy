@@ -586,8 +586,13 @@ async function startUrlScan() {
         var ir = await fetch('/api/auction/items/'+sessionId);
         var items = await ir.json();
         if (items && items.length) document.getElementById('url-status').textContent = 'Found '+items.length+' items...';
-        if ((items && items.length > 0) || polls > 30) {
+        if ((items && items.length > 0) || polls > 15) {
           clearInterval(pollInterval);
+          if (!items || !items.length) {
+            document.getElementById('url-progress').style.display='none';
+            alert('No items found. Try uploading the PDF catalog instead.');
+            return;
+          }
           document.getElementById('url-bar').style.width = '100%';
           document.getElementById('url-status').textContent = 'Complete! '+(items?items.length:0)+' items';
           var scanId = 'url_'+Date.now();
