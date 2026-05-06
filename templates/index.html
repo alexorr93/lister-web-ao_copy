@@ -2537,6 +2537,19 @@ function toggleSavedBatchesDropdown() {
   }
 }
 
+// Delegated click handler for saved batch items
+document.addEventListener('click', function(e) {
+  var item = e.target.closest('.saved-batch-dd-item');
+  if (item) {
+    var id = item.getAttribute('data-id');
+    if (id) {
+      loadBatch(id);
+      var dd = document.getElementById('saved-batches-dropdown');
+      if (dd) dd.style.display = 'none';
+    }
+  }
+});
+
 async function loadSavedBatchesDropdown() {
   var list = document.getElementById('saved-batches-dd-list');
   if (!list) return;
