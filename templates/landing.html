@@ -814,25 +814,79 @@ footer {
 
 <!-- HOW IT WORKS -->
 <div class="how-section">
-  <div style="text-align:center;max-width:600px;margin:0 auto;" class="fade-in">
+  <div style="text-align:center;max-width:700px;margin:0 auto;" class="fade-in">
     <div class="section-label">// workflow</div>
     <h2 class="section-title" style="color:#fff;">From sourced to<br><span style="color:var(--green);">listed</span> in minutes.</h2>
   </div>
-  <div class="steps-grid">
-    <div class="step fade-in">
-      <div class="step-num">01</div>
-      <div class="step-title">Snap a photo</div>
-      <div class="step-desc">Point your camera at any item. Robo handles the rest — no barcodes, no manual entry.</div>
+
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:24px;max-width:1400px;margin:64px auto 0;" class="fade-in">
+
+    <!-- Step 1 -->
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:24px;padding:40px;position:relative;overflow:hidden;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:80px;color:rgba(74,222,128,0.06);line-height:1;position:absolute;top:16px;right:24px;">01</div>
+      <!-- Phone photo graphic -->
+      <div style="margin-bottom:28px;">
+        <div style="background:#080b10;border:1px solid #1a2a1a;border-radius:16px;padding:20px;display:inline-block;position:relative;">
+          <div style="width:120px;height:120px;background:linear-gradient(135deg,#0d2a0d,#1a3a1a);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:48px;">👟</div>
+          <div style="position:absolute;bottom:-10px;right:-10px;width:32px;height:32px;background:#4ade80;border-radius:50%;display:flex;align-items:center;justify-content:center;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+        </div>
+      </div>
+      <div style="font-family:'DM Mono',monospace;font-size:12px;color:var(--green);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:10px;">Step 01</div>
+      <div style="font-size:26px;font-weight:800;color:#fff;margin-bottom:12px;line-height:1.2;">Snap a photo</div>
+      <div style="font-size:17px;color:var(--muted2);line-height:1.7;">Point your camera at any item. No barcodes, no manual entry — just a photo.</div>
     </div>
-    <div class="step fade-in">
-      <div class="step-num">02</div>
-      <div class="step-title">Robo identifies &amp; prices it</div>
-      <div class="step-desc">AI pulls real sold data and generates a complete listing in under 30 seconds.</div>
+
+    <!-- Step 2 -->
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:24px;padding:40px;position:relative;overflow:hidden;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:80px;color:rgba(74,222,128,0.06);line-height:1;position:absolute;top:16px;right:24px;">02</div>
+      <!-- Terminal analysis graphic -->
+      <div style="margin-bottom:28px;">
+        <div style="background:#050810;border:1px solid #0d1a0d;border-radius:12px;padding:16px 18px;font-family:'DM Mono',monospace;font-size:13px;line-height:1.9;">
+          <div style="color:#1a4a1a;">robo@scan $ analyze...</div>
+          <div><span style="color:#1a4a1a;">→ </span><span style="color:#4ade80;">Nike Air Force 1 '07</span></div>
+          <div><span style="color:#1a4a1a;">→ </span><span style="color:#f0f4f8;">sold avg: </span><span style="color:#f59e0b;">$95–$110</span></div>
+          <div><span style="color:#1a4a1a;">→ </span><span style="color:#f0f4f8;">suggested: </span><span style="color:#4ade80;">$89.00 ✓</span></div>
+        </div>
+      </div>
+      <div style="font-family:'DM Mono',monospace;font-size:12px;color:var(--green);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:10px;">Step 02</div>
+      <div style="font-size:26px;font-weight:800;color:#fff;margin-bottom:12px;line-height:1.2;">Robo identifies &amp; prices it</div>
+      <div style="font-size:17px;color:var(--muted2);line-height:1.7;">AI pulls real eBay sold data and internet pricing to generate a listing title and suggested price.</div>
     </div>
-    <div class="step fade-in">
-      <div class="step-num">03</div>
-      <div class="step-title">Review &amp; edit</div>
-      <div class="step-desc">Tweak the price, condition, or title. Save to batch or push immediately.</div>
+
+    <!-- Step 3 -->
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:24px;padding:40px;position:relative;overflow:hidden;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:80px;color:rgba(74,222,128,0.06);line-height:1;position:absolute;top:16px;right:24px;">03</div>
+      <!-- Review card graphic -->
+      <div style="margin-bottom:28px;">
+        <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:14px 16px;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+            <div style="width:40px;height:40px;background:rgba(74,222,128,0.08);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:20px;">👟</div>
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:700;color:#fff;">Nike Air Force 1 '07</div>
+              <div style="font-size:11px;color:#4a5568;font-family:'DM Mono',monospace;">editing...</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <div style="flex:1;background:#060810;border:1px solid #1a2332;border-radius:7px;padding:8px;text-align:center;">
+              <div style="font-size:10px;color:#4a5568;font-family:'DM Mono',monospace;margin-bottom:2px;">PRICE</div>
+              <div style="font-size:18px;font-weight:800;color:#4ade80;">$89</div>
+            </div>
+            <div style="flex:1;background:#060810;border:1px solid #1a2332;border-radius:7px;padding:8px;text-align:center;">
+              <div style="font-size:10px;color:#4a5568;font-family:'DM Mono',monospace;margin-bottom:2px;">COND</div>
+              <div style="font-size:13px;font-weight:800;color:#fff;">Used</div>
+            </div>
+            <div style="flex:1;background:#1a3a1a;border:1px solid rgba(74,222,128,0.3);border-radius:7px;padding:8px;text-align:center;cursor:pointer;">
+              <div style="font-size:10px;color:#4a5568;font-family:'DM Mono',monospace;margin-bottom:2px;">PUSH</div>
+              <div style="font-size:13px;font-weight:800;color:#4ade80;">eBay</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="font-family:'DM Mono',monospace;font-size:12px;color:var(--green);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:10px;">Step 03</div>
+      <div style="font-size:26px;font-weight:800;color:#fff;margin-bottom:12px;line-height:1.2;">Review &amp; push</div>
+      <div style="font-size:17px;color:var(--muted2);line-height:1.7;">Adjust the price, set condition, save to batch — or push straight to eBay or Shopify.</div>
     </div>
 
   </div>
