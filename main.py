@@ -168,7 +168,7 @@ async def process_checkout(request: Request):
         raise HTTPException(401, "Not authenticated")
     try:
         # Update scan limit based on plan
-        plan_limits = {"Free Trial": 25, "Starter": 100, "Growth": 500, "Pro": 1000}
+        plan_limits = {"Free Trial": 100, "Reseller": 250, "High Volume": 1000, "Warehouse": 5000, "Enterprise": 99999}
         scan_limit = plan_limits.get(plan, 25)
         biz = supabase.table("businesses").select("name,email").eq("id", business_id).execute()
         if not biz.data:
@@ -3769,7 +3769,7 @@ async def change_account_plan(request: Request):
     try:
         body = await request.json()
         plan = body.get("plan", "")
-        plan_limits = {"Free Trial": 25, "Starter": 100, "Growth": 500, "Pro": 1000}
+        plan_limits = {"Free Trial": 100, "Reseller": 250, "High Volume": 1000, "Warehouse": 5000, "Enterprise": 99999}
         if plan not in plan_limits:
             raise HTTPException(400, "Invalid plan")
         supabase.table("businesses").update({"scan_limit": plan_limits[plan]}).eq("id", business_id).execute()

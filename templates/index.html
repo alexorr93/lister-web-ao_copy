@@ -1121,7 +1121,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <div style="font-size:16px;color:var(--muted);margin-bottom:12px;">Upload one photo of many items - AI detects each one, you review, then scans them all separately. <strong style="color:#f59e0b;">Max 20 items per photo.</strong></div>
       <div id="multi-scan-locked" style="display:none;background:rgba(124,58,237,0.08);border:1px dashed rgba(124,58,237,0.4);border-radius:10px;padding:22px;text-align:center;">
         <div style="font-size:32px;margin-bottom:8px;">🔒</div>
-        <div style="font-size:15px;font-weight:600;margin-bottom:4px;">Available on Growth plan or higher</div>
+        <div style="font-size:15px;font-weight:600;margin-bottom:4px;">Available on Reseller plan or higher</div>
         <div style="font-size:15px;color:var(--muted);margin-bottom:12px;">Detect and scan up to 20 items from one photo.</div>
         <button class="btn btn-primary" onclick="openPlansModal()" style="font-size:16px;padding:8px 16px;">Upgrade Plan</button>
       </div>
@@ -2156,9 +2156,10 @@ window.addEventListener('DOMContentLoaded', () => {
 
 // ── ACCOUNT PAGE ────────────────────────────────────────────────
 const PLAN_TIERS = [
-  {name:'Free Trial', price:0, scans:25, sub:'25 total scans', features:['25 total scans','AI identification','CSV export']},
-  {name:'Starter', price:50, scans:100, sub:'100 scans / month', features:['100 scans / month','AI identification','Live pricing','CSV export']},
-  {name:'Growth', price:150, scans:500, sub:'500 scans / month', featured:true, features:['500 scans / month','AI identification','Live pricing','Priority support']},
+  {name:'Free Trial', price:0, scans:100, sub:'100 free scans', features:['100 total scans','AI identification','All features included','No credit card required']},
+  {name:'Reseller', price:49.99, scans:250, sub:'250 scans / month', features:['250 scans / month','AI identification','All features included','eBay & Shopify push','CSV export']},
+  {name:'High Volume', price:129.99, scans:1000, sub:'1,000 scans / month', featured:true, features:['1,000 scans / month','AI identification','All features included','eBay & Shopify push','CSV export']},
+  {name:'Warehouse', price:299.99, scans:5000, sub:'5,000 scans / month', features:['5,000 scans / month','AI identification','All features included','eBay & Shopify push','CSV export']},
   {name:'Pro', price:250, scans:1000, sub:'1,000 scans / month', features:['1,000 scans / month','AI identification','Live pricing','Dedicated support']}
 ];
 
@@ -4146,7 +4147,7 @@ async function checkMultiScanTier() {
   try {
     var r = await fetch('/api/dashboard/summary?period=month');
     var d = await r.json();
-    var hasAccess = (d.scan_limit || 0) >= 500;
+    var hasAccess = (d.scan_limit || 0) >= 250;
     var locked = document.getElementById('multi-scan-locked');
     var active = document.getElementById('multi-scan-active');
     if (locked) locked.style.display = hasAccess ? 'none' : 'block';
@@ -4172,7 +4173,7 @@ async function startMultiScan(input) {
     var r = await fetch('/api/multi-scan/detect', {method:'POST', body:fd});
     if (!r.ok) {
       if (r.status === 402) {
-        toast('Multi-item scanning requires Growth plan or higher', 'error');
+        toast('Multi-item scanning requires Reseller plan or higher', 'error');
       } else {
         var txt = await r.text();
         toast('Detection failed: ' + (txt || r.status), 'error');
@@ -5364,7 +5365,7 @@ function setScannerMode(mode) {
     var scanLimit = {{ scan_limit }};
     if (scanLimit < 500) {
       setScannerMode('fast');
-      toast('Multi-item scan requires Growth+ plan', 'error');
+      toast('Multi-item scan requires Reseller plan or higher', 'error');
       return;
     }
     // Show the multi upload area — it calls startMultiScan directly
