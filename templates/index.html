@@ -5498,14 +5498,15 @@ function renderMobileTabBar() {
   bar.innerHTML = '';
   tabs.forEach(function(def) {
     var isRobo = def.tab === 'robo';
-    var isActive = !isRobo && currentMobileTab === def.tab;
+    var isActive = isRobo ? currentMobileTab === 'robo' : currentMobileTab === def.tab;
     var tabColor = def.tab === 'home' ? '#22c55e' : def.tab === 'robo' ? '#4ade80' : '#f59e0b';
-    var color = isRobo ? '#4ade80' : (isActive ? tabColor : '#64748b');
+    var activeColor = isActive ? tabColor : '#3a4a5a';
+    var activeBg = isActive ? ('rgba(' + (def.tab==='home'?'34,197,94':def.tab==='robo'?'74,222,128':'245,158,11') + ',0.1)') : 'transparent';
     var btn = document.createElement('button');
     btn.className = 'mobile-tab' + (isActive ? ' active' : '');
-    btn.style.cssText = 'flex:1 1 0;min-width:0;color:' + color + ';border-bottom:' + (isActive ? '2px solid ' + color : '2px solid transparent') + ';';
+    btn.style.cssText = 'flex:1 1 0;min-width:0;color:' + activeColor + ';background:' + activeBg + ';border-radius:10px;border-bottom:' + (isActive ? '2px solid ' + tabColor : '2px solid transparent') + ';';
     btn.onclick = isRobo ? function() { openRoboChat(); } : function() { switchMobileTab(def.tab); };
-    btn.innerHTML = def.svg + '<span style="font-size:11px;font-weight:700;color:' + color + ';line-height:1;width:100%;text-align:center;display:block;margin-top:4px;">' + def.label + '</span>';
+    btn.innerHTML = def.svg + '<span style="font-size:10px;font-weight:700;color:' + activeColor + ';line-height:1;width:100%;text-align:center;display:block;margin-top:3px;letter-spacing:0.03em;text-transform:uppercase;">' + def.label + '</span>';
     bar.appendChild(btn);
   });
 }
