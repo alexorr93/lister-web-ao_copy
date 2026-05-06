@@ -2150,6 +2150,21 @@ function renderPlanCards(currentPlan) {
   }).join('');
 }
 
+
+async function changePassword() {
+  var np = document.getElementById('acct-new-password').value;
+  var cp = document.getElementById('acct-confirm-password').value;
+  if (!np) { toast('Enter a new password', 'error'); return; }
+  if (np !== cp) { toast('Passwords do not match', 'error'); return; }
+  if (np.length < 8) { toast('Password must be at least 8 characters', 'error'); return; }
+  try {
+    await api('POST', '/api/account/change-password', {password: np});
+    document.getElementById('acct-new-password').value = '';
+    document.getElementById('acct-confirm-password').value = '';
+    toast('Password updated');
+  } catch(e) { toast('Failed to update password', 'error'); }
+}
+
 async function saveAccountInfo() {
   const name = document.getElementById('acct-name').value.trim();
   const email = document.getElementById('acct-email').value.trim();
