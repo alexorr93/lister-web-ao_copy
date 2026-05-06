@@ -6042,7 +6042,7 @@ async function sendUserThreadMessage() {
     view.scrollTop = view.scrollHeight;
   }
   try {
-    await fetch('/api/support/thread/message', {
+    await fetch('/api/support/send', {
       method: 'POST', credentials: 'include',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({body: text})
