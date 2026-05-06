@@ -5208,18 +5208,20 @@ async def robo_chat(request: Request):
         gemini_key = os.getenv("GEMINI_API_KEY", "")
         if not gemini_key:
             return {"ok": False, "reply": "Gemini API key not configured."}
-        import google.generativeai as _genai
-        _genai.configure(api_key=gemini_key)
-        system = """You are Robo, an expert AI reselling assistant built into RoboReseller. You have deep knowledge of eBay selling, reselling strategy, product identification, pricing research, and business basics for resellers. You are direct and practical like a seasoned reseller mentor. Give specific actionable advice. Keep responses short — 2-4 sentences max per point. Use line breaks between separate points. No markdown, no bullet symbols, plain text only."""
-        for model_name in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]:
+        from google import genai as _genai
+        from google.genai import types as _gt
+        client = _genai.Client(api_key=gemini_key)
+        system = "You are Robo, an AI reselling expert. Know eBay, pricing, product ID, reselling strategy. Be direct. Short responses, line breaks between points. Plain text only."
+        for _m in ["gemini-2.5-flash-preview-04-17", "gemini-2.0-flash-lite", "gemini-2.0-flash"]:
             try:
-                model = _genai.GenerativeModel(model_name, system_instruction=system)
-                response = model.generate_content(message)
-                return {"ok": True, "reply": response.text}
-            except Exception as model_err:
-                print(f"[Robo] {model_name} failed: {model_err}")
+                _cfg = _gt.GenerateContentConfig(system_instruction=system, temperature=0.7)
+                _resp = client.models.generate_content(model=_m, contents=message, config=_cfg)
+                print("[Robo] ok:", _m)
+                return {"ok": True, "reply": _resp.text}
+            except Exception as _me:
+                print("[Robo] failed:", _m, _me)
                 continue
-        return {"ok": True, "reply": "I'm having trouble connecting right now. Try again in a moment."}
+        return {"ok": True, "reply": "I am having trouble connecting. Try again in a moment."}
     except Exception as e:
         print(f"[Robo chat error] {type(e).__name__}: {e}")
         return {"ok": True, "reply": "I'm having trouble connecting right now. Try again in a moment."}
