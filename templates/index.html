@@ -5455,6 +5455,22 @@ function renderMobileTabBar() {
 
 function switchMobileTab(tabId) {
   currentMobileTab = tabId;
+  try { localStorage.setItem('rr_mobile_tab', tabId); } catch(e) {}
+  try { history.pushState({ tab: tabId }, '', '#' + tabId); } catch(e) {}
+
+  if (tabId === 'robo') {
+    // Robo has no nav-btn — show tab-robo directly
+    document.querySelectorAll('.tab-content').forEach(function(t) {
+      t.style.display = 'none'; t.classList.remove('active');
+    });
+    var roboTab = document.getElementById('tab-robo');
+    if (roboTab) { roboTab.style.display = 'flex'; roboTab.classList.add('active'); }
+    renderMobileTabBar();
+    closeMobileMore();
+    setTimeout(function(){ var i=document.getElementById('robo-tab-input'); if(i) i.focus(); }, 200);
+    return;
+  }
+
   var btn = document.querySelector('.nav-btn[data-tab="' + tabId + '"]');
   if (btn) btn.click();
   renderMobileTabBar();
