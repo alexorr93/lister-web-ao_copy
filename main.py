@@ -2483,13 +2483,21 @@ weight fields: use null if truly unknown"""
         except Exception as gm_err:
             print(f"   Grounding metadata error: {gm_err}")
 
-        raw = response.text.strip()
+        raw = (response.text or "").strip()
         print(f"   Deep research raw response (lot {lot}): {raw[:2000]}")
         try:
             _d = json.loads(raw if raw.startswith("{") else raw[raw.find("{"):raw.rfind("}")+1])
             print(f"   notes: {_d.get(chr(110)+chr(111)+chr(116)+chr(101)+chr(115),chr(101)+chr(109)+chr(112)+chr(116)+chr(121))}")
         except: pass
         print(f"   AI overview chars: {len(ai_overview_html)}, sources: {len(grounding_sources)}")
+        if not raw:
+            print(f"   Empty response for lot {lot} — skipping")
+            return {"revised_value": current_val, "confidence": "low", "pricing_tier": "NO_DATA",
+                    "pricing_flag": "No response from Gemini", "comps": [], "image_notes": "",
+                    "recommendation": "skip", "rec_reason": "No data returned",
+                    "notes": "Research unavailable", "weight_item_lbs": None,
+                    "weight_packaged_lbs": None, "weight_note": None,
+                    "liquidity_score": 0, "liquidity_note": "", "sold_30d": 0, "sold_90d": 0, "active_listings": 0}
         # Strip markdown fences
         if "```" in raw:
             raw = raw.split("```")[1]
@@ -2950,7 +2958,7 @@ your_value must be an integer."""
     executor = ThreadPoolExecutor(max_workers=1)
     try:
         response = await loop.run_in_executor(executor, lambda: model.generate_content(prompt, generation_config={"max_output_tokens": 300}))
-        raw = response.text.strip().replace("```json","").replace("```","").strip()
+        raw = (response.text or "").strip().replace("```json","").replace("```","").strip()
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
