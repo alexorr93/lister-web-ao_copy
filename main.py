@@ -5226,19 +5226,19 @@ When someone asks a question, give a real answer with specifics. If they ask abo
                 print("[Robo] ok:", _m)
                 # Format response for readability
                 raw = _resp.text.strip()
-                # Split into sentences and group into short paragraphs
                 import re
-                sentences = re.split(r'(?<=[.!?])\s+', raw)
-                chunks = []
-                current = []
-                for s in sentences:
-                    current.append(s)
-                    if len(current) >= 2:
-                        chunks.append(' '.join(current))
-                        current = []
-                if current:
-                    chunks.append(' '.join(current))
-                formatted = '\n\n'.join(chunks)
+                # Split on existing newlines first
+                parts = [p.strip() for p in re.split(r'\n+', raw) if p.strip()]
+                # Then split long parts into sentences, max 2 per chunk
+                final = []
+                for part in parts:
+                    sentences = re.split(r'(?<=[.!?])\s+', part)
+                    i = 0
+                    while i < len(sentences):
+                        chunk = ' '.join(sentences[i:i+2])
+                        final.append(chunk)
+                        i += 2
+                formatted = '\n\n'.join(final)
                 return {"ok": True, "reply": formatted}
             except Exception as _me:
                 print("[Robo] failed:", _m, _me)
