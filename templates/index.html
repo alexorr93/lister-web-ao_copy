@@ -61,7 +61,7 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 .nav-btn[data-tab="upload"].active { background: rgba(74,222,128,0.08); color: #4ade80; }
 .nav-btn[data-tab="fastscan"].active { background: rgba(74,222,128,0.08); color: #4ade80; }
 .nav-btn[data-tab="expenses"].active { background: rgba(74,222,128,0.08); color: #4ade80; }
-.nav-btn[data-tab="intake"].active { background: rgba(74,222,128,0.08); color: #4ade80; }
+.nav-btn[data-tab="notes"].active { background: rgba(74,222,128,0.08); color: #4ade80; }
 .nav-btn[data-tab="inventory"].active { background: rgba(74,222,128,0.08); color: #4ade80; }
 .nav-btn[data-tab="settings"].active { background: rgba(74,222,128,0.08); color: #4ade80; }
 .nav-btn[data-tab="messages"].active { background: rgba(74,222,128,0.08); color: #4ade80; }
@@ -495,8 +495,8 @@ select.field-input { background: #fff; color: #0f172a; }
     <button class="nav-btn" data-tab="sales"><svg style="color:#a78bfa;" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
       Sales
     </button>
-    <button class="nav-btn" data-tab="intake"><svg style="color:#64748b;" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/></svg>
-      Intake
+    <button class="nav-btn" data-tab="notes"><svg style="color:#64748b;" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/></svg>
+      Notes
     </button>
     <button class="nav-btn" data-tab="settings"><svg style="color:#64748b;" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
       Account
@@ -1697,14 +1697,14 @@ select.field-input { background: #fff; color: #0f172a; }
   </div>
 
   <!-- INTAKE TAB -->
-  <div class="tab-content" id="tab-intake">
+  <div class="tab-content" id="tab-notes">
     <div style="max-width:1100px;margin:0 auto;">
 
       <!-- Header -->
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
         <div>
-          <div style="font-size:32px;font-weight:800;">📥 Intake</div>
-          <div style="font-size:15px;color:var(--muted);margin-top:2px;" id="intake-stats">Track purchases before you scan them</div>
+          <div style="font-size:32px;font-weight:800;">📝 Notes</div>
+          <div style="font-size:15px;color:var(--muted);margin-top:2px;" id="intake-stats">Jot down purchases, hauls, and anything worth logging</div>
         </div>
         <div style="display:flex;gap:6px;">
           <button class="btn btn-primary" style="font-size:15px;padding:8px 16px;background:#f59e0b;border-color:#f59e0b;color:#000;" onclick="addIntakeRow()">+ Add Row</button>
@@ -1719,9 +1719,8 @@ select.field-input { background: #fff; color: #0f172a; }
               <tr style="background:var(--bg);border-bottom:1px solid var(--border);">
                 <th style="padding:10px 12px;text-align:left;font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;width:90px;">Photo</th>
                 <th style="padding:10px 12px;text-align:left;font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;">Item Name</th>
-                <th style="padding:10px 12px;text-align:left;font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;width:140px;">Purchase Date</th>
+                <th style="padding:10px 12px;text-align:left;font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;width:140px;">Date</th>
                 <th style="padding:10px 12px;text-align:right;font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;width:120px;">Price</th>
-                <th style="padding:10px 12px;text-align:left;font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;width:140px;">SKU Code</th>
                 <th style="padding:10px 12px;text-align:left;font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;">Notes</th>
                 <th style="padding:10px 12px;width:50px;"></th>
               </tr>
@@ -1730,15 +1729,15 @@ select.field-input { background: #fff; color: #0f172a; }
           </table>
         </div>
         <div id="intake-empty" style="padding:60px 24px;text-align:center;display:none;">
-          <div style="font-size:42px;margin-bottom:10px;">📥</div>
-          <div style="font-size:15px;font-weight:600;margin-bottom:4px;">No intake records yet</div>
-          <div style="font-size:16px;color:var(--muted);">Click "Add Row" to log a purchase before scanning</div>
+          <div style="font-size:42px;margin-bottom:10px;">📝</div>
+          <div style="font-size:15px;font-weight:600;margin-bottom:4px;">No notes yet</div>
+          <div style="font-size:16px;color:var(--muted);">Click "Add Row" to start logging</div>
         </div>
       </div>
 
       <!-- Bottom helper text -->
       <div style="margin-top:14px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.25);border-radius:8px;padding:12px 14px;font-size:16px;color:#94a3b8;line-height:1.55;">
-        <strong style="color:#f59e0b;">Tip:</strong> Use intake to log estate sale or auction lots before you photograph each item. Snap a quick photo of a sticker or receipt, jot down the price, and come back to it later. Each row is independent — link to inventory items will come in a future update.
+        <strong style="color:#f59e0b;">Tip:</strong> Use Notes to log estate sale finds, auction lots, or any purchase before you scan. Snap a photo of a receipt, jot down the price, add a note — come back to it anytime.
       </div>
 
     </div>
@@ -2048,7 +2047,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     if (tab === 'detailed') { loadDetailedAnalytics(); }
     if (tab === 'inventory') { loadInventory(); }
   if (tab === 'dashboard') { loadScannerBatches(); }
-    if (tab === 'intake') { if (typeof loadIntake === 'function') loadIntake(); }
+    if (tab === 'notes') { if (typeof loadIntake === 'function') loadIntake(); }
     if (tab === 'expenses') { if (typeof loadExpenses === 'function') loadExpenses(); }
     if (tab === 'fastscan') { if (typeof checkMultiScanTier === 'function') checkMultiScanTier(); }
     if (tab === 'auction')   loadAuctionSessions();
@@ -4557,7 +4556,7 @@ function renderIntakeTable() {
   if (!intakeRows.length) {
     tbody.innerHTML = '';
     if (empty) empty.style.display = 'block';
-    if (stats) stats.textContent = 'Track purchases before you scan them';
+    if (stats) stats.textContent = 'Jot down purchases, hauls, and anything worth logging';
     return;
   }
   if (empty) empty.style.display = 'none';
