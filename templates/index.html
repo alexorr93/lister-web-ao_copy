@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
 <title>RoboReseller</title>
 <style>
-* { max-width: 100%; }
+* { max-width: 100%; box-sizing: border-box; }
 img, video, canvas, iframe { max-width: 100%; }
 :root {
   --bg:       #0a0c10;
@@ -177,7 +177,7 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 @media (max-width: 768px) {
   #home-start-scan { flex-direction: column !important; align-items: flex-start !important; gap: 14px !important; padding: 18px !important; }
   #home-bottom-tiles { grid-template-columns: 1fr !important; }
-  #home-stats-row { grid-template-columns: 1fr 1fr !important; }
+  #home-stats-row { grid-template-columns: 1fr !important; }
   #home-stats-row > div:last-child { grid-column: 1 / -1 !important; }
   .home-hero-btns { margin-left: 0 !important; flex-wrap: wrap !important; width: 100% !important; }
   .home-hero-btns > div { flex: 1 1 calc(50% - 5px) !important; justify-content: center !important; min-width: 120px !important; }
@@ -1456,7 +1456,7 @@ select.field-input { background: #fff; color: #0f172a; }
           <span style="font-size:15px;color:var(--muted);" id="exp-txn-count">0 transactions</span>
         </div>
         <div style="overflow-x:auto;">
-          <table style="width:100%;border-collapse:collapse;font-size:15px;min-width:700px;">
+          <table style="width:100%;border-collapse:collapse;font-size:15px;min-width:0;">
             <thead>
               <tr style="background:rgba(0,0,0,0.15);">
                 <th onclick="sortExpenses('merchant')" style="padding:14px 24px;text-align:left;font-size:16px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.08em;cursor:pointer;user-select:none;border-bottom:1px solid var(--border);">Merchant <span id="exp-sort-merchant">↕</span></th>
@@ -1618,7 +1618,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <!-- Spreadsheet table -->
       <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:10px;overflow:hidden;">
         <div style="overflow-x:auto;">
-          <table id="intake-table" style="width:100%;border-collapse:collapse;font-size:15px;min-width:880px;">
+          <table id="intake-table" style="width:100%;border-collapse:collapse;font-size:15px;min-width:0;">
             <thead>
               <tr style="background:var(--bg);border-bottom:1px solid var(--border);">
                 <th style="padding:10px 12px;text-align:left;font-size:15px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;width:90px;">Photo</th>
