@@ -581,7 +581,12 @@ async function startUrlScan() {
   document.getElementById('url-bar').style.width = '20%';
   document.getElementById('url-status').textContent = 'Scraping auction page...';
   try {
-    var r = await fetch('/api/auction/scan', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:url})});
+    var r = await fetch('/api/auction/scan', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        url:url,
+        mode: document.getElementById('url-mode')?.value || 'all',
+        start_page: parseInt(document.getElementById('url-start-page')?.value)||1,
+        end_page: parseInt(document.getElementById('url-end-page')?.value)||null
+      })});
     if (!r.ok) { var err = await r.json().catch(function(){return{};}); alert('Failed: '+(err.detail||'error')); document.getElementById('url-progress').style.display='none'; return; }
     var data = await r.json();
     var sessionId = data.session_id;

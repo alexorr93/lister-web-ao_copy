@@ -5467,6 +5467,9 @@ async def scan_auction_url(request: Request):
     except Exception:
         raise HTTPException(400, "Invalid JSON")
     url = body.get("url", "").strip()
+    page_mode = body.get("mode", "all")
+    start_page = body.get("start_page", 1) or 1
+    end_page = body.get("end_page")
     if not url:
         raise HTTPException(400, "url required")
 
@@ -5571,7 +5574,14 @@ async def scan_auction_url(request: Request):
                 # Try robo-scraper microservice for JS-rendered pages
                 try:
                     import json as _rjson
-                    scrape_payload = _rjson.dumps({"url": url, "extract_images": True}).encode()
+                    scrape_payload = _rjson.dumps({
+                        "url": url,
+                        "extract_images": True,
+                        "mode": page_mode,
+                        "start_page": start_page,
+                        "end_page": end_page,
+                        "max_pages": 30
+                    }).encode()
                     scrape_req = urllib.request.Request(
                         "https://robo-scraper-production.up.railway.app/scrape",
                         data=scrape_payload,
