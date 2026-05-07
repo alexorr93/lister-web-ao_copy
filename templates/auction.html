@@ -166,6 +166,20 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
           <input type="text" id="url-input" placeholder="Paste auction URL (Dickensheet, Purple Wave, etc.)" style="flex:1;background:#1e2535;border:1px solid #2d3348;border-radius:8px;padding:10px 14px;color:#f1f5f9;font-size:13px;font-family:inherit;outline:none;">
           <button class="btn-amber" onclick="startUrlScan()" style="white-space:nowrap;">Scan URL</button>
         </div>
+        <div style="display:flex;gap:8px;margin-top:8px;align-items:center;">
+          <select id="url-mode" onchange="togglePageRange()" style="background:#1e2535;border:1px solid #2d3348;border-radius:8px;padding:8px 12px;color:#f1f5f9;font-size:12px;font-family:inherit;outline:none;cursor:pointer;">
+            <option value="all">All pages (auto)</option>
+            <option value="single">This page only</option>
+            <option value="range">Page range</option>
+          </select>
+          <div id="page-range-inputs" style="display:none;gap:8px;align-items:center;">
+            <input type="number" id="url-start-page" placeholder="From" min="1" style="width:72px;background:#1e2535;border:1px solid #2d3348;border-radius:8px;padding:8px 10px;color:#f1f5f9;font-size:12px;font-family:inherit;outline:none;">
+            <span style="color:#64748b;font-size:12px;">to</span>
+            <input type="number" id="url-end-page" placeholder="To" min="1" style="width:72px;background:#1e2535;border:1px solid #2d3348;border-radius:8px;padding:8px 10px;color:#f1f5f9;font-size:12px;font-family:inherit;outline:none;">
+          </div>
+        </div>
+        <div style="display:none">
+        </div>
         <div id="url-progress" style="display:none;margin-top:10px;background:#1e2535;border:1px solid #2d3348;border-radius:8px;padding:12px 14px;">
           <div style="font-size:12px;color:#EF9F27;font-weight:600;" id="url-status">Scanning URL...</div>
           <div style="height:4px;background:#2d3348;border-radius:2px;margin-top:8px;overflow:hidden;"><div id="url-bar" style="height:100%;background:#EF9F27;border-radius:2px;width:0%;transition:width 0.5s;"></div></div>
@@ -572,6 +586,12 @@ function openGemini(title, imgUrl) {
   var prompt = 'I am evaluating this auction item for resale. Research and give me:\\n\\nItem: ' + title + '\\n\\n1. Current eBay sold prices\\n2. Typical resale value range\\n3. Key value factors\\n4. Buy recommendation';
   var q = stripAuctionTitle(title);
   window.open('https://www.google.com/search?q=' + encodeURIComponent(q + ' resale value eBay sold'), '_blank', 'noopener,width=1000,height=800');
+}
+
+function togglePageRange() {
+  var mode = document.getElementById('url-mode').value;
+  var rangeDiv = document.getElementById('page-range-inputs');
+  rangeDiv.style.display = mode === 'range' ? 'flex' : 'none';
 }
 
 async function startUrlScan() {
