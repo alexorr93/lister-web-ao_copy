@@ -5567,6 +5567,33 @@ async def scan_auction_url(request: Request):
                         print(f"Apify actor error: {apify_err}")
 
             if not text:
+                # Try robo-scraper microservice for JS-rendered pages
+                try:
+                    import json as _rjson
+                    scrape_payload = _rjson.dumps({"url": url, "extract_images": True}).encode()
+                    scrape_req = urllib.request.Request(
+                        "https://robo-scraper-production.up.railway.app/scrape",
+                        data=scrape_payload,
+                        headers={"Content-Type": "application/json"},
+                        method="POST"
+                    )
+                    with urllib.request.urlopen(scrape_req, timeout=60) as sr:
+                        scrape_data = _rjson.loads(sr.read())
+                    rs_lots = scrape_data.get("lots", [])
+                    rs_raw = scrape_data.get("raw_text", "")
+                    if rs_lots:
+                        lines = []
+                        for lot in rs_lots:
+                            lines.append(f"Lot {lot.get('lot','')}: {lot.get('title','')} | Estimate: {lot.get('estimate','')} | Image: {lot.get('image_url','')}")
+                        text = "\n".join(lines)
+                        print(f"robo-scraper: got {len(rs_lots)} structured lots")
+                    elif rs_raw:
+                        text = rs_raw
+                        print(f"robo-scraper: got raw text ({len(text)} chars)")
+                except Exception as rs_err:
+                    print(f"robo-scraper error: {rs_err}")
+
+            if not text:
                 # Fallback: fetch HTML and extract lot data from script tags
                 html = fetch_url(url)
                 # Look for JSON embedded in page
