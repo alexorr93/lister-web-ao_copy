@@ -5647,7 +5647,7 @@ Example: [{"lot":"5","title":"Sony Headphones","description":"Wireless noise can
         resp = _client3.models.generate_content(
             model="gemini-2.5-flash",
             contents=[prompt, f"\nAUCTION PAGE TEXT:\n{text}"],
-            config=_gtypes3.GenerateContentConfig(max_output_tokens=8000)
+            config=_gtypes3.GenerateContentConfig(max_output_tokens=32000)
         )
         raw = resp.text.strip()
         if "```" in raw:
@@ -5658,7 +5658,11 @@ Example: [{"lot":"5","title":"Sony Headphones","description":"Wireless noise can
         end = raw.rfind("]") + 1
         if start >= 0 and end > start:
             raw = raw[start:end]
-        items = json.loads(raw)
+        try:
+            items = json.loads(raw)
+        except Exception:
+            from json_repair import repair_json
+            items = json.loads(repair_json(raw))
     except Exception as e:
         print(f"URL scan Gemini error: {e}")
         items = []
