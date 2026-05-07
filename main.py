@@ -5490,6 +5490,7 @@ async def scan_auction_url(request: Request):
 
     try:
         text = ""
+        scraper_images = {}
         # ── Bidspotter ──
         if "bidspotter.com" in url:
             print(f"[DEBUG] Bidspotter URL detected: {url}")
@@ -5586,9 +5587,12 @@ async def scan_auction_url(request: Request):
                         for lot in rs_lots:
                             lines.append(f"Lot {lot.get('lot','')}: {lot.get('title','')} | Estimate: {lot.get('estimate','')} | Image: {lot.get('image_url','')}")
                         text = "\n".join(lines)
-                        print(f"robo-scraper: got {len(rs_lots)} structured lots")
+                        # Stash image URLs for later attachment to items
+                        scraper_images = {str(lot.get('lot','')): lot.get('image_url','') for lot in rs_lots if lot.get('image_url')}
+                        print(f"robo-scraper: got {len(rs_lots)} structured lots, {len(scraper_images)} with images")
                     elif rs_raw:
                         text = rs_raw
+                        scraper_images = {}
                         print(f"robo-scraper: got raw text ({len(text)} chars)")
                 except Exception as rs_err:
                     print(f"robo-scraper error: {rs_err}")
@@ -5678,6 +5682,14 @@ Example: [{"lot":"5","title":"Sony Headphones","description":"Wireless noise can
         }).execute()
     except Exception as e:
         print(f"Session save error: {e}")
+
+    # Attach scraped images to items by lot number
+    if scraper_images:
+        for it in items:
+            lot_str = str(it.get("lot", "")).strip()
+            if lot_str in scraper_images and not it.get("image_url"):
+                it["image_url"] = scraper_images[lot_str]
+                it["_page_img"] = scraper_images[lot_str]
 
     return {"session_id": session_id, "items": items, "total": len(items)}
 
