@@ -2792,6 +2792,8 @@ function toggleSelect(id) {
   var bs = document.getElementById('batch-summary');
   if (bs) bs.textContent = batchLine;
   updateSubmitBtn();
+  // List view rows aren't updated by the tile DOM tweaks above — re-render to sync visual state
+  if (scanView === 'list') renderTiles();
 }
 function selectAll()   { listings.forEach(l => selected.add(l.id)); renderTiles(); }
 function toggleSavedBatchesDropdown() {
@@ -2862,10 +2864,11 @@ async function bulkDeleteSelected() {
 function deselectAll() { selected.clear(); renderTiles(); }
 function updateSubmitBtn() {
   const btn = document.getElementById('submit-batch-btn');
+  const delBtn = document.getElementById('bulk-delete-btn');
   const count = document.getElementById('submit-count');
   if (btn) btn.style.display = selected.size > 0 ? 'inline-block' : 'none';
+  if (delBtn) delBtn.style.display = selected.size > 0 ? 'inline-block' : 'none';
   if (count) count.textContent = selected.size;
-  // Update batch summary line
   if (typeof renderBatchSummary === 'function') renderBatchSummary();
 }
 

@@ -1677,6 +1677,14 @@ async def update_listing(item_id: str, body: UpdateField):
     except Exception as e:
         raise HTTPException(500, str(e))
 
+@app.delete("/api/listings/{item_id}")
+async def delete_listing(item_id: str):
+    try:
+        supabase.table("listings").delete().eq("id", item_id).execute()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 @app.post("/api/listings/{item_id}/rescan")
 async def rescan_listing(item_id: str):
     try:
