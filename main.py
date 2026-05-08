@@ -860,6 +860,36 @@ def detect_isbn_from_text(text):
     return matches[0] if matches else None
 
 
+def _suggest_ebay_category(title: str, token: str, api_base: str) -> str:
+    """Use eBay taxonomy API to suggest a category from item title.
+    Returns category_id string, or empty string if no suggestion."""
+    if not title or not token:
+        return ""
+    try:
+        import requests as _req
+        from urllib.parse import quote as _q
+        headers = {"Authorization": f"Bearer {token}"}
+        # Use first 5 words for cleaner match — full titles confuse the matcher
+        q = " ".join(title.split()[:5])
+        r = _req.get(
+            f"{api_base}/commerce/taxonomy/v1/category_tree/0/get_category_suggestions?q={_q(q)}",
+            headers=headers,
+            timeout=10,
+        )
+        if not r.ok:
+            print(f"[eBay autocat] suggestions failed: status={r.status_code}")
+            return ""
+        suggestions = r.json().get("categorySuggestions", [])
+        if not suggestions:
+            return ""
+        cat_id = str(suggestions[0].get("category", {}).get("categoryId", "") or "")
+        print(f"[eBay autocat] '{q}' -> {cat_id}")
+        return cat_id
+    except Exception as e:
+        print(f"[eBay autocat] error: {e}")
+        return ""
+
+
 @app.post("/api/ebay/submit-listings")
 async def submit_listings_to_ebay(request: Request):
     """Submit selected listings to eBay as draft listings using Inventory API."""
@@ -899,8 +929,24 @@ async def submit_listings_to_ebay(request: Request):
                 condition = "USED_EXCELLENT" if (listing.get("condition") or "used").lower() == "used" else "NEW"
                 # Prefer modal-provided category, fall back to DB
                 modal_lookup = modal_items.get(str(listing["id"]), {})
-                category_id = str(modal_lookup.get("category_id") or listing.get("ebay_category_id") or "99")
-                print(f"[eBay] Using category_id={category_id} for {listing.get('id')} (modal={modal_lookup.get('category_id')}, db={listing.get('ebay_category_id')})")
+                category_id = str(modal_lookup.get("category_id") or listing.get("ebay_category_id") or "")
+                # Treat 0, empty, "99" (placeholder) as unset
+                if category_id in ("", "0", "99"):
+                    category_id = ""
+                if not category_id:
+                    suggested = _suggest_ebay_category(title, token, api_base)
+                    if suggested:
+                        category_id = suggested
+                        # Save back to DB so we don't re-detect next time
+                        try:
+                            supabase.table("listings").update({"ebay_category_id": category_id}).eq("id", listing["id"]).eq("business_id", business_id).execute()
+                        except Exception as _e:
+                            print(f"[eBay autocat] failed to save category back: {_e}")
+                if not category_id:
+                    print(f"[eBay] No category for {listing.get('id')}, skipping")
+                    results.append({"id": listing["id"], "ok": False, "error": "category_required", "title": title})
+                    continue
+                print(f"[eBay] Using category_id={category_id} for {listing.get('id')}")
                 description = listing.get("description") or title
                 qty = int(listing.get("quantity") or 1)
 
