@@ -2819,6 +2819,15 @@ function toggleSavedBatchesDropdown() {
   var dd = document.getElementById('saved-batches-dropdown');
   if (!dd) return;
   if (dd.style.display === 'none') {
+    var btn = document.querySelector('[onclick="toggleSavedBatchesDropdown()"]');
+    if (btn) {
+      var rect = btn.getBoundingClientRect();
+      dd.style.position = 'fixed';
+      dd.style.top = (rect.bottom + 6) + 'px';
+      dd.style.right = (window.innerWidth - rect.right) + 'px';
+      dd.style.left = 'auto';
+      dd.style.minWidth = '280px';
+    }
     dd.style.display = 'block';
     loadSavedBatchesDropdown();
     // Close on outside click
