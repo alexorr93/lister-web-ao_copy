@@ -1211,7 +1211,7 @@ async def get_scheduled_listings(request: Request):
         # Pull from our DB - listings pushed to eBay
         db_res = supabase.table("listings").select(
             "id,title,price,photo_id,ebay_item_id,status,created_at"
-        ).eq("business_id", business_id).eq("status", "ebay_scheduled").execute()
+        ).eq("business_id", business_id).not_.is_("ebay_item_id", "null").neq("ebay_item_id", "").execute()
 
         items = db_res.data or []
         print(f"[eBay Listings] found {len(items)} scheduled listings in DB")
