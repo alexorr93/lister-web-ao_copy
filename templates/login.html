@@ -3,41 +3,544 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Login — Lister AI</title>
+<title>AUTH MODULE — RoboSeller</title>
 <link rel="icon" type="image/png" href="/static/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { background:#0a0c10; color:#f1f5f9; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; min-height:100vh; display:flex; align-items:center; justify-content:center; }
-  .card { background:#111318; border:1px solid #1e2330; border-radius:16px; padding:40px; width:100%; max-width:400px; }
-  .logo { text-align:center; margin-bottom:32px; }
-  .logo img { width:56px; height:56px; border-radius:50%; }
-  .logo h1 { font-size:22px; font-weight:800; margin-top:12px; }
-  .logo p { color:#64748b; font-size:13px; margin-top:4px; }
-  .field { margin-bottom:16px; }
-  .field label { display:block; font-size:12px; color:#64748b; font-weight:600; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.05em; }
-  .field input { width:100%; background:#0f1117; border:1px solid #1e2330; border-radius:8px; padding:12px 14px; color:#f1f5f9; font-size:14px; outline:none; transition:border-color 0.2s; }
-  .field input:focus { border-color:#22c55e; }
-  .btn { width:100%; background:#22c55e; border:none; border-radius:8px; padding:13px; color:#000; font-size:15px; font-weight:700; cursor:pointer; margin-top:8px; transition:background 0.2s; }
-  .btn:hover { background:#16a34a; }
-  .error { background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:8px; padding:12px; color:#ef4444; font-size:13px; margin-bottom:16px; }
-  .link { text-align:center; margin-top:20px; font-size:13px; color:#64748b; }
-  .link a { color:#22c55e; text-decoration:none; }
+:root {
+  --bg: #050608;
+  --chassis: #0d1015;
+  --chassis-light: #181d27;
+  --chassis-dark: #02030400;
+  --bevel-light: rgba(255,255,255,0.06);
+  --bevel-dark: rgba(0,0,0,0.6);
+  --inset: #050709;
+  --green: #4ade80;
+  --green-dim: #22c55e;
+  --green-deep: #052e16;
+  --green-glow: rgba(74,222,128,0.5);
+  --amber: #f59e0b;
+  --amber-glow: rgba(245,158,11,0.5);
+  --red: #ef4444;
+  --red-glow: rgba(239,68,68,0.5);
+  --text: #d8e0eb;
+  --text-dim: #6a7585;
+  --label: #8a96a8;
+  --border: #1a1f2a;
+  --serif: 'Instrument Sans', system-ui, sans-serif;
+  --mono: 'DM Mono', 'SF Mono', Menlo, monospace;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--serif);
+  overflow: hidden;
+}
+
+/* Ambient grid background */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background:
+    radial-gradient(ellipse 60% 40% at 50% 50%, rgba(74,222,128,0.04), transparent 70%),
+    linear-gradient(rgba(255,255,255,0.012) 1px, transparent 1px) 0 0 / 32px 32px,
+    linear-gradient(90deg, rgba(255,255,255,0.012) 1px, transparent 1px) 0 0 / 32px 32px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* CRT scanline overlay */
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.12) 2px, rgba(0,0,0,0.12) 3px);
+  pointer-events: none;
+  z-index: 9999;
+  mix-blend-mode: multiply;
+}
+
+.stage {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+
+/* ─────── CHASSIS ─────── */
+.chassis {
+  position: relative;
+  width: 100%;
+  max-width: 460px;
+  background:
+    linear-gradient(180deg, #161b25 0%, #0e1218 100%);
+  border-radius: 18px;
+  padding: 14px;
+  box-shadow:
+    0 0 0 1px var(--bevel-light) inset,
+    0 1px 0 rgba(255,255,255,0.08) inset,
+    0 -1px 0 rgba(0,0,0,0.8) inset,
+    0 30px 60px -20px rgba(0,0,0,0.9),
+    0 60px 120px -40px rgba(0,0,0,0.7);
+  animation: bootIn 0.6s cubic-bezier(.2,.8,.2,1) both;
+}
+
+@keyframes bootIn {
+  0% { transform: scale(0.97); opacity: 0; filter: brightness(0.3); }
+  60% { filter: brightness(1.1); }
+  100% { transform: scale(1); opacity: 1; filter: brightness(1); }
+}
+
+/* Screw heads in corners */
+.screw {
+  position: absolute;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #2a3140, #0a0d12);
+  box-shadow:
+    0 0 0 1px rgba(0,0,0,0.6),
+    inset 0 0 2px rgba(0,0,0,0.8);
+}
+.screw::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-top: 1px solid rgba(0,0,0,0.7);
+  transform: rotate(40deg);
+}
+.screw.tl { top: 8px; left: 8px; }
+.screw.tr { top: 8px; right: 8px; }
+.screw.bl { bottom: 8px; left: 8px; }
+.screw.br { bottom: 8px; right: 8px; }
+
+/* ─────── HEADER STRIP ─────── */
+.strip {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px 10px;
+  border-bottom: 1px solid rgba(0,0,0,0.5);
+  margin-bottom: 14px;
+}
+.serial {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-dim);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+.leds {
+  display: flex; gap: 10px;
+  align-items: center;
+}
+.led-group {
+  display: flex; align-items: center; gap: 5px;
+}
+.led {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #1a1f29;
+  box-shadow: inset 0 0 2px rgba(0,0,0,0.8);
+  transition: all 0.3s;
+}
+.led.on.green {
+  background: var(--green);
+  box-shadow:
+    inset 0 0 2px rgba(255,255,255,0.6),
+    0 0 6px var(--green-glow),
+    0 0 12px var(--green-glow);
+  animation: pulse 2.5s ease-in-out infinite;
+}
+.led.on.amber {
+  background: var(--amber);
+  box-shadow:
+    inset 0 0 2px rgba(255,255,255,0.6),
+    0 0 6px var(--amber-glow),
+    0 0 12px var(--amber-glow);
+}
+.led.on.red {
+  background: var(--red);
+  box-shadow:
+    inset 0 0 2px rgba(255,255,255,0.6),
+    0 0 6px var(--red-glow);
+}
+.led-label {
+  font-family: var(--mono);
+  font-size: 8px;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+@keyframes pulse {
+  50% { filter: brightness(1.3); }
+}
+
+/* ─────── INNER PANEL ─────── */
+.panel {
+  background: var(--inset);
+  border-radius: 12px;
+  padding: 26px 26px 22px;
+  box-shadow:
+    inset 0 1px 2px rgba(0,0,0,0.9),
+    inset 0 -1px 0 rgba(255,255,255,0.03);
+  position: relative;
+}
+
+/* ─────── CRT WINDOW WITH ROBO ─────── */
+.crt {
+  position: relative;
+  width: 88px; height: 88px;
+  margin: 0 auto 18px;
+  background: radial-gradient(ellipse at center, #0a1f12 0%, #051509 70%, #02080340 100%);
+  border-radius: 14px;
+  box-shadow:
+    inset 0 2px 4px rgba(0,0,0,0.9),
+    inset 0 0 0 1px rgba(0,0,0,0.6),
+    0 0 0 1px var(--bevel-light),
+    0 0 24px rgba(74,222,128,0.15);
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+.crt::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.3) 2px, rgba(0,0,0,0.3) 3px);
+  pointer-events: none;
+}
+.crt::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.06) 0%, transparent 30%, transparent 70%, rgba(0,0,0,0.4) 100%);
+  pointer-events: none;
+}
+.robo {
+  width: 56px; height: 56px;
+  filter: drop-shadow(0 0 6px var(--green-glow));
+  animation: roboFloat 3s ease-in-out infinite, roboFlicker 0.15s steps(2) infinite;
+}
+@keyframes roboFloat {
+  50% { transform: translateY(-2px); }
+}
+@keyframes roboFlicker {
+  50% { opacity: 0.95; }
+}
+.robo-eye {
+  animation: blink 4s steps(1) infinite;
+}
+@keyframes blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  94%, 98% { transform: scaleY(0.1); }
+}
+
+/* ─────── HEADINGS ─────── */
+.module-tag {
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.4em;
+  color: var(--green);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  text-shadow: 0 0 8px var(--green-glow);
+}
+.module-title {
+  text-align: center;
+  font-family: var(--serif);
+  font-weight: 800;
+  font-size: 26px;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.module-sub {
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 22px;
+  letter-spacing: 0.05em;
+}
+
+/* ─────── ERROR ─────── */
+.alert {
+  display: flex; align-items: flex-start; gap: 10px;
+  background: rgba(239,68,68,0.08);
+  border: 1px solid rgba(239,68,68,0.3);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: #fca5a5;
+  letter-spacing: 0.02em;
+}
+.alert::before {
+  content: '⚠';
+  color: var(--red);
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+/* ─────── INPUT FIELDS ─────── */
+.field {
+  margin-bottom: 14px;
+}
+.field-label {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--label);
+}
+.field-status {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 9px;
+  color: var(--text-dim);
+}
+.field-status .led {
+  width: 5px; height: 5px;
+}
+.field-input {
+  width: 100%;
+  background: var(--inset);
+  border: 1px solid #0a0d12;
+  border-radius: 7px;
+  padding: 13px 14px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  outline: none;
+  box-shadow:
+    inset 0 2px 3px rgba(0,0,0,0.7),
+    inset 0 -1px 0 rgba(255,255,255,0.02);
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+.field-input:focus {
+  border-color: var(--green-dim);
+  box-shadow:
+    inset 0 2px 3px rgba(0,0,0,0.7),
+    0 0 0 3px rgba(74,222,128,0.12),
+    0 0 14px rgba(74,222,128,0.18);
+}
+.field-input::placeholder {
+  color: #2e3744;
+  font-family: var(--mono);
+}
+
+/* ─────── SUBMIT BUTTON ─────── */
+.btn {
+  width: 100%;
+  margin-top: 8px;
+  position: relative;
+  background: linear-gradient(180deg, #28da74 0%, #1ba85a 100%);
+  border: 1px solid #0d6334;
+  border-radius: 8px;
+  padding: 14px;
+  color: #032512;
+  font-family: var(--serif);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.4),
+    inset 0 -2px 0 rgba(0,0,0,0.3),
+    0 4px 0 #0a4a26,
+    0 6px 16px rgba(0,0,0,0.4),
+    0 0 24px rgba(74,222,128,0.25);
+  transition: all 0.08s;
+  overflow: hidden;
+}
+.btn:hover {
+  filter: brightness(1.05);
+}
+.btn:active {
+  transform: translateY(3px);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.3),
+    inset 0 -1px 0 rgba(0,0,0,0.2),
+    0 1px 0 #0a4a26,
+    0 2px 6px rgba(0,0,0,0.4),
+    0 0 18px rgba(74,222,128,0.3);
+}
+.btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+  transform: translateX(-100%);
+  transition: transform 0.6s;
+}
+.btn:hover::before {
+  transform: translateX(100%);
+}
+
+/* ─────── FOOTER STATUS ─────── */
+.footer {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 14px;
+  padding: 0 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.08em;
+}
+.footer a {
+  color: var(--green);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--green);
+  text-shadow: 0 0 8px var(--green-glow);
+}
+.footer a:hover { filter: brightness(1.2); }
+.uptime { font-variant-numeric: tabular-nums; }
+
+/* ─────── MOBILE ─────── */
+@media (max-width: 480px) {
+  .stage { padding: 12px; }
+  .panel { padding: 22px 20px 18px; }
+  .module-title { font-size: 22px; }
+  .crt { width: 74px; height: 74px; }
+  .robo { width: 46px; height: 46px; }
+  .leds { gap: 6px; }
+  .led-label { display: none; }
+}
 </style>
 </head>
 <body>
-<div class="card">
-  <div class="logo">
-    <img src="/static/favicon.png" alt="Logo">
-    <h1>Lister AI</h1>
-    <p>Sign in to your account</p>
+
+<div class="stage">
+  <div class="chassis">
+
+    <div class="screw tl"></div>
+    <div class="screw tr"></div>
+    <div class="screw bl"></div>
+    <div class="screw br"></div>
+
+    <!-- HEADER STRIP -->
+    <div class="strip">
+      <div class="serial">RBS-AUTH · MK-IV</div>
+      <div class="leds">
+        <div class="led-group">
+          <div class="led on green"></div>
+          <span class="led-label">SYS</span>
+        </div>
+        <div class="led-group">
+          <div class="led on amber"></div>
+          <span class="led-label">AUTH</span>
+        </div>
+        <div class="led-group">
+          <div class="led on green"></div>
+          <span class="led-label">SEC</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- INNER PANEL -->
+    <div class="panel">
+
+      <!-- CRT MONITOR W/ ROBO -->
+      <div class="crt">
+        <svg class="robo" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <!-- Antenna -->
+          <line x1="32" y1="6" x2="32" y2="14" stroke="#4ade80" stroke-width="2"/>
+          <circle cx="32" cy="5" r="2.5" fill="#4ade80"/>
+
+          <!-- Head -->
+          <rect x="14" y="14" width="36" height="26" rx="5" fill="#22c55e" stroke="#4ade80" stroke-width="1"/>
+          <rect x="14" y="14" width="36" height="3" fill="#4ade80" opacity="0.5"/>
+
+          <!-- Eye visor -->
+          <rect x="18" y="22" width="28" height="10" rx="2" fill="#02180b"/>
+
+          <!-- Eyes -->
+          <g class="robo-eye">
+            <rect x="22" y="25" width="5" height="4" rx="1" fill="#4ade80"/>
+            <rect x="37" y="25" width="5" height="4" rx="1" fill="#4ade80"/>
+          </g>
+
+          <!-- Mouth slit -->
+          <rect x="24" y="34" width="16" height="2" rx="1" fill="#4ade80" opacity="0.7"/>
+
+          <!-- Neck -->
+          <rect x="28" y="40" width="8" height="3" fill="#1a3a26"/>
+
+          <!-- Body -->
+          <rect x="12" y="43" width="40" height="16" rx="4" fill="#22c55e" stroke="#4ade80" stroke-width="1"/>
+
+          <!-- Chest panel -->
+          <rect x="22" y="47" width="20" height="8" rx="1" fill="#02180b"/>
+          <circle cx="27" cy="51" r="1.5" fill="#4ade80"/>
+          <circle cx="32" cy="51" r="1.5" fill="#f59e0b"/>
+          <circle cx="37" cy="51" r="1.5" fill="#4ade80"/>
+
+          <!-- Side bolts -->
+          <circle cx="14" cy="46" r="1" fill="#0d3a1f"/>
+          <circle cx="50" cy="46" r="1" fill="#0d3a1f"/>
+          <circle cx="14" cy="56" r="1" fill="#0d3a1f"/>
+          <circle cx="50" cy="56" r="1" fill="#0d3a1f"/>
+        </svg>
+      </div>
+
+      <div class="module-tag">// AUTH MODULE</div>
+      <div class="module-title">RoboSeller</div>
+      <div class="module-sub">[ awaiting credentials ]</div>
+
+      {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+
+      <form method="POST" action="/login" autocomplete="on">
+
+        <div class="field">
+          <div class="field-label">
+            <span>Operator ID</span>
+            <span class="field-status"><span class="led on green"></span>READY</span>
+          </div>
+          <input class="field-input" type="email" name="email" placeholder="user@domain" required autofocus>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
+            <span>Access Key</span>
+            <span class="field-status"><span class="led on green"></span>ENCRYPTED</span>
+          </div>
+          <input class="field-input" type="password" name="password" placeholder="••••••••••••" required>
+        </div>
+
+        <button class="btn" type="submit">Initialize Session</button>
+
+      </form>
+
+    </div>
+
+    <!-- FOOTER STATUS -->
+    <div class="footer">
+      <span>v4.7 · <span class="uptime" id="clock">--:--:--</span></span>
+      <span>NEW OPERATOR? <a href="/register">REGISTER</a></span>
+    </div>
+
   </div>
-  {% if error %}<div class="error">{{ error }}</div>{% endif %}
-  <form method="POST" action="/login">
-    <div class="field"><label>Email</label><input type="email" name="email" required autofocus></div>
-    <div class="field"><label>Password</label><input type="password" name="password" required></div>
-    <button class="btn" type="submit">Sign In</button>
-  </form>
-  <div class="link">Don't have an account? <a href="/register">Register</a></div>
 </div>
+
+<script>
+(function() {
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function tick() {
+    var d = new Date();
+    var t = pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+    var el = document.getElementById('clock');
+    if (el) el.textContent = t;
+  }
+  tick();
+  setInterval(tick, 1000);
+})();
+</script>
+
 </body>
 </html>
