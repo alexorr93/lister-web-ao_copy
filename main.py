@@ -4565,6 +4565,23 @@ async def update_inventory(inv_id: str, request: Request):
         from datetime import datetime, timezone
         updates["updated_at"] = datetime.now(timezone.utc).isoformat()
         supabase.table("inventory").update(updates).eq("id", inv_id).eq("business_id", business_id).execute()
+        # Auto-sync cost to expenses if COGS toggle is on and cost was updated
+        if "cost" in updates and _is_cogs_enabled(business_id):
+            try:
+                inv_row = supabase.table("inventory").select("id,title,cost,source_listing_id,created_at").eq("id", inv_id).eq("business_id", business_id).limit(1).execute()
+                if inv_row.data:
+                    item = inv_row.data[0]
+                    # Use source_listing_id if present (so listings + inventory dedupe to same expense),
+                    # otherwise use inventory id with a prefix marker
+                    sync_id = item.get("source_listing_id") or item.get("id")
+                    _upsert_cogs_expense(business_id, {
+                        "id": sync_id,
+                        "title": item.get("title", ""),
+                        "cost": item.get("cost", 0),
+                        "created_at": item.get("created_at", "")
+                    })
+            except Exception as e:
+                print(f"[cogs inventory-sync] Failed for inv {inv_id}: {e}")
         # Track storage location for autocomplete
         if "storage_location" in updates and updates["storage_location"]:
             try:
