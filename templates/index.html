@@ -653,7 +653,7 @@ select.field-input { background: #fff; color: #0f172a; }
           </label>
           <div style="padding:11px 20px;border-radius:9px;font-size:15px;font-weight:600;background:rgba(255,255,255,0.06);color:#94a3b8;border:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;gap:7px;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-            Bulk Upload
+            Batch Upload
           </div>
 
         </div>
@@ -802,7 +802,7 @@ select.field-input { background: #fff; color: #0f172a; }
           <div style="width:36px;height:36px;background:rgba(56,189,248,0.12);border-radius:9px;display:flex;align-items:center;justify-content:center;margin-bottom:8px;">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           </div>
-          <div style="font-size:15px;font-weight:800;color:#38bdf8;margin-bottom:3px;">Bulk Upload</div>
+          <div style="font-size:15px;font-weight:800;color:#38bdf8;margin-bottom:3px;">Batch Upload</div>
           <div style="font-size:15px;color:#4a6080;line-height:1.4;">Multiple photos per item</div>
         </button>
         <button id="scanner-mode-multi" onclick="setScannerMode('multi')" style="border:1px solid #1a2332;border-radius:12px;padding:14px;cursor:pointer;background:#0a0f18;text-align:left;font-family:inherit;position:relative;">
@@ -864,7 +864,7 @@ select.field-input { background: #fff; color: #0f172a; }
           });
         })();
         </script>
-        <!-- Bulk Upload — navigates to Upload tab, area hidden -->
+        <!-- Batch Upload — navigates to Upload tab, area hidden -->
         <div id="scanner-bulk-upload" style="display:none;">
           <label for="bulk-scanner-input" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border:2px dashed var(--border);border-radius:12px;padding:40px 20px;cursor:pointer;background:#0a0f18;text-align:center;"
             ondragover="event.preventDefault();this.style.borderColor='#38bdf8'" ondragleave="this.style.borderColor='var(--border)'" ondrop="event.preventDefault();this.style.borderColor='var(--border)';handleScannerUpload({files:event.dataTransfer.files})">
@@ -1040,7 +1040,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <!-- Batch header bar -->
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border);">
         <div>
-          <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;">Bulk Upload Session</div>
+          <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;">Batch Upload Session</div>
           <div id="up-batch-title-display" style="font-size:18px;font-weight:800;color:var(--text);margin-top:2px;">Untitled batch</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
@@ -2623,7 +2623,7 @@ function renderTiles() {
 
     // Selection checkmark in top-right corner
     const checkmark = isSel
-      ? `<div class="tile-checkmark" onclick="event.stopPropagation();toggleSelect('${l.id}');" style="position:absolute;top:8px;right:8px;width:22px;height:22px;background:var(--accent);border-radius:5px;display:flex;align-items:center;justify-content:center;z-index:5;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.4);"><span style="color:#fff;font-size:13px;font-weight:700;">✓</span></div>`
+      ? `<div class="tile-checkmark" onclick="event.stopPropagation();toggleSelect('${l.id}');" style="position:absolute;top:8px;right:8px;width:22px;height:22px;background:var(--accent);border-radius:5px;display:flex;align-items:center;justify-content:center;z-index:5;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.4);"><svg width="12" height="12" viewBox="0 0 10 10" fill="none"><polyline points="2,5 4.5,7.5 8,3" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`
       : `<div class="tile-checkmark" onclick="event.stopPropagation();toggleSelect('${l.id}');" style="position:absolute;top:8px;right:8px;width:22px;height:22px;background:rgba(15,17,23,0.7);border:1.5px solid #4b5563;border-radius:5px;z-index:5;cursor:pointer;"></div>`;
 
     // Cost row (only shown when cost tracking is enabled)
@@ -2657,8 +2657,8 @@ function renderTiles() {
       <div class="tile-body">
         <input class="tile-title-input" type="text" value="${(l.title||'').replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Title">
         <div class="tile-search-btns">
-          <button class="tile-search-btn" onclick="window.open('https://www.google.com/search?q='+encodeURIComponent(stripSearchTitle(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value)),'popupwin','noopener,width=1200,height=800')">Google</button>
-          <button class="tile-search-btn" onclick="window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(stripSearchTitle(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value))+'&LH_Sold=1&LH_Complete=1','popupwin','noopener,width=1200,height=800')">eBay Sold</button>
+          <button class="tile-search-btn" style="color:#4285F4;font-weight:700;" onclick="window.open('https://www.google.com/search?q='+encodeURIComponent(stripSearchTitle(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value)),'popupwin','noopener,width=1200,height=800')">G Google</button>
+          <button class="tile-search-btn" style="font-weight:700;" onclick="window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(stripSearchTitle(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value))+'&LH_Sold=1&LH_Complete=1','popupwin','noopener,width=1200,height=800')"><span style="color:#e53238;">e</span><span style="color:#0064d2;">B</span><span style="color:#f5af02;">a</span><span style="color:#86b817;">y</span> Sold</button>
         </div>
 
         <div class="tile-price-cond-row">
@@ -5133,11 +5133,23 @@ function exportTaxYear() {
   window.location.href = '/api/expenses/tax-export?year=' + encodeURIComponent(year);
 }
 
-function populateTaxYearPicker() {
+async function populateTaxYearPicker() {
   var sel = document.getElementById('exp-tax-year');
   if (!sel || sel.options.length) return;
   var thisYear = new Date().getFullYear();
-  for (var y = thisYear; y >= thisYear - 4; y--) {
+  var startYear = thisYear;
+  // Get signup year from account info
+  try {
+    var r = await fetch('/api/account/info', {credentials:'include'});
+    var d = await r.json();
+    if (d && d.created_at) {
+      var signupYear = new Date(d.created_at).getFullYear();
+      if (!isNaN(signupYear) && signupYear >= 2000 && signupYear <= thisYear) {
+        startYear = signupYear;
+      }
+    }
+  } catch(e) { /* fall through to single year */ }
+  for (var y = thisYear; y >= startYear; y--) {
     var opt = document.createElement('option');
     opt.value = y;
     opt.textContent = y;
