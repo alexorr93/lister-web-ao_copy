@@ -1298,11 +1298,15 @@ async def get_scheduled_listings(request: Request):
         # Build a SKU -> photo_url map from our DB so we can show thumbnails for app-pushed listings
         sku_photos = {}
         try:
-            db_res = supabase.table("listings").select("ebay_item_id,photo_id").eq("business_id", business_id).not_.is_("ebay_item_id", "null").execute()
+            db_res = supabase.table("listings").select("id,ebay_item_id,photo_id").eq("business_id", business_id).not_.is_("ebay_item_id", "null").execute()
             for row in (db_res.data or []):
                 pid = row.get("photo_id")
                 if pid:
-                    sku_photos[row["ebay_item_id"]] = f"{SUPABASE_URL}/storage/v1/object/public/part-photos/{pid}"
+                    url = f"{SUPABASE_URL}/storage/v1/object/public/part-photos/{pid}"
+                    # Key by ebay_item_id (the eBay listing ID like 406902542660)
+                    sku_photos[str(row["ebay_item_id"])] = url
+                    # Also key by LISTER-{id} SKU pattern so offer.sku lookup works
+                    sku_photos[f"LISTER-{str(row['id'])[:8]}"] = url
         except Exception as _e:
             print(f"[eBay Listings] photo map failed: {_e}")
 
@@ -1330,7 +1334,7 @@ async def get_scheduled_listings(request: Request):
                         title = (ir.json().get("product") or {}).get("title") or sku
                 except Exception:
                     title = sku
-            photo_url = sku_photos.get(listing_id) or sku_photos.get(offer_id) or ""
+            photo_url = sku_photos.get(str(listing_id)) or sku_photos.get(str(offer_id)) or sku_photos.get(sku) or ""
             results.append({
                 "sku": sku,
                 "title": title or "Untitled",
