@@ -4642,6 +4642,9 @@ async def update_inventory(inv_id: str, request: Request):
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        print(f"[update_inventory] CRASH for inv_id={inv_id}: {e}")
+        traceback.print_exc()
         raise HTTPException(500, str(e))
 
 
