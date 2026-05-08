@@ -4182,6 +4182,13 @@ async def update_listing_cost(listing_id: int, request: Request):
         if cost < 0:
             raise HTTPException(400, "Cost cannot be negative")
         supabase.table("listings").update({"cost": cost}).eq("id", listing_id).eq("business_id", business_id).execute()
+        if _is_cogs_enabled(business_id):
+            try:
+                lst = supabase.table("listings").select("id,title,cost,created_at").eq("id", listing_id).eq("business_id", business_id).limit(1).execute()
+                if lst.data:
+                    _upsert_cogs_expense(business_id, lst.data[0])
+            except Exception as e:
+                print(f"[cogs auto-sync] Failed for listing {listing_id}: {e}")
         return {"ok": True, "cost": cost}
     except HTTPException:
         raise
@@ -4202,6 +4209,7 @@ async def apply_lot_cost(request: Request):
         method = body.get("method", "even")  # 'even' or 'weighted'
         if not listing_ids or total_cost <= 0:
             raise HTTPException(400, "listing_ids and total_cost required")
+        cogs_on = _is_cogs_enabled(business_id)
 
         if method == "weighted":
             # Distribute proportionally to listed price
@@ -4213,14 +4221,33 @@ async def apply_lot_cost(request: Request):
                 method = "even"
             else:
                 for it in items:
-                    portion = (float(it.get("price") or 0) / total_listed) * total_cost
-                    supabase.table("listings").update({"cost": round(portion, 2)}).eq("id", it["id"]).eq("business_id", business_id).execute()
+                    portion = round((float(it.get("price") or 0) / total_listed) * total_cost, 2)
+                    supabase.table("listings").update({"cost": portion}).eq("id", it["id"]).eq("business_id", business_id).execute()
+                    if cogs_on:
+                        try:
+                            _upsert_cogs_expense(business_id, {"id": it["id"], "title": it.get("title",""), "cost": portion, "created_at": it.get("created_at","")})
+                        except Exception as _e:
+                            print(f"[cogs lot-sync] {_e}")
                 return {"ok": True, "method": "weighted", "applied_to": len(items)}
 
         # Even split
         per_item = round(total_cost / len(listing_ids), 2)
+        _lot_meta = {}
+        if cogs_on:
+            try:
+                rr = supabase.table("listings").select("id,title,created_at").in_("id", listing_ids).eq("business_id", business_id).execute()
+                for row in (rr.data or []):
+                    _lot_meta[row["id"]] = row
+            except Exception as _e:
+                print(f"[cogs lot-meta] {_e}")
         for lid in listing_ids:
             supabase.table("listings").update({"cost": per_item}).eq("id", lid).eq("business_id", business_id).execute()
+            if cogs_on and lid in _lot_meta:
+                try:
+                    meta = _lot_meta[lid]
+                    _upsert_cogs_expense(business_id, {"id": lid, "title": meta.get("title",""), "cost": per_item, "created_at": meta.get("created_at","")})
+                except Exception as _e:
+                    print(f"[cogs lot-sync] {_e}")
         return {"ok": True, "method": "even", "per_item": per_item, "applied_to": len(listing_ids)}
     except HTTPException:
         raise
