@@ -5339,6 +5339,51 @@ If a field is unreadable, use null. Try your best to extract every field first."
         raise HTTPException(500, str(e))
 
 
+def _is_cogs_enabled(business_id):
+    """Check if business has auto COGS import enabled."""
+    try:
+        r = supabase.table("businesses").select("cogs_import_enabled").eq("id", business_id).limit(1).execute()
+        return bool(r.data and r.data[0].get("cogs_import_enabled"))
+    except Exception:
+        return False
+
+
+def _upsert_cogs_expense(business_id, listing):
+    """Create or update the auto-COGS expense for a listing. Idempotent via source_listing_id."""
+    cost = float(listing.get("cost") or 0)
+    listing_id = listing.get("id")
+    if not listing_id:
+        return
+    title = (listing.get("title") or "").strip() or "Inventory item"
+    created = listing.get("created_at") or ""
+    expense_date = created.split("T")[0] if created else None
+    if not expense_date:
+        from datetime import date as _date
+        expense_date = str(_date.today())
+
+    existing = supabase.table("expenses").select("id").eq("business_id", business_id).eq("source_listing_id", listing_id).limit(1).execute()
+
+    if cost <= 0:
+        if existing.data:
+            supabase.table("expenses").delete().eq("id", existing.data[0]["id"]).execute()
+        return
+
+    row = {
+        "business_id": business_id,
+        "amount": cost,
+        "category": "Cost of Goods",
+        "merchant": title[:120],
+        "notes": "Auto-imported from inventory",
+        "expense_date": expense_date,
+        "source": "auto-cogs",
+        "source_listing_id": listing_id,
+    }
+    if existing.data:
+        supabase.table("expenses").update(row).eq("id", existing.data[0]["id"]).execute()
+    else:
+        supabase.table("expenses").insert(row).execute()
+
+
 @app.post("/api/expenses/toggle-cogs")
 async def toggle_cogs_import(request: Request):
     """Toggle COGS import from scans. Records timestamp when enabled."""
