@@ -1827,6 +1827,8 @@ async def archive_batch():
 class CreateGroup(BaseModel):
     session_id: str
     condition:  str
+    batch_name: Optional[str] = None
+    lot_cost_total: Optional[float] = None
 
 
 # ── API: SAVED BATCHES ────────────────────────────────────────── #
@@ -2060,13 +2062,18 @@ async def create_group(body: CreateGroup, request: Request):
                 raise HTTPException(402, "Scan limit reached. Please contact us to upgrade your plan.")
             # Increment scan count
             supabase.table("businesses").update({"scan_count": scan_count + 1}).eq("id", business_id).execute()
-        res = supabase.table("listing_groups").insert({
+        _ins = {
             "session_id": body.session_id,
             "status":     "waiting",
             "quantity":   1,
             "condition":  body.condition,
             "business_id": business_id,
-        }).execute()
+        }
+        if getattr(body, "batch_name", None):
+            _ins["batch_name"] = body.batch_name
+        if getattr(body, "lot_cost_total", None) is not None:
+            _ins["lot_cost_total"] = float(body.lot_cost_total or 0)
+        res = supabase.table("listing_groups").insert(_ins).execute()
         import traceback
         print(f"Group insert result: {res}")
         data = res.data
