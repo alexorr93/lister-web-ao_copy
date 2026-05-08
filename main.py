@@ -1254,24 +1254,44 @@ async def get_scheduled_listings(request: Request):
         api_base = "https://api.ebay.com" if EBAY_ENV != "sandbox" else "https://api.sandbox.ebay.com"
         headers = {"Authorization": f"Bearer {token}"}
 
-        # Page through eBay's offer list (max 100 per page; cap at 5 pages = 500 listings)
+        # eBay's /offer endpoint requires a sku param. Workaround: fetch all inventory items,
+        # then fetch each item's offers. Limit to 200 most recent inventory items to keep fast.
         all_offers = []
-        offset = 0
-        for _ in range(5):
-            r = _req.get(
-                f"{api_base}/sell/inventory/v1/offer?limit=100&offset={offset}",
+        try:
+            inv_r = _req.get(
+                f"{api_base}/sell/inventory/v1/inventory_item?limit=200",
                 headers=headers,
                 timeout=15,
             )
-            if not r.ok:
-                print(f"[eBay Listings] offer fetch failed: status={r.status_code}, body={r.text[:300]}")
-                break
-            data = r.json()
-            offers = data.get("offers", [])
-            all_offers.extend(offers)
-            if len(offers) < 100:
-                break
-            offset += 100
+            if not inv_r.ok:
+                print(f"[eBay Listings] inventory fetch failed: status={inv_r.status_code}, body={inv_r.text[:300]}")
+            else:
+                inv_data = inv_r.json()
+                inv_items = inv_data.get("inventoryItems", [])
+                print(f"[eBay Listings] found {len(inv_items)} inventory items, fetching offers...")
+                for it in inv_items:
+                    sku = it.get("sku")
+                    if not sku:
+                        continue
+                    try:
+                        from urllib.parse import quote as _q
+                        offer_r = _req.get(
+                            f"{api_base}/sell/inventory/v1/offer?sku={_q(sku)}",
+                            headers=headers,
+                            timeout=8,
+                        )
+                        if offer_r.ok:
+                            offers = offer_r.json().get("offers", [])
+                            for o in offers:
+                                # Inject title from inventory item if missing on offer
+                                if not o.get("title") and not o.get("listingDescription"):
+                                    prod = it.get("product") or {}
+                                    o["_inv_title"] = prod.get("title", "")
+                                all_offers.append(o)
+                    except Exception as _e:
+                        print(f"[eBay Listings] offer fetch failed for sku {sku}: {_e}")
+        except Exception as e:
+            print(f"[eBay Listings] outer fetch failed: {e}")
 
         print(f"[eBay Listings] fetched {len(all_offers)} offers from eBay")
 
@@ -1298,7 +1318,7 @@ async def get_scheduled_listings(request: Request):
             price_obj = (o.get("pricingSummary") or {}).get("price") or {}
             price = float(price_obj.get("value") or 0)
             # Try to get title from offer; fall back to inventory item title
-            title = o.get("listingDescription") or o.get("title") or ""
+            title = o.get("listingDescription") or o.get("title") or o.get("_inv_title") or ""
             if not title and sku:
                 try:
                     ir = _req.get(f"{api_base}/sell/inventory/v1/inventory_item/{sku}", headers=headers, timeout=8)
