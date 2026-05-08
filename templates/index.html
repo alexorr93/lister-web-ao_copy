@@ -7302,18 +7302,19 @@ async function sendRoboMessageTab() {
   var ph = document.getElementById('robo-tab-placeholder');
   if (ph) ph.style.display = 'none';
   appendRoboTabMessage('user', msg);
-  roboTabHistory.push({role:'user', content: msg});
+  roboHistory.push({role:'user', content: msg});
   var botDiv = appendRoboTabMessage('bot', '...');
   if (botDiv) botDiv.style.color = '#4a6080';
   try {
-    var r = await fetch('/api/robo/chat', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({message: msg, history: roboTabHistory})});
+    var r = await fetch('/api/robo/chat', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({message: msg, history: roboHistory})});
     var d = await r.json();
     var reply = d.reply || 'Sorry, had trouble with that.';
     if (botDiv) {
       botDiv.style.color = '#e2e8f0';
       botDiv.innerHTML = reply.split(/\n+/).filter(function(p){return p.trim();}).map(function(p){return '<p style="margin:0 0 6px;">'+p+'</p>';}).join('');
     }
-    roboTabHistory.push({role:'assistant', content: reply});
+    roboHistory.push({role:'model', content: reply});
+    if (roboHistory.length > 20) roboHistory = roboHistory.slice(-20);
   } catch(e) {
     if (botDiv) botDiv.textContent = 'Connection error. Try again.';
   }
@@ -7330,14 +7331,15 @@ async function handleRoboImageTab(input) {
     appendRoboTabMessage('user', '[Photo sent]');
     var botDiv = appendRoboTabMessage('bot', 'Analyzing photo...');
     try {
-      var r = await fetch('/api/robo/chat', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({message: 'Please identify this item and suggest a price for resale on eBay.', image: b64, image_mime: file.type, history: roboTabHistory})});
+      var r = await fetch('/api/robo/chat', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({message: 'Please identify this item and suggest a price for resale on eBay.', image: b64, image_mime: file.type, history: roboHistory})});
       var d = await r.json();
       var reply = d.reply || 'Could not analyze image.';
       if (botDiv) {
         botDiv.style.color = '#e2e8f0';
         botDiv.innerHTML = reply.split(/\n+/).filter(function(p){return p.trim();}).map(function(p){return '<p style="margin:0 0 6px;">'+p+'</p>';}).join('');
       }
-      roboTabHistory.push({role:'assistant', content: reply});
+      roboHistory.push({role:'model', content: reply});
+      if (roboHistory.length > 20) roboHistory = roboHistory.slice(-20);
     } catch(e) {
       if (botDiv) botDiv.textContent = 'Connection error.';
     }
