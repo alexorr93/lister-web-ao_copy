@@ -1539,15 +1539,21 @@ select.field-input { background: #fff; color: #0f172a; }
           </div>
           <div id="exp-cat-list"></div>
         </div>
-        <div style="background:rgba(255,255,255,0.02);border:1px solid #1a2332;border-radius:14px;padding:20px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-            <span style="font-size:15px;font-weight:600;color:var(--text);">Distribution</span>
+        <div style="background:linear-gradient(180deg,rgba(74,222,128,0.025),rgba(255,255,255,0.01));border:1px solid #1a2332;border-radius:14px;padding:20px;position:relative;overflow:hidden;">
+          <div style="position:absolute;inset:0;background-image:linear-gradient(rgba(74,222,128,0.018) 1px, transparent 1px),linear-gradient(90deg, rgba(74,222,128,0.018) 1px, transparent 1px);background-size:18px 18px;pointer-events:none;"></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;position:relative;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <div style="width:6px;height:6px;border-radius:50%;background:#4ade80;box-shadow:0 0 8px rgba(74,222,128,0.6);"></div>
+              <span style="font-family:'DM Mono',monospace;font-size:11px;color:#4ade80;letter-spacing:0.18em;text-transform:uppercase;font-weight:700;">// distribution</span>
+            </div>
+            <span id="exp-chart-period-tag" style="font-family:'DM Mono',monospace;font-size:10px;color:#64748b;letter-spacing:0.12em;text-transform:uppercase;">--</span>
           </div>
-          <div style="display:flex;align-items:center;justify-content:center;padding:8px 0;position:relative;">
-            <canvas id="exp-chart" width="200" height="200"></canvas>
+          <div style="display:flex;align-items:center;justify-content:center;padding:4px 0;position:relative;">
+            <svg id="exp-chart-svg" viewBox="0 0 220 220" style="width:220px;height:220px;display:block;"></svg>
             <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;">
-              <div style="font-size:16px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:600;">Total</div>
-              <div id="exp-chart-total" style="font-size:32px;font-weight:700;letter-spacing:-0.01em;color:var(--text);">$0</div>
+              <div style="font-family:'DM Mono',monospace;font-size:9px;color:#475569;text-transform:uppercase;letter-spacing:0.25em;font-weight:600;margin-bottom:2px;">total</div>
+              <div id="exp-chart-total" style="font-family:'Instrument Sans',sans-serif;font-size:30px;font-weight:800;letter-spacing:-0.02em;color:#f0f4f8;line-height:1;">$0</div>
+              <div id="exp-chart-categories-count" style="font-family:'DM Mono',monospace;font-size:9px;color:#475569;text-transform:uppercase;letter-spacing:0.18em;margin-top:6px;font-weight:600;">0 categories</div>
             </div>
           </div>
         </div>
@@ -4846,32 +4852,95 @@ function renderExpSummaryCards() {
 }
 
 function renderExpChart() {
-  var canvas = document.getElementById('exp-chart');
-  if (!canvas) return;
+  var svg = document.getElementById('exp-chart-svg');
+  if (!svg) return;
   var cats = Object.keys(expSummary).filter(function(c) { return expSummary[c].total > 0; });
-  if (!cats.length) { canvas.style.display = 'none'; return; }
-  canvas.style.display = 'block';
 
-  if (expChartInstance) { expChartInstance.destroy(); expChartInstance = null; }
-
-  // Load Chart.js if needed
-  if (typeof Chart === 'undefined') {
-    var s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js';
-    s.onload = function() { renderExpChart(); };
-    document.head.appendChild(s);
-    return;
-  }
-
-  var labels = cats;
-  var data = cats.map(function(c) { return expSummary[c].total; });
-  var colors = cats.map(function(c) { return EXP_COLORS[c] || '#6b7280'; });
+  // Update period tag
+  var periodLabels = {day:'TODAY',week:'WEEK',month:'MONTH','3month':'Q','6month':'6M','12month':'YEAR',all:'ALL TIME'};
+  var pTag = document.getElementById('exp-chart-period-tag');
+  if (pTag) pTag.textContent = periodLabels[expPeriod] || 'PERIOD';
 
   // Update center total
   var centerEl = document.getElementById('exp-chart-total');
-  if (centerEl) centerEl.textContent = '$' + expTotal.toFixed(0);
-  var badgeEl = document.getElementById('exp-total-badge');
-  if (badgeEl) badgeEl.textContent = '';
+  if (centerEl) centerEl.textContent = '$' + Math.round(expTotal).toLocaleString();
+  var catsCountEl = document.getElementById('exp-chart-categories-count');
+  if (catsCountEl) catsCountEl.textContent = cats.length + ' ' + (cats.length === 1 ? 'category' : 'categories');
+
+  // Empty state
+  if (!cats.length) {
+    svg.innerHTML = '<circle cx="110" cy="110" r="84" fill="none" stroke="#1a2332" stroke-width="14" stroke-dasharray="3 6" opacity="0.5"/>';
+    return;
+  }
+
+  var cx = 110, cy = 110;
+  var rOuter = 96, rRing = 84, rTicks = 100, rDots = 105;
+  var total = expTotal || 1;
+  var GAP_DEG = 2.4;  // gap between segments for techy segmented look
+  var startDeg = -90; // top of circle
+  var parts = [];
+
+  // Outer faint ring (decorative chassis)
+  parts.push('<circle cx="' + cx + '" cy="' + cy + '" r="' + rOuter + '" fill="none" stroke="#1a2332" stroke-width="1" opacity="0.6"/>');
+
+  // Tick marks every 30deg (decorative)
+  for (var t = 0; t < 12; t++) {
+    var ang = (t * 30 - 90) * Math.PI / 180;
+    var x1 = cx + (rOuter - 4) * Math.cos(ang);
+    var y1 = cy + (rOuter - 4) * Math.sin(ang);
+    var x2 = cx + rOuter * Math.cos(ang);
+    var y2 = cy + rOuter * Math.sin(ang);
+    parts.push('<line x1="' + x1.toFixed(2) + '" y1="' + y1.toFixed(2) + '" x2="' + x2.toFixed(2) + '" y2="' + y2.toFixed(2) + '" stroke="#1a2332" stroke-width="1" opacity="0.7"/>');
+  }
+
+  // Segmented donut arcs
+  cats.forEach(function(cat, idx) {
+    var pct = expSummary[cat].total / total;
+    var sweep = pct * 360 - GAP_DEG;
+    if (sweep < 0.5) sweep = 0.5;
+    var endDeg = startDeg + sweep;
+    var color = EXP_COLORS[cat] || '#6b7280';
+
+    var startRad = startDeg * Math.PI / 180;
+    var endRad = endDeg * Math.PI / 180;
+    var sx = cx + rRing * Math.cos(startRad);
+    var sy = cy + rRing * Math.sin(startRad);
+    var ex = cx + rRing * Math.cos(endRad);
+    var ey = cy + rRing * Math.sin(endRad);
+    var largeArc = sweep > 180 ? 1 : 0;
+    var d = 'M ' + sx.toFixed(2) + ' ' + sy.toFixed(2) + ' A ' + rRing + ' ' + rRing + ' 0 ' + largeArc + ' 1 ' + ex.toFixed(2) + ' ' + ey.toFixed(2);
+    parts.push('<path d="' + d + '" fill="none" stroke="' + color + '" stroke-width="14" stroke-linecap="butt" data-cat="' + cat.replace(/"/g,'&quot;') + '" data-pct="' + (pct * 100).toFixed(1) + '" style="filter:drop-shadow(0 0 4px ' + color + '88);transition:stroke-width 0.18s;"/>');
+
+    startDeg = endDeg + GAP_DEG;
+  });
+
+  // Tiny rotating dots on outer ring (decorative)
+  for (var d2 = 0; d2 < 24; d2++) {
+    var aD = (d2 * 15 - 90) * Math.PI / 180;
+    var dx = cx + rDots * Math.cos(aD);
+    var dy = cy + rDots * Math.sin(aD);
+    var op = (d2 % 3 === 0) ? 0.45 : 0.18;
+    parts.push('<circle cx="' + dx.toFixed(2) + '" cy="' + dy.toFixed(2) + '" r="0.9" fill="#4ade80" opacity="' + op + '"/>');
+  }
+
+  svg.innerHTML = parts.join('');
+
+  // Hover tooltips
+  var paths = svg.querySelectorAll('path[data-cat]');
+  paths.forEach(function(p) {
+    p.addEventListener('mouseenter', function() {
+      this.setAttribute('stroke-width', '18');
+      var cat = this.getAttribute('data-cat');
+      var pct = this.getAttribute('data-pct');
+      if (centerEl) centerEl.innerHTML = '<div style="font-size:13px;color:' + (EXP_COLORS[cat] || '#fff') + ';font-weight:700;">' + cat + '</div><div style="font-size:22px;color:#f0f4f8;">$' + Math.round(expSummary[cat].total).toLocaleString() + '</div><div style="font-family:DM Mono,monospace;font-size:10px;color:#64748b;">' + pct + '%</div>';
+    });
+    p.addEventListener('mouseleave', function() {
+      this.setAttribute('stroke-width', '14');
+      if (centerEl) centerEl.textContent = '$' + Math.round(expTotal).toLocaleString();
+    });
+  });
+
+  return; // skip Chart.js code below — we handle everything via SVG now
 
   // Render custom HTML legend
   var legendEl = document.getElementById('exp-chart-legend');
