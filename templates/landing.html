@@ -911,7 +911,7 @@ var roboDemoConversation = [
   }
 ];
 
-function roboDemo(question) {
+async function roboDemo(question) {
   var msgs = document.getElementById('robo-demo-msgs');
   if (!msgs) return;
 
@@ -929,22 +929,27 @@ function roboDemo(question) {
   msgs.appendChild(typingDiv);
   msgs.scrollTop = msgs.scrollHeight;
 
-  // Find matching response or use generic
-  var match = roboDemoConversation.find(function(c) {
-    return c.q.toLowerCase().indexOf(question.toLowerCase().slice(0,15)) >= 0 ||
-           question.toLowerCase().indexOf(c.q.toLowerCase().slice(0,15)) >= 0;
-  });
+  var reply;
+  try {
+    var r = await fetch('/api/robo/landing-chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: question})
+    });
+    var d = await r.json();
+    reply = (d && d.reply) ? d.reply : "Robo had a hiccup. Try again?";
+  } catch (e) {
+    reply = "Connection issue — try once more.";
+  }
 
-  var reply = match ? match.a : "Good question. That really depends on the condition and what similar items have actually sold for recently. Check eBay completed listings — that's always your best source of truth.";
-
-  setTimeout(function() {
-    msgs.removeChild(typingDiv);
-    var botDiv = document.createElement('div');
-    botDiv.className = 'robo-msg-bot';
-    botDiv.innerHTML = reply;
-    msgs.appendChild(botDiv);
-    msgs.scrollTop = msgs.scrollHeight;
-  }, 1200 + Math.random() * 600);
+  if (typingDiv.parentNode) typingDiv.parentNode.removeChild(typingDiv);
+  var botDiv = document.createElement('div');
+  botDiv.className = 'robo-msg-bot';
+  // Render plain text safely with line breaks
+  var safe = String(reply).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n+/g,'<br><br>');
+  botDiv.innerHTML = safe;
+  msgs.appendChild(botDiv);
+  msgs.scrollTop = msgs.scrollHeight;
 }
 </script>
 

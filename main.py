@@ -5964,6 +5964,62 @@ async def change_password(request: Request):
     except Exception as e:
         raise HTTPException(500, str(e))
 
+# Simple in-memory rate limiter for landing demo (resets when server restarts)
+_landing_chat_hits = {}
+
+@app.post("/api/robo/landing-chat")
+async def robo_landing_chat(request: Request):
+    """Public Robo chat for landing page demo. Rate-limited by IP."""
+    try:
+        from datetime import datetime, timezone
+        # Crude IP-based rate limit: 8 messages per 5 min per IP
+        client_ip = request.client.host if request.client else "unknown"
+        now = datetime.now(timezone.utc).timestamp()
+        hits = _landing_chat_hits.get(client_ip, [])
+        hits = [t for t in hits if now - t < 300]  # 5 min window
+        if len(hits) >= 8:
+            return {"ok": False, "reply": "Demo limit reached — sign up free to chat with Robo as much as you want!"}
+        hits.append(now)
+        _landing_chat_hits[client_ip] = hits
+
+        body = await request.json()
+        message = (body.get("message") or "").strip()
+        if not message:
+            return {"ok": False, "reply": "Type a question and I'll answer."}
+        if len(message) > 500:
+            message = message[:500]
+
+        gemini_key = os.getenv("GEMINI_API_KEY", "")
+        if not gemini_key:
+            return {"ok": False, "reply": "Robo is offline — try again in a moment."}
+
+        from google import genai as _genai
+        from google.genai import types as _gt
+        client = _genai.Client(api_key=gemini_key)
+
+        system = """You are Robo, a friendly AI assistant for resellers on the RoboSeller landing page demo. Keep replies SHORT (2-4 sentences max), conversational, and helpful. Topics: pricing items for resale, eBay/marketplace selling tips, shipping, sourcing, what's worth buying. Plain text only — no markdown, no bullet lists. Be honest if you don't know something specific. End some replies hinting at what RoboSeller can do (scan, identify, price, list) without sounding like a sales pitch."""
+
+        for _m in ["gemini-2.5-flash", "gemini-2.5-flash-preview-04-17"]:
+            try:
+                _cfg = _gt.GenerateContentConfig(system_instruction=system, temperature=0.7, max_output_tokens=300)
+                _resp = client.models.generate_content(
+                    model=_m,
+                    contents=[_gt.Content(role="user", parts=[_gt.Part(text=message)])],
+                    config=_cfg,
+                )
+                reply = (_resp.text or "").strip()
+                if reply:
+                    return {"ok": True, "reply": reply}
+            except Exception as _e:
+                print(f"[landing-chat] {_m} failed: {_e}")
+                continue
+
+        return {"ok": False, "reply": "Robo had a hiccup. Try again?"}
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return {"ok": False, "reply": "Something went wrong on our end."}
+
+
 @app.post("/api/robo/chat")
 async def robo_chat(request: Request):
     business_id = require_auth(request)
