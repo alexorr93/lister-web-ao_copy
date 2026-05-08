@@ -555,7 +555,7 @@ select.field-input { background: #fff; color: #0f172a; }
 
 <!-- tabbar moved to body level via JS -->
 <!-- Saved batches dropdown — global, works from desktop + mobile -->
-<div id="saved-batches-dropdown" style="display:none;position:absolute;top:calc(100% + 6px);right:0;min-width:280px;max-width:360px;background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:4px;z-index:10001;box-shadow:0 8px 32px rgba(0,0,0,0.7);">
+<div id="saved-batches-dropdown" style="display:none;position:fixed;top:120px;right:20px;min-width:280px;max-width:360px;background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:4px;z-index:10001;box-shadow:0 8px 32px rgba(0,0,0,0.7);">
   <div id="saved-batches-dd-list" style="max-height:280px;overflow-y:auto;"></div>
 </div>
 <div class="mobile-tabbar" id="mobile-tabbar-placeholder">
@@ -934,9 +934,7 @@ select.field-input { background: #fff; color: #0f172a; }
         <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="openLotCostModal()" id="lot-cost-btn">Lot Cost</button>
         <button class="btn" style="font-size:16px;padding:8px 14px;background:#1a3a1a;border-color:#2d5a2d;color:#86efac;font-weight:700;" onclick="openSaveBatchModal()">Save Batch</button>
         <div style="position:relative;">
-          <div style="position:relative;display:inline-block;">
-            <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="toggleSavedBatchesDropdown()">🗂 Saved</button>
-        </div>
+          <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="toggleSavedBatchesDropdown()">🗂 Saved</button>
         <button class="btn btn-danger" id="bulk-delete-btn" style="font-size:16px;padding:8px 14px;display:none;" onclick="bulkDeleteSelected()">Delete selected</button>
         <div style="position:relative;" id="submit-dropdown-wrap">
           <button class="btn btn-primary" id="submit-batch-btn" style="font-size:16px;padding:7px 14px;display:none;" onclick="toggleSubmitDropdown()">Submit (<span id="submit-count">0</span>) ▾</button>
