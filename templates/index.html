@@ -903,13 +903,18 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
     </div>
 
-    <!-- Current Batch header + actions -->
+    <!-- Section divider between upload area and current batch -->
+    <div style="margin:36px 0 24px;display:flex;align-items:center;gap:14px;">
+      <div style="flex:1;height:1px;background:linear-gradient(90deg, transparent, #1a2332 30%, #1a2332 70%, transparent);"></div>
+      <div style="font-size:10px;font-weight:700;color:#4a5568;letter-spacing:0.2em;text-transform:uppercase;font-family:'DM Mono', monospace;">YOUR ITEMS</div>
+      <div style="flex:1;height:1px;background:linear-gradient(90deg, transparent, #1a2332 30%, #1a2332 70%, transparent);"></div>
+    </div>
 
     <!-- DESKTOP toolbar -->
-    <div class="batch-toolbar-desktop" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap;">
-      <div style="display:flex;align-items:baseline;gap:10px;">
-        <div style="font-size:15px;font-weight:700;color:var(--text);">Current Batch</div>
-        <div style="font-size:16px;color:var(--muted);" id="batch-summary">—</div>
+    <div class="batch-toolbar-desktop" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:8px;flex-wrap:wrap;padding:14px 18px;background:#070a10;border:1px solid #1a2332;border-radius:12px;">
+      <div style="display:flex;align-items:baseline;gap:12px;">
+        <div style="font-size:16px;font-weight:800;color:var(--text);letter-spacing:-0.01em;">Current Batch</div>
+        <div style="font-size:13px;color:var(--muted);" id="batch-summary">—</div>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
         <select id="dash-sort" onchange="changeDashSort()" style="background:#0a0f18;border:1px solid #1a2332;border-radius:6px;color:var(--muted);font-size:15px;padding:5px 8px;cursor:pointer;font-family:inherit;outline:none;">
