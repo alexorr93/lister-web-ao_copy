@@ -1469,6 +1469,14 @@ select.field-input { background: #fff; color: #0f172a; }
             <div id="exp-export-menu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:#0a0f18;border:1px solid #1a2332;border-radius:8px;z-index:50;min-width:160px;overflow:hidden;">
               <button onclick="exportExpenses('csv')" style="display:block;width:100%;padding:14px 18px;background:transparent;border:none;color:var(--text);font-size:15px;text-align:left;cursor:pointer;font-family:inherit;">CSV / Excel</button>
               <button onclick="exportExpenses('pdf')" style="display:block;width:100%;padding:14px 18px;background:transparent;border:none;color:var(--text);font-size:15px;text-align:left;cursor:pointer;font-family:inherit;">PDF Report</button>
+              <div style="border-top:1px solid #1a2332;padding:10px 14px;">
+                <div style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:8px;">Tax Export</div>
+                <div style="display:flex;gap:6px;align-items:center;">
+                  <select id="exp-tax-year" style="flex:1;background:#0a0f18;border:1px solid #1a2332;border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;font-family:inherit;outline:none;cursor:pointer;"></select>
+                  <button onclick="exportTaxYear()" style="background:#0F766E;border:none;border-radius:6px;padding:7px 14px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">Export</button>
+                </div>
+                <div style="font-size:10px;color:var(--muted);margin-top:6px;">Multi-tab xlsx with P&amp;L, sales, expenses, inventory snapshot</div>
+              </div>
             </div>
           </div>
           <label style="display:flex;align-items:center;gap:7px;font-size:15px;color:var(--muted);cursor:pointer;padding:7px 10px;border-radius:7px;background:#0a0f18;border:1px solid #1a2332;">
@@ -5101,6 +5109,7 @@ async function confirmReceiptExpense() {
 
 // ── EXPORT ──
 function toggleExpExportMenu() {
+  populateTaxYearPicker();
   var m = document.getElementById('exp-export-menu');
   if (m) m.style.display = m.style.display === 'none' ? 'block' : 'none';
 }
@@ -5111,6 +5120,25 @@ document.addEventListener('click', function(e) {
     menu.style.display = 'none';
   }
 });
+
+function exportTaxYear() {
+  var sel = document.getElementById('exp-tax-year');
+  var year = sel ? sel.value : new Date().getFullYear();
+  document.getElementById('exp-export-menu').style.display = 'none';
+  window.location.href = '/api/expenses/tax-export?year=' + encodeURIComponent(year);
+}
+
+function populateTaxYearPicker() {
+  var sel = document.getElementById('exp-tax-year');
+  if (!sel || sel.options.length) return;
+  var thisYear = new Date().getFullYear();
+  for (var y = thisYear; y >= thisYear - 4; y--) {
+    var opt = document.createElement('option');
+    opt.value = y;
+    opt.textContent = y;
+    sel.appendChild(opt);
+  }
+}
 
 function exportExpenses(fmt) {
   document.getElementById('exp-export-menu').style.display = 'none';
