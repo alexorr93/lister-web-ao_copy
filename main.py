@@ -3934,6 +3934,7 @@ async def get_account_info(request: Request):
             "scan_limit": limit,
             "scan_count": b.get("scan_count", 0),
             "created_at": b.get("created_at", ""),
+            "cogs_import_enabled": bool(b.get("cogs_import_enabled")),
         }
     except HTTPException:
         raise
