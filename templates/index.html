@@ -2854,6 +2854,60 @@ document.addEventListener('click', function(e) {
   }
 });
 
+async function loadBatch(batchId) {
+  // Close dropdown
+  var dd = document.getElementById('saved-batches-dropdown');
+  if (dd) dd.style.display = 'none';
+
+  // Switch to scanner/dashboard tab
+  var tab = document.querySelector('.nav-btn[data-tab="dashboard"]');
+  if (tab) tab.click();
+
+  // Show loading toast
+  toast('Loading batch...');
+
+  try {
+    var r = await fetch('/api/saved-batches/' + batchId, {credentials: 'include'});
+    var d = await r.json();
+    if (!d || !d.items) { toast('Failed to load batch', 'error'); return; }
+
+    var items = d.items;
+    var batchName = d.name || 'Saved Batch';
+
+    // Build listings array in the same shape as scanner listings
+    listings = items.map(function(it) {
+      return {
+        id: it.original_listing_id || it.id,
+        title: it.title || '',
+        price: it.price || 0,
+        price_used: it.price_used || 0,
+        price_new: it.price_new || 0,
+        cost: it.cost || 0,
+        condition: it.condition || 'used',
+        quantity: it.quantity || 1,
+        photo_id: it.photo_id || '',
+        photo_url: it.thumb_url || '',
+        all_photo_urls: (it.all_photos || []).map(function(p) { return p.thumb; }),
+        status: it.status || 'draft',
+        ebay_category_id: it.ebay_category_id || '',
+        description: it.description || '',
+        listing_type: it.listing_type || 'fixed',
+      };
+    });
+
+    selected.clear();
+    renderListings();
+
+    // Update batch summary label
+    var bs = document.getElementById('batch-summary');
+    if (bs) bs.textContent = items.length + ' items · from "' + batchName + '"';
+
+    toast('Loaded "' + batchName + '" — ' + items.length + ' items');
+  } catch(e) {
+    toast('Error loading batch: ' + e.message, 'error');
+  }
+}
+
 async function loadSavedBatchesDropdown() {
   var list = document.getElementById('saved-batches-dd-list');
   if (!list) return;
