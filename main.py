@@ -5533,6 +5533,370 @@ async def toggle_cogs_import(request: Request):
         raise HTTPException(500, str(e))
 
 
+@app.get("/api/expenses/tax-export")
+async def tax_export(request: Request, year: int = None):
+    """Generate a comprehensive multi-tab tax export xlsx for a given year."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Not authenticated")
+
+    from datetime import datetime, timezone, date
+    if year is None:
+        year = datetime.now(timezone.utc).year
+
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, NamedStyle
+        from openpyxl.utils import get_column_letter
+        import io as _io
+
+        # ---- Fetch business name for filename ----
+        biz = supabase.table("businesses").select("name").eq("id", business_id).limit(1).execute()
+        biz_name = (biz.data[0].get("name") if biz.data else "") or "RoboSeller"
+        biz_name_safe = "".join(c for c in biz_name if c.isalnum() or c in "_- ").strip()[:50] or "RoboSeller"
+
+        year_start = f"{year}-01-01"
+        year_end = f"{year}-12-31"
+
+        # ---- Pull all expenses for the year ----
+        exp_res = supabase.table("expenses").select("*").eq("business_id", business_id)\
+            .gte("expense_date", year_start).lte("expense_date", year_end)\
+            .order("expense_date").execute()
+        expenses = exp_res.data or []
+
+        # ---- Pull all sold inventory items for the year ----
+        inv_res = supabase.table("inventory").select("*").eq("business_id", business_id)\
+            .eq("status", "sold")\
+            .gte("sold_date", year_start).lte("sold_date", year_end)\
+            .order("sold_date").execute()
+        sales = inv_res.data or []
+
+        # ---- Inventory snapshot at year start and year end ----
+        try:
+            yr_start_dt = f"{year-1}-12-31T23:59:59"
+            yr_end_dt = f"{year}-12-31T23:59:59"
+            beg_res = supabase.table("inventory").select("cost").eq("business_id", business_id)\
+                .lte("created_at", yr_start_dt).execute()
+            beg_inventory_value = sum(float(i.get("cost") or 0) for i in (beg_res.data or []))
+            end_res = supabase.table("inventory").select("cost,status").eq("business_id", business_id)\
+                .lte("created_at", yr_end_dt).execute()
+            # Ending inventory = items still in stock at end of year (not sold)
+            end_inventory_value = sum(float(i.get("cost") or 0) for i in (end_res.data or []) if i.get("status") != "sold")
+        except Exception as _e:
+            beg_inventory_value = 0.0
+            end_inventory_value = 0.0
+            print(f"[tax-export] inventory snapshot failed: {_e}")
+
+        # ---- Aggregate calculations ----
+        gross_sales = sum(float(s.get("sold_price") or 0) for s in sales)
+        cogs_from_sales = sum(float(s.get("cost") or 0) for s in sales)
+
+        # Expense totals by category
+        cat_totals = {cat: 0.0 for cat in EXPENSE_CATEGORIES}
+        for e in expenses:
+            cat = e.get("category", "Other")
+            if cat not in cat_totals:
+                cat_totals[cat] = 0.0
+            cat_totals[cat] += float(e.get("amount") or 0)
+
+        total_expenses = sum(cat_totals.values())
+        total_expenses_excl_cogs = total_expenses - cat_totals.get("Cost of Goods", 0)
+        net_profit = gross_sales - total_expenses
+
+        # Quarterly breakdown
+        def quarter_of(dstr):
+            try:
+                m = int(dstr[5:7])
+                return (m - 1) // 3 + 1
+            except Exception:
+                return 0
+
+        q_sales = {1:0,2:0,3:0,4:0}
+        q_expenses = {1:0,2:0,3:0,4:0}
+        for s in sales:
+            q = quarter_of(s.get("sold_date") or "")
+            if q: q_sales[q] += float(s.get("sold_price") or 0)
+        for e in expenses:
+            q = quarter_of(e.get("expense_date") or "")
+            if q: q_expenses[q] += float(e.get("amount") or 0)
+
+        # Monthly breakdown for category pivot
+        months = list(range(1, 13))
+        cat_by_month = {cat: {m: 0.0 for m in months} for cat in cat_totals.keys()}
+        for e in expenses:
+            try:
+                m = int((e.get("expense_date") or "")[5:7])
+                cat = e.get("category", "Other")
+                if cat not in cat_by_month:
+                    cat_by_month[cat] = {mm: 0.0 for mm in months}
+                cat_by_month[cat][m] += float(e.get("amount") or 0)
+            except Exception:
+                pass
+
+        # ---- Build workbook ----
+        wb = Workbook()
+
+        # Style helpers
+        TITLE = Font(name="Calibri", size=18, bold=True, color="0F766E")
+        H1 = Font(name="Calibri", size=12, bold=True, color="FFFFFF")
+        H1_FILL = PatternFill("solid", fgColor="0F766E")
+        H2 = Font(name="Calibri", size=11, bold=True, color="1E293B")
+        H2_FILL = PatternFill("solid", fgColor="E2E8F0")
+        TOTAL_FILL = PatternFill("solid", fgColor="FEF3C7")
+        TOTAL_FONT = Font(name="Calibri", size=11, bold=True)
+        MONEY = '"$"#,##0.00'
+        thin = Side(border_style="thin", color="CBD5E1")
+        BORDER = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+        # ============ TAB 1: SUMMARY (P&L) ============
+        ws = wb.active
+        ws.title = "Summary"
+        ws.column_dimensions["A"].width = 38
+        ws.column_dimensions["B"].width = 18
+        ws.column_dimensions["C"].width = 18
+
+        ws["A1"] = f"{biz_name} — {year} Tax Summary"
+        ws["A1"].font = TITLE
+        ws.merge_cells("A1:C1")
+        ws["A2"] = f"Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d')}  ·  All amounts in USD"
+        ws["A2"].font = Font(italic=True, color="64748B")
+        ws.merge_cells("A2:C2")
+
+        row = 4
+        # Income section
+        ws.cell(row=row, column=1, value="INCOME").font = H1
+        ws.cell(row=row, column=1).fill = H1_FILL
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
+        row += 1
+        ws.cell(row=row, column=1, value="Gross Sales (eBay + other)")
+        ws.cell(row=row, column=2, value=gross_sales).number_format = MONEY
+        row += 2
+
+        # COGS section
+        ws.cell(row=row, column=1, value="COST OF GOODS SOLD").font = H1
+        ws.cell(row=row, column=1).fill = H1_FILL
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
+        row += 1
+        ws.cell(row=row, column=1, value="Beginning inventory value (Jan 1)")
+        ws.cell(row=row, column=2, value=beg_inventory_value).number_format = MONEY
+        row += 1
+        ws.cell(row=row, column=1, value="Ending inventory value (Dec 31)")
+        ws.cell(row=row, column=2, value=end_inventory_value).number_format = MONEY
+        row += 1
+        ws.cell(row=row, column=1, value="COGS from sold items (this year)")
+        ws.cell(row=row, column=2, value=cogs_from_sales).number_format = MONEY
+        row += 1
+        ws.cell(row=row, column=1, value="COGS expense entries (auto-imported)")
+        ws.cell(row=row, column=2, value=cat_totals.get("Cost of Goods", 0)).number_format = MONEY
+        row += 2
+
+        # Expenses by category
+        ws.cell(row=row, column=1, value="OPERATING EXPENSES").font = H1
+        ws.cell(row=row, column=1).fill = H1_FILL
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
+        row += 1
+        for cat in EXPENSE_CATEGORIES:
+            if cat == "Cost of Goods":
+                continue  # already shown above
+            ws.cell(row=row, column=1, value=cat)
+            ws.cell(row=row, column=2, value=cat_totals.get(cat, 0)).number_format = MONEY
+            row += 1
+        ws.cell(row=row, column=1, value="Total operating expenses").font = TOTAL_FONT
+        ws.cell(row=row, column=2, value=total_expenses_excl_cogs).number_format = MONEY
+        ws.cell(row=row, column=2).font = TOTAL_FONT
+        for col in (1, 2):
+            ws.cell(row=row, column=col).fill = TOTAL_FILL
+        row += 2
+
+        # Bottom line
+        ws.cell(row=row, column=1, value="NET PROFIT (Gross sales − all expenses)").font = TOTAL_FONT
+        ws.cell(row=row, column=2, value=net_profit).number_format = MONEY
+        ws.cell(row=row, column=2).font = TOTAL_FONT
+        for col in (1, 2):
+            ws.cell(row=row, column=col).fill = PatternFill("solid", fgColor="DCFCE7")
+        row += 2
+
+        # Quarterly breakdown
+        ws.cell(row=row, column=1, value="QUARTERLY BREAKDOWN").font = H1
+        ws.cell(row=row, column=1).fill = H1_FILL
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
+        row += 1
+        ws.cell(row=row, column=1, value="").font = H2
+        ws.cell(row=row, column=2, value="Sales").font = H2
+        ws.cell(row=row, column=3, value="Expenses").font = H2
+        for col in (1, 2, 3):
+            ws.cell(row=row, column=col).fill = H2_FILL
+        row += 1
+        for q in (1, 2, 3, 4):
+            ws.cell(row=row, column=1, value=f"Q{q} ({['Jan-Mar','Apr-Jun','Jul-Sep','Oct-Dec'][q-1]})")
+            ws.cell(row=row, column=2, value=q_sales[q]).number_format = MONEY
+            ws.cell(row=row, column=3, value=q_expenses[q]).number_format = MONEY
+            row += 1
+
+        # ============ TAB 2: SALES DETAIL ============
+        ws2 = wb.create_sheet("Sales Detail")
+        headers = ["Sold Date", "Item Title", "Sold Price", "Cost (COGS)", "Profit", "Sold Location", "Inventory ID"]
+        for i, h in enumerate(headers, 1):
+            cell = ws2.cell(row=1, column=i, value=h)
+            cell.font = H1
+            cell.fill = H1_FILL
+            cell.alignment = Alignment(horizontal="left")
+        widths = [14, 50, 14, 14, 14, 20, 36]
+        for i, w in enumerate(widths, 1):
+            ws2.column_dimensions[get_column_letter(i)].width = w
+
+        for r, s in enumerate(sales, 2):
+            sp = float(s.get("sold_price") or 0)
+            co = float(s.get("cost") or 0)
+            ws2.cell(row=r, column=1, value=s.get("sold_date") or "")
+            ws2.cell(row=r, column=2, value=(s.get("title") or "")[:200])
+            ws2.cell(row=r, column=3, value=sp).number_format = MONEY
+            ws2.cell(row=r, column=4, value=co).number_format = MONEY
+            ws2.cell(row=r, column=5, value=sp - co).number_format = MONEY
+            ws2.cell(row=r, column=6, value=s.get("sold_location") or "")
+            ws2.cell(row=r, column=7, value=str(s.get("id") or ""))
+
+        # Totals row
+        last = len(sales) + 2
+        ws2.cell(row=last, column=1, value="TOTAL").font = TOTAL_FONT
+        ws2.cell(row=last, column=3, value=gross_sales).number_format = MONEY
+        ws2.cell(row=last, column=4, value=cogs_from_sales).number_format = MONEY
+        ws2.cell(row=last, column=5, value=gross_sales - cogs_from_sales).number_format = MONEY
+        for col in range(1, 8):
+            ws2.cell(row=last, column=col).fill = TOTAL_FILL
+            ws2.cell(row=last, column=col).font = TOTAL_FONT
+
+        ws2.freeze_panes = "A2"
+
+        # ============ TAB 3: EXPENSES DETAIL ============
+        ws3 = wb.create_sheet("Expenses Detail")
+        headers = ["Date", "Merchant", "Category", "Amount", "Source", "Notes"]
+        for i, h in enumerate(headers, 1):
+            cell = ws3.cell(row=1, column=i, value=h)
+            cell.font = H1
+            cell.fill = H1_FILL
+        widths = [12, 30, 22, 14, 14, 50]
+        for i, w in enumerate(widths, 1):
+            ws3.column_dimensions[get_column_letter(i)].width = w
+
+        for r, e in enumerate(expenses, 2):
+            ws3.cell(row=r, column=1, value=e.get("expense_date") or "")
+            ws3.cell(row=r, column=2, value=(e.get("merchant") or "")[:200])
+            ws3.cell(row=r, column=3, value=e.get("category") or "Other")
+            ws3.cell(row=r, column=4, value=float(e.get("amount") or 0)).number_format = MONEY
+            ws3.cell(row=r, column=5, value=e.get("source") or "manual")
+            ws3.cell(row=r, column=6, value=(e.get("notes") or "")[:300])
+
+        last = len(expenses) + 2
+        ws3.cell(row=last, column=1, value="TOTAL").font = TOTAL_FONT
+        ws3.cell(row=last, column=4, value=total_expenses).number_format = MONEY
+        for col in range(1, 7):
+            ws3.cell(row=last, column=col).fill = TOTAL_FILL
+            ws3.cell(row=last, column=col).font = TOTAL_FONT
+
+        ws3.freeze_panes = "A2"
+
+        # ============ TAB 4: CATEGORY x MONTH PIVOT ============
+        ws4 = wb.create_sheet("Category Pivot")
+        month_names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+        ws4.cell(row=1, column=1, value="Category").font = H1
+        ws4.cell(row=1, column=1).fill = H1_FILL
+        for i, mn in enumerate(month_names, 2):
+            cell = ws4.cell(row=1, column=i, value=mn)
+            cell.font = H1
+            cell.fill = H1_FILL
+        cell = ws4.cell(row=1, column=14, value="TOTAL")
+        cell.font = H1
+        cell.fill = H1_FILL
+        ws4.column_dimensions["A"].width = 26
+        for i in range(2, 15):
+            ws4.column_dimensions[get_column_letter(i)].width = 11
+
+        r = 2
+        for cat, mvals in cat_by_month.items():
+            ws4.cell(row=r, column=1, value=cat)
+            row_total = 0
+            for mi, m in enumerate(months, 2):
+                v = mvals.get(m, 0)
+                ws4.cell(row=r, column=mi, value=v).number_format = MONEY
+                row_total += v
+            ws4.cell(row=r, column=14, value=row_total).number_format = MONEY
+            ws4.cell(row=r, column=14).font = Font(bold=True)
+            r += 1
+
+        # Total row
+        for mi, m in enumerate(months, 2):
+            month_total = sum(cat_by_month[cat].get(m, 0) for cat in cat_by_month)
+            ws4.cell(row=r, column=mi, value=month_total).number_format = MONEY
+            ws4.cell(row=r, column=mi).font = TOTAL_FONT
+            ws4.cell(row=r, column=mi).fill = TOTAL_FILL
+        ws4.cell(row=r, column=1, value="TOTAL").font = TOTAL_FONT
+        ws4.cell(row=r, column=1).fill = TOTAL_FILL
+        ws4.cell(row=r, column=14, value=total_expenses).number_format = MONEY
+        ws4.cell(row=r, column=14).font = TOTAL_FONT
+        ws4.cell(row=r, column=14).fill = TOTAL_FILL
+
+        ws4.freeze_panes = "B2"
+
+        # ============ TAB 5: INVENTORY SNAPSHOT ============
+        ws5 = wb.create_sheet("Inventory Snapshot")
+        ws5.column_dimensions["A"].width = 40
+        ws5.column_dimensions["B"].width = 18
+        ws5.cell(row=1, column=1, value="Inventory Snapshot").font = TITLE
+        ws5.cell(row=2, column=1, value=f"For tax year {year} — used to calculate accurate COGS").font = Font(italic=True, color="64748B")
+        ws5.cell(row=4, column=1, value="Beginning inventory (Jan 1 cost basis)").font = H2
+        ws5.cell(row=4, column=2, value=beg_inventory_value).number_format = MONEY
+        ws5.cell(row=5, column=1, value="Ending inventory (Dec 31 cost basis)").font = H2
+        ws5.cell(row=5, column=2, value=end_inventory_value).number_format = MONEY
+        ws5.cell(row=6, column=1, value="Change in inventory").font = TOTAL_FONT
+        ws5.cell(row=6, column=2, value=end_inventory_value - beg_inventory_value).number_format = MONEY
+        ws5.cell(row=8, column=1, value="Schedule C COGS formula:").font = Font(italic=True)
+        ws5.cell(row=9, column=1, value="  Beginning inventory + Purchases − Ending inventory = COGS").font = Font(italic=True, color="64748B")
+
+        # ============ TAB 6: TAX REFERENCE ============
+        ws6 = wb.create_sheet("Tax Reference")
+        ws6.column_dimensions["A"].width = 30
+        ws6.column_dimensions["B"].width = 50
+        ws6.cell(row=1, column=1, value="Schedule C Mapping Reference").font = TITLE
+        ws6.cell(row=2, column=1, value="How your expense categories typically map to IRS Schedule C lines").font = Font(italic=True, color="64748B")
+        ws6.merge_cells("A2:B2")
+        mapping = [
+            ("Your Category", "Schedule C Line (typical)"),
+            ("Cost of Goods", "Part III — Cost of Goods Sold"),
+            ("Shipping & Postage", "Line 22 — Supplies (or Line 27a — Other expenses)"),
+            ("Supplies & Packaging", "Line 22 — Supplies"),
+            ("Fees & Subscriptions", "Line 17 — Legal & professional / Line 27a"),
+            ("Gas & Travel", "Line 9 — Car & truck expenses (if mileage) / Line 24a — Travel"),
+            ("Food & Meals", "Line 24b — Meals (50% deductible)"),
+            ("Software & Tools", "Line 18 — Office expense / Line 27a — Other"),
+            ("Other", "Line 27a — Other expenses (review individually)"),
+        ]
+        for r, (col1, col2) in enumerate(mapping, 4):
+            cell1 = ws6.cell(row=r, column=1, value=col1)
+            cell2 = ws6.cell(row=r, column=2, value=col2)
+            if r == 4:
+                cell1.font = H1; cell1.fill = H1_FILL
+                cell2.font = H1; cell2.fill = H1_FILL
+        ws6.cell(row=14, column=1, value="⚠ Always verify with your accountant or tax professional.").font = Font(italic=True, color="DC2626")
+        ws6.merge_cells("A14:B14")
+
+        # ---- Output ----
+        buf = _io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        from fastapi.responses import Response
+        filename = f"{biz_name_safe}_tax_export_{year}.xlsx"
+        return Response(
+            content=buf.getvalue(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(500, f"Tax export failed: {e}")
+
+
 @app.get("/api/expenses/export")
 async def export_expenses(request: Request, period: str = "month", fmt: str = "csv"):
     """Export expenses as CSV."""
