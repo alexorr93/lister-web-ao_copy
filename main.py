@@ -5496,7 +5496,39 @@ async def toggle_cogs_import(request: Request):
         if enabled:
             updates["cogs_import_since"] = datetime.now(timezone.utc).isoformat()
         supabase.table("businesses").update(updates).eq("id", business_id).execute()
-        return {"ok": True, "enabled": enabled}
+
+        backfilled = 0
+        skipped = 0
+        if enabled:
+            try:
+                # Pull all inventory items with cost > 0
+                inv_res = supabase.table("inventory").select(
+                    "id,title,cost,source_listing_id,created_at"
+                ).eq("business_id", business_id).gt("cost", 0).execute()
+                items = inv_res.data or []
+                print(f"[cogs backfill] processing {len(items)} inventory items with cost > 0")
+
+                for item in items:
+                    try:
+                        # Need integer source_listing_id since expenses.source_listing_id is BIGINT
+                        src_id = item.get("source_listing_id")
+                        if not src_id or not isinstance(src_id, int):
+                            skipped += 1
+                            continue
+                        _upsert_cogs_expense(business_id, {
+                            "id": src_id,
+                            "title": item.get("title", ""),
+                            "cost": item.get("cost", 0),
+                            "created_at": item.get("created_at", ""),
+                        })
+                        backfilled += 1
+                    except Exception as _e:
+                        print(f"[cogs backfill] failed inv {item.get('id')}: {_e}")
+                        skipped += 1
+            except Exception as _e:
+                print(f"[cogs backfill] outer error: {_e}")
+
+        return {"ok": True, "enabled": enabled, "backfilled": backfilled, "skipped": skipped}
     except Exception as e:
         raise HTTPException(500, str(e))
 
