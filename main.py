@@ -1244,7 +1244,7 @@ async def get_ebay_orders(request: Request, limit: int = 20, period: str = "mont
 
 @app.get("/api/ebay/scheduled-listings")
 async def get_scheduled_listings(request: Request):
-    """Fetch scheduled/active listings from eBay offers API."""
+    """Fetch all live listings from eBay offers API — shows everything scheduled/active on user's eBay account."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Not authenticated")
@@ -1254,30 +1254,74 @@ async def get_scheduled_listings(request: Request):
         api_base = "https://api.ebay.com" if EBAY_ENV != "sandbox" else "https://api.sandbox.ebay.com"
         headers = {"Authorization": f"Bearer {token}"}
 
-        # Pull from our DB - listings pushed to eBay
-        db_res = supabase.table("listings").select(
-            "id,title,price,photo_id,ebay_item_id,status,created_at"
-        ).eq("business_id", business_id).not_.is_("ebay_item_id", "null").neq("ebay_item_id", "").execute()
+        # Page through eBay's offer list (max 100 per page; cap at 5 pages = 500 listings)
+        all_offers = []
+        offset = 0
+        for _ in range(5):
+            r = _req.get(
+                f"{api_base}/sell/inventory/v1/offer?limit=100&offset={offset}",
+                headers=headers,
+                timeout=15,
+            )
+            if not r.ok:
+                print(f"[eBay Listings] offer fetch failed: status={r.status_code}, body={r.text[:300]}")
+                break
+            data = r.json()
+            offers = data.get("offers", [])
+            all_offers.extend(offers)
+            if len(offers) < 100:
+                break
+            offset += 100
 
-        items = db_res.data or []
-        print(f"[eBay Listings] found {len(items)} scheduled listings in DB")
+        print(f"[eBay Listings] fetched {len(all_offers)} offers from eBay")
 
+        # Build a SKU -> photo_url map from our DB so we can show thumbnails for app-pushed listings
+        sku_photos = {}
+        try:
+            db_res = supabase.table("listings").select("ebay_item_id,photo_id").eq("business_id", business_id).not_.is_("ebay_item_id", "null").execute()
+            for row in (db_res.data or []):
+                pid = row.get("photo_id")
+                if pid:
+                    sku_photos[row["ebay_item_id"]] = f"{SUPABASE_URL}/storage/v1/object/public/part-photos/{pid}"
+        except Exception as _e:
+            print(f"[eBay Listings] photo map failed: {_e}")
+
+        # Filter to only PUBLISHED + SCHEDULED (skip drafts, ended, etc.)
         results = []
-        for it in items:
-            photo_url = it.get("photo_url","")
-            if not photo_url and it.get("photo_id"):
-                photo_url = f"https://febnocmzhgkikvxqaamr.supabase.co/storage/v1/object/public/part-photos/{it['photo_id']}"
+        for o in all_offers:
+            status = (o.get("status") or "").upper()
+            if status not in ("PUBLISHED", "SCHEDULED"):
+                continue
+            sku = o.get("sku") or ""
+            offer_id = o.get("offerId") or ""
+            listing_id = (o.get("listing") or {}).get("listingId") or offer_id
+            price_obj = (o.get("pricingSummary") or {}).get("price") or {}
+            price = float(price_obj.get("value") or 0)
+            # Try to get title from offer; fall back to inventory item title
+            title = o.get("listingDescription") or o.get("title") or ""
+            if not title and sku:
+                try:
+                    ir = _req.get(f"{api_base}/sell/inventory/v1/inventory_item/{sku}", headers=headers, timeout=8)
+                    if ir.ok:
+                        title = (ir.json().get("product") or {}).get("title") or sku
+                except Exception:
+                    title = sku
+            photo_url = sku_photos.get(listing_id) or sku_photos.get(offer_id) or ""
             results.append({
-                "sku": it.get("ebay_item_id",""),
-                "title": it.get("title",""),
+                "sku": sku,
+                "title": title or "Untitled",
                 "photo_url": photo_url,
-                "price": it.get("price",0),
-                "status": "Scheduled",
-                "listing_id": it.get("ebay_item_id",""),
-                "barcode_id": it.get("ebay_item_id",""),
-                "ebay_item_id": it.get("ebay_item_id",""),
+                "price": price,
+                "status": "Scheduled" if status == "SCHEDULED" else "Active",
+                "listing_id": listing_id,
+                "barcode_id": sku,
+                "ebay_item_id": listing_id,
             })
 
+        # Newest first (eBay returns oldest first by default — flip it)
+        results.reverse()
+
+        print(f"[eBay Listings] returning {len(results)} active+scheduled listings")
         return {"ok": True, "listings": results, "total": len(results)}
     except Exception as e:
         import traceback; traceback.print_exc()
