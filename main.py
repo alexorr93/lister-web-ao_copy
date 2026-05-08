@@ -1290,7 +1290,7 @@ async def get_scheduled_listings(request: Request):
         results = []
         for o in all_offers:
             status = (o.get("status") or "").upper()
-            if status not in ("PUBLISHED", "SCHEDULED"):
+            if status != "SCHEDULED":
                 continue
             sku = o.get("sku") or ""
             offer_id = o.get("offerId") or ""
@@ -1312,7 +1312,7 @@ async def get_scheduled_listings(request: Request):
                 "title": title or "Untitled",
                 "photo_url": photo_url,
                 "price": price,
-                "status": "Scheduled" if status == "SCHEDULED" else "Active",
+                "status": "Scheduled",
                 "listing_id": listing_id,
                 "barcode_id": sku,
                 "ebay_item_id": listing_id,
