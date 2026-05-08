@@ -1314,7 +1314,7 @@ async def get_scheduled_listings(request: Request):
         results = []
         for o in all_offers:
             status = (o.get("status") or "").upper()
-            if status != "SCHEDULED":
+            if status != "PUBLISHED":
                 continue
             sku = o.get("sku") or ""
             offer_id = o.get("offerId") or ""
@@ -1336,7 +1336,7 @@ async def get_scheduled_listings(request: Request):
                 "title": title or "Untitled",
                 "photo_url": photo_url,
                 "price": price,
-                "status": "Scheduled",
+                "status": "Active",
                 "listing_id": listing_id,
                 "barcode_id": sku,
                 "ebay_item_id": listing_id,
@@ -1345,7 +1345,7 @@ async def get_scheduled_listings(request: Request):
         # Newest first (eBay returns oldest first by default — flip it)
         results.reverse()
 
-        print(f"[eBay Listings] returning {len(results)} active+scheduled listings")
+        print(f"[eBay Listings] returning {len(results)} published listings")
         return {"ok": True, "listings": results, "total": len(results)}
     except Exception as e:
         import traceback; traceback.print_exc()
