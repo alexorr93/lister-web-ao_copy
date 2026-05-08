@@ -1953,7 +1953,7 @@ async def list_saved_batches(request: Request):
         for f in folders:
             f["count"] = counts.get(f["id"], 0)
 
-        return JSONResponse(folders)
+        return JSONResponse({"batches": folders})
     except Exception as e:
         raise HTTPException(500, str(e))
 
