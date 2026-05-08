@@ -1942,16 +1942,20 @@ async def list_saved_batches(request: Request):
         folder_ids = [f["id"] for f in folders]
         counts = {}
         if folder_ids:
+            # Fetch counts per batch using limit=10000 to avoid truncation
             cnt_res = supabase.table("saved_batch_listings")\
                 .select("saved_batch_id")\
                 .in_("saved_batch_id", folder_ids)\
+                .limit(10000)\
                 .execute()
             for row in (cnt_res.data or []):
                 bid = row["saved_batch_id"]
                 counts[bid] = counts.get(bid, 0) + 1
 
         for f in folders:
-            f["count"] = counts.get(f["id"], 0)
+            cnt = counts.get(f["id"], 0)
+            f["item_count"] = cnt
+            f["count"] = cnt
 
         return JSONResponse({"batches": folders})
     except Exception as e:
