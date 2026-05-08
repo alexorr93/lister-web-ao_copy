@@ -1306,7 +1306,11 @@ async def get_scheduled_listings(request: Request):
         except Exception as _e:
             print(f"[eBay Listings] photo map failed: {_e}")
 
-        # Filter to only PUBLISHED + SCHEDULED (skip drafts, ended, etc.)
+        # Debug: log what statuses we actually got
+        from collections import Counter
+        status_counts = Counter((o.get("status") or "UNKNOWN").upper() for o in all_offers)
+        print(f"[eBay Listings] offer status breakdown: {dict(status_counts)}")
+
         results = []
         for o in all_offers:
             status = (o.get("status") or "").upper()
