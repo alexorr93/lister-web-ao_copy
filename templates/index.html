@@ -2887,7 +2887,9 @@ async function loadBatch(batchId) {
         quantity: it.quantity || 1,
         photo_id: it.photo_id || '',
         photo_url: it.thumb_url || '',
-        all_photo_urls: (it.all_photos || []).map(function(p) { return p.thumb; }),
+        thumb_url: it.thumb_url || '',
+        full_url: it.full_url || it.thumb_url || '',
+        all_photos: (it.all_photos && it.all_photos.length) ? it.all_photos : (it.thumb_url ? [{thumb: it.thumb_url, full: it.full_url || it.thumb_url}] : []),
         status: it.status || 'draft',
         ebay_category_id: it.ebay_category_id || '',
         description: it.description || '',
@@ -6193,10 +6195,12 @@ async function confirmSaveBatch() {
   const btn = document.getElementById('save-batch-confirm-btn');
   btn.disabled = true; btn.textContent = 'Saving...';
   try {
+    // If items are selected, only save those; otherwise save all
+    const selectedIds = selected.size > 0 ? Array.from(selected) : null;
     const r = await fetch('/api/saved-batches', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name})
+      body: JSON.stringify({name, listing_ids: selectedIds})
     });
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
