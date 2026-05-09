@@ -334,6 +334,11 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 .tier-retail { background:rgba(22,83,52,0.9); color:#86efac; border:1px solid rgba(34,197,94,0.4); }
 .tier-estimated { background:rgba(59,43,0,0.9); color:#fcd34d; border:1px solid rgba(245,158,11,0.4); }
 .tier-active { background:rgba(42,26,26,0.9); color:#fca5a5; border:1px solid rgba(239,68,68,0.4); }
+.tile-tier-badge { position:absolute; bottom:42px; left:8px; font-size:9px; font-weight:700; padding:2px 7px; border-radius:10px; letter-spacing:0.04em; }
+.tier-sold { background:rgba(30,58,95,0.9); color:#93c5fd; border:1px solid rgba(59,130,246,0.4); }
+.tier-retail { background:rgba(22,83,52,0.9); color:#86efac; border:1px solid rgba(34,197,94,0.4); }
+.tier-estimated { background:rgba(59,43,0,0.9); color:#fcd34d; border:1px solid rgba(245,158,11,0.4); }
+.tier-active { background:rgba(42,26,26,0.9); color:#fca5a5; border:1px solid rgba(239,68,68,0.4); }
 .tile-body { padding: 10px 11px 8px; }
 .tile-title { font-size: 14px; font-weight: 700; color: #f8fafc; line-height: 1.4; min-height: 40px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .tile-category { font-size: 12px; color:#94a3b8; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2668,6 +2673,7 @@ function renderTiles() {
         <div class="tile-price-overlay">
           ${l.sold_count > 0 ? '<div style="display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:700;color:#22c55e;background:rgba(0,0,0,0.65);border:1px solid rgba(34,197,94,0.6);border-radius:4px;padding:2px 7px;margin-bottom:4px;">✓ Verified</div>' : ''}
           ${(function(){ var tier=l.pricing_tier||''; if(tier==='SOLD_COMPS') return '<div class="tile-tier-badge tier-sold">Sold comps</div>'; if(tier==='RETAIL_ANCHORED') return '<div class="tile-tier-badge tier-retail">Retail</div>'; if(tier==='ESTIMATED') return '<div class="tile-tier-badge tier-estimated">Estimated</div>'; if(tier==='ACTIVE_LISTINGS') return '<div class="tile-tier-badge tier-active">Active only</div>'; return ''; })()}
+          ${(function(){ var tier=l.pricing_tier||''; if(tier==='SOLD_COMPS') return '<div class="tile-tier-badge tier-sold">Sold comps</div>'; if(tier==='RETAIL_ANCHORED') return '<div class="tile-tier-badge tier-retail">Retail</div>'; if(tier==='ESTIMATED') return '<div class="tile-tier-badge tier-estimated">Estimated</div>'; if(tier==='ACTIVE_LISTINGS') return '<div class="tile-tier-badge tier-active">Active only</div>'; return ''; })()}
           <div class="tile-price-main">$${l.price.toFixed(2)}</div>
           ${refs ? `<div class="tile-price-ref">${refs}</div>` : ''}
         </div>
@@ -2675,8 +2681,8 @@ function renderTiles() {
       <div class="tile-body">
         <input class="tile-title-input" type="text" value="${(l.title||'').replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Title">
         <div class="tile-search-btns">
-          <button class="tile-search-btn" style="color:#4285F4;font-weight:700;" onclick="window.open('https://www.google.com/search?q='+encodeURIComponent(stripSearchTitle(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value)),'popupwin','noopener,width=1200,height=800')">G Google</button>
-          <button class="tile-search-btn" style="font-weight:700;" onclick="window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(stripSearchTitle(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value))+'&LH_Sold=1&LH_Complete=1','popupwin','noopener,width=1200,height=800')"><span style="color:#e53238;">e</span><span style="color:#0064d2;">B</span><span style="color:#f5af02;">a</span><span style="color:#86b817;">y</span> Sold</button>
+          <button class="tile-search-btn google" onclick="window.open('https://www.google.com/search?q='+encodeURIComponent(stripSearchTitle(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value)),'popupwin','noopener,width=1200,height=800')">G Google</button>
+          <button class="tile-search-btn ebay-btn" onclick="window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(stripSearchTitle(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value))+'&LH_Sold=1&LH_Complete=1','popupwin','noopener,width=1200,height=800')"><span style="color:#e53238;">e</span><span style="color:#0064d2;">B</span><span style="color:#f5af02;">a</span><span style="color:#86b817;">y</span> Sold</button>
         </div>
 
         <div class="tile-price-cond-row">
