@@ -312,10 +312,10 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 @media (max-width: 700px) { .tile-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; } }
 @media (max-width: 400px) { .tile-grid { grid-template-columns: 1fr; } }
 
-.tile { background:#0a0f18; border: 1.5px solid var(--border); border-radius: 14px; overflow: hidden; cursor: pointer; transition: transform 0.12s, border-color 0.12s; }
-.tile:hover { transform: translateY(-1px); }
-.tile.selected { border: 2.5px solid var(--accent) !important; box-shadow: 0 0 0 2px rgba(37,99,235,0.2); }
-.tile.ebay-draft { border-left: 3px solid var(--accent); }
+.tile { background:#0d1117; border: 1px solid #1a2332; border-radius: 12px; overflow: hidden; cursor: pointer; transition: border-color 0.12s; }
+.tile:hover { border-color: #2a3a4a; }
+.tile.selected { border: 2px solid #22c55e !important; }
+.tile.ebay-draft { border-left: 3px solid #2563eb; }
 
 .tile-photo { position: relative; width: 100%; padding-top: 100%; background: #161925; overflow: hidden; }
 .tile-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; image-orientation: from-image; }
@@ -329,6 +329,11 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 .tile-price-overlay { position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(transparent, rgba(0,0,0,0.85)); padding: 28px 10px 8px; }
 .tile-price-main { color: #fff; font-size: 26px; font-weight: 900; letter-spacing: -0.5px; line-height: 1; }
 .tile-price-ref { color: #cbd5e1; font-size: 12px; font-weight: 600; margin-top: 2px; }
+.tile-tier-badge { position:absolute; bottom:42px; left:8px; font-size:9px; font-weight:700; padding:2px 7px; border-radius:10px; letter-spacing:0.04em; }
+.tier-sold { background:rgba(30,58,95,0.9); color:#93c5fd; border:1px solid rgba(59,130,246,0.4); }
+.tier-retail { background:rgba(22,83,52,0.9); color:#86efac; border:1px solid rgba(34,197,94,0.4); }
+.tier-estimated { background:rgba(59,43,0,0.9); color:#fcd34d; border:1px solid rgba(245,158,11,0.4); }
+.tier-active { background:rgba(42,26,26,0.9); color:#fca5a5; border:1px solid rgba(239,68,68,0.4); }
 .tile-body { padding: 10px 11px 8px; }
 .tile-title { font-size: 14px; font-weight: 700; color: #f8fafc; line-height: 1.4; min-height: 40px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .tile-category { font-size: 12px; color:#94a3b8; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -337,14 +342,17 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 .tile-title-input:hover { border-bottom-color:var(--border); }
 .tile-title-input:focus { border-bottom-color:var(--accent); }
 .tile-search-btns { display:flex; gap:5px; margin-bottom:6px; }
-.tile-search-btn { flex:1; font-size:12px; padding:5px 8px; border-radius:5px; border:1px solid #1a2332; background:transparent; color:#94a3b8; cursor:pointer; font-family:inherit; font-weight:600; }
-.tile-search-btn:hover { background:var(--border); color:var(--text); }
+.tile-search-btn { flex:1; font-size:12px; padding:6px 8px; border-radius:6px; border:1px solid #1a2332; background:transparent; cursor:pointer; font-family:inherit; font-weight:700; }
+.tile-search-btn:hover { filter: brightness(1.2); }
+.tile-search-btn.google { color:#4285F4; border-color:rgba(66,133,244,0.25); background:rgba(66,133,244,0.06); }
+.tile-search-btn.ebay-btn { border-color:rgba(229,50,56,0.2); background:rgba(229,50,56,0.04); }
 .tile-price-cond-row { display:flex; align-items:center; gap:6px; }
 .tile-price-input { width:75px; background:transparent; border:none; border-bottom:1px solid var(--border); color:#f8fafc; font-size:16px; font-weight:800; font-family:inherit; outline:none; padding:0 0 2px; }
 .tile-price-input:focus { border-bottom-color:var(--accent); }
 .tile-cond-toggle { display:flex; margin-left:auto; border:1px solid #1a2332; border-radius:5px; overflow:hidden; }
-.tile-cond-btn { font-size:12px; padding:5px 10px; background:transparent; border:none; color:#94a3b8; cursor:pointer; font-family:inherit; font-weight:600; }
-.tile-cond-btn.active { background:var(--accent); color:#fff; }
+.tile-cond-btn { font-size:12px; padding:6px 12px; background:transparent; border:none; color:#64748b; cursor:pointer; font-family:inherit; font-weight:600; }
+.tile-cond-btn.active.used-active { background:rgba(59,130,246,0.18); color:#60a5fa; }
+.tile-cond-btn.active.new-active { background:rgba(34,197,94,0.18); color:#4ade80; }
 .proc-bar-wrap { background:#0d1117; border:1px solid #1a2332; border-radius:10px; padding:14px 18px; margin-bottom:14px; }
 .proc-bar-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:7px; font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:0.06em; }
 .proc-bar-track { height:5px; background:var(--border); border-radius:3px; overflow:hidden; margin-bottom:7px; }
@@ -362,7 +370,10 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 .qty-btn.plus  { color: var(--green); }
 .qty-btn:hover { background: var(--border); }
 .qty-num { flex: 1; text-align: center; font-size: 14px; font-weight: 700; color: var(--text); border-left: 1px solid var(--border); border-right: 1px solid var(--border); height: 26px; line-height: 26px; }
-.tile-rescan { padding: 4px 8px; background:#0d1117; border:1px solid #1a2332; border-radius: 6px; color: var(--muted); font-size: 10px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.tile-rescan { padding: 5px 10px; background:#0d1117; border:1px solid #1a2332; border-radius: 6px; color: var(--muted); font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.tile-rescan:hover { border-color:#2a3a4a; color:var(--text); }
+.tile-warn-btn { padding: 5px 8px; background:rgba(245,158,11,0.06); border:1px solid rgba(146,64,14,0.5); border-radius:6px; color:#f59e0b; font-size:12px; cursor:pointer; }
+.tile-warn-btn:hover { background:rgba(245,158,11,0.12); }
 .tile-rescan:hover { color: var(--text); background: var(--border); }
 
 /* MODAL */
@@ -2656,6 +2667,7 @@ function renderTiles() {
         <div class="tile-badge-tr">${statusBadge}</div>
         <div class="tile-price-overlay">
           ${l.sold_count > 0 ? '<div style="display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:700;color:#22c55e;background:rgba(0,0,0,0.65);border:1px solid rgba(34,197,94,0.6);border-radius:4px;padding:2px 7px;margin-bottom:4px;">✓ Verified</div>' : ''}
+          ${(function(){ var tier=l.pricing_tier||''; if(tier==='SOLD_COMPS') return '<div class="tile-tier-badge tier-sold">Sold comps</div>'; if(tier==='RETAIL_ANCHORED') return '<div class="tile-tier-badge tier-retail">Retail</div>'; if(tier==='ESTIMATED') return '<div class="tile-tier-badge tier-estimated">Estimated</div>'; if(tier==='ACTIVE_LISTINGS') return '<div class="tile-tier-badge tier-active">Active only</div>'; return ''; })()}
           <div class="tile-price-main">$${l.price.toFixed(2)}</div>
           ${refs ? `<div class="tile-price-ref">${refs}</div>` : ''}
         </div>
@@ -2671,8 +2683,8 @@ function renderTiles() {
           <span style="color:var(--muted);font-size:11px;">$</span>
           <input class="tile-price-input" type="number" step="0.01" value="${l.price.toFixed(2)}" data-id="${l.id}">
           <div class="tile-cond-toggle">
-            <button class="tile-cond-btn${isNew?'' :' active'}" data-id="${l.id}" data-cond="used">Used</button>
-            <button class="tile-cond-btn${isNew?' active':''}" data-id="${l.id}" data-cond="new">New</button>
+            <button class="tile-cond-btn${isNew?'' :' active used-active'}" data-id="${l.id}" data-cond="used">Used</button>
+            <button class="tile-cond-btn${isNew?' active new-active':''}" data-id="${l.id}" data-cond="new">New</button>
           </div>
         </div>
         ${costRow}
@@ -2684,7 +2696,7 @@ function renderTiles() {
           <button class="qty-btn plus" onclick="changeQty('${l.id}',1)">+</button>
         </div>
         <button class="tile-rescan" onclick="rescanItem('${l.id}')" title="Rescan">↺ Rescan</button>
-        <button class="tile-rescan" style="color:#f59e0b;border-color:#92400e;" onclick="reportBadScan('${l.id}')" title="Report bad scan">⚠</button>
+        <button class="tile-warn-btn" onclick="reportBadScan('${l.id}')" title="Report bad scan">⚠</button>
       </div>
     </div>`;
   }).join('');
