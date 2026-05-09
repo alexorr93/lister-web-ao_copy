@@ -948,6 +948,10 @@ select.field-input { background: #fff; color: #0f172a; }
         <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="selectAll()">Select all</button>
         <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="deselectAll()">Deselect</button>
         <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="openLotCostModal()" id="lot-cost-btn">Lot Cost</button>
+        <button onclick="openScannerSettings()" style="padding:8px 12px;background:#0a0f18;border:1px solid #1a2332;border-radius:8px;color:#94a3b8;cursor:pointer;font-size:15px;display:flex;align-items:center;gap:6px;font-family:inherit;" title="Listing defaults">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Settings
+        </button>
         <button class="btn" style="font-size:16px;padding:8px 14px;background:#1a3a1a;border-color:#2d5a2d;color:#86efac;font-weight:700;" onclick="openSaveBatchModal()">Save Batch</button>
         <div style="position:relative;">
           <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="toggleSavedBatchesDropdown()">🗂 Saved</button>
@@ -6119,6 +6123,92 @@ loadDashboardSummary();
 setInterval(() => { if (activeTab === 'dashboard') loadDashboardSummary(); }, 30000);
 
 
+// ── SCANNER SETTINGS ───────────────────────────────────────────
+var _scannerDefaults = {};
+
+async function openScannerSettings() {
+  document.getElementById('scanner-settings-modal').style.display = 'flex';
+  try {
+    var r = await fetch('/api/listing-defaults', {credentials:'include'});
+    var d = await r.json();
+    _scannerDefaults = d;
+    document.getElementById('sl-location').value = d.location || '';
+    document.getElementById('sl-postal').value = d.postal_code || '';
+    document.getElementById('sl-dispatch').value = d.dispatch_time || '1';
+    document.getElementById('sl-format').value = d.format || 'FixedPrice';
+    document.getElementById('sl-duration').value = d.duration || 'GTC';
+    document.getElementById('sl-best-offer').checked = d.best_offer === 'true';
+    document.getElementById('sl-bo-accept').value = d.best_offer_auto_accept || '';
+    document.getElementById('sl-bo-min').value = d.best_offer_min || '';
+    document.getElementById('sl-ship-svc').value = d.shipping_service || 'USPSGround';
+    document.getElementById('sl-ship-cost').value = d.shipping_cost || '0.00';
+    document.getElementById('sl-return-policy').value = d.return_policy || 'ReturnsAccepted';
+    document.getElementById('sl-returns-within').value = d.returns_within || 'Days_30';
+    document.getElementById('sl-refund').value = d.refund_option || 'MoneyBack';
+    document.getElementById('sl-ret-paid-by').value = d.return_shipping_paid_by || 'Buyer';
+    document.getElementById('sl-ship-profile').value = d.shipping_profile || '';
+    document.getElementById('sl-ret-profile').value = d.return_profile || '';
+    document.getElementById('sl-pay-profile').value = d.payment_profile || '';
+    document.getElementById('sl-description').value = d.default_description || '';
+    toggleBestOfferFields();
+    updateDurationOptions();
+  } catch(e) { console.error('Failed to load listing defaults', e); }
+}
+
+function closeScannerSettings() {
+  document.getElementById('scanner-settings-modal').style.display = 'none';
+}
+
+function toggleBestOfferFields() {
+  var checked = document.getElementById('sl-best-offer').checked;
+  var fields = document.getElementById('sl-best-offer-fields');
+  if (fields) fields.style.display = checked ? 'grid' : 'none';
+}
+
+function updateDurationOptions() {
+  var fmt = document.getElementById('sl-format').value;
+  var dur = document.getElementById('sl-duration');
+  dur.innerHTML = fmt === 'FixedPrice'
+    ? '<option value="GTC">Good Till Cancelled (GTC)</option>'
+    : '<option value="7">7 days</option><option value="10">10 days</option><option value="5">5 days</option><option value="3">3 days</option><option value="1">1 day</option>';
+}
+
+async function saveScannerSettings() {
+  var payload = {
+    location: document.getElementById('sl-location').value.trim(),
+    postal_code: document.getElementById('sl-postal').value.trim(),
+    dispatch_time: document.getElementById('sl-dispatch').value,
+    format: document.getElementById('sl-format').value,
+    duration: document.getElementById('sl-duration').value,
+    best_offer: document.getElementById('sl-best-offer').checked ? 'true' : 'false',
+    best_offer_auto_accept: document.getElementById('sl-bo-accept').value.trim(),
+    best_offer_min: document.getElementById('sl-bo-min').value.trim(),
+    shipping_service: document.getElementById('sl-ship-svc').value,
+    shipping_cost: document.getElementById('sl-ship-cost').value || '0.00',
+    return_policy: document.getElementById('sl-return-policy').value,
+    returns_within: document.getElementById('sl-returns-within').value,
+    refund_option: document.getElementById('sl-refund').value,
+    return_shipping_paid_by: document.getElementById('sl-ret-paid-by').value,
+    shipping_profile: document.getElementById('sl-ship-profile').value.trim(),
+    return_profile: document.getElementById('sl-ret-profile').value.trim(),
+    payment_profile: document.getElementById('sl-pay-profile').value.trim(),
+    default_description: document.getElementById('sl-description').value.trim(),
+  };
+  try {
+    var r = await fetch('/api/listing-defaults', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      credentials: 'include',
+      body: JSON.stringify(payload)
+    });
+    if (!r.ok) throw new Error('Save failed');
+    toast('Listing defaults saved ✓', 'success');
+    closeScannerSettings();
+  } catch(e) {
+    toast('Failed to save defaults', 'error');
+  }
+}
+
 // ── INIT ───────────────────────────────────────────────────────
 loadListings();
 initTileListeners();
@@ -6162,6 +6252,177 @@ function updatePriceByCondition() {
 </script>
 
 <!-- Save Batch modal -->
+<!-- Scanner / Listing Defaults Settings Modal -->
+<div id="scanner-settings-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto;">
+  <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:14px;padding:28px;max-width:640px;width:100%;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+      <div>
+        <div style="font-size:18px;font-weight:800;color:var(--text);">Listing Defaults</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:3px;">Applied to all eBay CSV exports and pushes</div>
+      </div>
+      <button onclick="closeScannerSettings()" style="background:transparent;border:1px solid #1a2332;color:var(--muted);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:17px;">×</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+
+      <!-- Location -->
+      <div style="grid-column:1/-1;">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Item Location (City, State)</div>
+        <input id="sl-location" type="text" placeholder="e.g. Denver, CO" class="acct-input" style="width:100%;">
+      </div>
+
+      <!-- Postal Code -->
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Postal Code</div>
+        <input id="sl-postal" type="text" placeholder="e.g. 80201" class="acct-input" style="width:100%;">
+      </div>
+
+      <!-- Dispatch Time -->
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Handling Time (days)</div>
+        <select id="sl-dispatch" class="acct-input" style="width:100%;">
+          <option value="1">1 day</option>
+          <option value="2">2 days</option>
+          <option value="3">3 days</option>
+          <option value="5">5 days</option>
+          <option value="10">10 days</option>
+        </select>
+      </div>
+
+      <!-- Format -->
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Listing Format</div>
+        <select id="sl-format" class="acct-input" style="width:100%;" onchange="updateDurationOptions()">
+          <option value="FixedPrice">Fixed Price (Buy It Now)</option>
+          <option value="Auction">Auction</option>
+        </select>
+      </div>
+
+      <!-- Duration -->
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Duration</div>
+        <select id="sl-duration" class="acct-input" style="width:100%;">
+          <option value="GTC">Good Till Cancelled (GTC)</option>
+          <option value="30">30 days</option>
+        </select>
+      </div>
+
+      <!-- Best Offer -->
+      <div style="grid-column:1/-1;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;color:var(--text);font-weight:600;">
+            <input type="checkbox" id="sl-best-offer" onchange="toggleBestOfferFields()" style="width:15px;height:15px;accent-color:#22c55e;">
+            Enable Best Offer
+          </label>
+        </div>
+        <div id="sl-best-offer-fields" style="display:none;display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Auto-Accept Price ($)</div>
+            <input id="sl-bo-accept" type="number" step="0.01" placeholder="Optional" class="acct-input" style="width:100%;">
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Min Offer Price ($)</div>
+            <input id="sl-bo-min" type="number" step="0.01" placeholder="Optional" class="acct-input" style="width:100%;">
+          </div>
+        </div>
+      </div>
+
+      <!-- Shipping -->
+      <div style="grid-column:1/-1;border-top:1px solid #1a2332;padding-top:14px;margin-top:4px;">
+        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:12px;">Shipping</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Service</div>
+            <select id="sl-ship-svc" class="acct-input" style="width:100%;">
+              <option value="USPSGround">USPS Ground Advantage</option>
+              <option value="USPSPriority">USPS Priority Mail</option>
+              <option value="USPSFirstClass">USPS First Class</option>
+              <option value="UPSGround">UPS Ground</option>
+              <option value="UPS2ndDay">UPS 2nd Day Air</option>
+              <option value="FedExGround">FedEx Ground</option>
+              <option value="FedExHomeDelivery">FedEx Home Delivery</option>
+              <option value="FreightQuote">Freight (Large items)</option>
+            </select>
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Cost ($) — 0 for free</div>
+            <input id="sl-ship-cost" type="number" step="0.01" placeholder="0.00" class="acct-input" style="width:100%;">
+          </div>
+        </div>
+      </div>
+
+      <!-- Returns -->
+      <div style="grid-column:1/-1;border-top:1px solid #1a2332;padding-top:14px;margin-top:4px;">
+        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:12px;">Returns</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Policy</div>
+            <select id="sl-return-policy" class="acct-input" style="width:100%;">
+              <option value="ReturnsAccepted">Returns Accepted</option>
+              <option value="ReturnsNotAccepted">No Returns</option>
+            </select>
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Return Window</div>
+            <select id="sl-returns-within" class="acct-input" style="width:100%;">
+              <option value="Days_30">30 days</option>
+              <option value="Days_14">14 days</option>
+              <option value="Days_60">60 days</option>
+            </select>
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Refund Method</div>
+            <select id="sl-refund" class="acct-input" style="width:100%;">
+              <option value="MoneyBack">Money Back</option>
+              <option value="MoneyBackOrExchange">Money Back or Exchange</option>
+              <option value="MoneyBackOrReplacement">Money Back or Replacement</option>
+            </select>
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Return Shipping Paid By</div>
+            <select id="sl-ret-paid-by" class="acct-input" style="width:100%;">
+              <option value="Buyer">Buyer</option>
+              <option value="Seller">Seller</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Business Policies (optional — overrides shipping/return fields above) -->
+      <div style="grid-column:1/-1;border-top:1px solid #1a2332;padding-top:14px;margin-top:4px;">
+        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px;">Business Policies <span style="font-size:11px;font-weight:400;color:var(--muted);">(optional — overrides shipping & return fields above)</span></div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Enter the exact policy name from your <a href="https://www.bizpolicy.ebay.com/businesspolicy/manage" target="_blank" style="color:#22c55e;">eBay Business Policies page</a></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Shipping Profile</div>
+            <input id="sl-ship-profile" type="text" placeholder="Policy name" class="acct-input" style="width:100%;">
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Return Profile</div>
+            <input id="sl-ret-profile" type="text" placeholder="Policy name" class="acct-input" style="width:100%;">
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Payment Profile</div>
+            <input id="sl-pay-profile" type="text" placeholder="Policy name" class="acct-input" style="width:100%;">
+          </div>
+        </div>
+      </div>
+
+      <!-- Default Description -->
+      <div style="grid-column:1/-1;border-top:1px solid #1a2332;padding-top:14px;margin-top:4px;">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Default Item Description</div>
+        <textarea id="sl-description" rows="4" placeholder="Leave blank to use no default description..." class="acct-input" style="width:100%;resize:vertical;font-family:inherit;font-size:13px;line-height:1.5;"></textarea>
+      </div>
+
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:20px;justify-content:flex-end;">
+      <button onclick="closeScannerSettings()" style="padding:10px 20px;background:transparent;border:1px solid #1a2332;border-radius:8px;color:var(--muted);cursor:pointer;font-family:inherit;font-size:14px;">Cancel</button>
+      <button onclick="saveScannerSettings()" style="padding:10px 24px;background:#22c55e;border:none;border-radius:8px;color:#052e16;cursor:pointer;font-family:inherit;font-size:14px;font-weight:700;">Save Defaults</button>
+    </div>
+  </div>
+</div>
+
 <div id="save-batch-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
   <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:12px;padding:24px;min-width:360px;max-width:90vw;">
     <div style="font-size:16px;font-weight:700;margin-bottom:16px;color:var(--text);">💾 Save Current Batch</div>

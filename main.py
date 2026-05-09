@@ -1668,33 +1668,70 @@ async def get_ebay_policies(request: Request):
         return {"fulfillment": [], "returns": [], "payments": [], "error": str(e)}
 
 @app.get("/api/export/ebay-csv")
-async def export_ebay_csv():
+async def export_ebay_csv(request: Request):
     import csv, io
     from fastapi.responses import StreamingResponse
     from datetime import datetime
+    business_id = require_auth(request)
     try:
         res = supabase.table("listings").select(
-            "title,description,price,price_used,price_new,quantity,condition,photo_id,ebay_category_id,description"
-        ).neq("status", "archived").execute()
+            "id,title,description,price,price_used,price_new,quantity,condition,photo_id,ebay_category_id,barcode_id"
+        ).eq("business_id", business_id).neq("status", "archived").execute()
         items = res.data or []
     except Exception as e:
         raise HTTPException(500, str(e))
 
+    # Load listing defaults for this business
+    try:
+        def_res = supabase.table("app_settings").select("key,value").eq("business_id", business_id).like("key", "listing_%").execute()
+        d = {r["key"].replace("listing_", ""): r["value"] for r in (def_res.data or [])}
+    except Exception:
+        d = {}
+
+    def_format        = d.get("format", "FixedPrice")
+    def_duration      = d.get("duration", "GTC")
+    def_location      = d.get("location", "")
+    def_postal        = d.get("postal_code", "")
+    def_dispatch      = d.get("dispatch_time", "1")
+    def_ship_svc      = d.get("shipping_service", "USPSGround")
+    def_ship_cost     = d.get("shipping_cost", "0.00")
+    def_best_offer    = d.get("best_offer", "false")
+    def_bo_accept     = d.get("best_offer_auto_accept", "")
+    def_bo_min        = d.get("best_offer_min", "")
+    def_return_policy = d.get("return_policy", "ReturnsAccepted")
+    def_returns_within= d.get("returns_within", "Days_30")
+    def_refund        = d.get("refund_option", "MoneyBack")
+    def_ret_paid_by   = d.get("return_shipping_paid_by", "Buyer")
+    def_ship_profile  = d.get("shipping_profile", "")
+    def_ret_profile   = d.get("return_profile", "")
+    def_pay_profile   = d.get("payment_profile", "")
+    def_description   = d.get("default_description", "") or EBAY_DESCRIPTION
+
     output = io.StringIO()
+    output.write("Info,Version=1.0.0,Template=fx_category_template_EBAY_US\r\n")
 
-    # eBay draft flat file headers — same format as the working version
-    output.write('#INFO,Version=0.0.2,Template= eBay-draft-listings-template_US,,,,,,,,\n')
-    output.write('#INFO Action and Category ID are required fields.,,,,,,,,,,\n')
-    output.write('#INFO,,,,,,,,,,\n')
-    output.write('Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8),Custom label (SKU),Category ID,Title,UPC,Price,Quantity,Item photo URL,Condition ID,Description,Format\n')
+    headers = [
+        "*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)",
+        "CustomLabel", "*Category", "StoreCategory", "*Title",
+        "*ConditionID", "PicURL", "*Description", "*Format", "*Duration",
+        "*StartPrice", "BuyItNowPrice", "BestOfferEnabled",
+        "BestOfferAutoAcceptPrice", "MinimumBestOfferPrice",
+        "*Quantity", "ImmediatePayRequired",
+        "*Location", "PostalCode",
+        "ShippingType", "ShippingService-1:Option", "ShippingService-1:Cost",
+        "*DispatchTimeMax",
+        "*ReturnsAcceptedOption", "ReturnsWithinOption",
+        "RefundOption", "ShippingCostPaidByOption",
+        "ShippingProfileName", "ReturnProfileName", "PaymentProfileName",
+    ]
 
-    writer = csv.writer(output, quoting=csv.QUOTE_ALL)
+    writer = csv.writer(output, quoting=csv.QUOTE_ALL, lineterminator="\r\n")
+    writer.writerow(headers)
 
     for item in items:
         cond = str(item.get("condition") or "used").strip().lower()
-        cond_id = "NEW" if cond == "new" else "USED"
+        cond_id = "1000" if cond == "new" else "3000"
         pid = str(item.get("photo_id") or "")
-        # Look up all photos for this listing via group_photos table
         try:
             _gp = supabase.table("group_photos").select("photo_id").eq("group_id",
                 (supabase.table("group_photos").select("group_id").eq("photo_id", pid).execute().data or [{}])[0].get("group_id", "")
@@ -1703,24 +1740,55 @@ async def export_ebay_csv():
             pic = "|".join(photo_url(p) for p in _all_pids if p) if _all_pids else (photo_url(pid) if pid else "")
         except Exception:
             pic = photo_url(pid) if pid else ""
-        category_id = "12576"
+
+        cat_id = str(item.get("ebay_category_id") or "")
         price = float(item.get("price") or item.get("price_used") or 0)
+        sku = str(item.get("barcode_id") or item.get("id") or "")
+        desc = str(item.get("description") or def_description)
+
+        # Best offer fields
+        bo_enabled = "1" if def_best_offer == "true" else "0"
+        bo_accept_val = def_bo_accept if def_best_offer == "true" and def_bo_accept else ""
+        bo_min_val = def_bo_min if def_best_offer == "true" and def_bo_min else ""
+
+        # Use business policies if set, otherwise use direct shipping fields
+        use_policies = bool(def_ship_profile or def_ret_profile or def_pay_profile)
+
         writer.writerow([
-            "Draft",
+            "Add",
+            sku,
+            cat_id,
             "",
-            category_id,
-            str(item.get("title",""))[:80],
-            "",
-            f"{price:.2f}",
-            str(int(item.get("quantity") or 1)),
-            pic,
+            str(item.get("title", ""))[:80],
             cond_id,
-            str(item.get('description','') or EBAY_DESCRIPTION),
-            "FixedPrice",
+            pic,
+            desc,
+            def_format,
+            def_duration if def_format == "FixedPrice" else "7",
+            f"{price:.2f}",
+            "",  # BuyItNowPrice (for auction only)
+            bo_enabled,
+            bo_accept_val,
+            bo_min_val,
+            str(int(item.get("quantity") or 1)),
+            "1",  # ImmediatePayRequired
+            def_location if not def_postal else "",
+            def_postal,
+            "" if use_policies else "Flat",
+            "" if use_policies else def_ship_svc,
+            "" if use_policies else def_ship_cost,
+            def_dispatch,
+            "" if use_policies else def_return_policy,
+            "" if use_policies else def_returns_within,
+            "" if use_policies else def_refund,
+            "" if use_policies else def_ret_paid_by,
+            def_ship_profile,
+            def_ret_profile,
+            def_pay_profile,
         ])
 
-    csv_bytes = output.getvalue().encode("utf-8")
-    fn = f"ebay_export_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+    csv_bytes = output.getvalue().encode("utf-8-sig")  # BOM for Excel compatibility
+    fn = f"eBay-category-listing-template-{datetime.now().strftime('%b-%-d-%Y-%H-%M-%S')}.csv"
     return StreamingResponse(
         io.BytesIO(csv_bytes),
         media_type="text/csv",
@@ -3772,6 +3840,70 @@ If no text visible or no matches, still return the JSON with empty arrays."""
     }
 
 # ── SETTINGS ──────────────────────────────────────────────────── #
+
+@app.get("/api/listing-defaults")
+async def get_listing_defaults(request: Request):
+    """Get per-business eBay listing defaults."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Not authenticated")
+    try:
+        res = supabase.table("app_settings").select("key,value").eq("business_id", business_id).like("key", "listing_%").execute()
+        defaults = {r["key"].replace("listing_", ""): r["value"] for r in (res.data or [])}
+        return {
+            "location": defaults.get("location", ""),
+            "format": defaults.get("format", "FixedPrice"),
+            "duration": defaults.get("duration", "GTC"),
+            "best_offer": defaults.get("best_offer", "false"),
+            "best_offer_auto_accept": defaults.get("best_offer_auto_accept", ""),
+            "best_offer_min": defaults.get("best_offer_min", ""),
+            "dispatch_time": defaults.get("dispatch_time", "1"),
+            "shipping_service": defaults.get("shipping_service", "USPSGround"),
+            "shipping_cost": defaults.get("shipping_cost", "0.00"),
+            "return_policy": defaults.get("return_policy", "ReturnsAccepted"),
+            "returns_within": defaults.get("returns_within", "Days_30"),
+            "refund_option": defaults.get("refund_option", "MoneyBack"),
+            "return_shipping_paid_by": defaults.get("return_shipping_paid_by", "Buyer"),
+            "shipping_profile": defaults.get("shipping_profile", ""),
+            "return_profile": defaults.get("return_profile", ""),
+            "payment_profile": defaults.get("payment_profile", ""),
+            "default_description": defaults.get("default_description", ""),
+            "postal_code": defaults.get("postal_code", ""),
+        }
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/listing-defaults")
+async def save_listing_defaults(request: Request):
+    """Save per-business eBay listing defaults."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Not authenticated")
+    try:
+        body = await request.json()
+        allowed = [
+            "location", "format", "duration", "best_offer",
+            "best_offer_auto_accept", "best_offer_min", "dispatch_time",
+            "shipping_service", "shipping_cost", "return_policy",
+            "returns_within", "refund_option", "return_shipping_paid_by",
+            "shipping_profile", "return_profile", "payment_profile",
+            "default_description", "postal_code",
+        ]
+        rows = []
+        for k in allowed:
+            if k in body:
+                rows.append({
+                    "business_id": business_id,
+                    "key": f"listing_{k}",
+                    "value": str(body[k]),
+                })
+        for row in rows:
+            supabase.table("app_settings").upsert(row, on_conflict="business_id,key").execute()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 
 @app.get("/api/settings")
 async def get_settings():
