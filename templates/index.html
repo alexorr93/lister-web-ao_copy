@@ -5651,6 +5651,7 @@ async function scanReceipt(input) {
       throw new Error(errData.detail || 'Scan failed (' + r.status + ')');
     }
     var d = await r.json();
+    _receiptPhotoId = d.photo_id || null;
     var data = d.data || {};
     document.getElementById('rec-f-amount').value = data.amount || '';
     document.getElementById('rec-f-merchant').value = data.merchant || '';
