@@ -2764,7 +2764,7 @@ function setScanView(v) {
 
 function renderTileRow(l, idx) {
   const qty = quantities[l.id] ?? l.quantity;
-  const isSel = selected.has(l.id);
+  const isSel = selected.has(String(l.id));
   const cond = (l.condition || "used").toString().toLowerCase().trim();
   const isNew = cond === "new";
   const firstThumb = (l.all_photos || (l.thumb_url ? [{thumb:l.thumb_url}] : []))[0]?.thumb || "";
@@ -2837,7 +2837,7 @@ function renderTiles() {
   grid.style.display = 'grid';
   grid.innerHTML = listings.map((l, idx) => {
     const qty = quantities[l.id] ?? l.quantity;
-    const isSel = selected.has(l.id);
+    const isSel = selected.has(String(l.id));
     const cond = (l.condition || 'used').toString().toLowerCase().trim();
     const isNew = cond === 'new';
     const condCol = isNew ? '#16a34a' : '#3b82f6';
