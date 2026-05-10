@@ -1150,7 +1150,7 @@ async def submit_listings_to_ebay(request: Request):
                                         fixed = True
                             # Also catch "missing" pattern from message
                             import re
-                            m = re.search(r"aspect[s]?\s+['"]?([^'"]+)['"]?\s+is missing", msg, re.I)
+                            m = re.search(r'aspect\w*\s+\S+\s+is missing', msg, re.I)
                             if m:
                                 asp_name = m.group(1).strip()
                                 if asp_name not in aspects:
