@@ -1819,10 +1819,12 @@ async def export_ebay_csv(request: Request):
             "0" if bo_enabled == "1" else "1",  # ImmediatePayRequired — can't combine with BestOffer
             def_location,
             def_postal,
+            # When business policies are opted in, NEVER send legacy fields
+            # Send legacy fields ONLY when explicitly not using policies
             "" if use_policies else "Flat",
             "" if use_policies else def_ship_svc,
             "" if use_policies else def_ship_cost,
-            def_dispatch,
+            "" if use_policies else def_dispatch,
             "" if use_policies else def_return_policy,
             "" if use_policies else def_returns_within,
             "" if use_policies else def_refund,
