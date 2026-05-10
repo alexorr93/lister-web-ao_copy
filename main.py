@@ -1772,7 +1772,7 @@ async def export_ebay_csv(request: Request):
             bo_min_val,
             str(int(item.get("quantity") or 1)),
             "1",  # ImmediatePayRequired
-            def_location if not def_postal else "",
+            def_location,
             def_postal,
             "" if use_policies else "Flat",
             "" if use_policies else def_ship_svc,
