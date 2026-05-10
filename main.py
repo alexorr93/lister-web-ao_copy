@@ -2031,13 +2031,7 @@ async def export_ebay_csv(request: Request):
     )
     if False:  # dummy to close old return block
 
-    if False:
-        _unused = output  # kept for reference
-    if False:
-        _unused2 = 
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={fn}"}
-    )
+
 
 
 @app.get("/api/photos/view/{photo_id}")
