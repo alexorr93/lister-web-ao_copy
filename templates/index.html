@@ -5685,7 +5685,7 @@ async function confirmReceiptExpense() {
     expense_date: document.getElementById('rec-f-date').value,
     notes: document.getElementById('rec-f-notes').value.trim(),
     source: 'receipt',
-    receipt_photo_id: _receiptPhotoId || undefined
+    receipt_photo_id: _receiptPhotoId
   };
   try {
     await fetch('/api/expenses', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify(body)});
