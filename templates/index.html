@@ -966,7 +966,9 @@ select.field-input { background: #fff; color: #0f172a; }
         <div style="position:relative;">
           <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="toggleSavedBatchesDropdown()">🗂 Saved</button>
         </div>
-        <button class="btn btn-danger" id="bulk-delete-btn" style="font-size:16px;padding:8px 14px;display:none;" onclick="bulkDeleteSelected()">Delete selected</button>
+        <button id="bulk-delete-btn" onclick="bulkDeleteSelected()" title="Delete selected" style="width:36px;height:36px;padding:0;background:transparent;border:1.5px solid #7f1d1d;border-radius:8px;color:#f87171;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0.3;pointer-events:none;transition:opacity 0.15s;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+        </button>
         <div style="position:relative;" id="submit-dropdown-wrap">
           <button class="btn btn-primary" id="submit-batch-btn" style="font-size:16px;padding:7px 14px;display:none;" onclick="toggleSubmitDropdown()">Submit (<span id="submit-count">0</span>) ▾</button>
           <div id="submit-dropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:4px;background:#0a0f18;border:1px solid #1a2332;border-radius:8px;padding:4px;min-width:180px;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,0.4);">
@@ -2831,7 +2833,7 @@ function renderTiles() {
     grid.innerHTML = listings.map((l, idx) => renderTileRow(l, idx)).join('');
     updateSubmitBtn();
     var delBtn = document.getElementById('bulk-delete-btn');
-    if (delBtn) delBtn.style.display = selected.size > 0 ? 'inline-block' : 'none';
+    if (delBtn) { delBtn.style.opacity = selected.size > 0 ? '1' : '0.3'; delBtn.style.pointerEvents = selected.size > 0 ? 'auto' : 'none'; }
     return;
   }
   grid.style.display = 'grid';
@@ -3166,7 +3168,7 @@ async function bulkDeleteSelected() {
   }
   selected.clear();
   await loadListings();
-  document.getElementById('bulk-delete-btn').style.display = 'none';
+  var _db=document.getElementById('bulk-delete-btn'); if(_db){_db.style.opacity='0.3';_db.style.pointerEvents='none';}
 }
 
 function deselectAll() { selected.clear(); renderTiles(); }
