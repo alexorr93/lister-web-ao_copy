@@ -1813,8 +1813,10 @@ async def export_ebay_csv(request: Request):
     def_pay_profile   = d.get("payment_profile", "")
     def_description   = d.get("default_description", "") or EBAY_DESCRIPTION
 
-    output = io.StringIO()
-    output.write("Info,Version=1.0.0,Template=fx_category_template_EBAY_US\r\n")
+    # Use list to build rows then join with \r\n — guarantees CRLF for eBay
+    csv_rows = []
+    csv_rows.append("Info,Version=1.0.0,Template=fx_category_template_EBAY_US")
+    output = io.StringIO()  # temp for csv.writer
 
     # Headers now built dynamically after aspect fetch
 
@@ -1880,8 +1882,14 @@ async def export_ebay_csv(request: Request):
     dynamic_cols = [f"C:{name}" for name in dynamic_aspect_names]
     headers = base_headers + dynamic_cols
 
-    writer = csv.writer(output, quoting=csv.QUOTE_ALL, lineterminator="\r\n")
-    writer.writerow(headers)
+    import io as _io
+    def _row_to_csv(row):
+        buf = _io.StringIO()
+        csv.writer(buf, quoting=csv.QUOTE_ALL).writerow(row)
+        return buf.getvalue().rstrip("\r\n")
+
+    csv_rows.append(_row_to_csv(headers))
+    writer = None  # unused — we use csv_rows list
 
     for item in items:
         cond = str(item.get("condition") or "used").strip().lower()
@@ -1979,7 +1987,7 @@ async def export_ebay_csv(request: Request):
                     else:
                         filled[name] = "Does Not Apply"
 
-        writer.writerow([
+        row_data = [
             "Add",
             sku,
             cat_id,
@@ -2011,12 +2019,22 @@ async def export_ebay_csv(request: Request):
             def_ship_profile,
             def_ret_profile,
             def_pay_profile,
-        ] + [filled.get(name, "Does Not Apply") for name in dynamic_aspect_names])
-
-    csv_bytes = output.getvalue().encode("utf-8-sig")  # BOM for Excel compatibility
+        ] + [filled.get(name, "Does Not Apply") for name in dynamic_aspect_names]
+        csv_rows.append(_row_to_csv(row_data))
+    # Build final output with guaranteed CRLF
+    csv_bytes = ("\r\n".join(csv_rows) + "\r\n").encode("utf-8-sig")
     fn = f"eBay-category-listing-template-{datetime.now().strftime('%b-%-d-%Y-%H-%M-%S')}.csv"
     return StreamingResponse(
         io.BytesIO(csv_bytes),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={fn}"}
+    )
+    if False:  # dummy to close old return block
+
+    if False:
+        _unused = output  # kept for reference
+    if False:
+        _unused2 = 
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={fn}"}
     )
