@@ -6460,11 +6460,12 @@ function rcpRenderItems(){
   var el=document.getElementById('rcp-items-list');
   if(!el)return;
   el.innerHTML=rcpItems.map(function(item){
+    var iid=item.id;
     return '<div style="display:grid;grid-template-columns:1fr 52px 68px 24px;gap:6px;margin-bottom:6px;">'
-      +'<input class="acct-input" style="font-size:12px;padding:5px 8px;" value="'+escapeHtml(item.d||'')+'" placeholder="Item name" oninput="rcpSyncItem(''+item.id+'','d',this.value)">'
-      +'<input class="acct-input" style="font-size:12px;padding:5px 8px;" type="number" value="'+item.q+'" min="1" oninput="rcpSyncItem(''+item.id+'','q',this.value)">'
-      +'<input class="acct-input" style="font-size:12px;padding:5px 8px;" type="number" value="'+item.p+'" step="0.01" placeholder="0.00" oninput="rcpSyncItem(''+item.id+'','p',this.value)">'
-      +'<button onclick="rcpRemoveItem(''+item.id+'')" style="width:24px;height:32px;background:transparent;border:1px solid #1a2332;border-radius:5px;color:var(--muted);cursor:pointer;font-size:13px;">×</button>'
+      +'<input class="acct-input" style="font-size:12px;padding:5px 8px;" value="'+escapeHtml(item.d||'')+'" placeholder="Item name" oninput="rcpSyncItem(this.closest(\'div\').dataset.id,\'d\',this.value)" data-id="'+iid+'">'
+      +'<input class="acct-input" style="font-size:12px;padding:5px 8px;" type="number" value="'+item.q+'" min="1" oninput="rcpSyncItem(this.closest(\'div\').dataset.id,\'q\',this.value)">'
+      +'<input class="acct-input" style="font-size:12px;padding:5px 8px;" type="number" value="'+item.p+'" step="0.01" placeholder="0.00" oninput="rcpSyncItem(this.closest(\'div\').dataset.id,\'p\',this.value)">'
+      +'<button onclick="rcpRemoveItem(this.closest(\'div\').dataset.id)" style="width:24px;height:32px;background:transparent;border:1px solid #1a2332;border-radius:5px;color:var(--muted);cursor:pointer;font-size:13px;">×</button>'
       +'</div>';
   }).join('');
   receiptUpdate();
