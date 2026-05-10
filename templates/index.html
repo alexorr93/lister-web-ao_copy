@@ -3243,6 +3243,39 @@ async function confirmClearBatch() {
   } catch(e) { toast('Failed to clear batch', 'error'); }
 }
 
+function closeProgressModal() {
+  document.getElementById('ebay-progress-modal').style.display = 'none';
+  loadListings();
+  document.querySelector('.nav-btn[data-tab="dashboard"]')?.click();
+}
+
+function updateProgressItem(id, state, message) {
+  var el = document.getElementById('ebay-prog-' + id);
+  if (!el) return;
+  var icon = el.querySelector('.prog-icon');
+  var msg = el.querySelector('.prog-msg');
+  if (state === 'pending') {
+    icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>';
+  } else if (state === 'loading') {
+    icon.innerHTML = '<div style="width:14px;height:14px;border:2px solid #1a2332;border-top-color:#4ade80;border-radius:50%;animation:spin 0.7s linear infinite;"></div>';
+    el.style.borderLeft = '3px solid #4ade80';
+  } else if (state === 'retry') {
+    icon.innerHTML = '<div style="width:14px;height:14px;border:2px solid #1a2332;border-top-color:#f59e0b;border-radius:50%;animation:spin 0.7s linear infinite;"></div>';
+    el.style.borderLeft = '3px solid #f59e0b';
+    if (msg) msg.style.color = '#f59e0b';
+  } else if (state === 'success') {
+    icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
+    el.style.borderLeft = '3px solid #22c55e';
+    el.style.background = 'rgba(34,197,94,0.04)';
+    if (msg) { msg.textContent = message || 'Listed'; msg.style.color = '#22c55e'; }
+  } else if (state === 'error') {
+    icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    el.style.borderLeft = '3px solid #f87171';
+    el.style.background = 'rgba(239,68,68,0.04)';
+    if (msg) { msg.textContent = message || 'Failed'; msg.style.color = '#f87171'; }
+  }
+}
+
 async function submitSelected() {
   if (!selected.size) { toast('Select items first', 'error'); return; }
   var ebayDot = document.getElementById('ebay-status-dot');
@@ -3253,31 +3286,82 @@ async function submitSelected() {
     }
     return;
   }
+
   var ids = Array.from(selected);
-  var btn = document.getElementById('submit-batch-btn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Submitting...'; }
-  try {
-    var r = await fetch('/api/ebay/submit-listings', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      credentials: 'include',
-      body: JSON.stringify({listing_ids: ids})
-    });
-    var d = await r.json();
-    if (d.ok) {
-      toast(d.submitted + ' of ' + d.total + ' listings sent to eBay as drafts — review in Seller Hub');
-      selected.clear();
-      await loadListings();
-      // Stay on scanner tab so layout stays centered
-      document.querySelector('.nav-btn[data-tab="dashboard"]')?.click();
-    } else {
-      toast('Submit failed: ' + (d.detail || 'Unknown error'), 'error');
+  var total = ids.length;
+  var successCount = 0, failCount = 0;
+
+  // Show progress modal
+  var modal = document.getElementById('ebay-progress-modal');
+  modal.style.display = 'flex';
+  document.getElementById('ebay-progress-close').style.display = 'none';
+  document.getElementById('ebay-progress-summary').textContent = '';
+  document.getElementById('ebay-progress-subtitle').textContent = '0 of ' + total + ' complete';
+
+  // Build item rows
+  var listEl = document.getElementById('ebay-progress-list');
+  var html = '';
+  ids.forEach(function(id) {
+    var l = listings.find(function(x){ return String(x.id)===String(id); });
+    var title = l ? (l.title||'Item').slice(0,55) : 'Item ' + id;
+    html += '<div id="ebay-prog-' + id + '" style="display:flex;align-items:center;gap:14px;padding:12px 24px;border-left:3px solid #1a2332;margin:2px 0;transition:all 0.2s;">'
+      + '<div class="prog-icon" style="flex-shrink:0;width:14px;height:14px;display:flex;align-items:center;justify-content:center;">'
+      + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#334155" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>'
+      + '</div>'
+      + '<div style="flex:1;min-width:0;">'
+      + '<div style="font-size:13px;font-weight:600;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(title) + '</div>'
+      + '<div class="prog-msg" style="font-size:11px;color:#475569;margin-top:2px;">Waiting...</div>'
+      + '</div>'
+      + '</div>';
+  });
+  listEl.innerHTML = html;
+
+  // Submit one at a time
+  for (var i = 0; i < ids.length; i++) {
+    var id = ids[i];
+    var l = listings.find(function(x){ return String(x.id)===String(id); });
+
+    updateProgressItem(id, 'loading');
+    document.getElementById('ebay-progress-subtitle').textContent = (i+1) + ' of ' + total + ' — ' + (l ? (l.title||'').slice(0,40) : '');
+
+    try {
+      var r = await fetch('/api/ebay/submit-listings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'include',
+        body: JSON.stringify({listing_ids: [id], items: ebayModalItems.filter(function(m){return String(m.id)===String(id);})})
+      });
+      var d = await r.json();
+      var itemResult = (d.results || [])[0];
+
+      if (d.ok && itemResult && itemResult.ok) {
+        successCount++;
+        updateProgressItem(id, 'success', itemResult.listing_id ? 'Listed #' + itemResult.listing_id : 'Listed ✓');
+        selected.delete(String(id));
+        selected.delete(id);
+      } else {
+        failCount++;
+        var errMsg = itemResult ? (itemResult.error || 'Failed') : (d.detail || 'Failed');
+        // Shorten error
+        errMsg = errMsg.replace('Publish failed after 3 attempts: ','').split('.')[0];
+        if (errMsg.length > 60) errMsg = errMsg.slice(0,60) + '…';
+        updateProgressItem(id, 'error', errMsg);
+      }
+    } catch(e) {
+      failCount++;
+      updateProgressItem(id, 'error', e.message || 'Network error');
     }
-  } catch(e) {
-    toast('Submit error: ' + e.message, 'error');
-  } finally {
-    if (btn) { btn.disabled = false; updateSubmitBtn(); }
+
+    // Update summary
+    document.getElementById('ebay-progress-summary').textContent = successCount + ' listed · ' + failCount + ' failed';
+    document.getElementById('ebay-progress-subtitle').textContent = (i+1) + ' of ' + total + ' complete';
   }
+
+  // Done
+  document.getElementById('ebay-progress-close').style.display = 'block';
+  document.getElementById('ebay-progress-subtitle').textContent = 'Done — ' + successCount + ' listed, ' + failCount + ' failed';
+  if (successCount > 0) toast(successCount + ' listing' + (successCount>1?'s':'') + ' pushed to eBay ✓', 'success');
+  if (failCount > 0) toast(failCount + ' item' + (failCount>1?'s':'') + ' need attention', 'error');
 }
 
 async function deleteItem(id) {
@@ -6725,6 +6809,23 @@ function updatePriceByCondition() {
 </script>
 
 <!-- Save Batch modal -->
+<!-- eBay Submit Progress Modal -->
+<div id="ebay-progress-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:10001;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:16px;max-width:560px;width:100%;max-height:85vh;display:flex;flex-direction:column;">
+    <div style="padding:20px 24px;border-bottom:1px solid #1a2332;display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div style="font-size:17px;font-weight:700;color:#f1f5f9;">Submitting to eBay</div>
+        <div id="ebay-progress-subtitle" style="font-size:13px;color:#64748b;margin-top:2px;">Preparing...</div>
+      </div>
+      <div id="ebay-progress-summary" style="font-size:13px;font-weight:700;color:#4ade80;"></div>
+    </div>
+    <div id="ebay-progress-list" style="overflow-y:auto;flex:1;padding:8px 0;"></div>
+    <div style="padding:16px 24px;border-top:1px solid #1a2332;display:flex;justify-content:flex-end;">
+      <button id="ebay-progress-close" onclick="closeProgressModal()" style="display:none;padding:10px 24px;background:#22c55e;border:none;border-radius:8px;color:#052e16;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">Done</button>
+    </div>
+  </div>
+</div>
+
 <!-- Receipt Generator Modal -->
 <div id="receipt-gen-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:9999;align-items:flex-start;justify-content:center;padding:24px 16px;overflow-y:auto;">
   <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:16px;max-width:760px;width:100%;margin:auto;">
