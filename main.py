@@ -1716,43 +1716,49 @@ def _fetch_category_aspects(category_id: str, token: str) -> list:
 def _gemini_fill_aspects(title: str, brand: str, model: str, mpn: str,
                           aspects: list, gemini_key: str = "") -> dict:
     """Use Gemini to fill item specifics for a listing."""
-    import requests as _rq, json as _json
+    import json as _json
     if not aspects:
         return {}
-    # Build prompt
-    fields = []
-    for asp in aspects:
-        if asp["mode"] == "SELECTION_ONLY" and asp["values"]:
-            fields.append(f'  "{asp["name"]}": one of {asp["values"][:10]}')
-        else:
-            fields.append(f'  "{asp["name"]}": free text string')
-    prompt = f"""You are an eBay listing specialist. Fill in the item specifics for this product.
-Product title: {title}
-Brand: {brand or "Unknown"}
-Model: {model or "Unknown"}
-MPN: {mpn or "Unknown"}
+    # Only ask Gemini about required/recommended fields
+    req_aspects = [a for a in aspects if a["required"]]
+    rec_aspects = [a for a in aspects if not a["required"]][:5]
+    ask_aspects = req_aspects + rec_aspects
+    if not ask_aspects:
+        return {}
 
-Fill ALL of these fields. If unknown, use "Does Not Apply" for required fields or the most likely value.
-Return ONLY a raw JSON object, no markdown:
+    fields_desc = []
+    for asp in ask_aspects:
+        if asp["mode"] == "SELECTION_ONLY" and asp["values"]:
+            fields_desc.append(f'  "{asp["name"]}": choose the BEST match from {asp["values"][:8]}')
+        else:
+            fields_desc.append(f'  "{asp["name"]}": short descriptive value')
+
+    prompt = f"""You are an expert eBay reseller filling in item specifics.
+
+Item: {title}
+Brand: {brand or "Unbranded"}
+Model/MPN: {model or mpn or "N/A"}
+
+For each field below, provide the most accurate value based on the item description.
+For SELECTION_ONLY fields, you MUST pick one of the listed options exactly as written.
+If genuinely unknown, use "Does Not Apply".
+Do NOT use placeholder values like ".Hack//" or random options.
+
+Return ONLY a raw JSON object:
 {{
-{chr(10).join(fields)}
+{chr(10).join(fields_desc)}
 }}"""
     try:
-        # Use Gemini Flash via direct REST (no auth key needed — uses same env)
         import google.generativeai as genai_mod
         model_obj = genai_mod.GenerativeModel("gemini-2.0-flash")
         resp = model_obj.generate_content(prompt)
-        raw = (resp.text or "").strip()
-        raw = raw.replace("```json","").replace("```","").strip()
+        raw = (resp.text or "").strip().replace("```json","").replace("```","").strip()
         return _json.loads(raw)
     except Exception:
-        # Fallback — use first valid value or generic
+        # Safe fallback — required fields get "Does Not Apply", others empty
         result = {}
-        for asp in aspects:
-            if asp["values"]:
-                result[asp["name"]] = asp["values"][0]
-            else:
-                result[asp["name"]] = "Does Not Apply" if asp["required"] else ""
+        for asp in ask_aspects:
+            result[asp["name"]] = "Does Not Apply" if asp["required"] else ""
         return result
 
 
@@ -1852,9 +1858,13 @@ async def export_ebay_csv(request: Request):
         "*ReturnsAcceptedOption", "ReturnsWithinOption",
         "RefundOption", "ShippingCostPaidByOption",
         "ShippingProfileName", "ReturnProfileName", "PaymentProfileName",
-        "C:Brand", "C:MPN", "C:Model",
-    ]
-    dynamic_cols = [f"C:{name}" for name in dynamic_aspect_names]
+    ]  # Dynamic C: columns added below from taxonomy
+    # Deduplicate — never add a C: col already in base headers
+    base_col_set = set(base_headers)
+    dynamic_cols = [f"C:{name}" for name in dynamic_aspect_names
+                    if f"C:{name}" not in base_col_set]
+    dynamic_aspect_names = [name for name in dynamic_aspect_names
+                            if f"C:{name}" not in base_col_set]
     headers = base_headers + dynamic_cols
 
     writer = csv.writer(output, quoting=csv.QUOTE_ALL, lineterminator="\r\n")
@@ -1912,19 +1922,23 @@ async def export_ebay_csv(request: Request):
             cond_id = "3000"
 
         # ── Phase 3: Gemini fills dynamic aspects for this item ────────────
+        # Only fill aspects that belong to THIS item's category
         item_aspects = cat_aspects_cache.get(cat_id, [])
-        if item_aspects:
+        # Filter to only dynamic columns that exist in our header
+        item_aspects_filtered = [a for a in item_aspects
+                                 if a["name"] in dynamic_aspect_names]
+        if item_aspects_filtered:
             filled = _gemini_fill_aspects(
                 title=str(item.get("title","")),
                 brand=item_brand,
                 model=item_model,
                 mpn=item_mpn,
-                aspects=item_aspects,
+                aspects=item_aspects_filtered,
             )
         else:
             filled = {}
 
-        # Always ensure Brand is in filled specifics
+        # Always ensure Brand/MPN in filled
         if "Brand" not in filled:
             filled["Brand"] = item_brand
         if "MPN" not in filled and item_mpn:
@@ -1962,9 +1976,6 @@ async def export_ebay_csv(request: Request):
             def_ship_profile,
             def_ret_profile,
             def_pay_profile,
-            item_brand,
-            item_mpn,
-            item_model,
         ] + [filled.get(name, "Does Not Apply") for name in dynamic_aspect_names])
 
     csv_bytes = output.getvalue().encode("utf-8-sig")  # BOM for Excel compatibility
