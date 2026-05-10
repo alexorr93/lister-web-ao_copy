@@ -1667,6 +1667,79 @@ async def get_ebay_policies(request: Request):
     except Exception as e:
         return {"fulfillment": [], "returns": [], "payments": [], "error": str(e)}
 
+# ── eBay Taxonomy helpers ─────────────────────────────────────────────────
+
+def _fetch_category_aspects(category_id: str, token: str) -> list:
+    """Return list of {name, required, recommended, values, mode} for a category."""
+    import requests as _rq
+    try:
+        r = _rq.get(
+            f"https://api.ebay.com/commerce/taxonomy/v1/category_tree/0/get_item_aspects_for_category?category_id={category_id}",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            timeout=8
+        )
+        if not r.ok:
+            return []
+        out = []
+        for asp in r.json().get("aspects", []):
+            constraint = asp.get("aspectConstraint", {})
+            usage = constraint.get("aspectUsage", "OPTIONAL")
+            if usage not in ("REQUIRED", "RECOMMENDED"):
+                continue
+            values = [v.get("localizedValue","") for v in asp.get("aspectValues", [])[:30] if v.get("localizedValue")]
+            out.append({
+                "name": asp.get("localizedAspectName",""),
+                "required": usage == "REQUIRED",
+                "mode": constraint.get("aspectMode","FREE_TEXT"),
+                "values": values,
+            })
+        return out
+    except Exception:
+        return []
+
+def _gemini_fill_aspects(title: str, brand: str, model: str, mpn: str,
+                          aspects: list, gemini_key: str = "") -> dict:
+    """Use Gemini to fill item specifics for a listing."""
+    import requests as _rq, json as _json
+    if not aspects:
+        return {}
+    # Build prompt
+    fields = []
+    for asp in aspects:
+        if asp["mode"] == "SELECTION_ONLY" and asp["values"]:
+            fields.append(f'  "{asp["name"]}": one of {asp["values"][:10]}')
+        else:
+            fields.append(f'  "{asp["name"]}": free text string')
+    prompt = f"""You are an eBay listing specialist. Fill in the item specifics for this product.
+Product title: {title}
+Brand: {brand or "Unknown"}
+Model: {model or "Unknown"}
+MPN: {mpn or "Unknown"}
+
+Fill ALL of these fields. If unknown, use "Does Not Apply" for required fields or the most likely value.
+Return ONLY a raw JSON object, no markdown:
+{{
+{chr(10).join(fields)}
+}}"""
+    try:
+        # Use Gemini Flash via direct REST (no auth key needed — uses same env)
+        import google.generativeai as genai_mod
+        model_obj = genai_mod.GenerativeModel("gemini-2.0-flash")
+        resp = model_obj.generate_content(prompt)
+        raw = (resp.text or "").strip()
+        raw = raw.replace("```json","").replace("```","").strip()
+        return _json.loads(raw)
+    except Exception:
+        # Fallback — use first valid value or generic
+        result = {}
+        for asp in aspects:
+            if asp["values"]:
+                result[asp["name"]] = asp["values"][0]
+            else:
+                result[asp["name"]] = "Does Not Apply" if asp["required"] else ""
+        return result
+
+
 @app.get("/api/export/ebay-csv")
 async def export_ebay_csv(request: Request):
     import csv, io
@@ -1713,7 +1786,36 @@ async def export_ebay_csv(request: Request):
     output = io.StringIO()
     output.write("Info,Version=1.0.0,Template=fx_category_template_EBAY_US\r\n")
 
-    headers = [
+    # Headers now built dynamically after aspect fetch
+
+    # ── Phase 1: Collect unique categories + fetch aspects ─────────────────
+    try:
+        ebay_token = get_ebay_token(business_id)
+    except Exception:
+        ebay_token = ""
+
+    # Cache aspects per category
+    cat_aspects_cache = {}  # cat_id -> list of aspect dicts
+    for item in items:
+        cat_id_raw = str(item.get("ebay_category_id") or "99")
+        if cat_id_raw not in ("0", "") and cat_id_raw not in cat_aspects_cache:
+            if ebay_token:
+                cat_aspects_cache[cat_id_raw] = _fetch_category_aspects(cat_id_raw, ebay_token)
+            else:
+                cat_aspects_cache[cat_id_raw] = []
+
+    # ── Phase 2: Build master aspect column list ────────────────────────────
+    # Union of all required/recommended aspects across all categories in this batch
+    seen_aspects = {}  # name -> aspect dict (deduplicated)
+    for aspects in cat_aspects_cache.values():
+        for asp in aspects:
+            if asp["name"] and asp["name"] not in seen_aspects:
+                seen_aspects[asp["name"]] = asp
+
+    dynamic_aspect_names = list(seen_aspects.keys())
+
+    # Build final headers with dynamic C: columns
+    base_headers = [
         "*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)",
         "CustomLabel", "*Category", "StoreCategory", "*Title",
         "ScheduleTime",
@@ -1727,10 +1829,10 @@ async def export_ebay_csv(request: Request):
         "*ReturnsAcceptedOption", "ReturnsWithinOption",
         "RefundOption", "ShippingCostPaidByOption",
         "ShippingProfileName", "ReturnProfileName", "PaymentProfileName",
-        "C:Brand", "C:Type", "C:MPN", "C:Model",
-        "C:Color", "C:Size", "C:Department",
-        "C:Size Type", "C:Connectivity",
+        "C:Brand", "C:MPN", "C:Model",
     ]
+    dynamic_cols = [f"C:{name}" for name in dynamic_aspect_names]
+    headers = base_headers + dynamic_cols
 
     writer = csv.writer(output, quoting=csv.QUOTE_ALL, lineterminator="\r\n")
     writer.writerow(headers)
@@ -1777,26 +1879,33 @@ async def export_ebay_csv(request: Request):
         item_brand = str(item.get("brand") or "").strip()
         item_mpn   = str(item.get("mpn") or "Does Not Apply")
         item_model = str(item.get("model") or "").strip()
-        # Only use brand if explicitly saved
+        # Brand fallback
         if not item_brand:
             item_brand = "Unbranded"
-        # Type from category name
-        cat_name = str(item.get("ebay_category") or "")
-        item_type = cat_name.split(",")[0].strip() if cat_name else "Does Not Apply"
 
-        # Category-aware condition ID mapping
-        # Some categories (VHS=309, Collectibles=1, Art=550) only support 3000/4000/5000
-        no_new_cats = {"309", "99", "171228", "62390"}  # VHS, Everything Else, etc.
+        # Category-aware condition ID — some categories don't support "New"
+        no_new_cats = {"309", "99", "171228", "62390"}
         if cond_id == "1000" and cat_id in no_new_cats:
-            cond_id = "3000"  # fall back to Used - Good
+            cond_id = "3000"
 
-        # Generic item specifics with sensible fallbacks
-        item_color = "Multicolor"
-        item_size = "One Size"
-        item_dept = "Unisex Adults"
-        item_size_type = "Regular"
-        # Connectivity fallback for electronics
-        item_connectivity = "Wireless" if cat_id in {"112529","293","3944","14939"} else "Not Applicable"
+        # ── Phase 3: Gemini fills dynamic aspects for this item ────────────
+        item_aspects = cat_aspects_cache.get(cat_id, [])
+        if item_aspects:
+            filled = _gemini_fill_aspects(
+                title=str(item.get("title","")),
+                brand=item_brand,
+                model=item_model,
+                mpn=item_mpn,
+                aspects=item_aspects,
+            )
+        else:
+            filled = {}
+
+        # Always ensure Brand is in filled specifics
+        if "Brand" not in filled:
+            filled["Brand"] = item_brand
+        if "MPN" not in filled and item_mpn:
+            filled["MPN"] = item_mpn
 
         writer.writerow([
             "Add",
@@ -1833,15 +1942,9 @@ async def export_ebay_csv(request: Request):
             def_ret_profile,
             def_pay_profile,
             item_brand,
-            item_type,
             item_mpn,
             item_model,
-            item_color,
-            item_size,
-            item_dept,
-            item_size_type,
-            item_connectivity,
-        ])
+        ] + [filled.get(name, "Does Not Apply") for name in dynamic_aspect_names])
 
     csv_bytes = output.getvalue().encode("utf-8-sig")  # BOM for Excel compatibility
     fn = f"eBay-category-listing-template-{datetime.now().strftime('%b-%-d-%Y-%H-%M-%S')}.csv"
