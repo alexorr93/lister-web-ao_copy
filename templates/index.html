@@ -6451,29 +6451,34 @@ function rcpAddItem(d,q,p){
   rcpRenderItems();
 }
 
-function rcpRemoveItem(id){
-  rcpItems=rcpItems.filter(function(i){return i.id!==id;});
-  rcpRenderItems();
-}
+// rcpRemoveItem now index-based, defined inline above
 
 function rcpRenderItems(){
   var el=document.getElementById('rcp-items-list');
   if(!el)return;
-  el.innerHTML=rcpItems.map(function(item){
-    var iid=item.id;
-    return '<div style="display:grid;grid-template-columns:1fr 52px 68px 24px;gap:6px;margin-bottom:6px;">'
-      +'<input class="acct-input" style="font-size:12px;padding:5px 8px;" value="'+escapeHtml(item.d||'')+'" placeholder="Item name" oninput="rcpSyncItem(this.closest(\'div\').dataset.id,\'d\',this.value)" data-id="'+iid+'">'
-      +'<input class="acct-input" style="font-size:12px;padding:5px 8px;" type="number" value="'+item.q+'" min="1" oninput="rcpSyncItem(this.closest(\'div\').dataset.id,\'q\',this.value)">'
-      +'<input class="acct-input" style="font-size:12px;padding:5px 8px;" type="number" value="'+item.p+'" step="0.01" placeholder="0.00" oninput="rcpSyncItem(this.closest(\'div\').dataset.id,\'p\',this.value)">'
-      +'<button onclick="rcpRemoveItem(this.closest(\'div\').dataset.id)" style="width:24px;height:32px;background:transparent;border:1px solid #1a2332;border-radius:5px;color:var(--muted);cursor:pointer;font-size:13px;">×</button>'
+  var html='';
+  for(var i=0;i<rcpItems.length;i++){
+    var item=rcpItems[i];
+    html+='<div style="display:grid;grid-template-columns:1fr 52px 68px 24px;gap:6px;margin-bottom:6px;">'
+      +'<input class="acct-input" style="font-size:13px;padding:7px 10px;color:#f1f5f9;" value="'+escapeHtml(item.d||'')+'" placeholder="Item name" data-idx="'+i+'" data-field="d" oninput="rcpInputChange(this)">'
+      +'<input class="acct-input" style="font-size:13px;padding:7px 8px;color:#f1f5f9;" type="number" value="'+item.q+'" min="1" data-idx="'+i+'" data-field="q" oninput="rcpInputChange(this)">'
+      +'<input class="acct-input" style="font-size:13px;padding:7px 8px;color:#f1f5f9;" type="number" value="'+item.p+'" step="0.01" placeholder="0.00" data-idx="'+i+'" data-field="p" oninput="rcpInputChange(this)">'
+      +'<button onclick="rcpRemoveItem('+i+')" style="width:28px;height:36px;background:transparent;border:1px solid #1a2332;border-radius:6px;color:#94a3b8;cursor:pointer;font-size:15px;font-family:inherit;">×</button>'
       +'</div>';
-  }).join('');
+  }
+  el.innerHTML=html;
   receiptUpdate();
 }
 
-function rcpSyncItem(id,field,val){
-  var item=rcpItems.find(function(i){return i.id===id;});
-  if(item){item[field]=val;receiptUpdate();}
+function rcpInputChange(el){
+  var idx=parseInt(el.dataset.idx);
+  var field=el.dataset.field;
+  if(rcpItems[idx]){rcpItems[idx][field]=el.value;receiptUpdate();}
+}
+
+function rcpRemoveItem(idx){
+  rcpItems.splice(idx,1);
+  rcpRenderItems();
 }
 
 function rcpV(id){return (document.getElementById(id)||{}).value||'';}
@@ -6688,6 +6693,12 @@ function updatePriceByCondition() {
   <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:14px;max-width:700px;width:100%;margin:auto;">
 
     <!-- Modal header -->
+    <style>
+      #receipt-gen-modal .rcp-label{font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.06em;}
+      #receipt-gen-modal .acct-input{font-size:14px;color:#f1f5f9;padding:9px 12px;}
+      #receipt-gen-modal .rcp-sec{font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;border-top:1px solid #1a2332;padding-top:14px;}
+      #receipt-gen-modal .rcp-sec:first-child{border-top:none;padding-top:0;}
+    </style>
     <div style="display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid #1a2332;">
       <div>
         <div style="font-size:17px;font-weight:700;color:var(--text);">Generate Receipt</div>
@@ -6707,25 +6718,25 @@ function updatePriceByCondition() {
       <div style="padding:20px 24px;border-right:1px solid #1a2332;overflow-y:auto;max-height:70vh;">
 
         <!-- Seller -->
-        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">Your Business</div>
+        <div class="rcp-sec" style="border-top:none;padding-top:0;">Your Business</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">
-          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Name</div><input class="acct-input" id="rcp-biz-name" placeholder="Resel Junkie" oninput="receiptUpdate()"></div>
-          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Email</div><input class="acct-input" id="rcp-biz-email" placeholder="you@email.com" oninput="receiptUpdate()"></div>
-          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Phone</div><input class="acct-input" id="rcp-biz-phone" placeholder="Optional" oninput="receiptUpdate()"></div>
-          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Website</div><input class="acct-input" id="rcp-biz-web" placeholder="Optional" oninput="receiptUpdate()"></div>
+          <div><div class="rcp-label">Name</div><input class="acct-input" id="rcp-biz-name" placeholder="Resel Junkie" oninput="receiptUpdate()"></div>
+          <div><div class="rcp-label">Email</div><input class="acct-input" id="rcp-biz-email" placeholder="you@email.com" oninput="receiptUpdate()"></div>
+          <div><div class="rcp-label">Phone</div><input class="acct-input" id="rcp-biz-phone" placeholder="Optional" oninput="receiptUpdate()"></div>
+          <div><div class="rcp-label">Website</div><input class="acct-input" id="rcp-biz-web" placeholder="Optional" oninput="receiptUpdate()"></div>
         </div>
 
         <!-- Buyer -->
-        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;border-top:1px solid #1a2332;padding-top:12px;">Customer</div>
+        <div class="rcp-sec">Customer</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">
-          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Name</div><input class="acct-input" id="rcp-buy-name" placeholder="Jane Smith" oninput="receiptUpdate()"></div>
-          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Email</div><input class="acct-input" id="rcp-buy-email" placeholder="jane@email.com" oninput="receiptUpdate()"></div>
-          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Phone</div><input class="acct-input" id="rcp-buy-phone" placeholder="Optional" oninput="receiptUpdate()"></div>
-          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">eBay username</div><input class="acct-input" id="rcp-buy-ebay" placeholder="Optional" oninput="receiptUpdate()"></div>
+          <div><div class="rcp-label">Name</div><input class="acct-input" id="rcp-buy-name" placeholder="Jane Smith" oninput="receiptUpdate()"></div>
+          <div><div class="rcp-label">Email</div><input class="acct-input" id="rcp-buy-email" placeholder="jane@email.com" oninput="receiptUpdate()"></div>
+          <div><div class="rcp-label">Phone</div><input class="acct-input" id="rcp-buy-phone" placeholder="Optional" oninput="receiptUpdate()"></div>
+          <div><div class="rcp-label">eBay username</div><input class="acct-input" id="rcp-buy-ebay" placeholder="Optional" oninput="receiptUpdate()"></div>
         </div>
 
         <!-- Items -->
-        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;border-top:1px solid #1a2332;padding-top:12px;">Items</div>
+        <div class="rcp-sec">Items</div>
         <div style="display:grid;grid-template-columns:1fr 52px 68px 24px;gap:6px;margin-bottom:4px;">
           <div style="font-size:10px;color:var(--muted);">Description</div>
           <div style="font-size:10px;color:var(--muted);">Qty</div>
@@ -6736,19 +6747,19 @@ function updatePriceByCondition() {
         <button onclick="rcpAddItem()" style="margin-top:6px;padding:5px 12px;background:transparent;border:1px solid #1a2332;border-radius:6px;color:var(--muted);font-size:12px;cursor:pointer;font-family:inherit;">+ Add item</button>
 
         <!-- Totals -->
-        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin:14px 0 8px;border-top:1px solid #1a2332;padding-top:12px;">Fees & Payment</div>
+        <div class="rcp-sec">Fees & Payment</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Tax ($)</div><input class="acct-input" id="rcp-tax" type="number" step="0.01" placeholder="0.00" oninput="receiptUpdate()"></div>
-          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Shipping ($)</div><input class="acct-input" id="rcp-ship" type="number" step="0.01" placeholder="0.00" oninput="receiptUpdate()"></div>
-          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Discount ($)</div><input class="acct-input" id="rcp-disc" type="number" step="0.01" placeholder="0.00" oninput="receiptUpdate()"></div>
-          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Payment method</div>
+          <div><div class="rcp-label">Tax ($)</div><input class="acct-input" id="rcp-tax" type="number" step="0.01" placeholder="0.00" oninput="receiptUpdate()"></div>
+          <div><div class="rcp-label">Shipping ($)</div><input class="acct-input" id="rcp-ship" type="number" step="0.01" placeholder="0.00" oninput="receiptUpdate()"></div>
+          <div><div class="rcp-label">Discount ($)</div><input class="acct-input" id="rcp-disc" type="number" step="0.01" placeholder="0.00" oninput="receiptUpdate()"></div>
+          <div><div class="rcp-label">Payment method</div>
             <select class="acct-input" id="rcp-pay" onchange="receiptUpdate()">
               <option>eBay</option><option>PayPal</option><option>Venmo</option><option>Cash</option><option>Zelle</option><option>Check</option><option>Other</option>
             </select>
           </div>
         </div>
-        <div style="margin-bottom:8px;"><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Order / Transaction ID</div><input class="acct-input" id="rcp-oid" placeholder="Optional" oninput="receiptUpdate()"></div>
-        <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Note to customer</div><textarea class="acct-input" id="rcp-notes" rows="2" placeholder="Thanks for your purchase!" oninput="receiptUpdate()" style="resize:vertical;font-family:inherit;font-size:13px;line-height:1.5;"></textarea></div>
+        <div style="margin-bottom:8px;"><div class="rcp-label">Order / Transaction ID</div><input class="acct-input" id="rcp-oid" placeholder="Optional" oninput="receiptUpdate()"></div>
+        <div><div class="rcp-label">Note to customer</div><textarea class="acct-input" id="rcp-notes" rows="2" placeholder="Thanks for your purchase!" oninput="receiptUpdate()" style="resize:vertical;font-family:inherit;font-size:13px;line-height:1.5;"></textarea></div>
       </div>
 
       <!-- RIGHT: Preview -->
