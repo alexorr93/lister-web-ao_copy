@@ -5476,6 +5476,24 @@ function renderExpChart() {
   });
 }
 
+function viewReceiptPhoto(photoId) {
+  if (!photoId) return;
+  var url = 'https://febnocmzhgkikvxqaamr.supabase.co/storage/v1/object/public/part-photos/' + photoId;
+  var existing = document.getElementById('receipt-photo-lightbox');
+  if (existing) existing.remove();
+  var lb = document.createElement('div');
+  lb.id = 'receipt-photo-lightbox';
+  lb.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.95);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  lb.onclick = function(e) { if (e.target === lb) lb.remove(); };
+  lb.innerHTML = '<div style="position:relative;max-width:600px;width:100%;">'
+    + '<button onclick="document.getElementById('receipt-photo-lightbox').remove()" style="position:absolute;top:-40px;right:0;background:transparent;border:none;color:#fff;font-size:24px;cursor:pointer;padding:4px;">×</button>'
+    + '<img src="' + url + '" style="width:100%;border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,0.6);" />'
+    + '<div style="text-align:center;margin-top:12px;">'
+    + '<a href="' + url + '" target="_blank" style="color:#4ade80;font-size:13px;text-decoration:none;">↗ Open full size</a>'
+    + '</div></div>';
+  document.body.appendChild(lb);
+}
+
 function renderExpTable() {
   var tbody = document.getElementById('exp-tbody');
   var empty = document.getElementById('exp-empty');
@@ -5499,7 +5517,10 @@ function renderExpTable() {
       '<td style="padding:12px 20px;">' +
         '<div style="display:flex;align-items:center;gap:10px;">' +
           '<div style="width:32px;height:32px;border-radius:8px;background:' + color + '20;color:' + color + ';display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;">' + initial + '</div>' +
-          '<div><div style="font-weight:500;color:var(--text);">' + merchant + '</div>' + (it.notes ? '<div style="font-size:11px;color:var(--muted);margin-top:2px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + it.notes + '</div>' : '') + '</div>' +
+          '<div>' +
+            '<div style="font-weight:500;color:var(--text);' + (it.receipt_photo_id ? 'cursor:pointer;text-decoration:underline;text-underline-offset:2px;' : '') + '" ' + (it.receipt_photo_id ? 'onclick="viewReceiptPhoto('' + it.receipt_photo_id + '')"' : '') + '>' + merchant + (it.receipt_photo_id ? ' 🧾' : '') + '</div>' +
+            (it.notes ? '<div style="font-size:11px;color:var(--muted);margin-top:2px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + it.notes + '</div>' : '') +
+          '</div>' +
         '</div>' +
       '</td>' +
       '<td style="padding:12px 20px;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap;">' + dateStr + '</td>' +
@@ -5614,6 +5635,8 @@ function closeReceiptScanner() {
   document.getElementById('receipt-modal').style.display = 'none';
 }
 
+var _receiptPhotoId = null;
+
 async function scanReceipt(input) {
   var file = input.files && input.files[0];
   if (!file) return;
@@ -5660,7 +5683,8 @@ async function confirmReceiptExpense() {
     category: document.getElementById('rec-f-category').value,
     expense_date: document.getElementById('rec-f-date').value,
     notes: document.getElementById('rec-f-notes').value.trim(),
-    source: 'receipt'
+    source: 'receipt',
+    receipt_photo_id: _receiptPhotoId || undefined
   };
   try {
     await fetch('/api/expenses', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify(body)});

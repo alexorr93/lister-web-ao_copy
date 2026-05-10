@@ -6083,7 +6083,20 @@ If a field is unreadable, use null. Try your best to extract every field first."
             return {"ok": True, "data": {"merchant": "", "amount": None, "expense_date": "", "category": "Other", "notes": "Could not read receipt automatically — please fill in manually"}}
         from json_repair import repair_json
         data = _json.loads(repair_json(raw))
-        return {"ok": True, "data": data}
+        # Save receipt photo to storage
+        photo_id = None
+        try:
+            import uuid as _uuid
+            photo_id = f"receipt_{_uuid.uuid4().hex[:12]}.jpg"
+            supabase.storage.from_("part-photos").upload(
+                photo_id,
+                buf.getvalue(),
+                {"content-type": "image/jpeg", "x-upsert": "true"}
+            )
+        except Exception as _pe:
+            print(f"[Receipt] Photo save failed: {_pe}")
+
+        return {"ok": True, "data": data, "photo_id": photo_id}
     except Exception as e:
         import traceback; traceback.print_exc()
         raise HTTPException(500, str(e))
