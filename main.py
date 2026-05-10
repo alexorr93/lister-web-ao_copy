@@ -1879,7 +1879,7 @@ async def export_ebay_csv(request: Request):
     business_id = require_auth(request)
     try:
         res = supabase.table("listings").select(
-            "id,title,description,price,price_used,price_new,quantity,condition,photo_id,ebay_category_id,ebay_category,barcode_id,brand,model,mpn"
+            "id,title,description,price,price_used,price_new,quantity,condition,photo_id,ebay_category_id,ebay_category,barcode_id,brand,model,mpn,ebay_item_specifics"
         ).eq("business_id", business_id).neq("status", "archived").execute()
         items = res.data or []
     except Exception as e:
@@ -2087,7 +2087,12 @@ async def export_ebay_csv(request: Request):
         else:
             item_conn = "Does Not Apply"
 
-        filled = {
+        # Use aspects saved at scan time if available
+        saved_aspects = item.get("ebay_item_specifics") or {}
+        filled = saved_aspects.copy() if saved_aspects else {}
+
+        # Merge with hardcoded defaults for any missing fields
+        hardcoded = {
             "Brand": item_brand or "Unbranded",
             "MPN": item_mpn or "Does Not Apply",
             "Model": item_model or "Does Not Apply",
@@ -2119,6 +2124,10 @@ async def export_ebay_csv(request: Request):
             "Vintage": "No",
             "Original/Licensed Reproduction": "Licensed Reproduction",
         }
+        # Merge: saved aspects win, hardcoded fills gaps
+        for k, v in hardcoded.items():
+            if k not in filled or not filled[k] or filled[k] in ("Does Not Apply","N/A",""):
+                filled[k] = v
         # Also try Gemini for this item's category aspects if token available
         item_aspects = cat_aspects_cache.get(cat_id, [])
         item_aspects_filtered = [a for a in item_aspects if a["name"] in dynamic_aspect_names]
