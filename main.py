@@ -1922,7 +1922,8 @@ async def export_ebay_csv(request: Request):
         bo_min_val = def_bo_min if def_best_offer == "true" and def_bo_min else ""
 
         # Use business policies if set, blank ALL legacy fields to avoid conflict
-        use_policies = bool(def_ship_profile or def_ret_profile or def_pay_profile)
+        # ALL THREE policy names required — if any missing, use legacy fields
+        use_policies = bool(def_ship_profile and def_ret_profile and def_pay_profile)
 
         # Schedule 21 days from now (eBay max)
         from datetime import timedelta
