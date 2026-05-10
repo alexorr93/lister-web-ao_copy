@@ -2039,9 +2039,12 @@ async def export_ebay_csv(request: Request):
         if not item_brand:
             item_brand = "Unbranded"
 
-        # Category-aware condition ID — some categories don't support "New"
-        no_new_cats = {"309", "99", "171228", "62390"}
-        if cond_id == "1000" and cat_id in no_new_cats:
+        # Category-aware condition ID — VHS needs 4000/5000, others 3000
+        vhs_cats = {"309", "156955", "11232"}
+        no_new_cats = {"99", "171228", "62390", "1"}
+        if cat_id in vhs_cats:
+            cond_id = "5000"  # Good — valid for all VHS categories
+        elif cond_id == "1000" and cat_id in no_new_cats:
             cond_id = "3000"
 
         # ── Phase 3: Gemini fills dynamic aspects for this item ────────────
@@ -2074,12 +2077,15 @@ async def export_ebay_csv(request: Request):
         item_color = next((c.title() for c in colors if c in title_lower), "Multicolor")
 
         # Infer connectivity
-        if any(w in title_lower for w in ["wireless","wifi","wi-fi","bluetooth","bt"]):
+        headphone_cats = {"112529","293","3944","14939","31388"}
+        if any(w in title_lower for w in ["wireless","wifi","wi-fi","bluetooth","airpod","earbud"]):
             item_conn = "Wireless"
-        elif any(w in title_lower for w in ["wired","usb","3.5mm","aux"]):
+        elif any(w in title_lower for w in ["wired","usb","3.5mm","aux","corded"]):
             item_conn = "Wired"
-        else:
+        elif cat_id in headphone_cats:
             item_conn = "Wireless"
+        else:
+            item_conn = "Does Not Apply"
 
         filled = {
             "Brand": item_brand or "Unbranded",
@@ -2094,6 +2100,8 @@ async def export_ebay_csv(request: Request):
             "UK Shoe Size": "9",
             "EU Shoe Size": "44",
             "Connectivity": item_conn,
+            "Network Connectivity": item_conn,
+            "Connection Type": item_conn,
             "Wireless Technology": "Bluetooth" if "bluetooth" in title_lower else "Wi-Fi",
             "Country of Origin": "China",
             "Style": "Casual",
