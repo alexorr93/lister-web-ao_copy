@@ -3842,7 +3842,7 @@ If no text visible or no matches, still return the JSON with empty arrays."""
 # ── SETTINGS ──────────────────────────────────────────────────── #
 
 @app.get("/receipt")
-async def receipt_page(d: str = ""):
+async def receipt_page():
     """Standalone shareable receipt page — data is base64 encoded in ?d= param."""
     html = """<!DOCTYPE html>
 <html lang="en">
@@ -3885,7 +3885,7 @@ td:last-child{text-align:right}
 function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
 function fmt(x){return '$'+Number(x||0).toFixed(2);}
 try{
-  var raw = decodeURIComponent(atob('""" + d + """'));
+  var raw = decodeURIComponent(atob(new URLSearchParams(window.location.search).get('d')||''));
   var data = JSON.parse(raw);
   var b=data.b||{}, cu=data.c||{}, items=data.items||[];
   var tax=data.t||0, ship=data.s||0, disc=data.d||0;
