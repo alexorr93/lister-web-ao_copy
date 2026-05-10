@@ -1755,10 +1755,18 @@ Return ONLY a raw JSON object:
         raw = (resp.text or "").strip().replace("```json","").replace("```","").strip()
         return _json.loads(raw)
     except Exception:
-        # Safe fallback — required fields get "Does Not Apply", others empty
         result = {}
         for asp in ask_aspects:
-            result[asp["name"]] = "Does Not Apply" if asp["required"] else ""
+            if asp["required"]:
+                if asp["mode"] == "SELECTION_ONLY" and asp["values"]:
+                    # Pick first value that isn't obviously wrong
+                    safe = next((v for v in asp["values"]
+                                 if v not in ("", "Does Not Apply")), asp["values"][0])
+                    result[asp["name"]] = safe
+                else:
+                    result[asp["name"]] = "Does Not Apply"
+            else:
+                result[asp["name"]] = ""
         return result
 
 
@@ -1859,12 +1867,17 @@ async def export_ebay_csv(request: Request):
         "RefundOption", "ShippingCostPaidByOption",
         "ShippingProfileName", "ReturnProfileName", "PaymentProfileName",
     ]  # Dynamic C: columns added below from taxonomy
-    # Deduplicate — never add a C: col already in base headers
+    # Deduplicate and cap at 45 total C: columns
     base_col_set = set(base_headers)
-    dynamic_cols = [f"C:{name}" for name in dynamic_aspect_names
-                    if f"C:{name}" not in base_col_set]
-    dynamic_aspect_names = [name for name in dynamic_aspect_names
-                            if f"C:{name}" not in base_col_set]
+    # Sort: required first, then recommended
+    sorted_aspects = sorted(
+        [a for a in seen_aspects.values() if f"C:{a['name']}" not in base_col_set],
+        key=lambda a: (0 if a["required"] else 1)
+    )
+    # Cap at 45
+    sorted_aspects = sorted_aspects[:45]
+    dynamic_aspect_names = [a["name"] for a in sorted_aspects]
+    dynamic_cols = [f"C:{name}" for name in dynamic_aspect_names]
     headers = base_headers + dynamic_cols
 
     writer = csv.writer(output, quoting=csv.QUOTE_ALL, lineterminator="\r\n")
@@ -1938,11 +1951,33 @@ async def export_ebay_csv(request: Request):
         else:
             filled = {}
 
-        # Always ensure Brand/MPN in filled
-        if "Brand" not in filled:
-            filled["Brand"] = item_brand
-        if "MPN" not in filled and item_mpn:
-            filled["MPN"] = item_mpn
+        # Override bad/empty values for known required fields
+        smart_defaults = {
+            "Brand": item_brand or "Unbranded",
+            "MPN": item_mpn or "Does Not Apply",
+            "Model": item_model or "Does Not Apply",
+            "Color": "Multicolor",
+            "Department": "Unisex Adults",
+            "Size": "One Size",
+            "Size Type": "Regular",
+            "Type": "Other",
+            "Connectivity": "Wireless",
+            "Country of Origin": "United States",
+            "Style": "Casual",
+            "Material": "Mixed Materials",
+        }
+        for asp in item_aspects_filtered:
+            name = asp["name"]
+            val = filled.get(name, "")
+            # Replace empty or generic bad values with smart defaults
+            if not val or val in ("Does Not Apply", "N/A", "Unknown"):
+                if asp["required"]:
+                    if name in smart_defaults:
+                        filled[name] = smart_defaults[name]
+                    elif asp["mode"] == "SELECTION_ONLY" and asp["values"]:
+                        filled[name] = asp["values"][0]
+                    else:
+                        filled[name] = "Does Not Apply"
 
         writer.writerow([
             "Add",
