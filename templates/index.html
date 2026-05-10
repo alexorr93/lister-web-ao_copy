@@ -2765,13 +2765,13 @@ function renderTileRow(l, idx) {
   const firstThumb = (l.all_photos || (l.thumb_url ? [{thumb:l.thumb_url}] : []))[0]?.thumb || "";
   const photoHtml = firstThumb ? `<img src="${firstThumb}" style="width:100%;height:100%;object-fit:cover;" loading="lazy"/>` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#1e293b;font-size:20px;">📷</div>`;
   const checkmark = isSel
-    ? `<div class="tile-checkmark" onclick="event.stopPropagation();toggleSelect('${l.id}');" style="width:22px;height:22px;background:#2563eb;border-radius:5px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;"><svg width="11" height="11" viewBox="0 0 10 10" fill="none"><polyline points="2,5 4.5,7.5 8,3" stroke="#fff" stroke-width="1.5"/></svg></div>`
+    ? `<div class="tile-checkmark" onclick="event.stopPropagation();toggleSelect('${l.id}');" style="width:22px;height:22px;background:#22c55e;border-radius:5px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;"><svg width="11" height="11" viewBox="0 0 10 10" fill="none"><polyline points="2,5 4.5,7.5 8,3" stroke="#fff" stroke-width="1.5"/></svg></div>`
     : `<div class="tile-checkmark" onclick="event.stopPropagation();toggleSelect('${l.id}');" style="width:22px;height:22px;background:rgba(15,17,23,0.7);border:1.5px solid #334155;border-radius:5px;cursor:pointer;flex-shrink:0;"></div>`;
   const condColor = isNew ? "#4ade80" : "#60a5fa";
   const condBg = isNew ? "rgba(74,222,128,0.12)" : "rgba(59,130,246,0.12)";
   const tid = l.id;
   const titleVal = (l.title||"").replace(/"/g,"&quot;");
-  return `<div class="tile${isSel?" selected":""}" id="tile-${tid}" data-photos='${JSON.stringify(l.all_photos||[])}' data-photo-idx="0" style="display:flex;align-items:stretch;background:#111827;border:1px solid #243044;border-radius:10px;overflow:hidden;margin-bottom:8px;box-shadow:0 1px 4px rgba(0,0,0,0.4);">
+  return `<div class="tile${isSel?" selected":""}" id="tile-${tid}" data-photos='${JSON.stringify(l.all_photos||[])}' data-photo-idx="0" style="display:flex;align-items:stretch;background:#111827;border:${isSel?'2px solid #22c55e':'1px solid #243044'};border-radius:10px;overflow:hidden;margin-bottom:8px;box-shadow:0 1px 4px rgba(0,0,0,0.4);">
     <div style="width:160px;flex-shrink:0;position:relative;background:#060810;cursor:pointer;" onclick="openModal('${tid}')">
       ${photoHtml}
       <div style="position:absolute;top:6px;left:6px;background:rgba(0,0,0,0.6);color:#475569;font-size:10px;padding:2px 6px;border-radius:3px;font-family:monospace;">#${idx+1}</div>
@@ -3014,6 +3014,7 @@ function cyclePhoto(id, dir) {
 function toggleSelect(id) {
   if (selected.has(id)) selected.delete(id); else selected.add(id);
   // Always re-render to sync visual state reliably
+  renderTiles();
   // Update batch summary
   var totalListed = 0, totalCost = 0;
   listings.forEach(function(l) { totalListed += (l.price||0); totalCost += (l.cost||0); });
