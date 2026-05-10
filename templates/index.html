@@ -3013,25 +3013,7 @@ function cyclePhoto(id, dir) {
 
 function toggleSelect(id) {
   if (selected.has(id)) selected.delete(id); else selected.add(id);
-  // Update just this tile visually instead of full re-render
-  var tile = document.getElementById('tile-' + id);
-  if (tile) {
-    var isSel = selected.has(id);
-    tile.classList.toggle('selected', isSel);
-    // Update checkmark
-    var chk = tile.querySelector('.tile-checkmark');
-    if (chk) {
-      if (isSel) {
-        chk.style.background = '#22c55e';
-        chk.style.border = 'none';
-        chk.innerHTML = '<svg width="12" height="12" viewBox="0 0 10 10" fill="none"><polyline points="2,5 4.5,7.5 8,3" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-      } else {
-        chk.style.background = 'rgba(15,17,23,0.7)';
-        chk.style.border = '1.5px solid #4b5563';
-        chk.innerHTML = '';
-      }
-    }
-  }
+  // Always re-render to sync visual state reliably
   // Update batch summary
   var totalListed = 0, totalCost = 0;
   listings.forEach(function(l) { totalListed += (l.price||0); totalCost += (l.cost||0); });
@@ -3041,7 +3023,7 @@ function toggleSelect(id) {
   if (bs) bs.textContent = batchLine;
   updateSubmitBtn();
   // List view rows aren't updated by the tile DOM tweaks above — re-render to sync visual state
-  if (scanView === 'list') renderTiles();
+  renderTiles();
 }
 function selectAll()   { listings.forEach(l => selected.add(l.id)); renderTiles(); }
 function toggleSavedBatchesDropdown() {
