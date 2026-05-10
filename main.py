@@ -1669,6 +1669,22 @@ async def get_ebay_policies(request: Request):
 
 # ── eBay Taxonomy helpers ─────────────────────────────────────────────────
 
+def _get_app_token() -> str:
+    """Get eBay app-level OAuth token using client credentials — no user login needed."""
+    import requests as _rq, base64 as _b64
+    try:
+        creds = _b64.b64encode(f"{EBAY_APP_ID}:{EBAY_CERT_ID}".encode()).decode()
+        r = _rq.post(
+            "https://api.ebay.com/identity/v1/oauth2/token",
+            headers={"Authorization": f"Basic {creds}", "Content-Type": "application/x-www-form-urlencoded"},
+            data="grant_type=client_credentials&scope=https://api.ebay.com/oauth/api_scope",
+            timeout=10,
+        )
+        return r.json().get("access_token", "")
+    except Exception:
+        return ""
+
+
 def _fetch_category_aspects(category_id: str, token: str) -> list:
     """Return list of {name, required, recommended, values, mode} for a category."""
     import requests as _rq
@@ -1789,10 +1805,17 @@ async def export_ebay_csv(request: Request):
     # Headers now built dynamically after aspect fetch
 
     # ── Phase 1: Collect unique categories + fetch aspects ─────────────────
+    # Use app-level token (client credentials) — works without user eBay OAuth
     try:
-        ebay_token = get_ebay_token(business_id)
+        ebay_token = _get_app_token()
     except Exception:
         ebay_token = ""
+    # Fall back to user token if app token fails
+    if not ebay_token:
+        try:
+            ebay_token = get_ebay_token(business_id)
+        except Exception:
+            ebay_token = ""
 
     # Cache aspects per category
     cat_aspects_cache = {}  # cat_id -> list of aspect dicts
