@@ -1854,6 +1854,10 @@ select.field-input { background: #fff; color: #0f172a; }
           <div style="font-size:15px;color:var(--muted);margin-top:4px;" id="sales-sub">Connected to eBay</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
+          <button onclick="openReceiptModal()" style="font-size:14px;padding:8px 16px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:#4ade80;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:600;display:flex;align-items:center;gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            Generate Receipt
+          </button>
           <div style="display:inline-flex;gap:2px;background:rgba(0,0,0,0.25);border:1px solid #1a2332;border-radius:9px;padding:3px;">
             <button onclick="setSalesPeriod('day',this)" style="font-size:16px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">Day</button>
             <button onclick="setSalesPeriod('week',this)" style="font-size:16px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:inherit;font-weight:500;">Week</button>
@@ -6420,6 +6424,133 @@ loadDashboardSummary();
 setInterval(() => { if (activeTab === 'dashboard') loadDashboardSummary(); }, 30000);
 
 
+// ── RECEIPT GENERATOR ──────────────────────────────────────────
+var rcpItems = [];
+
+function openReceiptModal() {
+  document.getElementById('receipt-gen-modal').style.display = 'flex';
+  // Autofill from account info
+  fetch('/api/account/info', {credentials:'include'}).then(function(r){return r.json();}).then(function(a){
+    document.getElementById('rcp-biz-name').value = a.name || '';
+    document.getElementById('rcp-biz-email').value = a.email || '';
+    receiptUpdate();
+  }).catch(function(){});
+  if(!rcpItems.length) rcpAddItem();
+  receiptUpdate();
+}
+
+function closeReceiptModal() {
+  document.getElementById('receipt-gen-modal').style.display = 'none';
+}
+
+function rcpAddItem(d,q,p){
+  var id='ri'+Date.now()+Math.floor(Math.random()*999);
+  rcpItems.push({id:id,d:d||'',q:q||1,p:p||''});
+  rcpRenderItems();
+}
+
+function rcpRemoveItem(id){
+  rcpItems=rcpItems.filter(function(i){return i.id!==id;});
+  rcpRenderItems();
+}
+
+function rcpRenderItems(){
+  var el=document.getElementById('rcp-items-list');
+  if(!el)return;
+  el.innerHTML=rcpItems.map(function(item){
+    return '<div style="display:grid;grid-template-columns:1fr 52px 68px 24px;gap:6px;margin-bottom:6px;">'
+      +'<input class="acct-input" style="font-size:12px;padding:5px 8px;" value="'+escapeHtml(item.d||'')+'" placeholder="Item name" oninput="rcpSyncItem(''+item.id+'','d',this.value)">'
+      +'<input class="acct-input" style="font-size:12px;padding:5px 8px;" type="number" value="'+item.q+'" min="1" oninput="rcpSyncItem(''+item.id+'','q',this.value)">'
+      +'<input class="acct-input" style="font-size:12px;padding:5px 8px;" type="number" value="'+item.p+'" step="0.01" placeholder="0.00" oninput="rcpSyncItem(''+item.id+'','p',this.value)">'
+      +'<button onclick="rcpRemoveItem(''+item.id+'')" style="width:24px;height:32px;background:transparent;border:1px solid #1a2332;border-radius:5px;color:var(--muted);cursor:pointer;font-size:13px;">×</button>'
+      +'</div>';
+  }).join('');
+  receiptUpdate();
+}
+
+function rcpSyncItem(id,field,val){
+  var item=rcpItems.find(function(i){return i.id===id;});
+  if(item){item[field]=val;receiptUpdate();}
+}
+
+function rcpV(id){return (document.getElementById(id)||{}).value||'';}
+function rcpN(id){return parseFloat(rcpV(id))||0;}
+function rcpFmt(x){return '$'+Number(x).toFixed(2);}
+function rcpEsc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
+
+function receiptEncoded(){
+  var data={
+    b:{n:rcpV('rcp-biz-name'),e:rcpV('rcp-biz-email'),p:rcpV('rcp-biz-phone'),w:rcpV('rcp-biz-web')},
+    c:{n:rcpV('rcp-buy-name'),e:rcpV('rcp-buy-email'),p:rcpV('rcp-buy-phone'),eb:rcpV('rcp-buy-ebay')},
+    items:rcpItems.map(function(i){return{d:i.d,q:i.q,p:i.p};}),
+    t:rcpN('rcp-tax'),s:rcpN('rcp-ship'),d:rcpN('rcp-disc'),
+    pay:rcpV('rcp-pay'),oid:rcpV('rcp-oid'),notes:rcpV('rcp-notes')
+  };
+  return btoa(encodeURIComponent(JSON.stringify(data)));
+}
+
+function receiptCopyLink(){
+  var url=window.location.origin+'/receipt?d='+receiptEncoded();
+  if(navigator.clipboard){
+    navigator.clipboard.writeText(url).then(function(){toast('Receipt link copied ✓','success');}).catch(function(){prompt('Copy this link:',url);});
+  } else {
+    prompt('Copy this link:',url);
+  }
+}
+
+function receiptPrint(){
+  var url='/receipt?d='+receiptEncoded();
+  var win=window.open(url,'_blank');
+  if(win) setTimeout(function(){try{win.print();}catch(e){}},800);
+}
+
+function receiptUpdate(){
+  var el=document.getElementById('rcp-preview');
+  if(!el)return;
+  var subtotal=rcpItems.reduce(function(s,i){return s+((parseFloat(i.p)||0)*(parseInt(i.q)||1));},0);
+  var tax=rcpN('rcp-tax'),ship=rcpN('rcp-ship'),disc=rcpN('rcp-disc'),total=subtotal+tax+ship-disc;
+  var now=new Date(),dateStr=now.toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+  var bname=rcpV('rcp-biz-name')||'Your Business';
+  var html='<div style="text-align:center;margin-bottom:14px;padding-bottom:12px;border-bottom:1px dashed #1a2332;">'
+    +'<div style="font-size:15px;font-weight:600;">'+rcpEsc(bname)+'</div>'
+    +(rcpV('rcp-biz-email')?'<div style="font-size:11px;color:var(--muted);">'+rcpEsc(rcpV('rcp-biz-email'))+'</div>':'')
+    +(rcpV('rcp-biz-phone')?'<div style="font-size:11px;color:var(--muted);">'+rcpEsc(rcpV('rcp-biz-phone'))+'</div>':'')
+    +'<div style="font-size:10px;color:var(--muted);margin-top:6px;">'+dateStr+'</div>'
+    +(rcpV('rcp-oid')?'<div style="font-size:10px;color:var(--muted);">Order: '+rcpEsc(rcpV('rcp-oid'))+'</div>':'')
+    +'</div>';
+  if(rcpV('rcp-buy-name')||rcpV('rcp-buy-email')){
+    html+='<div style="margin-bottom:12px;"><div style="font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;border-bottom:1px solid #1a2332;padding-bottom:2px;">Bill To</div>';
+    if(rcpV('rcp-buy-name')) html+='<div style="font-size:13px;font-weight:600;">'+rcpEsc(rcpV('rcp-buy-name'))+'</div>';
+    if(rcpV('rcp-buy-email')) html+='<div style="display:flex;justify-content:space-between;font-size:11px;"><span style="color:var(--muted);">Email</span><span>'+rcpEsc(rcpV('rcp-buy-email'))+'</span></div>';
+    if(rcpV('rcp-buy-ebay')) html+='<div style="display:flex;justify-content:space-between;font-size:11px;"><span style="color:var(--muted);">eBay</span><span>'+rcpEsc(rcpV('rcp-buy-ebay'))+'</span></div>';
+    html+='</div>';
+  }
+  html+='<div style="margin-bottom:10px;"><div style="font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;border-bottom:1px solid #1a2332;padding-bottom:2px;">Items</div>';
+  html+='<table style="width:100%;border-collapse:collapse;font-size:11px;"><thead><tr>'
+    +'<th style="text-align:left;font-size:9px;color:var(--muted);padding:3px 0;border-bottom:1px solid #1a2332;">Description</th>'
+    +'<th style="text-align:center;font-size:9px;color:var(--muted);padding:3px 0;border-bottom:1px solid #1a2332;">Qty</th>'
+    +'<th style="text-align:right;font-size:9px;color:var(--muted);padding:3px 0;border-bottom:1px solid #1a2332;">Unit</th>'
+    +'<th style="text-align:right;font-size:9px;color:var(--muted);padding:3px 0;border-bottom:1px solid #1a2332;">Total</th>'
+    +'</tr></thead><tbody>';
+  rcpItems.forEach(function(item){
+    var p=parseFloat(item.p)||0,q=parseInt(item.q)||1;
+    html+='<tr><td style="padding:4px 0;border-bottom:1px solid #0d1117;">'+rcpEsc(item.d||'—')+'</td><td style="text-align:center;padding:4px 0;border-bottom:1px solid #0d1117;">'+q+'</td><td style="text-align:right;padding:4px 0;border-bottom:1px solid #0d1117;">'+rcpFmt(p)+'</td><td style="text-align:right;padding:4px 0;border-bottom:1px solid #0d1117;">'+rcpFmt(p*q)+'</td></tr>';
+  });
+  if(!rcpItems.length) html+='<tr><td colspan="4" style="color:var(--muted);font-size:11px;padding:4px 0;">No items yet</td></tr>';
+  html+='</tbody></table></div>';
+  html+='<div style="border-top:1px solid #1a2332;padding-top:8px;">';
+  html+='<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px;"><span>Subtotal</span><span>'+rcpFmt(subtotal)+'</span></div>';
+  if(ship) html+='<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px;"><span>Shipping</span><span>'+rcpFmt(ship)+'</span></div>';
+  if(tax) html+='<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px;"><span>Tax</span><span>'+rcpFmt(tax)+'</span></div>';
+  if(disc) html+='<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px;"><span>Discount</span><span style="color:#4ade80;">−'+rcpFmt(disc)+'</span></div>';
+  html+='<div style="display:flex;justify-content:space-between;font-size:14px;font-weight:600;margin-top:6px;"><span>Total</span><span>'+rcpFmt(total)+'</span></div>';
+  html+='<div style="display:flex;justify-content:space-between;font-size:11px;margin-top:4px;"><span style="color:var(--muted);">Payment</span><span>'+rcpEsc(rcpV('rcp-pay'))+'</span></div>';
+  html+='</div>';
+  if(rcpV('rcp-notes')) html+='<div style="text-align:center;font-size:11px;color:var(--muted);margin-top:12px;padding-top:10px;border-top:1px dashed #1a2332;">'+rcpEsc(rcpV('rcp-notes'))+'</div>';
+  html+='<div style="text-align:center;font-size:10px;color:var(--muted);margin-top:8px;">Thank you for your business.</div>';
+  el.innerHTML=html;
+}
+
 // ── SCANNER SETTINGS ───────────────────────────────────────────
 var _scannerDefaults = {};
 
@@ -6549,6 +6680,87 @@ function updatePriceByCondition() {
 </script>
 
 <!-- Save Batch modal -->
+<!-- Receipt Generator Modal -->
+<div id="receipt-gen-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:9999;align-items:flex-start;justify-content:center;padding:20px 16px;overflow-y:auto;">
+  <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:14px;max-width:700px;width:100%;margin:auto;">
+
+    <!-- Modal header -->
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid #1a2332;">
+      <div>
+        <div style="font-size:17px;font-weight:700;color:var(--text);">Generate Receipt</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px;">Fill in details · preview updates live</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button onclick="receiptCopyLink()" style="padding:8px 14px;background:transparent;border:1px solid #1a2332;border-radius:8px;color:#94a3b8;cursor:pointer;font-family:inherit;font-size:13px;">🔗 Share link</button>
+        <button onclick="window.open('/receipt?d='+receiptEncoded(),'_blank')" style="padding:8px 14px;background:transparent;border:1px solid #1a2332;border-radius:8px;color:#94a3b8;cursor:pointer;font-family:inherit;font-size:13px;">↗ Open</button>
+        <button onclick="receiptPrint()" style="padding:8px 16px;background:#22c55e;border:none;border-radius:8px;color:#052e16;cursor:pointer;font-family:inherit;font-size:13px;font-weight:700;">🖨 Print</button>
+        <button onclick="closeReceiptModal()" style="width:32px;height:32px;background:transparent;border:1px solid #1a2332;border-radius:8px;color:var(--muted);cursor:pointer;font-size:17px;">×</button>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;">
+
+      <!-- LEFT: Form -->
+      <div style="padding:20px 24px;border-right:1px solid #1a2332;overflow-y:auto;max-height:70vh;">
+
+        <!-- Seller -->
+        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">Your Business</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">
+          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Name</div><input class="acct-input" id="rcp-biz-name" placeholder="Resel Junkie" oninput="receiptUpdate()"></div>
+          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Email</div><input class="acct-input" id="rcp-biz-email" placeholder="you@email.com" oninput="receiptUpdate()"></div>
+          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Phone</div><input class="acct-input" id="rcp-biz-phone" placeholder="Optional" oninput="receiptUpdate()"></div>
+          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Website</div><input class="acct-input" id="rcp-biz-web" placeholder="Optional" oninput="receiptUpdate()"></div>
+        </div>
+
+        <!-- Buyer -->
+        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;border-top:1px solid #1a2332;padding-top:12px;">Customer</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">
+          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Name</div><input class="acct-input" id="rcp-buy-name" placeholder="Jane Smith" oninput="receiptUpdate()"></div>
+          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Email</div><input class="acct-input" id="rcp-buy-email" placeholder="jane@email.com" oninput="receiptUpdate()"></div>
+          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Phone</div><input class="acct-input" id="rcp-buy-phone" placeholder="Optional" oninput="receiptUpdate()"></div>
+          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">eBay username</div><input class="acct-input" id="rcp-buy-ebay" placeholder="Optional" oninput="receiptUpdate()"></div>
+        </div>
+
+        <!-- Items -->
+        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;border-top:1px solid #1a2332;padding-top:12px;">Items</div>
+        <div style="display:grid;grid-template-columns:1fr 52px 68px 24px;gap:6px;margin-bottom:4px;">
+          <div style="font-size:10px;color:var(--muted);">Description</div>
+          <div style="font-size:10px;color:var(--muted);">Qty</div>
+          <div style="font-size:10px;color:var(--muted);">Price</div>
+          <div></div>
+        </div>
+        <div id="rcp-items-list"></div>
+        <button onclick="rcpAddItem()" style="margin-top:6px;padding:5px 12px;background:transparent;border:1px solid #1a2332;border-radius:6px;color:var(--muted);font-size:12px;cursor:pointer;font-family:inherit;">+ Add item</button>
+
+        <!-- Totals -->
+        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin:14px 0 8px;border-top:1px solid #1a2332;padding-top:12px;">Fees & Payment</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Tax ($)</div><input class="acct-input" id="rcp-tax" type="number" step="0.01" placeholder="0.00" oninput="receiptUpdate()"></div>
+          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Shipping ($)</div><input class="acct-input" id="rcp-ship" type="number" step="0.01" placeholder="0.00" oninput="receiptUpdate()"></div>
+          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Discount ($)</div><input class="acct-input" id="rcp-disc" type="number" step="0.01" placeholder="0.00" oninput="receiptUpdate()"></div>
+          <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Payment method</div>
+            <select class="acct-input" id="rcp-pay" onchange="receiptUpdate()">
+              <option>eBay</option><option>PayPal</option><option>Venmo</option><option>Cash</option><option>Zelle</option><option>Check</option><option>Other</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-bottom:8px;"><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Order / Transaction ID</div><input class="acct-input" id="rcp-oid" placeholder="Optional" oninput="receiptUpdate()"></div>
+        <div><div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Note to customer</div><textarea class="acct-input" id="rcp-notes" rows="2" placeholder="Thanks for your purchase!" oninput="receiptUpdate()" style="resize:vertical;font-family:inherit;font-size:13px;line-height:1.5;"></textarea></div>
+      </div>
+
+      <!-- RIGHT: Preview -->
+      <div style="padding:0;display:flex;flex-direction:column;">
+        <div style="padding:10px 16px;background:#070a10;border-bottom:1px solid #1a2332;font-size:11px;font-weight:600;color:#4ade80;">Live Preview</div>
+        <div id="rcp-preview" style="padding:20px 18px;font-family:monospace;font-size:12px;color:var(--text);line-height:1.7;overflow-y:auto;flex:1;max-height:70vh;"></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Receipt print iframe -->
+<iframe id="rcp-print-frame" style="display:none;"></iframe>
+
 <!-- Scanner / Listing Defaults Settings Modal -->
 <div id="scanner-settings-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto;">
   <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:14px;padding:28px;max-width:640px;width:100%;">

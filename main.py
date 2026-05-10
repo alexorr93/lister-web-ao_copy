@@ -3841,6 +3841,104 @@ If no text visible or no matches, still return the JSON with empty arrays."""
 
 # ── SETTINGS ──────────────────────────────────────────────────── #
 
+@app.get("/receipt")
+async def receipt_page(d: str = ""):
+    """Standalone shareable receipt page — data is base64 encoded in ?d= param."""
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Receipt</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,sans-serif;background:#f8fafc;padding:32px 16px;color:#0f172a}
+.card{max-width:520px;margin:0 auto;background:#fff;border-radius:12px;box-shadow:0 1px 8px rgba(0,0,0,0.08);overflow:hidden}
+.top-bar{background:#0a1a0a;padding:12px 20px;display:flex;justify-content:space-between;align-items:center}
+.top-bar span{color:#4ade80;font-size:13px;font-weight:600}
+.print-btn{background:#22c55e;color:#052e16;border:none;padding:6px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer}
+.receipt{padding:28px 32px;font-family:monospace;font-size:13px;line-height:1.7}
+.r-header{text-align:center;margin-bottom:20px;padding-bottom:16px;border-bottom:1px dashed #e2e8f0}
+.r-biz{font-size:16px;font-weight:600;margin-bottom:2px}
+.r-sub{font-size:12px;color:#64748b}
+.r-section{margin-bottom:14px}
+.r-section-title{font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;border-bottom:1px solid #f1f5f9;padding-bottom:3px}
+.r-row{display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px}
+.r-row .k{color:#64748b}
+table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:4px}
+th{text-align:left;font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;padding:4px 0;border-bottom:1px solid #e2e8f0}
+td{padding:5px 0;border-bottom:1px solid #f8fafc;vertical-align:top}
+td:last-child{text-align:right}
+.totals{border-top:1px solid #e2e8f0;padding-top:8px;margin-top:4px}
+.t-row{display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px}
+.t-row.big{font-weight:600;font-size:15px;margin-top:6px}
+.footer{text-align:center;font-size:11px;color:#94a3b8;margin-top:16px;padding-top:12px;border-top:1px dashed #e2e8f0}
+@media print{.top-bar{display:none}.card{box-shadow:none;border-radius:0}.receipt{padding:0}}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="top-bar"><span>🧾 Receipt</span><button class="print-btn" onclick="window.print()">Print / Save PDF</button></div>
+  <div class="receipt" id="receipt">Loading...</div>
+</div>
+<script>
+function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
+function fmt(x){return '$'+Number(x||0).toFixed(2);}
+try{
+  var raw = decodeURIComponent(atob('""" + d + """'));
+  var data = JSON.parse(raw);
+  var b=data.b||{}, cu=data.c||{}, items=data.items||[];
+  var tax=data.t||0, ship=data.s||0, disc=data.d||0;
+  var subtotal=items.reduce(function(s,i){return s+((parseFloat(i.p)||0)*(parseInt(i.q)||1));},0);
+  var total=subtotal+tax+ship-disc;
+  var now=new Date();
+  var dateStr=now.toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+
+  var html='<div class="r-header">'
+    +'<div class="r-biz">'+esc(b.n||'Receipt')+'</div>'
+    +(b.e?'<div class="r-sub">'+esc(b.e)+'</div>':'')
+    +(b.p?'<div class="r-sub">'+esc(b.p)+'</div>':'')
+    +(b.w?'<div class="r-sub">'+esc(b.w)+'</div>':'')
+    +'<div style="margin-top:8px;font-size:11px;color:#94a3b8">'+dateStr+'</div>'
+    +(data.oid?'<div style="font-size:11px;color:#94a3b8">Order: '+esc(data.oid)+'</div>':'')
+    +'</div>';
+
+  if(cu.n||cu.e||cu.eb){
+    html+='<div class="r-section"><div class="r-section-title">Bill To</div>';
+    if(cu.n) html+='<div style="font-size:13px;font-weight:600;margin-bottom:2px">'+esc(cu.n)+'</div>';
+    if(cu.e) html+='<div class="r-row"><span class="k">Email</span><span>'+esc(cu.e)+'</span></div>';
+    if(cu.p) html+='<div class="r-row"><span class="k">Phone</span><span>'+esc(cu.p)+'</span></div>';
+    if(cu.eb) html+='<div class="r-row"><span class="k">eBay</span><span>'+esc(cu.eb)+'</span></div>';
+    html+='</div>';
+  }
+
+  html+='<div class="r-section"><div class="r-section-title">Items</div>';
+  html+='<table><thead><tr><th>Description</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit</th><th style="text-align:right">Total</th></tr></thead><tbody>';
+  items.forEach(function(item){
+    var p=parseFloat(item.p)||0,q=parseInt(item.q)||1;
+    html+='<tr><td>'+esc(item.d||'—')+'</td><td style="text-align:center">'+q+'</td><td style="text-align:right">'+fmt(p)+'</td><td style="text-align:right">'+fmt(p*q)+'</td></tr>';
+  });
+  html+='</tbody></table></div>';
+
+  html+='<div class="totals">';
+  html+='<div class="t-row"><span>Subtotal</span><span>'+fmt(subtotal)+'</span></div>';
+  if(ship) html+='<div class="t-row"><span>Shipping</span><span>'+fmt(ship)+'</span></div>';
+  if(tax) html+='<div class="t-row"><span>Tax / VAT</span><span>'+fmt(tax)+'</span></div>';
+  if(disc) html+='<div class="t-row"><span>Discount</span><span style="color:#16a34a">−'+fmt(disc)+'</span></div>';
+  html+='<div class="t-row big"><span>Total</span><span>'+fmt(total)+'</span></div>';
+  html+='<div class="t-row" style="margin-top:6px"><span style="color:#94a3b8">Payment</span><span>'+esc(data.pay||'')+'</span></div>';
+  html+='</div>';
+  if(data.notes) html+='<div class="footer">'+esc(data.notes)+'</div>';
+  html+='<div class="footer" style="margin-top:6px">Thank you for your business.</div>';
+  document.getElementById('receipt').innerHTML=html;
+} catch(e){document.getElementById('receipt').innerHTML='<p style="color:#ef4444;padding:20px">Invalid receipt link.</p>';}
+</script>
+</body>
+</html>"""
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content=html)
+
+
 @app.get("/api/listing-defaults")
 async def get_listing_defaults(request: Request):
     """Get per-business eBay listing defaults."""
