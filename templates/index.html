@@ -3016,7 +3016,14 @@ function cyclePhoto(id, dir) {
 }
 
 function toggleSelect(id) {
-  if (selected.has(id)) selected.delete(id); else selected.add(id);
+  // Normalize id type — API returns numbers, HTML passes strings
+  var numId = isNaN(id) ? id : (typeof id === 'string' ? id : Number(id));
+  var strId = String(id);
+  // Try both forms to find which is in the set
+  if (selected.has(numId)) selected.delete(numId);
+  else if (selected.has(strId)) selected.delete(strId);
+  else { selected.add(strId); }
+  id = strId;
   // Always re-render to sync visual state reliably
   renderTiles();
   // Update batch summary
@@ -3030,7 +3037,7 @@ function toggleSelect(id) {
   // List view rows aren't updated by the tile DOM tweaks above — re-render to sync visual state
   renderTiles();
 }
-function selectAll()   { listings.forEach(l => selected.add(l.id)); renderTiles(); }
+function selectAll()   { listings.forEach(l => selected.add(String(l.id))); renderTiles(); }
 function toggleSavedBatchesDropdown() {
   var dd = document.getElementById('saved-batches-dropdown');
   if (!dd) return;
