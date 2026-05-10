@@ -1675,7 +1675,7 @@ async def export_ebay_csv(request: Request):
     business_id = require_auth(request)
     try:
         res = supabase.table("listings").select(
-            "id,title,description,price,price_used,price_new,quantity,condition,photo_id,ebay_category_id,barcode_id"
+            "id,title,description,price,price_used,price_new,quantity,condition,photo_id,ebay_category_id,ebay_category,barcode_id,brand,model,mpn"
         ).eq("business_id", business_id).neq("status", "archived").execute()
         items = res.data or []
     except Exception as e:
@@ -1713,6 +1713,7 @@ async def export_ebay_csv(request: Request):
     headers = [
         "*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)",
         "CustomLabel", "*Category", "StoreCategory", "*Title",
+        "ScheduleTime",
         "*ConditionID", "PicURL", "*Description", "*Format", "*Duration",
         "*StartPrice", "BuyItNowPrice", "BestOfferEnabled",
         "BestOfferAutoAcceptPrice", "MinimumBestOfferPrice",
@@ -1723,6 +1724,7 @@ async def export_ebay_csv(request: Request):
         "*ReturnsAcceptedOption", "ReturnsWithinOption",
         "RefundOption", "ShippingCostPaidByOption",
         "ShippingProfileName", "ReturnProfileName", "PaymentProfileName",
+        "C:Brand", "C:Type", "C:MPN", "C:Model",
     ]
 
     writer = csv.writer(output, quoting=csv.QUOTE_ALL, lineterminator="\r\n")
@@ -1751,8 +1753,25 @@ async def export_ebay_csv(request: Request):
         bo_accept_val = def_bo_accept if def_best_offer == "true" and def_bo_accept else ""
         bo_min_val = def_bo_min if def_best_offer == "true" and def_bo_min else ""
 
-        # Use business policies if set, otherwise use direct shipping fields
+        # Use business policies if set, blank ALL legacy fields to avoid conflict
         use_policies = bool(def_ship_profile or def_ret_profile or def_pay_profile)
+
+        # Schedule 21 days from now by default (eBay max is 21 days)
+        from datetime import timedelta
+        schedule_dt = datetime.now() + timedelta(days=21)
+        schedule_time = schedule_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        # Item specifics — use saved fields, fall back to inferring from title
+        item_brand = str(item.get("brand") or "")
+        item_mpn   = str(item.get("mpn") or "Does Not Apply")
+        item_model = str(item.get("model") or "")
+        # Infer brand from title if not set
+        if not item_brand:
+            title_words = str(item.get("title","")).split()
+            item_brand = title_words[0] if title_words else "Unbranded"
+        # Infer type from category name
+        cat_name = str(item.get("ebay_category") or "")
+        item_type = cat_name.split(",")[0].strip() if cat_name else "Other"
 
         writer.writerow([
             "Add",
@@ -1760,6 +1779,7 @@ async def export_ebay_csv(request: Request):
             cat_id,
             "",
             str(item.get("title", ""))[:80],
+            schedule_time,
             cond_id,
             pic,
             desc,
@@ -1785,6 +1805,10 @@ async def export_ebay_csv(request: Request):
             def_ship_profile,
             def_ret_profile,
             def_pay_profile,
+            item_brand,
+            item_type,
+            item_mpn,
+            item_model,
         ])
 
     csv_bytes = output.getvalue().encode("utf-8-sig")  # BOM for Excel compatibility
