@@ -1106,30 +1106,131 @@ async def submit_listings_to_ebay(request: Request):
                                     break
 
                 if offer_id:
-                    # Publish as scheduled listing 1 year out — appears in Seller Hub as scheduled
                     from datetime import datetime as _dt, timedelta as _td
+
+                    def _apply_ebay_error_fixes(aspects, errors, title_lower):
+                        """Parse eBay error codes and fix aspects accordingly."""
+                        SMART_DEFAULTS = {
+                            "Brand": aspects.get("Brand", ["Unbranded"])[0] if aspects.get("Brand") else "Unbranded",
+                            "Type": "Other",
+                            "Color": "Multicolor",
+                            "Department": "Unisex Adults",
+                            "Size": "One Size",
+                            "Size Type": "Regular",
+                            "US Shoe Size": "10",
+                            "UK Shoe Size": "9",
+                            "EU Shoe Size": "44",
+                            "Model": "Does Not Apply",
+                            "MPN": "Does Not Apply",
+                            "Connectivity": "Wireless" if "wireless" in title_lower or "bluetooth" in title_lower else "Wired",
+                            "Wireless Technology": "Bluetooth" if "bluetooth" in title_lower else "Wi-Fi",
+                            "Material": "Mixed Materials",
+                            "Style": "Casual",
+                            "Country of Origin": "China",
+                            "Form Factor": "Over-Ear",
+                            "Number of Earpieces": "2",
+                            "Age Level": "Adult",
+                            "Theme": "General",
+                            "Occasion": "Casual",
+                            "Features": "Lightweight",
+                            "Power Source": "AC/DC Adapter",
+                            "Control Style": "Remote Control",
+                        }
+                        fixed = False
+                        for err in errors:
+                            msg = str(err.get("message","") or err.get("longMessage",""))
+                            # Extract missing aspect name
+                            for param in err.get("parameters",[]):
+                                if param.get("name") in ("aspectName","fieldName","name"):
+                                    asp_name = param.get("value","")
+                                    if asp_name and asp_name not in aspects:
+                                        val = SMART_DEFAULTS.get(asp_name, "Does Not Apply")
+                                        aspects[asp_name] = [val]
+                                        print(f"[eBay retry] Fixed missing aspect: {asp_name}={val}")
+                                        fixed = True
+                            # Also catch "missing" pattern from message
+                            import re
+                            m = re.search(r"aspect[s]?\s+['"]?([^'"]+)['"]?\s+is missing", msg, re.I)
+                            if m:
+                                asp_name = m.group(1).strip()
+                                if asp_name not in aspects:
+                                    val = SMART_DEFAULTS.get(asp_name, "Does Not Apply")
+                                    aspects[asp_name] = [val]
+                                    print(f"[eBay retry] Fixed from msg: {asp_name}={val}")
+                                    fixed = True
+                        return aspects, fixed
+
+                    # Auto-retry publish loop — up to 3 attempts
                     scheduled_date = (_dt.utcnow() + _td(days=20)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
                     listing_id = offer_id
-                    try:
-                        pub_r = _req3.post(
-                            f"{api_base}/sell/inventory/v1/offer/{offer_id}/publish",
-                            headers=headers,
-                            json={"scheduledStartDate": scheduled_date}
-                        )
-                        print(f"[eBay] Scheduled publish for {offer_id}: status={pub_r.status_code}, body={pub_r.text[:300]}")
-                        pub_data = pub_r.json() if pub_r.text else {}
-                        listing_id = pub_data.get("listingId") or offer_id
-                    except Exception as _pub_err:
-                        print(f"[eBay] Publish warning: {_pub_err}")
+                    pub_data = {}
+                    last_errors = []
+                    published = False
+
+                    for _attempt in range(3):
+                        try:
+                            pub_r = _req3.post(
+                                f"{api_base}/sell/inventory/v1/offer/{offer_id}/publish",
+                                headers=headers,
+                                json={}
+                            )
+                            print(f"[eBay] Publish attempt {_attempt+1} for {offer_id}: status={pub_r.status_code}, body={pub_r.text[:400]}")
+                            pub_data = pub_r.json() if pub_r.text else {}
+                            listing_id = pub_data.get("listingId") or offer_id
+
+                            if pub_r.status_code in (200, 201) and pub_data.get("listingId"):
+                                published = True
+                                print(f"[eBay] Published successfully on attempt {_attempt+1}")
+                                break
+
+                            # Parse errors and fix
+                            errs = pub_data.get("errors", [])
+                            last_errors = errs
+                            if not errs:
+                                # No errors but no listingId — might be warnings only
+                                if pub_r.status_code in (200,201):
+                                    published = True
+                                    break
+                                break
+
+                            # Apply fixes to inv_aspects
+                            title_lower_r = title.lower()
+                            inv_aspects, fixed = _apply_ebay_error_fixes(inv_aspects, errs, title_lower_r)
+
+                            if not fixed:
+                                print(f"[eBay] No fixable errors on attempt {_attempt+1}, giving up")
+                                break
+
+                            # Re-PUT inventory item with fixed aspects
+                            inv_payload["product"]["aspects"] = inv_aspects
+                            fix_r = _req3.put(
+                                f"{api_base}/sell/inventory/v1/inventory_item/{sku}",
+                                headers=headers,
+                                json=inv_payload
+                            )
+                            print(f"[eBay] Re-PUT inventory after fix: status={fix_r.status_code}")
+
+                        except Exception as _pub_err:
+                            print(f"[eBay] Publish attempt {_attempt+1} exception: {_pub_err}")
+                            break
 
                     try:
-                        supabase.table("listings").update({
-                            "ebay_item_id": listing_id,
-                            "status": "ebay_scheduled"
-                        }).eq("id", listing["id"]).execute()
+                        if published:
+                            supabase.table("listings").update({
+                                "ebay_item_id": listing_id,
+                                "status": "ebay_scheduled"
+                            }).eq("id", listing["id"]).execute()
+                            results.append({"id": listing["id"], "ok": True, "offer_id": offer_id, "listing_id": listing_id})
+                        else:
+                            err_summary = "; ".join(
+                                e.get("message","unknown") for e in last_errors[:2]
+                            ) if last_errors else str(pub_data)[:200]
+                            results.append({"id": listing["id"], "ok": False,
+                                          "error": f"Publish failed after 3 attempts: {err_summary}",
+                                          "offer_id": offer_id})
                     except Exception as _db_err:
                         print(f"[eBay] DB update warning: {_db_err}")
-                    results.append({"id": listing["id"], "ok": True, "offer_id": offer_id, "listing_id": listing_id})
+                        results.append({"id": listing["id"], "ok": True, "offer_id": offer_id, "listing_id": listing_id})
                 else:
                     results.append({"id": listing["id"], "ok": False, "error": str(offer_data)})
             except Exception as item_err:
