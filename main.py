@@ -1693,7 +1693,10 @@ async def export_ebay_csv(request: Request):
     def_location      = d.get("location", "")
     def_postal        = d.get("postal_code", "")
     def_dispatch      = d.get("dispatch_time", "1")
-    def_ship_svc      = d.get("shipping_service", "USPSGround")
+    def_ship_svc      = d.get("shipping_service", "USPSGroundAdvantage")
+    # Migrate old invalid code
+    if def_ship_svc == "USPSGround":
+        def_ship_svc = "USPSGroundAdvantage"
     def_ship_cost     = d.get("shipping_cost", "0.00")
     def_best_offer    = d.get("best_offer", "false")
     def_bo_accept     = d.get("best_offer_auto_accept", "")
@@ -1726,6 +1729,7 @@ async def export_ebay_csv(request: Request):
         "ShippingProfileName", "ReturnProfileName", "PaymentProfileName",
         "C:Brand", "C:Type", "C:MPN", "C:Model",
         "C:Color", "C:Size", "C:Department",
+        "C:Size Type", "C:Connectivity",
     ]
 
     writer = csv.writer(output, quoting=csv.QUOTE_ALL, lineterminator="\r\n")
@@ -1773,16 +1777,26 @@ async def export_ebay_csv(request: Request):
         item_brand = str(item.get("brand") or "").strip()
         item_mpn   = str(item.get("mpn") or "Does Not Apply")
         item_model = str(item.get("model") or "").strip()
-        # Only use brand if it's explicitly saved — never infer from title
+        # Only use brand if explicitly saved
         if not item_brand:
             item_brand = "Unbranded"
-        # Type from category name (first segment before comma)
+        # Type from category name
         cat_name = str(item.get("ebay_category") or "")
         item_type = cat_name.split(",")[0].strip() if cat_name else "Does Not Apply"
-        # Generic values for required specifics that vary by item
-        item_color = "See Photos"
-        item_size = "See Description"
-        item_dept = "Unisex"
+
+        # Category-aware condition ID mapping
+        # Some categories (VHS=309, Collectibles=1, Art=550) only support 3000/4000/5000
+        no_new_cats = {"309", "99", "171228", "62390"}  # VHS, Everything Else, etc.
+        if cond_id == "1000" and cat_id in no_new_cats:
+            cond_id = "3000"  # fall back to Used - Good
+
+        # Generic item specifics with sensible fallbacks
+        item_color = "Multicolor"
+        item_size = "One Size"
+        item_dept = "Unisex Adults"
+        item_size_type = "Regular"
+        # Connectivity fallback for electronics
+        item_connectivity = "Wireless" if cat_id in {"112529","293","3944","14939"} else "Not Applicable"
 
         writer.writerow([
             "Add",
@@ -1802,7 +1816,7 @@ async def export_ebay_csv(request: Request):
             bo_accept_val,
             bo_min_val,
             str(int(item.get("quantity") or 1)),
-            "1",  # ImmediatePayRequired
+            "0" if bo_enabled == "1" else "1",  # ImmediatePayRequired — can't combine with BestOffer
             def_location,
             def_postal,
             "" if use_policies else "Flat",
@@ -1823,6 +1837,8 @@ async def export_ebay_csv(request: Request):
             item_color,
             item_size,
             item_dept,
+            item_size_type,
+            item_connectivity,
         ])
 
     csv_bytes = output.getvalue().encode("utf-8-sig")  # BOM for Excel compatibility
