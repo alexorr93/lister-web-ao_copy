@@ -1725,6 +1725,7 @@ async def export_ebay_csv(request: Request):
         "RefundOption", "ShippingCostPaidByOption",
         "ShippingProfileName", "ReturnProfileName", "PaymentProfileName",
         "C:Brand", "C:Type", "C:MPN", "C:Model",
+        "C:Color", "C:Size", "C:Department",
     ]
 
     writer = csv.writer(output, quoting=csv.QUOTE_ALL, lineterminator="\r\n")
@@ -1746,9 +1747,16 @@ async def export_ebay_csv(request: Request):
         cat_id = str(item.get("ebay_category_id") or "")
         price = float(item.get("price") or item.get("price_used") or 0)
         sku = str(item.get("barcode_id") or item.get("id") or "")
-        desc = str(item.get("description") or def_description)
 
-        # Best offer fields
+        # Skip items with no valid category or no price
+        if not cat_id or cat_id in ("0", "") or price <= 0:
+            continue
+
+        # Use item description if available, otherwise use account default
+        item_desc = str(item.get("description") or "").strip()
+        desc = item_desc if item_desc else def_description
+
+        # Best offer — only enable if explicitly configured
         bo_enabled = "1" if def_best_offer == "true" else "0"
         bo_accept_val = def_bo_accept if def_best_offer == "true" and def_bo_accept else ""
         bo_min_val = def_bo_min if def_best_offer == "true" and def_bo_min else ""
@@ -1756,22 +1764,25 @@ async def export_ebay_csv(request: Request):
         # Use business policies if set, blank ALL legacy fields to avoid conflict
         use_policies = bool(def_ship_profile or def_ret_profile or def_pay_profile)
 
-        # Schedule 21 days from now by default (eBay max is 21 days)
+        # Schedule 21 days from now (eBay max)
         from datetime import timedelta
         schedule_dt = datetime.now() + timedelta(days=21)
         schedule_time = schedule_dt.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Item specifics — use saved fields, fall back to inferring from title
-        item_brand = str(item.get("brand") or "")
+        # Item specifics — use saved fields, sensible fallbacks
+        item_brand = str(item.get("brand") or "").strip()
         item_mpn   = str(item.get("mpn") or "Does Not Apply")
-        item_model = str(item.get("model") or "")
-        # Infer brand from title if not set
+        item_model = str(item.get("model") or "").strip()
+        # Only use brand if it's explicitly saved — never infer from title
         if not item_brand:
-            title_words = str(item.get("title","")).split()
-            item_brand = title_words[0] if title_words else "Unbranded"
-        # Infer type from category name
+            item_brand = "Unbranded"
+        # Type from category name (first segment before comma)
         cat_name = str(item.get("ebay_category") or "")
-        item_type = cat_name.split(",")[0].strip() if cat_name else "Other"
+        item_type = cat_name.split(",")[0].strip() if cat_name else "Does Not Apply"
+        # Generic values for required specifics that vary by item
+        item_color = "See Photos"
+        item_size = "See Description"
+        item_dept = "Unisex"
 
         writer.writerow([
             "Add",
@@ -1809,6 +1820,9 @@ async def export_ebay_csv(request: Request):
             item_type,
             item_mpn,
             item_model,
+            item_color,
+            item_size,
+            item_dept,
         ])
 
     csv_bytes = output.getvalue().encode("utf-8-sig")  # BOM for Excel compatibility
