@@ -5518,7 +5518,7 @@ function renderExpTable() {
         '<div style="display:flex;align-items:center;gap:10px;">' +
           '<div style="width:32px;height:32px;border-radius:8px;background:' + color + '20;color:' + color + ';display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;">' + initial + '</div>' +
           '<div>' +
-            '<div style="font-weight:500;color:var(--text);' + (it.receipt_photo_id ? 'cursor:pointer;text-decoration:underline;text-underline-offset:2px;' : '') + '" ' + (it.receipt_photo_id ? 'onclick="viewReceiptPhoto('' + it.receipt_photo_id + '')"' : '') + '>' + merchant + (it.receipt_photo_id ? ' 🧾' : '') + '</div>' +
+            '<div style="font-weight:500;color:var(--text);' + (it.receipt_photo_id ? 'cursor:pointer;text-decoration:underline;text-underline-offset:2px;' : '') + '" ' + (it.receipt_photo_id ? 'onclick="viewReceiptPhoto(\'' + it.receipt_photo_id + '\')"' : '') + '>' + merchant + (it.receipt_photo_id ? ' 🧾' : '') + '</div>' +
             (it.notes ? '<div style="font-size:11px;color:var(--muted);margin-top:2px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + it.notes + '</div>' : '') +
           '</div>' +
         '</div>' +
