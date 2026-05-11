@@ -1778,7 +1778,7 @@ def _get_app_token() -> str:
         r = _rq.post(
             "https://api.ebay.com/identity/v1/oauth2/token",
             headers={"Authorization": f"Basic {creds}", "Content-Type": "application/x-www-form-urlencoded"},
-            data="grant_type=client_credentials&scope=https://api.ebay.com/oauth/api_scope",
+            data="grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope%20https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope%2Fcommerce.taxonomy.readonly",
             timeout=10,
         )
         return r.json().get("access_token", "")
