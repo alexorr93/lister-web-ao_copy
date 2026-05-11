@@ -3627,6 +3627,28 @@ async function submitScanItem() {
   prog.style.display = 'none';
   toast(`✅ Item ${scanItems.length} sent to scanner`);
   renderScanItems();
+  // Poll for new listing and check required specifics when it appears
+  var _knownIds = new Set(listings.map(function(l){return String(l.id);}));
+  var _specPollCount = 0;
+  var _specPoll = setInterval(async function() {
+    _specPollCount++;
+    if (_specPollCount > 30) { clearInterval(_specPoll); return; }
+    try {
+      var _lr = await fetch('/api/listings?limit=5', {credentials:'include'});
+      var _ld = await _lr.json();
+      var _newItems = (_ld.listings || []).filter(function(l){
+        return !_knownIds.has(String(l.id)) && l.status === 'scanned';
+      });
+      if (_newItems.length) {
+        clearInterval(_specPoll);
+        await loadListings();
+        // Check each new item for required specifics
+        for (var _ni of _newItems) {
+          setTimeout(function(nid){ checkRequiredSpecifics(nid); }, 500, _ni.id);
+        }
+      }
+    } catch(e) {}
+  }, 3000);
   await createScanGroup();
 }
 
@@ -3753,6 +3775,27 @@ async function submitUploadItem() {
   prog.style.display = 'none';
   toast(`✅ Item ${upItems.length} sent to scanner`);
   renderUpItems();
+  // Poll for new listing and check required specifics when it appears
+  var _knownIds2 = new Set(listings.map(function(l){return String(l.id);}));
+  var _specPollCount2 = 0;
+  var _specPoll2 = setInterval(async function() {
+    _specPollCount2++;
+    if (_specPollCount2 > 30) { clearInterval(_specPoll2); return; }
+    try {
+      var _lr2 = await fetch('/api/listings?limit=5', {credentials:'include'});
+      var _ld2 = await _lr2.json();
+      var _newItems2 = (_ld2.listings || []).filter(function(l){
+        return !_knownIds2.has(String(l.id)) && l.status === 'scanned';
+      });
+      if (_newItems2.length) {
+        clearInterval(_specPoll2);
+        await loadListings();
+        for (var _ni2 of _newItems2) {
+          setTimeout(function(nid){ checkRequiredSpecifics(nid); }, 500, _ni2.id);
+        }
+      }
+    } catch(e) {}
+  }, 3000);
   await createUpGroup();
 }
 
