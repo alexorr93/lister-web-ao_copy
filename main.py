@@ -2644,7 +2644,7 @@ EBAY_REQUIRED_ASPECTS = {
         {"name":"Storage Capacity","mode":"SELECTION_ONLY","values":["128 GB","256 GB","500 GB","512 GB","1 TB","2 TB","4 TB","8 TB","16 TB"]},
         {"name":"Type","mode":"SELECTION_ONLY","values":["SSD","HDD","SSHD","NVMe SSD","External HDD","External SSD"]},
         {"name":"Interface","mode":"SELECTION_ONLY","values":["SATA III","NVMe","M.2","USB 3.0","USB-C","PCIe"]},
-        {"name":"Form Factor","mode":"SELECTION_ONLY","values":["2.5"","3.5"","M.2 2280","M.2 2242"]},
+        {"name":"Form Factor","mode":"SELECTION_ONLY","values":["2.5 inch","3.5 inch","M.2 2280","M.2 2242"]},
     ],
     "625": [  # Cameras
         {"name":"Brand","mode":"FREE_TEXT","values":[]},
