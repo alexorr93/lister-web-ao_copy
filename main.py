@@ -2485,6 +2485,71 @@ async def delete_saved_batch(batch_id: str, request: Request):
         raise HTTPException(500, str(e))
 
 
+@app.get("/api/groups/{group_id}/listing")
+async def get_group_listing(group_id: str, request: Request):
+    """Get listing created from a scan group — poll until scan completes."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Not authenticated")
+    try:
+        gp = supabase.table("group_photos").select("photo_id").eq("group_id", group_id).limit(1).execute()
+        if not gp.data:
+            return {"listing": None}
+        photo_id = gp.data[0]["photo_id"]
+        res = supabase.table("listings").select(
+            "id,title,status,ebay_category_id,ebay_category,ebay_item_specifics"
+        ).eq("business_id", business_id).eq("photo_id", photo_id).limit(1).execute()
+        return {"listing": res.data[0] if res.data else None}
+    except Exception as e:
+        return {"listing": None}
+
+
+@app.get("/api/listings/{listing_id}/required-aspects")
+async def get_required_aspects(listing_id: str, request: Request):
+    """Return required eBay aspects for listing category with current fill status."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Not authenticated")
+    try:
+        res = supabase.table("listings").select(
+            "id,title,ebay_category_id,ebay_category,brand,model,mpn,ebay_item_specifics"
+        ).eq("id", listing_id).eq("business_id", business_id).limit(1).execute()
+        if not res.data:
+            raise HTTPException(404, "Listing not found")
+        listing = res.data[0]
+        cat_id = str(listing.get("ebay_category_id") or "")
+        if not cat_id or cat_id in ("0", "99", ""):
+            return {"ok": True, "required": [], "filled": {}, "category": ""}
+        token = _get_app_token()
+        if not token:
+            return {"ok": True, "required": [], "filled": {}, "category": listing.get("ebay_category","")}
+        import requests as _rq
+        r = _rq.get(
+            f"https://api.ebay.com/commerce/taxonomy/v1/category_tree/0/get_item_aspects_for_category?category_id={cat_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=8
+        )
+        if not r.ok:
+            return {"ok": True, "required": [], "filled": {}, "category": listing.get("ebay_category","")}
+        saved = listing.get("ebay_item_specifics") or {}
+        required_fields = []
+        for asp in r.json().get("aspects", []):
+            name = asp.get("localizedAspectName","")
+            constraint = asp.get("aspectConstraint", {})
+            if constraint.get("aspectUsage","OPTIONAL") != "REQUIRED":
+                continue
+            mode = constraint.get("aspectMode","FREE_TEXT")
+            vals = [v.get("localizedValue","") for v in asp.get("aspectValues",[])[:20] if v.get("localizedValue")]
+            current = saved.get(name,"")
+            needs_input = not current or current in ("Does Not Apply","N/A","","Other","Multicolor","One Size","10","Unbranded","Does not apply")
+            required_fields.append({"name":name,"mode":mode,"values":vals,"current":current,"needs_input":needs_input})
+        return {"ok":True,"required":required_fields,"filled":saved,"category":listing.get("ebay_category",""),"category_id":cat_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"ok": True, "required": [], "filled": {}, "error": str(e)}
+
+
 @app.get("/api/groups/pending")
 async def get_pending_groups(request: Request):
     business_id = require_auth(request)
