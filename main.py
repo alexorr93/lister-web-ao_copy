@@ -2520,7 +2520,12 @@ async def get_required_aspects(listing_id: str, request: Request):
         cat_id = str(listing.get("ebay_category_id") or "")
         if not cat_id or cat_id in ("0", "99", ""):
             return {"ok": True, "required": [], "filled": {}, "category": ""}
-        token = _get_app_token()
+        # Try user OAuth token first, fall back to app token
+        token = None
+        try:
+            token = get_ebay_token(business_id)
+        except Exception:
+            token = _get_app_token()
         if not token:
             return {"ok": True, "required": [], "filled": {}, "category": listing.get("ebay_category","")}
         import requests as _rq
@@ -2529,6 +2534,7 @@ async def get_required_aspects(listing_id: str, request: Request):
             headers={"Authorization": f"Bearer {token}"},
             timeout=8
         )
+        print(f"[Aspects] cat={cat_id} status={r.status_code} body={r.text[:200]}")
         if not r.ok:
             return {"ok": True, "required": [], "filled": {}, "category": listing.get("ebay_category","")}
         saved = listing.get("ebay_item_specifics") or {}
