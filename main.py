@@ -5973,6 +5973,7 @@ async def create_expense(request: Request):
             "notes": body.get("notes") or "",
             "expense_date": body.get("expense_date") or str(__import__("datetime").date.today()),
             "source": body.get("source") or "manual",
+            "receipt_photo_id": body.get("receipt_photo_id") or None,
         }
         result = supabase.table("expenses").insert(row).execute()
         return {"ok": True, "item": result.data[0] if result.data else None}
