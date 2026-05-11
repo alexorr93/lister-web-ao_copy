@@ -3223,6 +3223,8 @@ async function rescanItem(id) {
           } else {
             loadListings();
           }
+          // Check for missing required specifics
+          checkRequiredSpecifics(id);
         }
       } catch(pe) { clearInterval(poll); loadListings(); }
     }, 2000);
@@ -6545,6 +6547,81 @@ loadDashboardSummary();
 setInterval(() => { if (activeTab === 'dashboard') loadDashboardSummary(); }, 30000);
 
 
+// ── ITEM SPECIFICS MODAL ────────────────────────────────────────
+var _specificsListingId = null;
+var _specificsFields = [];
+
+async function checkRequiredSpecifics(listingId) {
+  try {
+    var r = await fetch('/api/listings/' + listingId + '/required-aspects', {credentials:'include'});
+    var d = await r.json();
+    if (!d.ok || !d.required || !d.required.length) return;
+    var missing = d.required.filter(function(f){ return f.needs_input; });
+    if (!missing.length) return;
+    openItemSpecificsModal(listingId, missing, d.category);
+  } catch(e) {
+    console.log('Specifics check failed:', e);
+  }
+}
+
+function openItemSpecificsModal(listingId, fields, category) {
+  _specificsListingId = listingId;
+  _specificsFields = fields;
+  var sub = document.getElementById('specifics-modal-subtitle');
+  if (sub) sub.textContent = (category || 'This category') + ' requires these fields for eBay listing';
+  var container = document.getElementById('specifics-modal-fields');
+  if (!container) return;
+  container.innerHTML = fields.map(function(f, i) {
+    var id = 'spec-field-' + i;
+    var input = '';
+    if (f.mode === 'SELECTION_ONLY' && f.values && f.values.length) {
+      input = '<select id="' + id + '" class="acct-input" style="font-size:14px;padding:9px 12px;color:#f1f5f9;">'
+        + f.values.map(function(v){ return '<option value="' + escapeHtml(v) + '"' + (v === f.current ? ' selected' : '') + '>' + escapeHtml(v) + '</option>'; }).join('')
+        + '</select>';
+    } else {
+      input = '<input id="' + id + '" class="acct-input" style="font-size:14px;padding:9px 12px;color:#f1f5f9;" value="' + escapeHtml(f.current||'') + '" placeholder="Enter ' + escapeHtml(f.name.toLowerCase()) + '">';
+    }
+    return '<div>'
+      + '<div style="font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.05em;">'
+      + escapeHtml(f.name) + ' <span style="color:#ef4444;font-size:10px;">Required</span></div>'
+      + input + '</div>';
+  }).join('');
+  document.getElementById('item-specifics-modal').style.display = 'flex';
+}
+
+function skipItemSpecifics() {
+  document.getElementById('item-specifics-modal').style.display = 'none';
+  _specificsListingId = null;
+  _specificsFields = [];
+}
+
+async function saveItemSpecifics() {
+  if (!_specificsListingId || !_specificsFields.length) return;
+  var updates = {};
+  _specificsFields.forEach(function(f, i) {
+    var el = document.getElementById('spec-field-' + i);
+    if (el && el.value.trim()) updates[f.name] = el.value.trim();
+  });
+  try {
+    // Get current specifics and merge
+    var r = await fetch('/api/listings/' + _specificsListingId + '/required-aspects', {credentials:'include'});
+    var d = await r.json();
+    var merged = Object.assign({}, d.filled || {}, updates);
+    await fetch('/api/listings/' + _specificsListingId, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      credentials: 'include',
+      body: JSON.stringify({field: 'ebay_item_specifics', value: merged})
+    });
+    toast('Listing details saved ✓', 'success');
+    document.getElementById('item-specifics-modal').style.display = 'none';
+    _specificsListingId = null;
+    _specificsFields = [];
+  } catch(e) {
+    toast('Save failed: ' + e.message, 'error');
+  }
+}
+
 // ── RECEIPT GENERATOR ──────────────────────────────────────────
 var rcpItems = [];
 
@@ -6847,6 +6924,21 @@ function updatePriceByCondition() {
     <div id="ebay-progress-list" style="overflow-y:auto;flex:1;padding:8px 0;"></div>
     <div style="padding:16px 24px;border-top:1px solid #1a2332;display:flex;justify-content:flex-end;">
       <button id="ebay-progress-close" onclick="closeProgressModal()" style="display:none;padding:10px 24px;background:#22c55e;border:none;border-radius:8px;color:#052e16;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- Item Specifics Modal -->
+<div id="item-specifics-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:10002;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:16px;max-width:480px;width:100%;">
+    <div style="padding:20px 24px;border-bottom:1px solid #1a2332;">
+      <div style="font-size:17px;font-weight:700;color:#f1f5f9;">Complete your listing</div>
+      <div id="specifics-modal-subtitle" style="font-size:13px;color:#64748b;margin-top:3px;">eBay requires a few more details</div>
+    </div>
+    <div id="specifics-modal-fields" style="padding:20px 24px;max-height:60vh;overflow-y:auto;display:flex;flex-direction:column;gap:14px;"></div>
+    <div style="padding:16px 24px;border-top:1px solid #1a2332;display:flex;gap:8px;justify-content:flex-end;">
+      <button onclick="skipItemSpecifics()" style="padding:9px 18px;background:transparent;border:1px solid #1a2332;border-radius:8px;color:#64748b;cursor:pointer;font-family:inherit;font-size:13px;">Skip for now</button>
+      <button onclick="saveItemSpecifics()" style="padding:9px 20px;background:#22c55e;border:none;border-radius:8px;color:#052e16;cursor:pointer;font-family:inherit;font-size:14px;font-weight:700;">Save details</button>
     </div>
   </div>
 </div>
