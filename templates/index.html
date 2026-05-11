@@ -2199,12 +2199,11 @@ select.field-input { background: #fff; color: #0f172a; }
               </div>
             </div>
             <div style="margin-bottom:10px;">
-              <div class="field-label">eBay Category ID</div>
-              <input type="text" class="field-input" id="modal-cat-input" placeholder="e.g. 15709" oninput="modalDirty=true" style="font-family:monospace;"/>
-            </div>
-            <div>
-              <div class="field-label">Pricing Tier</div>
-              <div style="padding:9px 11px;background:#060c18;border:1px solid #1e2a3a;border-radius:8px;font-size:13px;color:#94a3b8;" id="modal-pricing-tier-display">—</div>
+              <div class="field-label">eBay Category</div>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <input type="text" class="field-input" id="modal-cat-input" placeholder="Category ID e.g. 15709" oninput="modalDirty=true;updateCategoryDisplay(this.value)" style="font-family:monospace;flex:0 0 120px;"/>
+                <div id="modal-cat-name" style="flex:1;padding:9px 11px;background:#060c18;border:1px solid #1e2a3a;border-radius:8px;font-size:13px;color:#64748b;">—</div>
+              </div>
             </div>
           </div>
 
@@ -3500,7 +3499,8 @@ function openModal(id) {
   document.getElementById('modal-weight-oz-input').value = l.weight_oz || '';
   document.getElementById('modal-qty-input').value = l.quantity || 1;
   document.getElementById('modal-cat-input').value = l.ebay_category_id || '';
-  document.getElementById('modal-pricing-tier-display').textContent = l.pricing_tier || '—';
+  document.getElementById('modal-cat-name').textContent = l.ebay_category || '—';
+  // pricing tier removed from display
 
   // Always open on listing tab
   switchModalTab('listing');
