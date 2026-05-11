@@ -2485,6 +2485,424 @@ async def delete_saved_batch(batch_id: str, request: Request):
         raise HTTPException(500, str(e))
 
 
+
+# ── eBay Required Item Specifics — hardcoded for top 50+ reseller categories ──
+# Bypasses taxonomy API OAuth requirement
+EBAY_REQUIRED_ASPECTS = {
+    # ── SHOES ──────────────────────────────────────────────────────────────────
+    "15709": [  # Athletic Shoes
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"US Shoe Size","mode":"FREE_TEXT","values":["5","5.5","6","6.5","7","7.5","8","8.5","9","9.5","10","10.5","11","11.5","12","13","14","15"]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Black","White","Red","Blue","Grey","Green","Brown","Multicolor","Navy","Beige"]},
+        {"name":"Department","mode":"SELECTION_ONLY","values":["Men","Women","Unisex Adults","Boys","Girls","Kids","Baby & Toddler"]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Athletic","Running","Basketball","Training & Gym","Skateboarding","Sneakers","Casual","Walking","Tennis","Cross Training"]},
+        {"name":"Style","mode":"FREE_TEXT","values":["Low Top","High Top","Mid Top"]},
+        {"name":"Upper Material","mode":"SELECTION_ONLY","values":["Leather","Synthetic","Canvas","Mesh","Suede","Knit"]},
+    ],
+    "11632": [  # Boots
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"US Shoe Size","mode":"FREE_TEXT","values":["5","5.5","6","6.5","7","7.5","8","8.5","9","9.5","10","10.5","11","11.5","12","13"]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Black","Brown","Tan","Grey","Beige","White","Multicolor"]},
+        {"name":"Department","mode":"SELECTION_ONLY","values":["Men","Women","Unisex Adults","Boys","Girls","Kids"]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Work & Safety","Cowboy & Western","Chelsea","Ankle","Knee-High","Rain","Snow & Winter","Hiking"]},
+        {"name":"Upper Material","mode":"SELECTION_ONLY","values":["Leather","Synthetic","Suede","Canvas","Rubber"]},
+    ],
+    "45333": [  # Casual Shoes
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"US Shoe Size","mode":"FREE_TEXT","values":["5","6","7","8","9","10","11","12","13"]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Black","White","Brown","Grey","Tan","Navy","Multicolor"]},
+        {"name":"Department","mode":"SELECTION_ONLY","values":["Men","Women","Unisex Adults","Boys","Girls"]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Loafers & Slip-Ons","Oxfords","Boat Shoes","Moccasins","Flats","Sandals"]},
+    ],
+    # ── CLOTHING (MEN) ──────────────────────────────────────────────────────────
+    "15687": [  # Men's T-Shirts
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Size","mode":"SELECTION_ONLY","values":["XS","S","M","L","XL","XXL","XXXL","4XL","5XL","One Size"]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Black","White","Grey","Navy","Red","Blue","Green","Brown","Multicolor"]},
+        {"name":"Department","mode":"SELECTION_ONLY","values":["Men","Boys","Unisex Adults","Unisex Kids"]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["T-Shirt","Graphic Tee","Long Sleeve","Polo","Henley","Tank Top","Sleeveless"]},
+        {"name":"Size Type","mode":"SELECTION_ONLY","values":["Regular","Big & Tall","Slim"]},
+        {"name":"Sleeve Length","mode":"SELECTION_ONLY","values":["Short Sleeve","Long Sleeve","Sleeveless","3/4 Sleeve"]},
+    ],
+    "57988": [  # Men's Jeans
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Size (Waist x Inseam)","mode":"FREE_TEXT","values":[]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Blue","Black","Grey","White","Dark Wash","Light Wash","Medium Wash"]},
+        {"name":"Department","mode":"SELECTION_ONLY","values":["Men","Boys","Unisex Adults"]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Slim","Straight","Relaxed","Skinny","Bootcut","Tapered","Wide Leg"]},
+        {"name":"Size Type","mode":"SELECTION_ONLY","values":["Regular","Big & Tall","Short","Long"]},
+    ],
+    "57990": [  # Men's Hoodies & Sweatshirts
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Size","mode":"SELECTION_ONLY","values":["XS","S","M","L","XL","XXL","XXXL","4XL"]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Black","Grey","Navy","White","Red","Blue","Green","Multicolor"]},
+        {"name":"Department","mode":"SELECTION_ONLY","values":["Men","Boys","Unisex Adults"]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Hoodie","Pullover Hoodie","Zip-Up Hoodie","Sweatshirt","Quarter-Zip"]},
+        {"name":"Size Type","mode":"SELECTION_ONLY","values":["Regular","Big & Tall"]},
+    ],
+    "57988": [  # Men's Pants
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Size (Waist)","mode":"FREE_TEXT","values":[]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Black","Khaki","Navy","Grey","Brown","Olive","Charcoal"]},
+        {"name":"Department","mode":"SELECTION_ONLY","values":["Men","Boys","Unisex Adults"]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Casual","Dress","Cargo","Chinos","Joggers","Sweatpants","Track Pants"]},
+    ],
+    # ── CLOTHING (WOMEN) ────────────────────────────────────────────────────────
+    "53159": [  # Women's Tops & Blouses
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Size","mode":"SELECTION_ONLY","values":["XXS","XS","S","M","L","XL","XXL","XXXL","0","2","4","6","8","10","12","14","16","18","20","One Size"]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Black","White","Pink","Blue","Red","Green","Purple","Beige","Multicolor"]},
+        {"name":"Department","mode":"SELECTION_ONLY","values":["Women","Girls","Juniors","Maternity"]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Blouse","T-Shirt","Tank Top","Crop Top","Tunic","Bodysuit","Camisole","Halter Top"]},
+        {"name":"Size Type","mode":"SELECTION_ONLY","values":["Regular","Plus","Petite","Tall","Maternity"]},
+        {"name":"Sleeve Length","mode":"SELECTION_ONLY","values":["Short Sleeve","Long Sleeve","Sleeveless","3/4 Sleeve","Strapless"]},
+    ],
+    "63861": [  # Women's Dresses
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Size","mode":"SELECTION_ONLY","values":["XXS","XS","S","M","L","XL","XXL","0","2","4","6","8","10","12","14","16","18","One Size"]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Black","White","Blue","Red","Pink","Green","Purple","Floral","Multicolor"]},
+        {"name":"Department","mode":"SELECTION_ONLY","values":["Women","Girls","Juniors","Maternity"]},
+        {"name":"Style","mode":"SELECTION_ONLY","values":["A-Line","Bodycon","Maxi","Midi","Mini","Shift","Wrap","Cocktail","Evening","Casual"]},
+        {"name":"Size Type","mode":"SELECTION_ONLY","values":["Regular","Plus","Petite","Tall","Maternity"]},
+        {"name":"Occasion","mode":"SELECTION_ONLY","values":["Casual","Formal","Party","Wedding","Beach","Work/Office","Evening"]},
+    ],
+    "11554": [  # Women's Jeans
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Size (Waist)","mode":"FREE_TEXT","values":[]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Blue","Black","White","Grey","Dark Wash","Light Wash","Medium Wash","Distressed"]},
+        {"name":"Department","mode":"SELECTION_ONLY","values":["Women","Girls","Juniors","Maternity"]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Skinny","Straight","Bootcut","Wide Leg","Flare","Mom","Relaxed","High-Waisted","Slim"]},
+        {"name":"Size Type","mode":"SELECTION_ONLY","values":["Regular","Plus","Petite","Tall","Maternity","Short"]},
+    ],
+    "169291": [  # Handbags & Purses
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Black","Brown","Tan","White","Red","Pink","Blue","Multicolor","Beige"]},
+        {"name":"Material","mode":"SELECTION_ONLY","values":["Leather","Faux Leather","Canvas","Nylon","Suede","Wicker","PVC"]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Tote","Shoulder Bag","Crossbody","Clutch","Satchel","Backpack","Hobo","Wristlet","Bucket Bag","Mini Bag"]},
+        {"name":"Lining Material","mode":"FREE_TEXT","values":["Fabric","Leather","Suede","Nylon"]},
+        {"name":"Closure","mode":"SELECTION_ONLY","values":["Zipper","Magnetic","Snap","Drawstring","Open Top","Buckle"]},
+    ],
+    # ── ELECTRONICS ─────────────────────────────────────────────────────────────
+    "9355": [  # Cell Phones & Smartphones
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Model","mode":"FREE_TEXT","values":[]},
+        {"name":"Storage Capacity","mode":"SELECTION_ONLY","values":["16 GB","32 GB","64 GB","128 GB","256 GB","512 GB","1 TB"]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Black","White","Gold","Silver","Blue","Red","Purple","Green"]},
+        {"name":"Network","mode":"SELECTION_ONLY","values":["Unlocked","AT&T","T-Mobile","Verizon","Sprint","Cricket","Boost Mobile","Other"]},
+        {"name":"Operating System","mode":"SELECTION_ONLY","values":["iOS","Android","Other"]},
+        {"name":"Screen Size","mode":"FREE_TEXT","values":[]},
+        {"name":"Connectivity","mode":"SELECTION_ONLY","values":["5G","4G LTE","3G","Wi-Fi Only"]},
+    ],
+    "177": [  # Laptops & Netbooks
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Model","mode":"FREE_TEXT","values":[]},
+        {"name":"Processor","mode":"FREE_TEXT","values":[]},
+        {"name":"RAM Size","mode":"SELECTION_ONLY","values":["2 GB","4 GB","8 GB","16 GB","32 GB","64 GB","128 GB"]},
+        {"name":"SSD Capacity","mode":"FREE_TEXT","values":[]},
+        {"name":"Screen Size","mode":"FREE_TEXT","values":[]},
+        {"name":"Operating System","mode":"SELECTION_ONLY","values":["Windows 11 Home","Windows 11 Pro","Windows 10 Home","Windows 10 Pro","macOS","Chrome OS","Linux","No Operating System"]},
+        {"name":"Graphics Processing Type","mode":"SELECTION_ONLY","values":["Integrated/On-Board Graphics","Dedicated/Discrete Graphics"]},
+    ],
+    "171485": [  # Tablets
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Model","mode":"FREE_TEXT","values":[]},
+        {"name":"Storage Capacity","mode":"SELECTION_ONLY","values":["16 GB","32 GB","64 GB","128 GB","256 GB","512 GB","1 TB"]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Black","White","Silver","Gold","Blue","Rose Gold","Space Grey"]},
+        {"name":"Screen Size","mode":"FREE_TEXT","values":[]},
+        {"name":"Connectivity","mode":"SELECTION_ONLY","values":["Wi-Fi Only","Wi-Fi + Cellular","4G LTE","5G"]},
+        {"name":"Operating System","mode":"SELECTION_ONLY","values":["iPadOS","Android","Windows","Fire OS","Other"]},
+    ],
+    "112529": [  # Headphones
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Model","mode":"FREE_TEXT","values":[]},
+        {"name":"Connectivity","mode":"SELECTION_ONLY","values":["Wireless","Wired","Wireless & Wired"]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Over-Ear","On-Ear","In-Ear/Earbuds","True Wireless","Bone Conduction"]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Black","White","Silver","Blue","Red","Rose Gold","Multicolor"]},
+        {"name":"Features","mode":"FREE_TEXT","values":["Noise Cancelling","Microphone","Foldable","Waterproof"]},
+        {"name":"Wireless Technology","mode":"SELECTION_ONLY","values":["Bluetooth","RF","Infrared","NFC"]},
+    ],
+    "178893": [  # Smart Watches
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Model","mode":"FREE_TEXT","values":[]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Black","Silver","Gold","Rose Gold","White","Blue"]},
+        {"name":"Compatible Operating System","mode":"SELECTION_ONLY","values":["iOS","Android","iOS & Android","watchOS","Other"]},
+        {"name":"Connectivity","mode":"SELECTION_ONLY","values":["Bluetooth","Wi-Fi + Bluetooth","LTE + Bluetooth","GPS"]},
+        {"name":"Case Size","mode":"FREE_TEXT","values":[]},
+        {"name":"Band Material","mode":"SELECTION_ONLY","values":["Silicone","Leather","Metal","Nylon","Rubber","Ceramic"]},
+    ],
+    "27386": [  # PC Graphics/Video Cards (GPUs)
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Model","mode":"FREE_TEXT","values":[]},
+        {"name":"Chipset/GPU Model","mode":"FREE_TEXT","values":[]},
+        {"name":"VRAM","mode":"SELECTION_ONLY","values":["2 GB","4 GB","6 GB","8 GB","10 GB","12 GB","16 GB","24 GB"]},
+        {"name":"Memory Type","mode":"SELECTION_ONLY","values":["GDDR6X","GDDR6","GDDR5X","GDDR5","GDDR4","HBM2"]},
+        {"name":"Connectors","mode":"FREE_TEXT","values":["HDMI","DisplayPort","DVI","VGA"]},
+    ],
+    "56081": [  # Hard Drives (HDD/SSD)
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Model","mode":"FREE_TEXT","values":[]},
+        {"name":"Storage Capacity","mode":"SELECTION_ONLY","values":["128 GB","256 GB","500 GB","512 GB","1 TB","2 TB","4 TB","8 TB","16 TB"]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["SSD","HDD","SSHD","NVMe SSD","External HDD","External SSD"]},
+        {"name":"Interface","mode":"SELECTION_ONLY","values":["SATA III","NVMe","M.2","USB 3.0","USB-C","PCIe"]},
+        {"name":"Form Factor","mode":"SELECTION_ONLY","values":["2.5"","3.5"","M.2 2280","M.2 2242"]},
+    ],
+    "625": [  # Cameras
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Model","mode":"FREE_TEXT","values":[]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["DSLR","Mirrorless","Point & Shoot","Film","Action Camera","Instant/Polaroid","Bridge"]},
+        {"name":"Megapixels","mode":"FREE_TEXT","values":[]},
+        {"name":"Optical Zoom","mode":"FREE_TEXT","values":[]},
+        {"name":"Connectivity","mode":"SELECTION_ONLY","values":["Bluetooth","Wi-Fi","NFC","USB","HDMI","No Wireless"]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Black","Silver","White","Red","Blue"]},
+    ],
+    "3323": [  # Camera Lenses
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Compatible Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Focal Length","mode":"FREE_TEXT","values":[]},
+        {"name":"Max Aperture","mode":"FREE_TEXT","values":[]},
+        {"name":"Focus Type","mode":"SELECTION_ONLY","values":["Autofocus","Manual Focus"]},
+        {"name":"Mount","mode":"FREE_TEXT","values":[]},
+        {"name":"Lens Type","mode":"SELECTION_ONLY","values":["Prime","Zoom","Wide Angle","Telephoto","Macro","Fisheye","Portrait"]},
+    ],
+    "139971": [  # Video Game Consoles
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Model","mode":"FREE_TEXT","values":[]},
+        {"name":"Storage Capacity","mode":"SELECTION_ONLY","values":["8 GB","32 GB","64 GB","256 GB","512 GB","1 TB","2 TB","No Storage (Disc Only)"]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Black","White","Red","Blue","Silver","Gold","Limited Edition"]},
+        {"name":"Region","mode":"SELECTION_ONLY","values":["North America","Europe","Japan","Asia","Region Free"]},
+        {"name":"Features","mode":"FREE_TEXT","values":["Disc Drive","Digital Only","4K","HDR","VR Compatible"]},
+    ],
+    "139973": [  # Video Games
+        {"name":"Platform","mode":"SELECTION_ONLY","values":["PlayStation 5","PlayStation 4","PlayStation 3","Xbox Series X/S","Xbox One","Xbox 360","Nintendo Switch","Nintendo 3DS","PC","Wii U","Wii"]},
+        {"name":"Genre","mode":"SELECTION_ONLY","values":["Action","Adventure","Sports","RPG","Shooter","Racing","Fighting","Puzzle","Simulation","Strategy","Horror","Platformer"]},
+        {"name":"Rating","mode":"SELECTION_ONLY","values":["E - Everyone","E10+ - Everyone 10 and Older","T - Teen","M - Mature 17+","AO - Adults Only 18+","RP - Rating Pending","Not Rated"]},
+        {"name":"Region Code","mode":"SELECTION_ONLY","values":["NTSC (USA/Canada)","PAL (Europe/Australia)","NTSC-J (Japan)","Region Free"]},
+    ],
+    # ── COLLECTIBLES ────────────────────────────────────────────────────────────
+    "261068": [  # Collectible Action Figures
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Action Figure","Vinyl Figure","Statue","Plush","Diecast","Funko Pop","Bearbrick","Resin Figure"]},
+        {"name":"Franchise","mode":"FREE_TEXT","values":[]},
+        {"name":"Character","mode":"FREE_TEXT","values":[]},
+        {"name":"Scale","mode":"SELECTION_ONLY","values":["1:6","1:12","1:18","1:64","1:1 (Life Size)","Non-Scale","Other"]},
+        {"name":"Material","mode":"SELECTION_ONLY","values":["PVC","ABS","Resin","Metal","Vinyl","Cloth/Fabric","Mixed Materials"]},
+    ],
+    "183454": [  # Non-Sport Trading Cards
+        {"name":"Card Manufacturer","mode":"FREE_TEXT","values":[]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Base Set","Insert","Parallel","Autograph","Relic/Memorabilia","Rookie","Error/Variation","Promotional"]},
+        {"name":"Year","mode":"FREE_TEXT","values":[]},
+        {"name":"Character/Subject","mode":"FREE_TEXT","values":[]},
+        {"name":"Graded","mode":"SELECTION_ONLY","values":["Yes","No"]},
+        {"name":"Grade","mode":"FREE_TEXT","values":[]},
+    ],
+    "261328": [  # Sports Trading Cards — Single
+        {"name":"Sport","mode":"SELECTION_ONLY","values":["Baseball","Basketball","Football","Hockey","Soccer","Golf","Tennis","Mixed Martial Arts","Boxing","Wrestling","Other"]},
+        {"name":"Card Manufacturer","mode":"FREE_TEXT","values":[]},
+        {"name":"Year","mode":"FREE_TEXT","values":[]},
+        {"name":"Player/Athlete","mode":"FREE_TEXT","values":[]},
+        {"name":"Team","mode":"FREE_TEXT","values":[]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Base Set","Insert","Parallel","Autograph","Relic/Memorabilia","Rookie","Refractor","Chrome","Error"]},
+        {"name":"Graded","mode":"SELECTION_ONLY","values":["Yes","No"]},
+        {"name":"Grade","mode":"FREE_TEXT","values":["PSA 10","PSA 9","PSA 8","PSA 7","BGS 9.5","BGS 9","SGC 10","Ungraded"]},
+    ],
+    "19006": [  # LEGO Sets
+        {"name":"Theme","mode":"FREE_TEXT","values":["City","Technic","Star Wars","Harry Potter","Marvel","Ninjago","Creator","Architecture","Minecraft","Ideas"]},
+        {"name":"Set Number","mode":"FREE_TEXT","values":[]},
+        {"name":"Number of Pieces","mode":"FREE_TEXT","values":[]},
+        {"name":"Age Level","mode":"SELECTION_ONLY","values":["1-3","4-7","7-12","8+","10+","12+","14+","16+","18+"]},
+        {"name":"Recommended Age","mode":"FREE_TEXT","values":[]},
+    ],
+    "306": [  # Vinyl Records
+        {"name":"Genre","mode":"SELECTION_ONLY","values":["Rock","Pop","Jazz","Classical","Blues","Country","Hip-Hop/Rap","R&B/Soul","Electronic","Folk","Metal","Punk","Reggae","Alternative","Indie"]},
+        {"name":"Speed","mode":"SELECTION_ONLY","values":["33 RPM (LP)","45 RPM (Single)","78 RPM","Other"]},
+        {"name":"Record Size","mode":"SELECTION_ONLY","values":['7"','10"','12"']},
+        {"name":"Release Year","mode":"FREE_TEXT","values":[]},
+        {"name":"Color","mode":"SELECTION_ONLY","values":["Black","Clear","Colored","Picture Disc","Splatter","Marbled"]},
+    ],
+    "309": [  # VHS Tapes
+        {"name":"Genre","mode":"SELECTION_ONLY","values":["Action/Adventure","Animation","Comedy","Drama","Horror","Science Fiction","Documentary","Family","Western","Thriller","Romance","Musical"]},
+        {"name":"Rating","mode":"SELECTION_ONLY","values":["G","PG","PG-13","R","NR/Unrated","Not Rated"]},
+        {"name":"Release Year","mode":"FREE_TEXT","values":[]},
+        {"name":"Language","mode":"SELECTION_ONLY","values":["English","Spanish","French","German","Italian","Japanese","Other"]},
+    ],
+    "176984": [  # CDs
+        {"name":"Genre","mode":"SELECTION_ONLY","values":["Rock","Pop","Jazz","Classical","Blues","Country","Hip-Hop/Rap","R&B/Soul","Electronic","Folk","Metal","Alternative","Indie","Reggae","Gospel"]},
+        {"name":"Release Year","mode":"FREE_TEXT","values":[]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Album","Single","EP","Box Set","Compilation","Live","Soundtrack","Greatest Hits"]},
+    ],
+    "617": [  # DVDs
+        {"name":"Genre","mode":"SELECTION_ONLY","values":["Action/Adventure","Animation","Comedy","Drama","Horror","Science Fiction","Documentary","Family","Western","Thriller","Romance","Musical","Anime"]},
+        {"name":"Rating","mode":"SELECTION_ONLY","values":["G","PG","PG-13","R","NC-17","NR/Unrated","Not Rated"]},
+        {"name":"Release Year","mode":"FREE_TEXT","values":[]},
+        {"name":"Language","mode":"SELECTION_ONLY","values":["English","Spanish","French","German","Italian","Japanese","Other"]},
+        {"name":"Aspect Ratio","mode":"SELECTION_ONLY","values":["Widescreen","Fullscreen","Other"]},
+        {"name":"Edition","mode":"FREE_TEXT","values":["Standard","Special Edition","Collector's Edition","Director's Cut","Extended","Blu-Ray"]},
+    ],
+    # ── WATCHES & JEWELRY ────────────────────────────────────────────────────────
+    "31387": [  # Wristwatches
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Model","mode":"FREE_TEXT","values":[]},
+        {"name":"Gender","mode":"SELECTION_ONLY","values":["Men","Women","Unisex/Uni-Sex","Boys","Girls"]},
+        {"name":"Movement","mode":"SELECTION_ONLY","values":["Automatic","Manual","Quartz","Solar","Kinetic","Digital","Smartwatch/Digital"]},
+        {"name":"Case Material","mode":"SELECTION_ONLY","values":["Stainless Steel","Gold","Rose Gold","Silver","Titanium","Ceramic","Plastic","Other"]},
+        {"name":"Band Material","mode":"SELECTION_ONLY","values":["Leather","Stainless Steel","Silicone","Rubber","Nylon","Canvas","Gold","Ceramic","Other"]},
+        {"name":"Dial Color","mode":"FREE_TEXT","values":["Black","White","Blue","Silver","Grey","Gold","Brown"]},
+        {"name":"Case Size","mode":"FREE_TEXT","values":[]},
+        {"name":"Water Resistance","mode":"SELECTION_ONLY","values":["Not Water Resistant","30 m (3 ATM)","50 m (5 ATM)","100 m (10 ATM)","200 m (20 ATM)","300 m+ (Diver)"]},
+    ],
+    "164": [  # Necklaces & Pendants
+        {"name":"Metal","mode":"SELECTION_ONLY","values":["Sterling Silver","14K Gold","18K Gold","10K Gold","Gold-Plated","Rose Gold","White Gold","Platinum","Stainless Steel","Copper","Titanium","Other"]},
+        {"name":"Chain Type","mode":"SELECTION_ONLY","values":["Cable","Box","Rope","Snake","Figaro","Curb/Cuban","Omega","Wheat","Herringbone","Ball","Tennis"]},
+        {"name":"Length","mode":"SELECTION_ONLY","values":['14"','16"','18"','20"','22"','24"','26"','28"','30"',"Adjustable"]},
+        {"name":"Style","mode":"SELECTION_ONLY","values":["Pendant","Chain Only","Statement","Choker","Locket","Charm","Cross","Initial/Letter","Bar/Minimalist"]},
+        {"name":"Main Stone","mode":"FREE_TEXT","values":["Diamond","Cubic Zirconia","Pearl","Turquoise","Sapphire","Ruby","Emerald","Opal","No Stone","Other"]},
+    ],
+    "67726": [  # Rings
+        {"name":"Metal","mode":"SELECTION_ONLY","values":["Sterling Silver","14K Gold","18K Gold","10K Gold","Gold-Plated","Rose Gold","White Gold","Platinum","Stainless Steel","Titanium","Other"]},
+        {"name":"Ring Size","mode":"FREE_TEXT","values":["4","4.5","5","5.5","6","6.5","7","7.5","8","8.5","9","9.5","10","10.5","11","12","13"]},
+        {"name":"Style","mode":"SELECTION_ONLY","values":["Band","Engagement","Wedding","Cocktail","Statement","Promise","Signet","Class/Graduation","Fashion"]},
+        {"name":"Main Stone","mode":"FREE_TEXT","values":["Diamond","Cubic Zirconia","Sapphire","Ruby","Emerald","Pearl","No Stone","Other"]},
+        {"name":"Theme","mode":"FREE_TEXT","values":[]},
+    ],
+    "10323": [  # Earrings
+        {"name":"Metal","mode":"SELECTION_ONLY","values":["Sterling Silver","14K Gold","18K Gold","10K Gold","Gold-Plated","Rose Gold","White Gold","Stainless Steel","Other"]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Stud","Hoop","Drop/Dangle","Huggie","Threader","Climber","Cluster","Ear Cuff"]},
+        {"name":"Theme","mode":"FREE_TEXT","values":[]},
+        {"name":"Main Stone","mode":"FREE_TEXT","values":["Diamond","Cubic Zirconia","Pearl","No Stone","Other"]},
+    ],
+    # ── AUTO PARTS ───────────────────────────────────────────────────────────────
+    "6030": [  # Auto Parts & Accessories
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Placement on Vehicle","mode":"SELECTION_ONLY","values":["Front","Rear","Left","Right","Front Left","Front Right","Rear Left","Rear Right","Center","Driver Side","Passenger Side","Universal"]},
+        {"name":"Warranty","mode":"SELECTION_ONLY","values":["No Warranty","1 Month","3 Months","6 Months","1 Year","2 Years","Limited Lifetime","Lifetime"]},
+        {"name":"Manufacturer Part Number","mode":"FREE_TEXT","values":[]},
+        {"name":"Interchange Part Number","mode":"FREE_TEXT","values":[]},
+    ],
+    "33637": [  # Car & Truck Wheels & Hubcaps
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Rim Diameter","mode":"SELECTION_ONLY","values":["13","14","15","16","17","18","19","20","21","22","24","26","28"]},
+        {"name":"Rim Width","mode":"FREE_TEXT","values":[]},
+        {"name":"Number of Lug Holes","mode":"SELECTION_ONLY","values":["4","5","6","8"]},
+        {"name":"Bolt Pattern","mode":"FREE_TEXT","values":[]},
+        {"name":"Material","mode":"SELECTION_ONLY","values":["Aluminum/Alloy","Steel","Chrome","Carbon Fiber"]},
+    ],
+    # ── HOME & GARDEN ─────────────────────────────────────────────────────────────
+    "20667": [  # Small Kitchen Appliances
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Model","mode":"FREE_TEXT","values":[]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Air Fryer","Blender","Coffee Maker","Toaster","Microwave","Food Processor","Stand Mixer","Instant Pot","Waffle Maker","Juicer","Electric Kettle","Toaster Oven"]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Black","White","Silver","Red","Stainless Steel","Grey"]},
+        {"name":"Capacity","mode":"FREE_TEXT","values":[]},
+        {"name":"Voltage","mode":"SELECTION_ONLY","values":["110V","120V","220V","240V","Dual Voltage"]},
+    ],
+    "116104": [  # Air Fryers specifically
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Model","mode":"FREE_TEXT","values":[]},
+        {"name":"Capacity","mode":"SELECTION_ONLY","values":["1-2 Qt","2-3 Qt","3-4 Qt","4-5 Qt","5-6 Qt","6-8 Qt","8+ Qt"]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Black","White","Silver","Grey","Red"]},
+        {"name":"Features","mode":"FREE_TEXT","values":["Digital Display","Preset Cooking Programs","Dishwasher Safe","Non-Stick","Temperature Control"]},
+    ],
+    "10033": [  # Home Décor
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Vase","Picture Frame","Candle","Figurine","Wall Art","Mirror","Clock","Planter","Sculpture","Tapestry","Rug","Throw Pillow"]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Black","White","Gold","Silver","Brown","Blue","Green","Multicolor","Beige","Grey"]},
+        {"name":"Material","mode":"SELECTION_ONLY","values":["Wood","Metal","Glass","Ceramic","Fabric","Plastic","Resin","Marble","Rattan","Bamboo"]},
+        {"name":"Style","mode":"SELECTION_ONLY","values":["Modern","Rustic","Boho","Farmhouse","Traditional","Minimalist","Vintage","Art Deco","Coastal","Industrial"]},
+        {"name":"Room","mode":"SELECTION_ONLY","values":["Living Room","Bedroom","Kitchen","Bathroom","Dining Room","Office","Outdoor","Any Room"]},
+    ],
+    # ── SPORTING GOODS ────────────────────────────────────────────────────────────
+    "15273": [  # Fitness Equipment
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Model","mode":"FREE_TEXT","values":[]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Dumbbells","Kettlebell","Barbell","Weight Bench","Treadmill","Exercise Bike","Elliptical","Rowing Machine","Pull-Up Bar","Resistance Bands","Yoga Mat","Jump Rope","Weight Plates","Power Rack","Cable Machine"]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Black","Grey","Silver","Red","Blue","Multicolor"]},
+        {"name":"Weight","mode":"FREE_TEXT","values":[]},
+        {"name":"Material","mode":"SELECTION_ONLY","values":["Cast Iron","Rubber","Steel","Neoprene","Vinyl","Chrome","Urethane"]},
+    ],
+    "7294": [  # Bikes
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Model","mode":"FREE_TEXT","values":[]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Mountain","Road","Hybrid","BMX","Cruiser","Electric","Folding","Gravel","Track/Fixed Gear","Kids"]},
+        {"name":"Frame Size","mode":"FREE_TEXT","values":["XS","S","M","L","XL","XXL"]},
+        {"name":"Wheel Size","mode":"SELECTION_ONLY","values":['12"','16"','20"','24"','26"','27.5"','29"','700c']},
+        {"name":"Color","mode":"FREE_TEXT","values":["Black","White","Red","Blue","Green","Silver","Grey","Multicolor"]},
+        {"name":"Frame Material","mode":"SELECTION_ONLY","values":["Aluminum","Carbon Fiber","Steel","Titanium","Chromoly"]},
+        {"name":"Number of Speeds","mode":"FREE_TEXT","values":[]},
+    ],
+    # ── TOOLS ─────────────────────────────────────────────────────────────────────
+    "631": [  # Hand Tools
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Wrench","Screwdriver","Hammer","Pliers","Socket Set","Drill Bit","Level","Measuring Tape","Saw","Allen/Hex Key","Torque Wrench","Chisel","File"]},
+        {"name":"Material","mode":"SELECTION_ONLY","values":["Chrome-Vanadium Steel","Carbon Steel","Stainless Steel","Titanium","Aluminum","High-Speed Steel"]},
+        {"name":"Size","mode":"FREE_TEXT","values":[]},
+        {"name":"MPN","mode":"FREE_TEXT","values":[]},
+    ],
+    "632": [  # Power Tools
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Model","mode":"FREE_TEXT","values":[]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Drill/Driver","Circular Saw","Jigsaw","Reciprocating Saw","Router","Sander","Grinder","Nail Gun","Heat Gun","Impact Driver","Oscillating Tool","Table Saw","Miter Saw","Band Saw"]},
+        {"name":"Power Source","mode":"SELECTION_ONLY","values":["Battery/Cordless","Corded Electric","Pneumatic/Air","Gas-Powered"]},
+        {"name":"Voltage","mode":"FREE_TEXT","values":["12V","18V","20V","24V","36V","40V","60V","120V","Other"]},
+        {"name":"Color","mode":"FREE_TEXT","values":["Yellow","Red","Teal","Blue","Green","Orange","Black"]},
+    ],
+    # ── BOOKS ─────────────────────────────────────────────────────────────────────
+    "267": [  # Books
+        {"name":"Format","mode":"SELECTION_ONLY","values":["Hardcover","Paperback","Mass Market Paperback","Trade Paperback","Spiral-Bound","Board Book","Audio Cassette","Other"]},
+        {"name":"Language","mode":"SELECTION_ONLY","values":["English","Spanish","French","German","Italian","Japanese","Chinese","Portuguese","Korean","Arabic","Other"]},
+        {"name":"Subject","mode":"FREE_TEXT","values":[]},
+        {"name":"Genre","mode":"SELECTION_ONLY","values":["Fiction","Non-Fiction","Mystery","Romance","Science Fiction","Fantasy","Biography","Self-Help","History","Children's","Young Adult","Textbook","Religion","Cookbook","Art","Other"]},
+    ],
+    "2229": [  # Textbooks
+        {"name":"Format","mode":"SELECTION_ONLY","values":["Hardcover","Paperback","Trade Paperback","Spiral-Bound"]},
+        {"name":"Subject","mode":"FREE_TEXT","values":[]},
+        {"name":"Level","mode":"SELECTION_ONLY","values":["Elementary","Middle School","High School","College","Graduate","Professional","Other"]},
+        {"name":"Edition","mode":"FREE_TEXT","values":[]},
+        {"name":"Language","mode":"SELECTION_ONLY","values":["English","Spanish","French","German","Other"]},
+    ],
+    # ── TOYS ─────────────────────────────────────────────────────────────────────
+    "220": [  # Toys & Games (General)
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Action Figure","Board Game","Card Game","Doll","Toy Vehicle","Stuffed Animal/Plush","Building Set","Puzzle","Remote Control","Educational","Outdoor","Arts & Crafts"]},
+        {"name":"Age Level","mode":"SELECTION_ONLY","values":["0-12 Months","1-3 Years","3-5 Years","5-7 Years","8-11 Years","12+ Years","Adult"]},
+        {"name":"Gender","mode":"SELECTION_ONLY","values":["Boys","Girls","Unisex"]},
+        {"name":"Theme","mode":"FREE_TEXT","values":[]},
+        {"name":"Color","mode":"FREE_TEXT","values":[]},
+    ],
+    # ── BABY ─────────────────────────────────────────────────────────────────────
+    "3082": [  # Baby & Toddler Clothing
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Size (Age/Weight)","mode":"SELECTION_ONLY","values":["Preemie","Newborn","0-3 Months","3-6 Months","6-9 Months","9-12 Months","12-18 Months","18-24 Months","2T","3T","4T","5T"]},
+        {"name":"Color","mode":"FREE_TEXT","values":["White","Pink","Blue","Yellow","Green","Grey","Multicolor"]},
+        {"name":"Gender","mode":"SELECTION_ONLY","values":["Boys","Girls","Unisex/Gender Neutral"]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Onesie","Sleeper/Pajamas","Outfit Set","Shirt","Pants","Dress","Jacket","Socks","Hat","Mittens","Swimwear"]},
+        {"name":"Material","mode":"SELECTION_ONLY","values":["Cotton","Fleece","Polyester","Bamboo","Organic Cotton","Jersey"]},
+    ],
+    # ── PET SUPPLIES ──────────────────────────────────────────────────────────────
+    "1281": [  # Pet Supplies
+        {"name":"Animal Type","mode":"SELECTION_ONLY","values":["Dog","Cat","Bird","Fish","Rabbit","Hamster/Gerbil","Guinea Pig","Reptile","Horse","Small Animal","Other"]},
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Type","mode":"FREE_TEXT","values":[]},
+        {"name":"Size","mode":"SELECTION_ONLY","values":["XS","S","M","L","XL","XXL","One Size","Other"]},
+        {"name":"Color","mode":"FREE_TEXT","values":[]},
+        {"name":"Material","mode":"FREE_TEXT","values":[]},
+    ],
+    # ── INDUSTRIAL/COMMERCIAL ─────────────────────────────────────────────────────
+    "11804": [  # Electrical Equipment & Supplies
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Type","mode":"FREE_TEXT","values":[]},
+        {"name":"Voltage","mode":"FREE_TEXT","values":["12V","24V","48V","110V","120V","220V","240V","480V"]},
+        {"name":"Amperage","mode":"FREE_TEXT","values":[]},
+        {"name":"MPN","mode":"FREE_TEXT","values":[]},
+        {"name":"Country of Manufacture","mode":"FREE_TEXT","values":["United States","China","Germany","Japan","Taiwan","Mexico","Korea","Other"]},
+    ],
+    "12576": [  # Test, Measurement & Inspection
+        {"name":"Brand","mode":"FREE_TEXT","values":[]},
+        {"name":"Model","mode":"FREE_TEXT","values":[]},
+        {"name":"Type","mode":"SELECTION_ONLY","values":["Multimeter","Oscilloscope","Power Supply","Signal Generator","LCR Meter","Spectrum Analyzer","Logic Analyzer","Clamp Meter","Thermometer","Caliper","Micrometer"]},
+        {"name":"MPN","mode":"FREE_TEXT","values":[]},
+        {"name":"Calibrated","mode":"SELECTION_ONLY","values":["Yes","No","Calibration Certificate Included"]},
+    ],
+}
+
 @app.get("/api/groups/{group_id}/listing")
 async def get_group_listing(group_id: str, request: Request):
     """Get listing created from a scan group — poll until scan completes."""
@@ -2520,35 +2938,24 @@ async def get_required_aspects(listing_id: str, request: Request):
         cat_id = str(listing.get("ebay_category_id") or "")
         if not cat_id or cat_id in ("0", "99", ""):
             return {"ok": True, "required": [], "filled": {}, "category": ""}
-        # Try user OAuth token first, fall back to app token
-        token = None
-        try:
-            token = get_ebay_token(business_id)
-        except Exception:
-            token = _get_app_token()
-        if not token:
-            return {"ok": True, "required": [], "filled": {}, "category": listing.get("ebay_category","")}
-        import requests as _rq
-        r = _rq.get(
-            f"https://api.ebay.com/commerce/taxonomy/v1/category_tree/0/get_item_aspects_for_category?category_id={cat_id}",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=8
-        )
-        print(f"[Aspects] cat={cat_id} status={r.status_code} body={r.text[:200]}")
-        if not r.ok:
-            return {"ok": True, "required": [], "filled": {}, "category": listing.get("ebay_category","")}
+        # Use hardcoded aspects map — avoids OAuth scope dependency
         saved = listing.get("ebay_item_specifics") or {}
+        aspects_list = EBAY_REQUIRED_ASPECTS.get(cat_id, [])
+        if not aspects_list:
+            # Try parent category (some cat IDs are subcategories)
+            return {"ok": True, "required": [], "filled": saved, "category": listing.get("ebay_category",""), "category_id": cat_id}
         required_fields = []
-        for asp in r.json().get("aspects", []):
-            name = asp.get("localizedAspectName","")
-            constraint = asp.get("aspectConstraint", {})
-            if constraint.get("aspectUsage","OPTIONAL") != "REQUIRED":
-                continue
-            mode = constraint.get("aspectMode","FREE_TEXT")
-            vals = [v.get("localizedValue","") for v in asp.get("aspectValues",[])[:20] if v.get("localizedValue")]
-            current = saved.get(name,"")
-            needs_input = not current or current in ("Does Not Apply","N/A","","Other","Multicolor","One Size","10","Unbranded","Does not apply")
-            required_fields.append({"name":name,"mode":mode,"values":vals,"current":current,"needs_input":needs_input})
+        for asp in aspects_list:
+            name = asp["name"]
+            current = saved.get(name, "")
+            needs_input = not current or current in ("Does Not Apply","N/A","","Other","Multicolor","One Size","10","Unbranded","Does not apply","China","Mixed Materials","Casual","Wireless")
+            required_fields.append({
+                "name": name,
+                "mode": asp["mode"],
+                "values": asp["values"],
+                "current": current,
+                "needs_input": needs_input
+            })
         return {"ok":True,"required":required_fields,"filled":saved,"category":listing.get("ebay_category",""),"category_id":cat_id}
     except HTTPException:
         raise
