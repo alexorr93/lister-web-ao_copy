@@ -7173,6 +7173,36 @@ async def export_expenses(request: Request, period: str = "month", fmt: str = "c
         writer.writerow([])
         writer.writerow(["TOTAL","","",f"${total:.2f}","",""])
 
+        # Append mileage log
+        try:
+            from datetime import datetime, timezone
+            year = datetime.now(timezone.utc).year
+            mil_res = supabase.table("mileage_logs").select("*")                .eq("business_id", business_id)                .gte("log_date", f"{year}-01-01")                .lte("log_date", f"{year}-12-31")                .order("log_date").execute()
+            mileage_logs = mil_res.data or []
+            if mileage_logs:
+                writer.writerow([])
+                writer.writerow([f"MILEAGE LOG ({year})","","","","",""])
+                writer.writerow(["Date","Purpose","Miles","Round Trip","Notes",""])
+                total_miles = 0.0
+                for log in mileage_logs:
+                    miles = float(log.get("miles") or 0)
+                    total_miles += miles
+                    writer.writerow([
+                        log.get("log_date",""),
+                        log.get("purpose",""),
+                        miles,
+                        "Yes" if log.get("round_trip") else "No",
+                        log.get("notes",""),
+                        ""
+                    ])
+                irs_rate = 0.67
+                writer.writerow([])
+                writer.writerow(["Total Miles","",total_miles,"","",""])
+                writer.writerow(["IRS Rate","",f"${irs_rate}/mi","","",""])
+                writer.writerow(["Mileage Deduction","",f"${total_miles * irs_rate:.2f}","","",""])
+        except Exception as _me:
+            print(f"[export] mileage fetch failed: {_me}")
+
         from fastapi.responses import Response
         return Response(
             content=buf.getvalue(),
