@@ -2002,8 +2002,6 @@ select.field-input { background: #fff; color: #0f172a; }
           <div id="modal-tier-badge" style="margin-top:10px;"></div>
           <!-- Photo controls -->
           <div style="display:flex;gap:6px;margin-top:12px;">
-            <button onclick="rotatePhoto('ccw')" style="flex:1;padding:6px;background:#0a0f18;border:1px solid #1a2332;border-radius:6px;color:#94a3b8;cursor:pointer;font-size:13px;">↺</button>
-            <button onclick="rotatePhoto('cw')" style="flex:1;padding:6px;background:#0a0f18;border:1px solid #1a2332;border-radius:6px;color:#94a3b8;cursor:pointer;font-size:13px;">↻</button>
             <button onclick="rescanItem(modalItemId);closeModal();" style="flex:1;padding:6px;background:#0a0f18;border:1px solid #1a2332;border-radius:6px;color:#4ade80;cursor:pointer;font-size:13px;font-weight:700;">↺ Rescan</button>
           </div>
         </div>
@@ -2046,16 +2044,10 @@ select.field-input { background: #fff; color: #0f172a; }
             </div>
           </div>
 
-          <!-- AI Prices -->
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;background:#060c18;border:1px solid #1e2a3a;border-radius:8px;padding:10px 12px;">
-            <div style="display:flex;align-items:center;justify-content:space-between;">
-              <span style="font-size:11px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">AI Used</span>
-              <span style="font-size:14px;color:#60a5fa;font-weight:700;" id="modal-ai-used">—</span>
-            </div>
-            <div style="display:flex;align-items:center;justify-content:space-between;">
-              <span style="font-size:11px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">AI New</span>
-              <span style="font-size:14px;color:#4ade80;font-weight:700;" id="modal-ai-new">—</span>
-            </div>
+          <!-- AI Prices — subtle inline row -->
+          <div style="display:flex;gap:16px;margin-bottom:14px;padding:0 2px;">
+            <span style="font-size:12px;color:#334155;">AI Used: <span id="modal-ai-used" style="color:#60a5fa;font-weight:600;">—</span></span>
+            <span style="font-size:12px;color:#334155;">AI New: <span id="modal-ai-new" style="color:#4ade80;font-weight:600;">—</span></span>
           </div>
 
           <!-- Brand / Model / SKU -->
@@ -2066,11 +2058,11 @@ select.field-input { background: #fff; color: #0f172a; }
             </div>
             <div>
               <div class="field-label">Model</div>
-              <input type="text" class="field-input" id="modal-model-input" placeholder="Air Force 1" oninput="modalDirty=true"/>
+              <input type="text" class="field-input" id="modal-model-input" placeholder="" oninput="modalDirty=true"/>
             </div>
             <div>
               <div class="field-label">Custom SKU</div>
-              <input type="text" class="field-input" id="modal-sku-input" placeholder="SHELF-A3-001" oninput="modalDirty=true" style="font-family:monospace;"/>
+              <input type="text" class="field-input" id="modal-sku-input" placeholder="" oninput="modalDirty=true" style="font-family:monospace;"/>
             </div>
           </div>
 
@@ -2147,20 +2139,10 @@ select.field-input { background: #fff; color: #0f172a; }
                 </div>
               </div>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
-              <div>
-                <div class="field-label">Location</div>
-                <input type="text" class="field-input" id="modal-location-input" placeholder="Denver, CO" oninput="modalDirty=true"/>
-              </div>
-              <div>
-                <div class="field-label">Postal Code</div>
-                <input type="text" class="field-input" id="modal-postal-input" placeholder="80201" oninput="modalDirty=true"/>
-              </div>
-            </div>
-            <div style="margin-bottom:10px;">
-              <div class="field-label">Subtitle <span style="color:#475569;font-weight:400;text-transform:none;font-size:10px;">Optional · +$1.50</span></div>
-              <input type="text" class="field-input" id="modal-subtitle-input" maxlength="55" placeholder="Optional subtitle" oninput="modalDirty=true"/>
-            </div>
+            <!-- Hidden fields kept for JS compat -->
+            <input type="hidden" id="modal-location-input"/>
+            <input type="hidden" id="modal-postal-input"/>
+            <input type="hidden" id="modal-subtitle-input"/>
             <!-- Hidden fields kept for JS compatibility -->
             <input type="hidden" id="modal-ship-svc-input"/>
             <input type="hidden" id="modal-ship-cost-input"/>
