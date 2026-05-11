@@ -956,15 +956,19 @@ select.field-input { background: #fff; color: #0f172a; }
           <button id="scan-view-list" onclick="setScanView('list')" style="font-size:13px;padding:6px 12px;border:none;background:transparent;color:var(--muted);cursor:pointer;font-family:inherit;">List</button>
         </div>
         <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="selectAll()">Select all</button>
-        <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="deselectAll()">Deselect</button>
+        <button class="btn" id="deselect-btn" style="font-size:16px;padding:8px 14px;display:none;" onclick="deselectAll()">Deselect</button>
         <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="openLotCostModal()" id="lot-cost-btn">Lot Cost</button>
         <button onclick="openScannerSettings()" style="padding:8px 12px;background:#0a0f18;border:1px solid #1a2332;border-radius:8px;color:#94a3b8;cursor:pointer;font-size:15px;display:flex;align-items:center;gap:6px;font-family:inherit;" title="Listing defaults">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           Settings
         </button>
-        <button class="btn" style="font-size:16px;padding:8px 14px;background:#1a3a1a;border-color:#2d5a2d;color:#86efac;font-weight:700;" onclick="openSaveBatchModal()">Save Batch</button>
+        <button onclick="openSaveBatchModal()" title="Save Batch" style="width:36px;height:36px;padding:0;background:#1a3a1a;border:1.5px solid #2d5a2d;border-radius:8px;color:#86efac;cursor:pointer;display:flex;align-items:center;justify-content:center;" onmouseover="this.title='Save Batch'">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        </button>
         <div style="position:relative;">
-          <button class="btn" style="font-size:16px;padding:8px 14px;" onclick="toggleSavedBatchesDropdown()">🗂 Saved</button>
+          <button onclick="toggleSavedBatchesDropdown()" title="Saved Batches" style="width:36px;height:36px;padding:0;background:transparent;border:1px solid #1a2332;border-radius:8px;color:#94a3b8;cursor:pointer;display:flex;align-items:center;justify-content:center;" onmouseover="this.style.borderColor='#fbbf24';this.style.color='#fbbf24'" onmouseout="this.style.borderColor='#1a2332';this.style.color='#94a3b8'">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          </button>
         </div>
         <button id="bulk-delete-btn" onclick="bulkDeleteSelected()" title="Delete selected" style="width:36px;height:36px;padding:0;background:transparent;border:1.5px solid #7f1d1d;border-radius:8px;color:#f87171;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0.3;transition:opacity 0.15s;">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
@@ -2007,126 +2011,145 @@ select.field-input { background: #fff; color: #0f172a; }
 
       <!-- Right: Tabbed editor -->
       <div style="flex:1;min-width:280px;display:flex;flex-direction:column;">
-        <div style="padding:14px 16px 0;border-bottom:1px solid #1a2332;">
-          <div class="modal-tab-bar">
-            <button class="modal-tab active" onclick="switchModalTab('listing')">Listing</button>
-            <button class="modal-tab" onclick="switchModalTab('pricing')">Pricing</button>
-            <button class="modal-tab" onclick="switchModalTab('shipping')">Shipping</button>
-            <button class="modal-tab" onclick="switchModalTab('details')">Item Details</button>
+        <div style="flex:1;overflow-y:auto;max-height:520px;padding:16px;display:flex;flex-direction:column;gap:0;">
+
+          <!-- SECTION: Title & Condition -->
+          <div style="margin-bottom:14px;">
+            <div style="display:grid;grid-template-columns:1fr auto;gap:6px;align-items:center;margin-bottom:6px;">
+              <div class="field-label" style="margin:0;">Title</div>
+              <span style="font-size:11px;color:#475569;" id="modal-title-count">0/80</span>
+            </div>
+            <input type="text" class="field-input" id="modal-title-input" maxlength="80" oninput="modalDirty=true;document.getElementById('modal-title-count').textContent=this.value.length+'/80'" style="font-size:14px;font-weight:600;"/>
           </div>
-        </div>
 
-        <div style="padding:16px;flex:1;overflow-y:auto;max-height:480px;">
-
-          <!-- TAB: LISTING -->
-          <div class="modal-section active" id="modal-tab-listing">
-            <div style="margin-bottom:10px;">
-              <div class="field-label">Title <span style="color:#475569;font-weight:400;text-transform:none;letter-spacing:0;" id="modal-title-count">0/80</span></div>
-              <input type="text" class="field-input" id="modal-title-input" maxlength="80" oninput="modalDirty=true;document.getElementById('modal-title-count').textContent=this.value.length+'/80'"/>
-            </div>
-            <div style="margin-bottom:10px;">
-              <div class="field-label">Subtitle <span style="color:#475569;font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">Optional · adds $1.50 fee</span></div>
-              <input type="text" class="field-input" id="modal-subtitle-input" maxlength="55" placeholder="Optional subtitle (55 chars)" oninput="modalDirty=true"/>
-            </div>
-            <div class="modal-grid-2" style="margin-bottom:10px;">
-              <div>
-                <div class="field-label">Condition</div>
-                <select class="field-input" id="modal-cond-input" onchange="modalDirty=true; updatePriceByCondition()">
-                  <option value="new">New</option>
-                  <option value="new_other">New Other</option>
-                  <option value="new_with_defects">New with Defects</option>
-                  <option value="used">Used - Excellent</option>
-                  <option value="used_good">Used - Good</option>
-                  <option value="used_acceptable">Used - Acceptable</option>
-                  <option value="for_parts">For Parts / Not Working</option>
-                </select>
-              </div>
-              <div>
-                <div class="field-label">Custom SKU</div>
-                <input type="text" class="field-input" id="modal-sku-input" placeholder="e.g. SHELF-A3-001" oninput="modalDirty=true" style="font-family:monospace;"/>
-              </div>
-            </div>
-            <div style="margin-bottom:10px;">
-              <div class="field-label">eBay Description</div>
-              <textarea class="field-input" id="modal-desc-input" rows="5" oninput="modalDirty=true" style="resize:vertical;line-height:1.5;"></textarea>
+          <!-- Condition + Price side by side -->
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;">
+            <div>
+              <div class="field-label">Condition</div>
+              <select class="field-input" id="modal-cond-input" onchange="modalDirty=true;updatePriceByCondition()">
+                <option value="new">New</option>
+                <option value="new_other">New Other</option>
+                <option value="new_with_defects">New with Defects</option>
+                <option value="used">Used - Excellent</option>
+                <option value="used_good">Used - Good</option>
+                <option value="used_acceptable">Used - Acceptable</option>
+                <option value="for_parts">For Parts</option>
+              </select>
             </div>
             <div>
-              <div class="field-label">Condition Notes <span style="color:#475569;font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;">Shown to buyers</span></div>
-              <textarea class="field-input" id="modal-cond-notes-input" rows="2" placeholder="Any defects, scratches, missing parts..." oninput="modalDirty=true" style="resize:vertical;line-height:1.5;"></textarea>
+              <div class="field-label">Price ($)</div>
+              <input type="number" class="field-input" id="modal-price-input" step="0.01" oninput="modalDirty=true" style="font-size:15px;font-weight:700;color:#4ade80;"/>
+            </div>
+            <div>
+              <div class="field-label">Quantity</div>
+              <input type="number" class="field-input" id="modal-qty-input" min="1" step="1" placeholder="1" oninput="modalDirty=true"/>
             </div>
           </div>
 
-          <!-- TAB: PRICING -->
-          <div class="modal-section" id="modal-tab-pricing">
-            <div class="modal-grid-2" style="margin-bottom:10px;">
+          <!-- AI Prices -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;background:#060c18;border:1px solid #1e2a3a;border-radius:8px;padding:10px 12px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <span style="font-size:11px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">AI Used</span>
+              <span style="font-size:14px;color:#60a5fa;font-weight:700;" id="modal-ai-used">—</span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <span style="font-size:11px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">AI New</span>
+              <span style="font-size:14px;color:#4ade80;font-weight:700;" id="modal-ai-new">—</span>
+            </div>
+          </div>
+
+          <!-- Brand / Model / SKU -->
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;">
+            <div>
+              <div class="field-label">Brand</div>
+              <input type="text" class="field-input" id="modal-brand-input" placeholder="Nike, Apple…" oninput="modalDirty=true"/>
+            </div>
+            <div>
+              <div class="field-label">Model</div>
+              <input type="text" class="field-input" id="modal-model-input" placeholder="Air Force 1" oninput="modalDirty=true"/>
+            </div>
+            <div>
+              <div class="field-label">Custom SKU</div>
+              <input type="text" class="field-input" id="modal-sku-input" placeholder="SHELF-A3-001" oninput="modalDirty=true" style="font-family:monospace;"/>
+            </div>
+          </div>
+
+          <!-- eBay Category -->
+          <div style="margin-bottom:14px;">
+            <div class="field-label">eBay Category</div>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input type="text" class="field-input" id="modal-cat-input" placeholder="ID e.g. 15709" oninput="modalDirty=true;updateCategoryDisplay(this.value)" style="font-family:monospace;flex:0 0 110px;"/>
+              <div id="modal-cat-name" style="flex:1;padding:9px 11px;background:#060c18;border:1px solid #1e2a3a;border-radius:8px;font-size:13px;color:#64748b;">—</div>
+            </div>
+          </div>
+
+          <!-- Description -->
+          <div style="margin-bottom:14px;">
+            <div class="field-label">Description</div>
+            <textarea class="field-input" id="modal-desc-input" rows="3" oninput="modalDirty=true" style="resize:vertical;line-height:1.5;font-size:13px;"></textarea>
+          </div>
+
+          <!-- Condition Notes -->
+          <div style="margin-bottom:14px;">
+            <div class="field-label">Condition Notes <span style="color:#475569;font-weight:400;text-transform:none;font-size:10px;">Shown to buyers</span></div>
+            <textarea class="field-input" id="modal-cond-notes-input" rows="2" placeholder="Any defects, scratches, missing parts..." oninput="modalDirty=true" style="resize:vertical;line-height:1.5;font-size:13px;"></textarea>
+          </div>
+
+          <!-- Divider: Advanced -->
+          <div style="border-top:1px solid #1a2332;margin-bottom:14px;padding-top:14px;">
+            <div style="font-size:10px;font-weight:700;color:#334155;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Advanced</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
               <div>
-                <div class="field-label">Listing Price</div>
-                <input type="number" class="field-input" id="modal-price-input" step="0.01" oninput="modalDirty=true"/>
+                <div class="field-label">MPN</div>
+                <input type="text" class="field-input" id="modal-mpn-input" placeholder="Does Not Apply" oninput="modalDirty=true"/>
+              </div>
+              <div>
+                <div class="field-label">UPC / Barcode</div>
+                <input type="text" class="field-input" id="modal-upc-input" placeholder="Optional" oninput="modalDirty=true" style="font-family:monospace;"/>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+              <div>
+                <div class="field-label">Weight (oz)</div>
+                <input type="number" class="field-input" id="modal-weight-oz-input" step="0.1" placeholder="0.0" oninput="modalDirty=true"/>
               </div>
               <div>
                 <div class="field-label">Format</div>
                 <select class="field-input" id="modal-format-input" onchange="modalDirty=true;toggleModalAuction()">
-                  <option value="FixedPrice">Fixed Price (BIN)</option>
+                  <option value="FixedPrice">Fixed Price</option>
                   <option value="Auction">Auction</option>
                 </select>
               </div>
             </div>
-            <div class="modal-grid-2" style="margin-bottom:10px;" id="modal-auction-fields" style="display:none;">
-              <div>
-                <div class="field-label">Start Price (Auction)</div>
-                <input type="number" class="field-input" id="modal-start-price-input" step="0.01" placeholder="1.00" oninput="modalDirty=true"/>
-              </div>
-              <div>
-                <div class="field-label">Duration</div>
-                <select class="field-input" id="modal-duration-input" onchange="modalDirty=true">
-                  <option value="7">7 days</option>
-                  <option value="10">10 days</option>
-                  <option value="5">5 days</option>
-                  <option value="3">3 days</option>
-                  <option value="1">1 day</option>
-                </select>
-              </div>
-            </div>
-            <div style="margin-bottom:10px;">
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text);font-weight:600;margin-bottom:8px;">
-                <input type="checkbox" id="modal-best-offer" onchange="modalDirty=true;toggleModalBestOffer()" style="width:14px;height:14px;accent-color:#22c55e;">
-                Enable Best Offer
-              </label>
-              <div id="modal-best-offer-fields" style="display:none;">
-                <div class="modal-grid-2">
-                  <div>
-                    <div class="field-label">Auto-Accept ($)</div>
-                    <input type="number" class="field-input" id="modal-bo-accept" step="0.01" placeholder="Optional" oninput="modalDirty=true"/>
-                  </div>
-                  <div>
-                    <div class="field-label">Min Offer ($)</div>
-                    <input type="number" class="field-input" id="modal-bo-min" step="0.01" placeholder="Optional" oninput="modalDirty=true"/>
-                  </div>
+            <div id="modal-auction-fields" style="display:none;margin-bottom:10px;">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <div>
+                  <div class="field-label">Start Price</div>
+                  <input type="number" class="field-input" id="modal-start-price-input" step="0.01" placeholder="1.00" oninput="modalDirty=true"/>
+                </div>
+                <div>
+                  <div class="field-label">Duration</div>
+                  <select class="field-input" id="modal-duration-input" onchange="modalDirty=true">
+                    <option value="7">7 days</option><option value="10">10 days</option><option value="5">5 days</option><option value="3">3 days</option>
+                  </select>
                 </div>
               </div>
             </div>
-            <div class="modal-grid-2" style="margin-bottom:10px;">
-              <div>
-                <div class="field-label">AI Price (Used)</div>
-                <div style="padding:9px 11px;background:#060c18;border:1px solid #1e2a3a;border-radius:8px;font-size:14px;color:#94a3b8;" id="modal-ai-used">—</div>
-              </div>
-              <div>
-                <div class="field-label">AI Price (New)</div>
-                <div style="padding:9px 11px;background:#060c18;border:1px solid #1e2a3a;border-radius:8px;font-size:14px;color:#94a3b8;" id="modal-ai-new">—</div>
-              </div>
-            </div>
             <div style="margin-bottom:10px;">
-              <div class="field-label">Schedule Start Time <span style="color:#475569;font-weight:400;text-transform:none;font-size:10px;">Optional</span></div>
-              <input type="datetime-local" class="field-input" id="modal-schedule-input" oninput="modalDirty=true"/>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text);font-weight:600;">
+                <input type="checkbox" id="modal-best-offer" onchange="modalDirty=true;toggleModalBestOffer()" style="width:14px;height:14px;accent-color:#22c55e;">
+                Enable Best Offer
+              </label>
+              <div id="modal-best-offer-fields" style="display:none;margin-top:8px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                  <div><div class="field-label">Auto-Accept ($)</div><input type="number" class="field-input" id="modal-bo-accept" step="0.01" placeholder="Optional" oninput="modalDirty=true"/></div>
+                  <div><div class="field-label">Min Offer ($)</div><input type="number" class="field-input" id="modal-bo-min" step="0.01" placeholder="Optional" oninput="modalDirty=true"/></div>
+                </div>
+              </div>
             </div>
-          </div>
-
-          <!-- TAB: SHIPPING -->
-          <div class="modal-section" id="modal-tab-shipping">
-            <div style="font-size:12px;color:#475569;margin-bottom:12px;">Override defaults from Scanner Settings, or leave blank to use defaults.</div>
-            <div class="modal-grid-2" style="margin-bottom:10px;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
               <div>
-                <div class="field-label">Item Location</div>
+                <div class="field-label">Location</div>
                 <input type="text" class="field-input" id="modal-location-input" placeholder="Denver, CO" oninput="modalDirty=true"/>
               </div>
               <div>
@@ -2134,80 +2157,18 @@ select.field-input { background: #fff; color: #0f172a; }
                 <input type="text" class="field-input" id="modal-postal-input" placeholder="80201" oninput="modalDirty=true"/>
               </div>
             </div>
-            <div class="modal-grid-2" style="margin-bottom:10px;">
-              <div>
-                <div class="field-label">Shipping Service</div>
-                <select class="field-input" id="modal-ship-svc-input" onchange="modalDirty=true">
-                  <option value="">Use account default</option>
-                  <option value="USPSGroundAdvantage">USPS Ground Advantage</option>
-                  <option value="USPSPriority">USPS Priority Mail</option>
-                  <option value="USPSFirstClass">USPS First Class</option>
-                  <option value="USPSMedia">USPS Media Mail</option>
-                  <option value="UPSGround">UPS Ground</option>
-                  <option value="FedExGround">FedEx Ground</option>
-                  <option value="FedExHomeDelivery">FedEx Home Delivery</option>
-                  <option value="FreightQuote">Freight</option>
-                </select>
-              </div>
-              <div>
-                <div class="field-label">Shipping Cost ($)</div>
-                <input type="number" class="field-input" id="modal-ship-cost-input" step="0.01" placeholder="0.00 = free" oninput="modalDirty=true"/>
-              </div>
-            </div>
             <div style="margin-bottom:10px;">
-              <div class="field-label">Handling Time (days)</div>
-              <select class="field-input" id="modal-dispatch-input" onchange="modalDirty=true">
-                <option value="">Use account default</option>
-                <option value="1">1 day</option>
-                <option value="2">2 days</option>
-                <option value="3">3 days</option>
-                <option value="5">5 days</option>
-              </select>
+              <div class="field-label">Subtitle <span style="color:#475569;font-weight:400;text-transform:none;font-size:10px;">Optional · +$1.50</span></div>
+              <input type="text" class="field-input" id="modal-subtitle-input" maxlength="55" placeholder="Optional subtitle" oninput="modalDirty=true"/>
             </div>
+            <!-- Hidden fields kept for JS compatibility -->
+            <input type="hidden" id="modal-ship-svc-input"/>
+            <input type="hidden" id="modal-ship-cost-input"/>
+            <input type="hidden" id="modal-dispatch-input"/>
+            <input type="hidden" id="modal-schedule-input"/>
           </div>
 
-          <!-- TAB: ITEM DETAILS -->
-          <div class="modal-section" id="modal-tab-details">
-            <div class="modal-grid-2" style="margin-bottom:10px;">
-              <div>
-                <div class="field-label">Brand</div>
-                <input type="text" class="field-input" id="modal-brand-input" placeholder="e.g. Nike, Apple" oninput="modalDirty=true"/>
-              </div>
-              <div>
-                <div class="field-label">Model</div>
-                <input type="text" class="field-input" id="modal-model-input" placeholder="e.g. Air Force 1" oninput="modalDirty=true"/>
-              </div>
-            </div>
-            <div class="modal-grid-2" style="margin-bottom:10px;">
-              <div>
-                <div class="field-label">MPN <span style="color:#475569;font-weight:400;font-size:10px;">Manufacturer Part No.</span></div>
-                <input type="text" class="field-input" id="modal-mpn-input" placeholder="Does Not Apply" oninput="modalDirty=true"/>
-              </div>
-              <div>
-                <div class="field-label">UPC / EAN / ISBN</div>
-                <input type="text" class="field-input" id="modal-upc-input" placeholder="Scan or enter barcode" oninput="modalDirty=true" style="font-family:monospace;"/>
-              </div>
-            </div>
-            <div class="modal-grid-2" style="margin-bottom:10px;">
-              <div>
-                <div class="field-label">Weight (oz)</div>
-                <input type="number" class="field-input" id="modal-weight-oz-input" step="0.1" placeholder="0.0" oninput="modalDirty=true"/>
-              </div>
-              <div>
-                <div class="field-label">Quantity</div>
-                <input type="number" class="field-input" id="modal-qty-input" min="1" step="1" placeholder="1" oninput="modalDirty=true"/>
-              </div>
-            </div>
-            <div style="margin-bottom:10px;">
-              <div class="field-label">eBay Category</div>
-              <div style="display:flex;gap:6px;align-items:center;">
-                <input type="text" class="field-input" id="modal-cat-input" placeholder="Category ID e.g. 15709" oninput="modalDirty=true;updateCategoryDisplay(this.value)" style="font-family:monospace;flex:0 0 120px;"/>
-                <div id="modal-cat-name" style="flex:1;padding:9px 11px;background:#060c18;border:1px solid #1e2a3a;border-radius:8px;font-size:13px;color:#64748b;">—</div>
-              </div>
-            </div>
-          </div>
-
-        </div><!-- /tab content -->
+        </div><!-- /content -->
 
         <!-- Save footer -->
         <div style="padding:12px 16px;border-top:1px solid #1a2332;display:flex;gap:8px;">
