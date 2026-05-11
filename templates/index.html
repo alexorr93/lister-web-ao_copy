@@ -1035,38 +1035,68 @@ select.field-input { background: #fff; color: #0f172a; }
 
   <!-- UPLOAD TAB -->
   <div class="tab-content" id="tab-upload">
-    <div id="upload-start" style="display:flex;align-items:center;justify-content:center;min-height:400px;padding:20px;">
-      <div style="width:100%;max-width:380px;">
-        <div style="font-size:20px;font-weight:800;color:var(--text);margin-bottom:4px;">New Batch</div>
-        <div style="font-size:15px;color:var(--muted);margin-bottom:24px;">Set up your batch before scanning</div>
+    <div id="upload-start" style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:40px 20px;background:radial-gradient(ellipse at 60% 20%, rgba(34,197,94,0.06) 0%, transparent 60%);">
+      <div style="width:100%;max-width:560px;">
 
-        <div style="display:flex;flex-direction:column;gap:14px;margin-bottom:24px;">
+        <!-- Header -->
+        <div style="margin-bottom:40px;">
+          <div style="display:inline-flex;align-items:center;gap:8px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);border-radius:20px;padding:5px 14px;margin-bottom:16px;">
+            <div style="width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 6px #22c55e;"></div>
+            <span style="font-size:12px;font-weight:700;color:#4ade80;letter-spacing:0.06em;text-transform:uppercase;">New Batch</span>
+          </div>
+          <div style="font-size:38px;font-weight:800;color:#f1f5f9;letter-spacing:-0.03em;line-height:1.1;margin-bottom:10px;">Set up your<br>scanning session</div>
+          <div style="font-size:16px;color:#475569;line-height:1.6;">Name your batch, set a lot price if buying as a group, then start adding items.</div>
+        </div>
+
+        <!-- Form card -->
+        <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:16px;padding:28px;margin-bottom:16px;display:flex;flex-direction:column;gap:22px;">
+
+          <!-- Batch name -->
           <div>
-            <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:6px;">Batch name <span style="color:#374151;text-transform:none;letter-spacing:0;font-weight:400;font-size:15px;">optional</span></div>
-            <input id="up-batch-title" type="text" placeholder="e.g. Estate sale, Garage haul..." style="width:100%;background:#0a0f18;border:1px solid #1a2332;border-radius:10px;padding:12px 14px;color:var(--text);font-size:15px;font-family:inherit;outline:none;box-sizing:border-box;" />
+            <div style="font-size:13px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Batch Name <span style="color:#1e2a3a;text-transform:none;letter-spacing:0;font-weight:400;font-size:12px;">— optional</span></div>
+            <input id="up-batch-title" type="text" placeholder="Estate sale, Garage haul, Thrift run..." style="width:100%;background:#060c18;border:1px solid #1a2332;border-radius:10px;padding:14px 16px;color:#f1f5f9;font-size:16px;font-family:inherit;outline:none;box-sizing:border-box;transition:border-color 0.15s;" onfocus="this.style.borderColor='#22c55e'" onblur="this.style.borderColor='#1a2332'"/>
           </div>
 
+          <!-- Lot price -->
           <div>
-            <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:6px;">Lot price <span style="color:#374151;text-transform:none;letter-spacing:0;font-weight:400;font-size:15px;">optional</span></div>
-            <div style="display:flex;align-items:center;background:#0a0f18;border:1px solid #1a2332;border-radius:10px;overflow:hidden;">
-              <div style="padding:12px 14px;font-size:16px;font-weight:700;color:var(--muted);border-right:1px solid var(--border);">$</div>
-              <input id="up-lot-price" type="number" min="0" step="0.01" placeholder="0.00" style="flex:1;background:transparent;border:none;padding:12px 14px;color:var(--text);font-size:15px;font-family:inherit;outline:none;" />
+            <div style="font-size:13px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Lot Price <span style="color:#1e2a3a;text-transform:none;letter-spacing:0;font-weight:400;font-size:12px;">— optional</span></div>
+            <div style="font-size:13px;color:#334155;margin-bottom:10px;">If you bought items as a lot, enter the total cost. We'll divide it evenly across items scanned.</div>
+            <div style="display:flex;align-items:center;background:#060c18;border:1px solid #1a2332;border-radius:10px;overflow:hidden;transition:border-color 0.15s;" onfocus="this.style.borderColor='#22c55e'" onblur="this.style.borderColor='#1a2332'">
+              <div style="padding:14px 16px;font-size:18px;font-weight:700;color:#334155;border-right:1px solid #1a2332;flex-shrink:0;">$</div>
+              <input id="up-lot-price" type="number" min="0" step="0.01" placeholder="0.00" style="flex:1;background:transparent;border:none;padding:14px 16px;color:#f1f5f9;font-size:18px;font-weight:700;font-family:inherit;outline:none;" />
             </div>
-            <div style="font-size:15px;color:#ef4444;margin-top:5px;font-weight:600;">Cost per item = lot ÷ items scanned</div>
           </div>
 
+          <!-- Condition -->
           <div>
-            <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:8px;">Default condition</div>
-            <div style="display:flex;gap:8px;">
-              <button class="btn btn-primary" id="up-cond-new" onclick="setUpCondition('new')" style="flex:1;padding:12px;border-radius:10px;font-size:15px;font-weight:800;">New</button>
-              <button class="btn" id="up-cond-used" onclick="setUpCondition('used')" style="flex:1;padding:12px;border-radius:10px;font-size:15px;font-weight:700;">Used</button>
+            <div style="font-size:13px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Default Condition</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <button id="up-cond-new" onclick="setUpCondition('new')" style="padding:14px;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;background:#22c55e;border:2px solid #22c55e;color:#052e16;transition:all 0.15s;">New</button>
+              <button id="up-cond-used" onclick="setUpCondition('used')" style="padding:14px;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;background:transparent;border:2px solid #1a2332;color:#64748b;transition:all 0.15s;">Used</button>
             </div>
           </div>
         </div>
 
-        <button onclick="startUploadBatch()" style="width:100%;background:#22c55e;border:none;border-radius:10px;color:#000;font-size:15px;font-weight:800;padding:16px;cursor:pointer;font-family:inherit;">
+        <!-- CTA -->
+        <button onclick="startUploadBatch()" style="width:100%;background:#22c55e;border:none;border-radius:12px;color:#052e16;font-size:18px;font-weight:800;padding:18px;cursor:pointer;font-family:inherit;box-shadow:0 4px 20px rgba(34,197,94,0.3);transition:all 0.15s;letter-spacing:-0.01em;" onmouseover="this.style.background='#16a34a';this.style.boxShadow='0 6px 28px rgba(34,197,94,0.45)'" onmouseout="this.style.background='#22c55e';this.style.boxShadow='0 4px 20px rgba(34,197,94,0.3)'">
           Start Adding Items →
         </button>
+
+        <!-- Tips -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:20px;">
+          <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:10px;padding:14px;text-align:center;">
+            <div style="font-size:20px;margin-bottom:6px;">📸</div>
+            <div style="font-size:12px;font-weight:600;color:#64748b;">Multiple photos per item</div>
+          </div>
+          <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:10px;padding:14px;text-align:center;">
+            <div style="font-size:20px;margin-bottom:6px;">🤖</div>
+            <div style="font-size:12px;font-weight:600;color:#64748b;">AI prices & titles</div>
+          </div>
+          <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:10px;padding:14px;text-align:center;">
+            <div style="font-size:20px;margin-bottom:6px;">⚡</div>
+            <div style="font-size:12px;font-weight:600;color:#64748b;">Push to eBay instantly</div>
+          </div>
+        </div>
       </div>
     </div>
     <div id="upload-active" style="display:none;">
