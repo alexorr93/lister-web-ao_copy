@@ -3436,6 +3436,7 @@ function openModal(id) {
 
   // Details tab
   document.getElementById('modal-brand-input').value = l.brand || '';
+  document.getElementById('modal-color-input').value = l.color || '';
   document.getElementById('modal-model-input').value = l.model || '';
   document.getElementById('modal-mpn-input').value = l.mpn || '';
   document.getElementById('modal-upc-input').value = l.upc || '';
@@ -3473,6 +3474,7 @@ async function saveModal() {
         shipping_cost: document.getElementById('modal-ship-cost-input').value,
         dispatch_time: document.getElementById('modal-dispatch-input').value,
         brand:         document.getElementById('modal-brand-input').value.trim(),
+        color:         document.getElementById('modal-color-input').value.trim(),
         model:         document.getElementById('modal-model-input').value.trim(),
         mpn:           document.getElementById('modal-mpn-input').value.trim(),
         upc:           document.getElementById('modal-upc-input').value.trim(),
