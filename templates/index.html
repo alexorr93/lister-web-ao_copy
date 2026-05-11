@@ -3482,7 +3482,7 @@ function openModal(id) {
   var titleInput = document.getElementById('modal-title-input');
   titleInput.value = l.title || '';
   document.getElementById('modal-title-count').textContent = (l.title||'').length + '/80';
-  document.getElementById('modal-subtitle-input').value = l.subtitle || '';
+  var _sub=document.getElementById('modal-subtitle-input'); if(_sub) _sub.value = l.subtitle || '';
   document.getElementById('modal-cond-input').value = l.condition || 'used';
   document.getElementById('modal-sku-input').value = l.barcode_id || '';
   document.getElementById('modal-desc-input').value = l.description || '';
@@ -3496,16 +3496,16 @@ function openModal(id) {
   document.getElementById('modal-bo-min').value = l.best_offer_min || '';
   document.getElementById('modal-ai-used').textContent = l.price_used > 0 ? '$'+l.price_used.toFixed(2) : '—';
   document.getElementById('modal-ai-new').textContent = l.price_new > 0 ? '$'+l.price_new.toFixed(2) : '—';
-  document.getElementById('modal-schedule-input').value = l.schedule_time || '';
+  var _s=document.getElementById('modal-schedule-input'); if(_s) _s.value = l.schedule_time || '';
   toggleModalAuction();
   toggleModalBestOffer();
 
   // Shipping tab
-  document.getElementById('modal-location-input').value = l.item_location || '';
-  document.getElementById('modal-postal-input').value = l.postal_code || '';
-  document.getElementById('modal-ship-svc-input').value = l.shipping_service || '';
-  document.getElementById('modal-ship-cost-input').value = l.shipping_cost || '';
-  document.getElementById('modal-dispatch-input').value = l.dispatch_time || '';
+  var _l=document.getElementById('modal-location-input'); if(_l) _l.value = l.item_location || '';
+  var _p=document.getElementById('modal-postal-input'); if(_p) _p.value = l.postal_code || '';
+  var _ss=document.getElementById('modal-ship-svc-input'); if(_ss) _ss.value = l.shipping_service || '';
+  var _sc=document.getElementById('modal-ship-cost-input'); if(_sc) _sc.value = l.shipping_cost || '';
+  var _d=document.getElementById('modal-dispatch-input'); if(_d) _d.value = l.dispatch_time || '';
 
   // Details tab
   document.getElementById('modal-brand-input').value = l.brand || '';
@@ -3519,8 +3519,6 @@ function openModal(id) {
   document.getElementById('modal-cat-name').textContent = l.ebay_category || '—';
   // pricing tier removed from display
 
-  // Always open on listing tab
-  switchModalTab('listing');
   document.getElementById('modal').classList.add('open');
 }
 
