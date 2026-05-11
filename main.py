@@ -6677,6 +6677,58 @@ async def toggle_cogs_import(request: Request):
         raise HTTPException(500, str(e))
 
 
+@app.get("/api/mileage")
+async def get_mileage(request: Request, year: int = None):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Not authenticated")
+    from datetime import datetime, timezone
+    if year is None:
+        year = datetime.now(timezone.utc).year
+    try:
+        res = supabase.table("mileage_logs").select("*")            .eq("business_id", business_id)            .gte("log_date", f"{year}-01-01")            .lte("log_date", f"{year}-12-31")            .order("log_date", desc=True).execute()
+        logs = res.data or []
+        total_miles = sum(float(l.get("miles") or 0) for l in logs)
+        irs_rate = 0.67  # 2024 IRS standard mileage rate
+        return {"ok": True, "logs": logs, "total_miles": total_miles,
+                "irs_rate": irs_rate, "deduction": round(total_miles * irs_rate, 2)}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/mileage")
+async def add_mileage(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Not authenticated")
+    try:
+        body = await request.json()
+        row = {
+            "business_id": business_id,
+            "log_date": body.get("log_date"),
+            "purpose": body.get("purpose", ""),
+            "miles": float(body.get("miles") or 0),
+            "round_trip": bool(body.get("round_trip", False)),
+            "notes": body.get("notes", ""),
+        }
+        result = supabase.table("mileage_logs").insert(row).execute()
+        return {"ok": True, "item": result.data[0] if result.data else None}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.delete("/api/mileage/{log_id}")
+async def delete_mileage(log_id: str, request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Not authenticated")
+    try:
+        supabase.table("mileage_logs").delete().eq("id", log_id).eq("business_id", business_id).execute()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 @app.get("/api/expenses/tax-export")
 async def tax_export(request: Request, year: int = None):
     """Generate a comprehensive multi-tab tax export xlsx for a given year."""
@@ -7030,6 +7082,50 @@ async def tax_export(request: Request, year: int = None):
         buf.seek(0)
 
         from fastapi.responses import Response
+        # ---- Mileage Tab ----
+        try:
+            mil_res = supabase.table("mileage_logs").select("*").eq("business_id", business_id)                .gte("log_date", year_start).lte("log_date", year_end)                .order("log_date").execute()
+            mileage_logs = mil_res.data or []
+        except Exception:
+            mileage_logs = []
+
+        if mileage_logs:
+            ws_mil = wb.create_sheet("Mileage Log")
+            ws_mil.column_dimensions["A"].width = 14
+            ws_mil.column_dimensions["B"].width = 30
+            ws_mil.column_dimensions["C"].width = 12
+            ws_mil.column_dimensions["D"].width = 14
+            ws_mil.column_dimensions["E"].width = 30
+
+            # Header
+            ws_mil.append(["Date", "Purpose", "Miles", "Round Trip", "Notes"])
+            for cell in ws_mil[1]:
+                cell.font = Font(bold=True, color="FFFFFF")
+                cell.fill = PatternFill("solid", fgColor="0F766E")
+                cell.alignment = Alignment(horizontal="center")
+
+            total_miles = 0.0
+            for log in mileage_logs:
+                miles = float(log.get("miles") or 0)
+                total_miles += miles
+                ws_mil.append([
+                    log.get("log_date", ""),
+                    log.get("purpose", ""),
+                    miles,
+                    "Yes" if log.get("round_trip") else "No",
+                    log.get("notes", ""),
+                ])
+
+            # Summary rows
+            ws_mil.append([])
+            irs_rate = 0.67
+            ws_mil.append(["TOTAL MILES", "", total_miles, "", ""])
+            ws_mil.append(["IRS Rate (2024)", "", f"${irs_rate}/mile", "", ""])
+            ws_mil.append(["MILEAGE DEDUCTION", "", round(total_miles * irs_rate, 2), "", ""])
+            for row in ws_mil.iter_rows(min_row=ws_mil.max_row - 2, max_row=ws_mil.max_row):
+                for cell in row:
+                    cell.font = Font(bold=True)
+
         filename = f"{biz_name_safe}_tax_export_{year}.xlsx"
         return Response(
             content=buf.getvalue(),
