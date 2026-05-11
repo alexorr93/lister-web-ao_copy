@@ -2776,6 +2776,8 @@ function renderTiles() {
     updateSubmitBtn();
     var delBtn = document.getElementById('bulk-delete-btn');
     if (delBtn) { delBtn.style.opacity = selected.size > 0 ? '1' : '0.3'; delBtn.style.pointerEvents = selected.size > 0 ? 'auto' : 'none'; }
+    var deselBtn = document.getElementById('deselect-btn');
+    if (deselBtn) deselBtn.style.display = selected.size > 0 ? 'inline-block' : 'none';
     return;
   }
   grid.style.display = 'grid';
@@ -2870,6 +2872,8 @@ function renderTiles() {
   updateSubmitBtn();
   var delBtn = document.getElementById('bulk-delete-btn');
   if (delBtn) delBtn.style.display = selected.size > 0 ? 'inline-block' : 'none';
+  var deselBtn2 = document.getElementById('deselect-btn');
+  if (deselBtn2) deselBtn2.style.display = selected.size > 0 ? 'inline-block' : 'none';
 }
 
 function initTileListeners() {
