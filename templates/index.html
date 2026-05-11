@@ -5803,7 +5803,24 @@ function exportExpenses(fmt) {
     '<div class="scard"><div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">By Category</div>' + catBreakdown + '</div></div>' +
     '<table><thead><tr><th>Date</th><th>Merchant</th><th>Category</th><th style="text-align:right;">Amount</th><th>Notes</th></tr></thead><tbody>' + rows + '</tbody>' +
     '<tfoot><tr><td colspan="3" style="font-weight:700;padding:12px;">TOTAL</td><td style="text-align:right;font-weight:900;font-size:16px;padding:12px;">$' + expTotal.toFixed(2) + '</td><td></td></tr></tfoot>' +
-    '</table><br><button onclick="window.print()" style="background:#111;color:#fff;border:none;padding:12px 24px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:700;">🖨️ Print / Save as PDF</button>' +
+    '</table>' +
+    (function() {
+      if (!_mileageLogs || !_mileageLogs.length) return '';
+      var totalMi = _mileageLogs.reduce(function(s,l){return s+parseFloat(l.miles||0);},0);
+      var deduction = (totalMi * 0.67).toFixed(2);
+      var mileRows = _mileageLogs.map(function(l){
+        var d=(l.log_date||'').replace(/^(\d{4})-(\d{2})-(\d{2})$/,'$2/$3/$1');
+        return '<tr><td>'+d+'</td><td>'+(l.purpose||'')+'</td><td style="text-align:right;">'+parseFloat(l.miles||0).toFixed(1)+'</td><td>'+(l.round_trip?'Yes':'No')+'</td><td style="color:#666;">'+(l.notes||'')+'</td></tr>';
+      }).join('');
+      return '<br><h2 style="font-size:18px;font-weight:900;margin:24px 0 8px;">🚗 Mileage Log</h2>' +
+        '<div style="display:flex;gap:24px;margin-bottom:16px;">' +
+        '<div style="border:1px solid #ddd;border-radius:8px;padding:12px 20px;"><div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:0.05em;">Total Miles</div><div style="font-size:28px;font-weight:900;">'+totalMi.toFixed(1)+'</div></div>' +
+        '<div style="border:1px solid #ddd;border-radius:8px;padding:12px 20px;"><div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:0.05em;">IRS Deduction (@ $0.67/mi)</div><div style="font-size:28px;font-weight:900;color:#16a34a;">$'+deduction+'</div></div>' +
+        '</div>' +
+        '<table><thead><tr><th>Date</th><th>Purpose</th><th style="text-align:right;">Miles</th><th>Round Trip</th><th>Notes</th></tr></thead><tbody>'+mileRows+'</tbody>' +
+        '<tfoot><tr><td colspan="2" style="font-weight:700;padding:12px;">TOTAL</td><td style="text-align:right;font-weight:900;padding:12px;">'+totalMi.toFixed(1)+' mi</td><td colspan="2"></td></tr></tfoot></table>';
+    })() +
+    '<br><button onclick="window.print()" style="background:#111;color:#fff;border:none;padding:12px 24px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:700;">🖨️ Print / Save as PDF</button>' +
     '</body></html>');
   win.document.close();
 }
