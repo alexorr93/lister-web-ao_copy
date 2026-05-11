@@ -213,7 +213,7 @@ EBAY_RUNAME = os.getenv("EBAY_RUNAME", "")
 EBAY_ENV = os.getenv("EBAY_ENV", "sandbox")
 EBAY_API_BASE = "https://api.sandbox.ebay.com" if EBAY_ENV == "sandbox" else "https://api.ebay.com"
 EBAY_AUTH_BASE = "https://auth.sandbox.ebay.com" if EBAY_ENV == "sandbox" else "https://auth.ebay.com"
-EBAY_SCOPES = "https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly"
+EBAY_SCOPES = "https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly https://api.ebay.com/oauth/api_scope/commerce.taxonomy.readonly"
 
 # Load full eBay category list at startup
 import json as _json_cats
