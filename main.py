@@ -7077,12 +7077,8 @@ async def tax_export(request: Request, year: int = None):
         ws6.merge_cells("A14:B14")
 
         # ---- Output ----
-        buf = _io.BytesIO()
-        wb.save(buf)
-        buf.seek(0)
-
         from fastapi.responses import Response
-        # ---- Mileage Tab ----
+        # ---- Mileage Tab ---- (must be before wb.save)
         try:
             mil_res = supabase.table("mileage_logs").select("*").eq("business_id", business_id)                .gte("log_date", year_start).lte("log_date", year_end)                .order("log_date").execute()
             mileage_logs = mil_res.data or []
@@ -7125,6 +7121,11 @@ async def tax_export(request: Request, year: int = None):
             for row in ws_mil.iter_rows(min_row=ws_mil.max_row - 2, max_row=ws_mil.max_row):
                 for cell in row:
                     cell.font = Font(bold=True)
+
+        # Save workbook AFTER all sheets including mileage
+        buf = _io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
 
         filename = f"{biz_name_safe}_tax_export_{year}.xlsx"
         return Response(
