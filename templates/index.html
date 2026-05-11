@@ -3442,6 +3442,19 @@ function toggleModalBestOffer() {
   if (f) f.style.display = checked ? 'block' : 'none';
 }
 
+function _setVal(id, val) {
+  var el = document.getElementById(id);
+  if (el) el.value = val;
+}
+function _setChk(id, val) {
+  var el = document.getElementById(id);
+  if (el) el.checked = val;
+}
+function _setText(id, val) {
+  var el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+
 function openModal(id) {
   id = isNaN(id) ? id : Number(id);
   const l = listings.find(x => x.id === id);
@@ -3479,23 +3492,22 @@ function openModal(id) {
   }
 
   // Listing tab
-  var titleInput = document.getElementById('modal-title-input');
-  titleInput.value = l.title || '';
-  document.getElementById('modal-title-count').textContent = (l.title||'').length + '/80';
+  _setVal('modal-title-input', l.title || '');
+  _setText('modal-title-count', (l.title||'').length + '/80');
   var _sub=document.getElementById('modal-subtitle-input'); if(_sub) _sub.value = l.subtitle || '';
-  document.getElementById('modal-cond-input').value = l.condition || 'used';
-  document.getElementById('modal-sku-input').value = l.barcode_id || '';
-  document.getElementById('modal-desc-input').value = l.description || '';
-  document.getElementById('modal-cond-notes-input').value = l.condition_notes || '';
+  _setVal('modal-cond-input', l.condition || 'used');
+  _setVal('modal-sku-input', l.barcode_id || '');
+  _setVal('modal-desc-input', l.description || '');
+  _setVal('modal-cond-notes-input', l.condition_notes || '');
 
   // Pricing tab
-  document.getElementById('modal-price-input').value = l.price.toFixed(2);
-  document.getElementById('modal-format-input').value = l.listing_type || 'FixedPrice';
-  document.getElementById('modal-best-offer').checked = l.best_offer_enabled || false;
-  document.getElementById('modal-bo-accept').value = l.best_offer_auto_accept || '';
-  document.getElementById('modal-bo-min').value = l.best_offer_min || '';
-  document.getElementById('modal-ai-used').textContent = l.price_used > 0 ? '$'+l.price_used.toFixed(2) : '—';
-  document.getElementById('modal-ai-new').textContent = l.price_new > 0 ? '$'+l.price_new.toFixed(2) : '—';
+  _setVal('modal-price-input', l.price.toFixed(2));
+  _setVal('modal-format-input', l.listing_type || 'FixedPrice');
+  _setChk('modal-best-offer', l.best_offer_enabled || false);
+  _setVal('modal-bo-accept', l.best_offer_auto_accept || '');
+  _setVal('modal-bo-min', l.best_offer_min || '');
+  _setText('modal-ai-used', l.price_used > 0 ? '$'+l.price_used.toFixed(2) : '—');
+  _setText('modal-ai-new', l.price_new > 0 ? '$'+l.price_new.toFixed(2) : '—');
   var _s=document.getElementById('modal-schedule-input'); if(_s) _s.value = l.schedule_time || '';
   toggleModalAuction();
   toggleModalBestOffer();
@@ -3508,15 +3520,15 @@ function openModal(id) {
   var _d=document.getElementById('modal-dispatch-input'); if(_d) _d.value = l.dispatch_time || '';
 
   // Details tab
-  document.getElementById('modal-brand-input').value = l.brand || '';
-  document.getElementById('modal-color-input').value = l.color || '';
-  document.getElementById('modal-model-input').value = l.model || '';
-  document.getElementById('modal-mpn-input').value = l.mpn || '';
-  document.getElementById('modal-upc-input').value = l.upc || '';
-  document.getElementById('modal-weight-oz-input').value = l.weight_oz || '';
-  document.getElementById('modal-qty-input').value = l.quantity || 1;
-  document.getElementById('modal-cat-input').value = l.ebay_category_id || '';
-  document.getElementById('modal-cat-name').textContent = l.ebay_category || '—';
+  _setVal('modal-brand-input', l.brand || '');
+  _setVal('modal-color-input', l.color || '');
+  _setVal('modal-model-input', l.model || '');
+  _setVal('modal-mpn-input', l.mpn || '');
+  _setVal('modal-upc-input', l.upc || '');
+  _setVal('modal-weight-oz-input', l.weight_oz || '');
+  _setVal('modal-qty-input', l.quantity || 1);
+  _setVal('modal-cat-input', l.ebay_category_id || '');
+  _setText('modal-cat-name', l.ebay_category || '—');
   // pricing tier removed from display
 
   document.getElementById('modal').classList.add('open');
