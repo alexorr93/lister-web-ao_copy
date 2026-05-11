@@ -1082,21 +1082,7 @@ select.field-input { background: #fff; color: #0f172a; }
           Start Adding Items →
         </button>
 
-        <!-- Tips -->
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:20px;">
-          <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:10px;padding:14px;text-align:center;">
-            <div style="font-size:20px;margin-bottom:6px;">📸</div>
-            <div style="font-size:12px;font-weight:600;color:#64748b;">Multiple photos per item</div>
-          </div>
-          <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:10px;padding:14px;text-align:center;">
-            <div style="font-size:20px;margin-bottom:6px;">🤖</div>
-            <div style="font-size:12px;font-weight:600;color:#64748b;">AI prices & titles</div>
-          </div>
-          <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:10px;padding:14px;text-align:center;">
-            <div style="font-size:20px;margin-bottom:6px;">⚡</div>
-            <div style="font-size:12px;font-weight:600;color:#64748b;">Push to eBay instantly</div>
-          </div>
-        </div>
+
       </div>
     </div>
     <div id="upload-active" style="display:none;">
@@ -3681,10 +3667,18 @@ function endScanBatch() {
 }
 
 // ── UPLOAD ─────────────────────────────────────────────────────
-function setUpCondition(c) {
-  upCondition = c;
-  document.getElementById('up-cond-used').className = 'btn' + (c==='used' ? ' btn-primary' : '');
-  document.getElementById('up-cond-new').className  = 'btn' + (c==='new'  ? ' btn-primary' : '');
+function setUpCondition(cond) {
+  upCondition = cond;
+  var nb = document.getElementById('up-cond-new');
+  var ub = document.getElementById('up-cond-used');
+  if (!nb || !ub) return;
+  if (cond === 'new') {
+    nb.style.cssText = 'flex:1;padding:14px;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;background:#22c55e;border:2px solid #22c55e;color:#052e16;transition:all 0.15s;';
+    ub.style.cssText = 'flex:1;padding:14px;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;background:transparent;border:2px solid #1a2332;color:#64748b;transition:all 0.15s;';
+  } else {
+    ub.style.cssText = 'flex:1;padding:14px;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;background:#22c55e;border:2px solid #22c55e;color:#052e16;transition:all 0.15s;';
+    nb.style.cssText = 'flex:1;padding:14px;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;background:transparent;border:2px solid #1a2332;color:#64748b;transition:all 0.15s;';
+  }
 }
 
 var upBatchTitle = '';
