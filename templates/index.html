@@ -3627,25 +3627,21 @@ async function submitScanItem() {
   prog.style.display = 'none';
   toast(`✅ Item ${scanItems.length} sent to scanner`);
   renderScanItems();
-  // Poll for new listing and check required specifics when it appears
-  var _knownIds = new Set(listings.map(function(l){return String(l.id);}));
+  // Poll for this group's listing to appear, then check required specifics
+  var _thisGroupId = scanGroupId;
   var _specPollCount = 0;
   var _specPoll = setInterval(async function() {
     _specPollCount++;
-    if (_specPollCount > 30) { clearInterval(_specPoll); return; }
+    if (_specPollCount > 40) { clearInterval(_specPoll); loadListings(); return; }
     try {
-      var _lr = await fetch('/api/listings?limit=5', {credentials:'include'});
+      var _lr = await fetch('/api/groups/' + _thisGroupId + '/listing', {credentials:'include'});
+      if (!_lr.ok) return;
       var _ld = await _lr.json();
-      var _newItems = (_ld.listings || []).filter(function(l){
-        return !_knownIds.has(String(l.id)) && l.status === 'scanned';
-      });
-      if (_newItems.length) {
+      var _newItem = _ld.listing;
+      if (_newItem && _newItem.id && _newItem.status === 'scanned') {
         clearInterval(_specPoll);
         await loadListings();
-        // Check each new item for required specifics
-        for (var _ni of _newItems) {
-          setTimeout(function(nid){ checkRequiredSpecifics(nid); }, 500, _ni.id);
-        }
+        setTimeout(function(){ checkRequiredSpecifics(_newItem.id); }, 600);
       }
     } catch(e) {}
   }, 3000);
@@ -3775,24 +3771,21 @@ async function submitUploadItem() {
   prog.style.display = 'none';
   toast(`✅ Item ${upItems.length} sent to scanner`);
   renderUpItems();
-  // Poll for new listing and check required specifics when it appears
-  var _knownIds2 = new Set(listings.map(function(l){return String(l.id);}));
+  // Poll for this group's listing to appear, then check required specifics
+  var _thisGroupId2 = upGroupId;
   var _specPollCount2 = 0;
   var _specPoll2 = setInterval(async function() {
     _specPollCount2++;
-    if (_specPollCount2 > 30) { clearInterval(_specPoll2); return; }
+    if (_specPollCount2 > 40) { clearInterval(_specPoll2); loadListings(); return; }
     try {
-      var _lr2 = await fetch('/api/listings?limit=5', {credentials:'include'});
+      var _lr2 = await fetch('/api/groups/' + _thisGroupId2 + '/listing', {credentials:'include'});
+      if (!_lr2.ok) return;
       var _ld2 = await _lr2.json();
-      var _newItems2 = (_ld2.listings || []).filter(function(l){
-        return !_knownIds2.has(String(l.id)) && l.status === 'scanned';
-      });
-      if (_newItems2.length) {
+      var _newItem2 = _ld2.listing;
+      if (_newItem2 && _newItem2.id && _newItem2.status === 'scanned') {
         clearInterval(_specPoll2);
         await loadListings();
-        for (var _ni2 of _newItems2) {
-          setTimeout(function(nid){ checkRequiredSpecifics(nid); }, 500, _ni2.id);
-        }
+        setTimeout(function(){ checkRequiredSpecifics(_newItem2.id); }, 600);
       }
     } catch(e) {}
   }, 3000);
