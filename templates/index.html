@@ -1309,19 +1309,98 @@ select.field-input { background: #fff; color: #0f172a; }
         <div style="font-size:15px;color:var(--muted);">Manage your business info, plan, and integrations</div>
       </div>
 
-      <!-- Plan summary row -->
+      <!-- Plan section -->
       <div class="acct-card" style="margin-bottom:14px;">
-        <div style="display:flex;align-items:center;gap:14px;">
-          <div style="width:42px;height:42px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">💎</div>
-          <div style="flex:1;min-width:0;">
-            <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;">Current Plan</div>
-            <div style="font-size:16px;font-weight:700;margin-top:2px;" id="acct-plan-name">—</div>
-            <div style="font-size:16px;color:var(--muted);margin-top:2px;" id="acct-plan-usage">—</div>
+
+        <!-- Plan header -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div id="plan-badge-icon" style="width:42px;height:42px;border-radius:10px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;">🤖</div>
+            <div>
+              <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:0.08em;font-weight:700;">Current Plan</div>
+              <div style="font-size:20px;font-weight:800;color:#f1f5f9;line-height:1.2;" id="acct-plan-name">—</div>
+              <div style="font-size:12px;color:#475569;margin-top:2px;" id="acct-plan-renewal">—</div>
+            </div>
           </div>
-          <button class="btn btn-primary" style="padding:8px 16px;font-size:15px;white-space:nowrap;" onclick="openPlansModal()">Change Plan</button>
+          <div id="plan-upgrade-btn-wrap">
+            <button onclick="openPlansModal()" style="padding:10px 20px;border-radius:9px;background:#22c55e;border:none;color:#052e16;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">⚡ Upgrade to Pro</button>
+          </div>
         </div>
-        <div style="margin-top:12px;height:6px;background:var(--bg);border-radius:3px;overflow:hidden;">
-          <div id="acct-usage-bar" style="height:100%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);width:0%;transition:width 0.3s;"></div>
+
+        <!-- Scan usage -->
+        <div style="background:#060c18;border:1px solid #1a2332;border-radius:10px;padding:14px 16px;margin-bottom:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div style="font-size:13px;font-weight:700;color:#94a3b8;">Monthly Scans</div>
+            <div style="font-size:13px;color:#64748b;" id="acct-monthly-usage-text">0 / 150 used</div>
+          </div>
+          <div style="height:6px;background:#1a2332;border-radius:3px;overflow:hidden;margin-bottom:10px;">
+            <div id="acct-usage-bar" style="height:100%;background:#22c55e;border-radius:3px;width:0%;transition:width 0.4s;"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div style="font-size:12px;color:#475569;">Resets monthly · unused scans don't roll over</div>
+            <div style="font-size:13px;font-weight:700;color:#fbbf24;" id="acct-purchased-scans-text"></div>
+          </div>
+        </div>
+
+        <!-- Scan packs -->
+        <div style="margin-bottom:12px;">
+          <div style="font-size:13px;font-weight:700;color:#94a3b8;margin-bottom:8px;">Buy More Scans <span style="color:#334155;font-weight:400;font-size:11px;">— never expire</span></div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
+            <button onclick="buyScanPack('100')" style="padding:10px 6px;border-radius:9px;border:1px solid #1a2332;background:#0a0f18;color:#f1f5f9;cursor:pointer;font-family:inherit;text-align:center;transition:all 0.15s;" onmouseover="this.style.borderColor='#22c55e'" onmouseout="this.style.borderColor='#1a2332'">
+              <div style="font-size:16px;font-weight:800;color:#4ade80;">100</div>
+              <div style="font-size:11px;color:#64748b;">scans</div>
+              <div style="font-size:13px;font-weight:700;color:#f1f5f9;margin-top:4px;">$20</div>
+            </button>
+            <button onclick="buyScanPack('250')" style="padding:10px 6px;border-radius:9px;border:1px solid #1a2332;background:#0a0f18;color:#f1f5f9;cursor:pointer;font-family:inherit;text-align:center;transition:all 0.15s;" onmouseover="this.style.borderColor='#22c55e'" onmouseout="this.style.borderColor='#1a2332'">
+              <div style="font-size:16px;font-weight:800;color:#4ade80;">250</div>
+              <div style="font-size:11px;color:#64748b;">scans</div>
+              <div style="font-size:13px;font-weight:700;color:#f1f5f9;margin-top:4px;">$40</div>
+            </button>
+            <button onclick="buyScanPack('500')" style="padding:10px 6px;border-radius:9px;border:1px solid rgba(34,197,94,0.3);background:rgba(34,197,94,0.05);color:#f1f5f9;cursor:pointer;font-family:inherit;text-align:center;transition:all 0.15s;position:relative;" onmouseover="this.style.borderColor='#22c55e'" onmouseout="this.style.borderColor='rgba(34,197,94,0.3)'">
+              <div style="position:absolute;top:-8px;left:50%;transform:translateX(-50%);background:#22c55e;color:#052e16;font-size:9px;font-weight:800;padding:2px 7px;border-radius:10px;white-space:nowrap;">BEST VALUE</div>
+              <div style="font-size:16px;font-weight:800;color:#4ade80;">500</div>
+              <div style="font-size:11px;color:#64748b;">scans</div>
+              <div style="font-size:13px;font-weight:700;color:#f1f5f9;margin-top:4px;">$60</div>
+            </button>
+            <button onclick="buyScanPack('1000')" style="padding:10px 6px;border-radius:9px;border:1px solid #1a2332;background:#0a0f18;color:#f1f5f9;cursor:pointer;font-family:inherit;text-align:center;transition:all 0.15s;" onmouseover="this.style.borderColor='#22c55e'" onmouseout="this.style.borderColor='#1a2332'">
+              <div style="font-size:16px;font-weight:800;color:#4ade80;">1000</div>
+              <div style="font-size:11px;color:#64748b;">scans</div>
+              <div style="font-size:13px;font-weight:700;color:#f1f5f9;margin-top:4px;">$80</div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Auto top-up -->
+        <div style="background:#060c18;border:1px solid #1a2332;border-radius:10px;padding:14px 16px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+            <div>
+              <div style="font-size:13px;font-weight:700;color:#94a3b8;">Auto Top-Up</div>
+              <div style="font-size:11px;color:#475569;margin-top:2px;">Auto-purchase scans when your balance runs low</div>
+            </div>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+              <input type="checkbox" id="auto-topup-enabled" onchange="saveAutoTopup()" style="width:15px;height:15px;accent-color:#22c55e;">
+              <span style="font-size:13px;color:#64748b;">Enable</span>
+            </label>
+          </div>
+          <div id="auto-topup-config" style="display:none;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <div>
+              <div style="font-size:11px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Trigger when below</div>
+              <select id="auto-topup-threshold" onchange="saveAutoTopup()" class="acct-input" style="width:100%;">
+                <option value="25">25 scans</option>
+                <option value="50" selected>50 scans</option>
+                <option value="100">100 scans</option>
+              </select>
+            </div>
+            <div>
+              <div style="font-size:11px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Auto-purchase pack</div>
+              <select id="auto-topup-pack" onchange="saveAutoTopup()" class="acct-input" style="width:100%;">
+                <option value="100">100 scans — $20</option>
+                <option value="250">250 scans — $40</option>
+                <option value="500" selected>500 scans — $60</option>
+                <option value="1000">1000 scans — $80</option>
+              </select>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -2411,6 +2490,122 @@ window.addEventListener('DOMContentLoaded', () => {
 
 
 // ── ACCOUNT PAGE ────────────────────────────────────────────────
+// ── PLAN SYSTEM ─────────────────────────────────────────────────
+var _planInfo = {};
+
+async function loadPlanInfo() {
+  try {
+    var r = await fetch('/api/plan', {credentials:'include'});
+    _planInfo = await r.json();
+    renderPlanUI(_planInfo);
+  } catch(e) { console.log('Plan load error:', e); }
+}
+
+function renderPlanUI(p) {
+  var isPro = p.plan === 'pro';
+
+  // Plan name
+  var nameEl = document.getElementById('acct-plan-name');
+  if (nameEl) nameEl.innerHTML = isPro
+    ? '<span style="color:#fbbf24;">⭐ Pro</span>'
+    : '<span style="color:#4ade80;">Free</span>';
+
+  // Renewal
+  var renewEl = document.getElementById('acct-plan-renewal');
+  if (renewEl) renewEl.textContent = isPro
+    ? 'Pro plan · $59.99/month'
+    : '150 scans/month included · upgrade for 1,000/month';
+
+  // Hide upgrade btn if pro
+  var upBtn = document.getElementById('plan-upgrade-btn-wrap');
+  if (upBtn) upBtn.style.display = isPro ? 'none' : 'block';
+
+  // Icon
+  var icon = document.getElementById('plan-badge-icon');
+  if (icon) {
+    icon.style.background = isPro ? 'rgba(251,191,36,0.1)' : 'rgba(34,197,94,0.1)';
+    icon.style.borderColor = isPro ? 'rgba(251,191,36,0.3)' : 'rgba(34,197,94,0.3)';
+    icon.textContent = isPro ? '⭐' : '🤖';
+  }
+
+  // Monthly usage bar
+  var used = p.monthly_used || 0;
+  var limit = p.monthly_limit || 150;
+  var pct = Math.min(100, Math.round(used / limit * 100));
+  var bar = document.getElementById('acct-usage-bar');
+  var txt = document.getElementById('acct-monthly-usage-text');
+  if (bar) {
+    bar.style.width = pct + '%';
+    bar.style.background = pct > 80 ? '#ef4444' : '#22c55e';
+  }
+  if (txt) txt.textContent = used + ' / ' + limit + ' used this month';
+
+  // Purchased scans
+  var purch = document.getElementById('acct-purchased-scans-text');
+  if (purch) {
+    if (p.purchased_scans > 0) {
+      purch.textContent = '+' + p.purchased_scans + ' purchased scans';
+      purch.style.display = 'block';
+    } else {
+      purch.textContent = '';
+    }
+  }
+
+  // Auto topup
+  var topupEl = document.getElementById('auto-topup-enabled');
+  var topupConfig = document.getElementById('auto-topup-config');
+  var threshEl = document.getElementById('auto-topup-threshold');
+  var packEl = document.getElementById('auto-topup-pack');
+  if (topupEl) topupEl.checked = p.auto_topup_enabled || false;
+  if (topupConfig) topupConfig.style.display = (p.auto_topup_enabled) ? 'grid' : 'none';
+  if (threshEl) threshEl.value = String(p.auto_topup_threshold || 50);
+  if (packEl) packEl.value = String(p.auto_topup_pack || '500');
+
+  // Also update scan bar on dashboard
+  var homeBar = document.getElementById('home-scan-bar');
+  var homePct = document.getElementById('home-scan-pct');
+  var homeRem = document.getElementById('home-scan-remaining');
+  if (homeBar) homeBar.style.width = pct + '%';
+  if (homePct) homePct.textContent = used + '/' + limit;
+  if (homeRem) homeRem.textContent = (p.total_remaining || 0) + ' scans remaining';
+}
+
+async function buyScanPack(pack) {
+  if (!confirm('Purchase ' + pack + ' scans? (Payment integration coming soon — contact us to add scans manually)')) return;
+  try {
+    var r = await fetch('/api/plan/add-scans', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      credentials: 'include',
+      body: JSON.stringify({pack: pack})
+    });
+    var d = await r.json();
+    if (d.ok) {
+      toast(pack + ' scans added ✓', 'success');
+      loadPlanInfo();
+    }
+  } catch(e) { toast('Failed to add scans', 'error'); }
+}
+
+async function saveAutoTopup() {
+  var enabled = document.getElementById('auto-topup-enabled').checked;
+  var config = document.getElementById('auto-topup-config');
+  if (config) config.style.display = enabled ? 'grid' : 'none';
+  try {
+    await fetch('/api/plan/auto-topup', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      credentials: 'include',
+      body: JSON.stringify({
+        enabled: enabled,
+        threshold: parseInt(document.getElementById('auto-topup-threshold').value),
+        pack: document.getElementById('auto-topup-pack').value
+      })
+    });
+    toast('Auto top-up saved ✓', 'success');
+  } catch(e) { toast('Save failed', 'error'); }
+}
+
 const PLAN_TIERS = [
   {name:'Free Trial', price:0, scans:100, sub:'100 free scans', features:['100 total scans','AI identification','All features included','No credit card required']},
   {name:'Reseller', price:49.99, scans:250, sub:'250 scans / month', features:['250 scans / month','AI identification','All features included','eBay & Shopify push','CSV export']},
