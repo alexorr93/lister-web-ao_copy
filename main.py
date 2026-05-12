@@ -5114,7 +5114,8 @@ async def get_account_info(request: Request):
             raise HTTPException(404, "Not found")
         b = biz.data[0]
         # Infer plan from scan_limit
-        limit = b.get("scan_limit", 25)
+        plan_info = get_business_plan(business_id)
+        limit = plan_info["monthly_limit"]
         plan_map = {25: "Free Trial", 100: "Starter", 500: "Growth", 1000: "Pro"}
         plan = plan_map.get(limit, "Custom")
         return {
