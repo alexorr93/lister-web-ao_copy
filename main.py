@@ -2922,6 +2922,22 @@ async def get_group_listing(group_id: str, request: Request):
         return {"listing": None}
 
 
+@app.get("/api/listings/{listing_id}")
+async def get_listing(listing_id: str, request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Not authenticated")
+    try:
+        res = supabase.table("listings").select("*").eq("id", listing_id).eq("business_id", business_id).limit(1).execute()
+        if not res.data:
+            raise HTTPException(404, "Listing not found")
+        return {"listing": res.data[0]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 @app.get("/api/listings/{listing_id}/required-aspects")
 async def get_required_aspects(listing_id: str, request: Request):
     """Return required eBay aspects for listing category with current fill status."""
