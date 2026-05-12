@@ -6976,24 +6976,26 @@ async function openScannerSettings() {
     var r = await fetch('/api/listing-defaults', {credentials:'include'});
     var d = await r.json();
     _scannerDefaults = d;
-    document.getElementById('sl-location').value = d.location || '';
-    document.getElementById('sl-postal').value = d.postal_code || '';
-    document.getElementById('sl-dispatch').value = d.dispatch_time || '1';
-    document.getElementById('sl-format').value = d.format || 'FixedPrice';
-    document.getElementById('sl-duration').value = d.duration || 'GTC';
-    document.getElementById('sl-best-offer').checked = d.best_offer === 'true';
-    document.getElementById('sl-bo-accept').value = d.best_offer_auto_accept || '';
-    document.getElementById('sl-bo-min').value = d.best_offer_min || '';
-    document.getElementById('sl-ship-svc').value = d.shipping_service || 'USPSGround';
-    document.getElementById('sl-ship-cost').value = d.shipping_cost || '0.00';
-    document.getElementById('sl-return-policy').value = d.return_policy || 'ReturnsAccepted';
-    document.getElementById('sl-returns-within').value = d.returns_within || 'Days_30';
-    document.getElementById('sl-refund').value = d.refund_option || 'MoneyBack';
-    document.getElementById('sl-ret-paid-by').value = d.return_shipping_paid_by || 'Buyer';
-    document.getElementById('sl-ship-profile').value = d.shipping_profile || '';
-    document.getElementById('sl-ret-profile').value = d.return_profile || '';
-    document.getElementById('sl-pay-profile').value = d.payment_profile || '';
-    document.getElementById('sl-description').value = d.default_description || '';
+    function _sv(id, val) { var el=document.getElementById(id); if(el) el.value=val; }
+    function _sc(id, val) { var el=document.getElementById(id); if(el) el.checked=val; }
+    _sv('sl-location', d.location || '');
+    _sv('sl-postal', d.postal_code || '');
+    _sv('sl-dispatch', d.dispatch_time || '1');
+    _sv('sl-format', d.format || 'FixedPrice');
+    _sv('sl-duration', d.duration || 'GTC');
+    _sc('sl-best-offer', d.best_offer === 'true');
+    _sv('sl-bo-accept', d.best_offer_auto_accept || '');
+    _sv('sl-bo-min', d.best_offer_min || '');
+    _sv('sl-ship-svc', d.shipping_service || 'USPSGround');
+    _sv('sl-ship-cost', d.shipping_cost || '0.00');
+    _sv('sl-return-policy', d.return_policy || 'ReturnsAccepted');
+    _sv('sl-returns-within', d.returns_within || 'Days_30');
+    _sv('sl-refund', d.refund_option || 'MoneyBack');
+    _sv('sl-ret-paid-by', d.return_shipping_paid_by || 'Buyer');
+    _sv('sl-ship-profile', d.shipping_profile || '');
+    _sv('sl-ret-profile', d.return_profile || '');
+    _sv('sl-pay-profile', d.payment_profile || '');
+    _sv('sl-description', d.default_description || '');
     toggleBestOfferFields();
     updateDurationOptions();
   } catch(e) { console.error('Failed to load listing defaults', e); }
@@ -7018,25 +7020,27 @@ function updateDurationOptions() {
 }
 
 async function saveScannerSettings() {
+  function _gv(id, fallback) { var el=document.getElementById(id); return el ? el.value : (fallback||''); }
+  function _gc(id) { var el=document.getElementById(id); return el ? el.checked : false; }
   var payload = {
-    location: document.getElementById('sl-location').value.trim(),
-    postal_code: document.getElementById('sl-postal').value.trim(),
-    dispatch_time: document.getElementById('sl-dispatch').value,
-    format: document.getElementById('sl-format').value,
-    duration: document.getElementById('sl-duration').value,
-    best_offer: document.getElementById('sl-best-offer').checked ? 'true' : 'false',
-    best_offer_auto_accept: document.getElementById('sl-bo-accept').value.trim(),
-    best_offer_min: document.getElementById('sl-bo-min').value.trim(),
-    shipping_service: document.getElementById('sl-ship-svc').value,
-    shipping_cost: document.getElementById('sl-ship-cost').value || '0.00',
-    return_policy: document.getElementById('sl-return-policy').value,
-    returns_within: document.getElementById('sl-returns-within').value,
-    refund_option: document.getElementById('sl-refund').value,
-    return_shipping_paid_by: document.getElementById('sl-ret-paid-by').value,
-    shipping_profile: document.getElementById('sl-ship-profile').value.trim(),
-    return_profile: document.getElementById('sl-ret-profile').value.trim(),
-    payment_profile: document.getElementById('sl-pay-profile').value.trim(),
-    default_description: document.getElementById('sl-description').value.trim(),
+    location: _gv('sl-location').trim(),
+    postal_code: _gv('sl-postal').trim(),
+    dispatch_time: _gv('sl-dispatch'),
+    format: _gv('sl-format'),
+    duration: _gv('sl-duration'),
+    best_offer: _gc('sl-best-offer') ? 'true' : 'false',
+    best_offer_auto_accept: _gv('sl-bo-accept').trim(),
+    best_offer_min: _gv('sl-bo-min').trim(),
+    shipping_service: _gv('sl-ship-svc') || 'USPSGroundAdvantage',
+    shipping_cost: _gv('sl-ship-cost') || '0.00',
+    return_policy: _gv('sl-return-policy') || 'ReturnsAccepted',
+    returns_within: _gv('sl-returns-within') || 'Days_30',
+    refund_option: _gv('sl-refund') || 'MoneyBack',
+    return_shipping_paid_by: _gv('sl-ret-paid-by') || 'Buyer',
+    shipping_profile: _gv('sl-ship-profile').trim(),
+    return_profile: _gv('sl-ret-profile').trim(),
+    payment_profile: _gv('sl-pay-profile').trim(),
+    default_description: _gv('sl-description').trim(),
   };
   try {
     var r = await fetch('/api/listing-defaults', {
