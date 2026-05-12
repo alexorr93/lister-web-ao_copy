@@ -5927,6 +5927,11 @@ async function toggleCogsImport() {
 
 // ── RECEIPT SCANNER ──
 function openReceiptScanner() {
+  if (_planInfo.plan && _planInfo.plan !== 'pro') {
+    toast('Receipt scanner is a Pro feature — upgrade to unlock', 'error');
+    setTimeout(function(){ document.querySelector('.nav-btn[data-tab=settings]').click(); }, 800);
+    return;
+  }
   document.getElementById('receipt-modal').style.display = 'flex';
   document.getElementById('receipt-step-upload').style.display = 'block';
   document.getElementById('receipt-step-scanning').style.display = 'none';
@@ -6990,6 +6995,11 @@ function toggleMileageLog() {
 }
 
 function openMileageModal() {
+  if (_planInfo.plan && _planInfo.plan !== 'pro') {
+    toast('Mileage tracker is a Pro feature — upgrade to unlock', 'error');
+    setTimeout(function(){ document.querySelector('.nav-btn[data-tab=settings]').click(); }, 800);
+    return;
+  }
   document.getElementById('mileage-modal').style.display = 'flex';
   document.getElementById('mil-date').value = new Date().toISOString().split('T')[0];
   document.getElementById('mil-purpose').value = '';
