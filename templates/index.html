@@ -2130,6 +2130,12 @@ select.field-input { background: #fff; color: #0f172a; }
             </div>
           </div>
 
+          <!-- Item Specifics -->
+          <div id="modal-specifics-section" style="margin-bottom:14px;display:none;">
+            <div class="field-label" style="margin-bottom:8px;">Item Specifics <span style="color:#334155;font-weight:400;text-transform:none;font-size:10px;letter-spacing:0;">from eBay requirements</span></div>
+            <div id="modal-specifics-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"></div>
+          </div>
+
           <!-- Description -->
           <div style="margin-bottom:14px;">
             <div class="field-label">Description</div>
@@ -3508,6 +3514,22 @@ function openModal(id) {
   _setVal('modal-qty-input', l.quantity || 1);
   _setVal('modal-cat-input', l.ebay_category_id || '');
   _setText('modal-cat-name', l.ebay_category || '—');
+  // Load item specifics
+  var specs = l.ebay_item_specifics || {};
+  var specSection = document.getElementById('modal-specifics-section');
+  var specGrid = document.getElementById('modal-specifics-grid');
+  if (specSection && specGrid) {
+    var specKeys = Object.keys(specs);
+    if (specKeys.length) {
+      specGrid.innerHTML = specKeys.map(function(k) {
+        return '<div><div style="font-size:11px;font-weight:600;color:#475569;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">' + k + '</div>'
+          + '<input class="field-input" style="font-size:13px;" data-spec-key="' + k + '" value="' + (specs[k]||'').toString().replace(/"/g,'&quot;') + '" oninput="modalDirty=true"/></div>';
+      }).join('');
+      specSection.style.display = 'block';
+    } else {
+      specSection.style.display = 'none';
+    }
+  }
   // pricing tier removed from display
 
   document.getElementById('modal').classList.add('open');
@@ -3543,6 +3565,13 @@ async function saveModal() {
         weight_oz:     parseFloat(document.getElementById('modal-weight-oz-input').value) || null,
         quantity:      parseInt(document.getElementById('modal-qty-input').value) || 1,
         ebay_category_id: document.getElementById('modal-cat-input').value.trim(),
+        ebay_item_specifics: (function(){
+          var inputs = document.querySelectorAll('#modal-specifics-grid [data-spec-key]');
+          if (!inputs.length) return null;
+          var obj = {};
+          inputs.forEach(function(inp){ obj[inp.dataset.specKey] = inp.value.trim(); });
+          return obj;
+        })(),
       };
       // Save each field
       for (const [field, value] of Object.entries(fields)) {
