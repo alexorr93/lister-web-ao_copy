@@ -66,6 +66,7 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 .nav-btn[data-tab="settings"].active { background: rgba(74,222,128,0.08); color: #4ade80; }
 .nav-btn[data-tab="messages"].active { background: rgba(74,222,128,0.08); color: #4ade80; }
 .nav-btn[data-tab="sales"].active { background: rgba(74,222,128,0.08); color: #4ade80; }
+.nav-btn[data-tab="picker"].active { background: rgba(251,191,36,0.08); color: #fbbf24; }
 .nav-btn[data-tab="auction"].active { background: rgba(74,222,128,0.08); color: #4ade80; }
 .nav-btn[data-tab="parts"].active { background: rgba(74,222,128,0.08); color: #4ade80; }
 .sidebar-bottom {
@@ -521,6 +522,9 @@ select.field-input { background: #fff; color: #0f172a; }
     </button>
     <button class="nav-btn" data-tab="sales"><svg style="color:#a78bfa;" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
       Sales
+    </button>
+    <button class="nav-btn" data-tab="picker"><svg style="color:#fbbf24;" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      Order Picker
     </button>
     <button class="nav-btn" data-tab="notes"><svg style="color:#64748b;" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/></svg>
       Notes
@@ -2392,6 +2396,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     if (tab === 'auction')   loadAuctionSessions();
     if (tab === 'settings')  { loadSettings(); loadAccountInfo(); loadShopifyStatus(); loadEbayOAuthStatus(); loadCostTrackingState(); loadPlanInfo(); }
     if (tab === 'messages')  { loadUserThread(); startMessagePolling(); }
+    if (tab === 'picker') { loadPickerOrders(); }
     else { stopMessagePolling(); }
     // Feature gating for free plan
     var proOnlyTabs = ['sales'];
@@ -8326,6 +8331,177 @@ async function submitEbayDrafts() {
   }
 }
 
+
+// ── ORDER PICKER ────────────────────────────────────────────────
+var _pickItems = [];
+var _pickFilter = 'all';
+var _pickSearchVal = '';
+
+async function loadPickerOrders() {
+  try {
+    var r = await fetch('/api/ebay/orders?limit=50&period=month', {credentials:'include'});
+    var d = await r.json();
+    var orders = d.orders || d || [];
+    _pickItems = orders.map(function(o, i) {
+      return {
+        id: o.order_id || o.id || ('ord-'+i),
+        title: o.title || (o.line_items && o.line_items[0] && o.line_items[0].title) || 'Order #'+(o.order_id||i),
+        order_num: o.order_id || o.ebay_order_id || '',
+        source: 'ebay',
+        photo_url: o.photo_url || o.image_url || '',
+        location: o.item_location || o.location || '',
+        sku: o.custom_sku || o.sku || '',
+        price: o.total_price || o.amount_paid || 0,
+        buyer: o.buyer_username || o.buyer || '',
+        picked: false,
+      };
+    });
+    renderPickGrid();
+  } catch(e) { console.log('Picker error:', e); renderPickGrid(); }
+}
+
+async function pullPickerOrders() {
+  var btn = event && event.currentTarget;
+  if (btn) { btn.textContent = 'Pulling...'; btn.disabled = true; }
+  try {
+    await pullEbayOrders();
+    await loadPickerOrders();
+    toast('Orders pulled ✓', 'success');
+  } catch(e) { toast('Pull failed', 'error'); }
+  if (btn) { btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.1"/></svg> Pull eBay orders'; btn.disabled = false; }
+}
+
+function setPickFilter(f, btn) {
+  _pickFilter = f;
+  document.querySelectorAll('.pick-ftab').forEach(function(b){ b.style.background='transparent'; b.style.color='#475569'; });
+  if (btn) { btn.style.background='#1a2332'; btn.style.color='#f1f5f9'; }
+  renderPickGrid();
+}
+
+function filterPickList(val) {
+  _pickSearchVal = (val||'').toLowerCase();
+  renderPickGrid();
+}
+
+function renderPickGrid() {
+  var grid = document.getElementById('picker-grid');
+  if (!grid) return;
+  var items = _pickItems.filter(function(item) {
+    if (_pickFilter === 'pending' && item.picked) return false;
+    if (_pickFilter === 'picked' && !item.picked) return false;
+    if (_pickSearchVal) {
+      var s = _pickSearchVal;
+      return (item.title||'').toLowerCase().includes(s) ||
+             (item.sku||'').toLowerCase().includes(s) ||
+             (item.location||'').toLowerCase().includes(s) ||
+             (item.order_num||'').toLowerCase().includes(s);
+    }
+    return true;
+  });
+  var pending = _pickItems.filter(function(i){ return !i.picked; }).length;
+  var picked = _pickItems.filter(function(i){ return i.picked; }).length;
+  var total = _pickItems.length;
+  var pct = total > 0 ? Math.round(picked/total*100) : 0;
+  var pb = document.getElementById('picker-progress-bar');
+  var pt = document.getElementById('picker-progress-text');
+  if (pb) { pb.style.width = pct+'%'; pb.style.background = pct===100 ? '#22c55e' : pct>50 ? '#fbbf24' : '#22c55e'; }
+  if (pt) pt.textContent = picked+' / '+total+' picked';
+  var pp = document.getElementById('picker-stat-pending'); if(pp) pp.textContent = pending;
+  var pk = document.getElementById('picker-stat-picked'); if(pk) pk.textContent = picked;
+  var ptot = document.getElementById('picker-stat-total'); if(ptot) ptot.textContent = total;
+  if (!items.length) {
+    grid.innerHTML = '<div style="grid-column:1/-1;padding:60px;text-align:center;color:#334155;font-size:15px;">No orders — pull from eBay or add manually</div>';
+    return;
+  }
+  grid.innerHTML = items.map(function(item) {
+    var srcBg = item.source==='ebay' ? 'rgba(37,99,235,0.2)' : item.source==='shopify' ? 'rgba(34,197,94,0.2)' : 'rgba(251,191,36,0.15)';
+    var srcBdr = item.source==='ebay' ? 'rgba(37,99,235,0.4)' : item.source==='shopify' ? 'rgba(34,197,94,0.4)' : 'rgba(251,191,36,0.3)';
+    var srcTxt = item.source==='ebay' ? '#93c5fd' : item.source==='shopify' ? '#86efac' : '#fde68a';
+    var srcLbl = item.source==='ebay' ? 'eBay' : item.source==='shopify' ? 'Shopify' : 'Manual';
+    var cardBdr = item.picked ? '#166534' : '#1a2332';
+    var cardBg = item.picked ? 'rgba(5,46,22,0.3)' : '#0a0f18';
+    var img = item.photo_url
+      ? '<img src="'+item.photo_url+'" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">'
+      : '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#1a2332" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>';
+    var overlay = item.picked ? '<div style="position:absolute;inset:0;background:rgba(5,46,22,0.5);display:flex;align-items:center;justify-content:center;"><div style="width:52px;height:52px;border-radius:50%;background:#052e16;border:2px solid #22c55e;display:flex;align-items:center;justify-content:center;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></div></div>' : '';
+    var btnStyle = item.picked
+      ? 'flex:1;padding:11px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;background:#052e16;border:1px solid #166534;color:#4ade80;'
+      : 'flex:1;padding:11px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;background:#22c55e;border:none;color:#052e16;';
+    var btnLbl = item.picked ? '✓ Picked' : 'Mark Picked';
+    return '<div style="background:'+cardBg+';border:1px solid '+cardBdr+';border-radius:14px;overflow:hidden;">'
+      +'<div style="width:100%;height:200px;background:#060c18;display:flex;align-items:center;justify-content:center;position:relative;border-bottom:1px solid #1a2332;">'
+      +img
+      +'<div style="position:absolute;top:10px;left:10px;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;background:'+srcBg+';border:1px solid '+srcBdr+';color:'+srcTxt+';">'+srcLbl+'</div>'
+      +(item.order_num ? '<div style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.75);border:1px solid #1a2332;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;color:#94a3b8;font-family:monospace;">#'+item.order_num+'</div>' : '')
+      +overlay+'</div>'
+      +'<div style="padding:14px;">'
+      +'<div style="font-size:15px;font-weight:700;color:#f1f5f9;margin-bottom:10px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">'+escapeHtml(item.title)+'</div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">'
+      +'<div style="background:#060c18;border:1px solid #1a2332;border-radius:8px;padding:8px 10px;"><div style="font-size:10px;color:#334155;text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:3px;">Location</div><div style="font-size:16px;font-weight:700;color:#fbbf24;font-family:monospace;">'+(item.location||'—')+'</div></div>'
+      +'<div style="background:#060c18;border:1px solid #1a2332;border-radius:8px;padding:8px 10px;"><div style="font-size:10px;color:#334155;text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:3px;">SKU</div><div style="font-size:16px;font-weight:700;color:#38bdf8;font-family:monospace;">'+(item.sku||'—')+'</div></div>'
+      +'<div style="background:#060c18;border:1px solid #1a2332;border-radius:8px;padding:8px 10px;"><div style="font-size:10px;color:#334155;text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:3px;">Sold for</div><div style="font-size:14px;font-weight:700;color:#f1f5f9;">$'+parseFloat(item.price||0).toFixed(2)+'</div></div>'
+      +'<div style="background:#060c18;border:1px solid #1a2332;border-radius:8px;padding:8px 10px;"><div style="font-size:10px;color:#334155;text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:3px;">Buyer</div><div style="font-size:12px;color:#64748b;margin-top:2px;">'+(item.buyer ? item.buyer.substring(0,8)+'***' : '—')+'</div></div>'
+      +'</div>'
+      +'<button style="'+btnStyle+'width:100%;" onclick="togglePicked(''+item.id+'')">'+btnLbl+'</button>'
+      +'</div></div>';
+  }).join('');
+}
+
+function togglePicked(id) {
+  var item = _pickItems.find(function(i){ return i.id===id; });
+  if (item) { item.picked = !item.picked; if(item.picked) toast('Picked ✓','success'); renderPickGrid(); }
+}
+
+function openManualPickModal() {
+  document.getElementById('manual-pick-modal').style.display = 'flex';
+  var els = ['manual-pick-search','mp-title','mp-order','mp-location','mp-sku'];
+  els.forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
+  document.getElementById('manual-pick-results').innerHTML = '';
+  setTimeout(function(){ var el=document.getElementById('manual-pick-search'); if(el) el.focus(); },100);
+}
+
+async function searchInventoryForPick(val) {
+  var el = document.getElementById('manual-pick-results');
+  if (!el || !val || val.length < 2) { if(el) el.innerHTML=''; return; }
+  try {
+    var r = await fetch('/api/inventory?search='+encodeURIComponent(val)+'&limit=8', {credentials:'include'});
+    var d = await r.json();
+    var items = d.items || d.inventory || [];
+    if (!items.length) { el.innerHTML='<div style="padding:12px;color:#334155;font-size:13px;">No matches</div>'; return; }
+    el.innerHTML = items.map(function(inv) {
+      var safeInv = JSON.stringify({title:inv.title,location:inv.location,sku:inv.custom_sku||inv.barcode_id}).replace(/'/g,"\'");
+      return '<div onclick="selectInventoryForPick(JSON.parse(''+safeInv+''))" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#060c18;border:1px solid #1a2332;border-radius:9px;cursor:pointer;" onmouseover="this.style.borderColor='#22c55e'" onmouseout="this.style.borderColor='#1a2332'">'
+        +'<div style="flex:1;min-width:0;"><div style="font-size:13px;font-weight:600;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+(inv.title||'—')+'</div>'
+        +'<div style="font-size:11px;color:#475569;margin-top:2px;">'+(inv.location||'')+(inv.custom_sku?' · '+inv.custom_sku:'')+'</div></div>'
+        +'<div style="font-size:12px;color:#22c55e;font-weight:700;flex-shrink:0;">Add</div></div>';
+    }).join('');
+  } catch(e) {}
+}
+
+function selectInventoryForPick(inv) {
+  var t=document.getElementById('mp-title'); if(t) t.value=inv.title||'';
+  var l=document.getElementById('mp-location'); if(l) l.value=inv.location||'';
+  var s=document.getElementById('mp-sku'); if(s) s.value=inv.sku||'';
+  var r=document.getElementById('manual-pick-results'); if(r) r.innerHTML='';
+  var ms=document.getElementById('manual-pick-search'); if(ms) ms.value=inv.title||'';
+}
+
+function addManualPickItem() {
+  var title = (document.getElementById('mp-title')||{}).value||'';
+  title = title.trim();
+  if (!title) { toast('Enter an item title','error'); return; }
+  _pickItems.unshift({
+    id: 'manual-'+Date.now(), title: title,
+    order_num: (document.getElementById('mp-order')||{}).value||'',
+    source: 'manual', photo_url: '',
+    location: (document.getElementById('mp-location')||{}).value||'',
+    sku: (document.getElementById('mp-sku')||{}).value||'',
+    price: 0, buyer: '', picked: false,
+  });
+  document.getElementById('manual-pick-modal').style.display = 'none';
+  renderPickGrid();
+  toast('Added to pick list ✓','success');
+}
 
 // ── SALES TAB ──────────────────────────────────────────────── //
 var salesPeriod = 'month';
