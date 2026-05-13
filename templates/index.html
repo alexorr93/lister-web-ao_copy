@@ -2547,6 +2547,10 @@ function renderTileRow(l, idx) {
           <div class="qty-num" id="qty-${tid}" style="font-size:18px;font-weight:700;color:#e2e8f0;min-width:36px;text-align:center;">${qty}</div>
           <button style="width:40px;height:44px;background:transparent;border:none;color:#4ade80;cursor:pointer;font-size:24px;font-weight:900;display:flex;align-items:center;justify-content:center;" onclick="changeQty('${tid}',1)">+</button>
         </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+          <span style="color:#475569;font-size:11px;font-weight:600;letter-spacing:0.05em;">SKU</span>
+          <input class="tile-sku-input" type="text" value="${(l.sku||'').replace(/"/g,'&quot;')}" data-id="${tid}" placeholder="—" style="width:90px;background:#060810;border:1px solid #1a2332;border-radius:6px;color:#94a3b8;font-size:13px;font-family:monospace;outline:none;padding:6px 8px;" title="SKU / internal reference"/>
+        </div>
         <button style="font-size:15px;padding:10px 18px;border-radius:8px;border:1px solid #1a2332;background:#0a0f18;color:#4285F4;cursor:pointer;font-family:inherit;font-weight:700;flex-shrink:0;" onclick="window.open('https://www.google.com/search?q='+encodeURIComponent(stripSearchTitle(document.querySelector('.tile-title-input[data-id=&quot;${tid}&quot;]').value)),'popupwin','noopener,width=1200,height=800')">G Google</button>
         <button style="font-size:15px;padding:10px 18px;border-radius:8px;border:1px solid #1a2332;background:#0a0f18;cursor:pointer;font-family:inherit;font-weight:700;flex-shrink:0;" onclick="window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(stripSearchTitle(document.querySelector('.tile-title-input[data-id=&quot;${tid}&quot;]').value))+'&LH_Sold=1&LH_Complete=1','popupwin','noopener,width=1200,height=800')"><span style="color:#e53238;">e</span><span style="color:#0064d2;">B</span><span style="color:#f5af02;">a</span><span style="color:#86b817;">y</span></button>
         <button class="tile-rescan" onclick="rescanItem('${tid}')" style="font-size:15px;font-weight:700;padding:10px 18px;border-radius:8px;border:1px solid #1a2332;background:#0a0f18;color:#94a3b8;cursor:pointer;font-family:inherit;font-weight:700;flex-shrink:0;margin-left:auto;" onclick="openModal('${tid}')">Edit</button>
@@ -2683,6 +2687,9 @@ function initTileListeners() {
     }
     if (el.classList.contains('tile-price-input')) {
       updateField(el.dataset.id, 'price', parseFloat(el.value));
+    }
+    if (el.classList.contains('tile-sku-input')) {
+      updateField(el.dataset.id, 'sku', el.value.trim());
     }
   }, true);
   document.getElementById('tile-grid').addEventListener('click', function(e) {
