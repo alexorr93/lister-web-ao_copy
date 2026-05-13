@@ -697,6 +697,115 @@ async def dashboard(request: Request):
 
 # ── API: LISTINGS ─────────────────────────────────────────────── #
 
+# ── PLAN & SCAN HELPERS ─────────────────────────────────────────
+
+def get_business_plan(business_id: str) -> dict:
+    from datetime import datetime, timezone
+    try:
+        res = supabase.table("businesses").select(
+            "plan,plan_expires_at,monthly_scan_limit,monthly_scans_used,monthly_reset_at,purchased_scans,auto_topup_enabled,auto_topup_threshold,auto_topup_pack,scan_count,scan_limit"
+        ).eq("id", business_id).limit(1).execute()
+        if not res.data:
+            return {"plan":"free","is_pro":False,"monthly_limit":150,"monthly_used":0,"monthly_remaining":150,"purchased_scans":0,"total_remaining":150,"auto_topup_enabled":False,"auto_topup_threshold":50,"auto_topup_pack":"500"}
+        b = res.data[0]
+        now = datetime.now(timezone.utc)
+        reset_at = b.get("monthly_reset_at")
+        if reset_at:
+            try:
+                reset_dt = datetime.fromisoformat(str(reset_at).replace("Z","+00:00"))
+                if (now - reset_dt).days >= 30:
+                    supabase.table("businesses").update({"monthly_scans_used":0,"monthly_reset_at":now.isoformat()}).eq("id",business_id).execute()
+                    b["monthly_scans_used"] = 0
+            except Exception: pass
+        plan = b.get("plan") or "free"
+        if plan == "pro" and b.get("plan_expires_at"):
+            try:
+                exp = datetime.fromisoformat(str(b["plan_expires_at"]).replace("Z","+00:00"))
+                if now > exp:
+                    plan = "free"
+                    supabase.table("businesses").update({"plan":"free"}).eq("id",business_id).execute()
+            except Exception: pass
+        monthly_limit = b.get("monthly_scan_limit") or (1000 if plan=="pro" else 150)
+        monthly_used = b.get("monthly_scans_used") or 0
+        purchased = b.get("purchased_scans") or 0
+        monthly_remaining = max(0, monthly_limit - monthly_used)
+        return {"plan":plan,"is_pro":plan=="pro","monthly_limit":monthly_limit,"monthly_used":monthly_used,"monthly_remaining":monthly_remaining,"purchased_scans":purchased,"total_remaining":monthly_remaining+purchased,"auto_topup_enabled":b.get("auto_topup_enabled") or False,"auto_topup_threshold":b.get("auto_topup_threshold") or 50,"auto_topup_pack":b.get("auto_topup_pack") or "500"}
+    except Exception as e:
+        print(f"[get_business_plan] error: {e}")
+        return {"plan":"free","is_pro":False,"monthly_limit":150,"monthly_used":0,"monthly_remaining":150,"purchased_scans":0,"total_remaining":150}
+
+
+def consume_scan(business_id: str) -> bool:
+    info = get_business_plan(business_id)
+    if info["total_remaining"] <= 0:
+        return False
+    if info["monthly_remaining"] > 0:
+        supabase.table("businesses").update({"monthly_scans_used": info["monthly_used"]+1}).eq("id",business_id).execute()
+    else:
+        supabase.table("businesses").update({"purchased_scans": info["purchased_scans"]-1}).eq("id",business_id).execute()
+    return True
+
+
+SCAN_PACK_PRICES = {"100":{"scans":100,"price":20.00},"250":{"scans":250,"price":40.00},"500":{"scans":500,"price":60.00},"1000":{"scans":1000,"price":80.00}}
+
+
+@app.get("/api/plan")
+async def get_plan_info(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Not authenticated")
+    try:
+        return get_business_plan(business_id)
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/plan/add-scans")
+async def add_scan_pack(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Not authenticated")
+    try:
+        body = await request.json()
+        pack = str(body.get("pack","500"))
+        if pack not in SCAN_PACK_PRICES:
+            raise HTTPException(400, "Invalid pack")
+        scans_to_add = SCAN_PACK_PRICES[pack]["scans"]
+        info = get_business_plan(business_id)
+        supabase.table("businesses").update({"purchased_scans": info["purchased_scans"]+scans_to_add}).eq("id",business_id).execute()
+        return {"ok":True,"added":scans_to_add}
+    except HTTPException: raise
+    except Exception as e: raise HTTPException(500, str(e))
+
+
+@app.post("/api/plan/upgrade")
+async def upgrade_plan(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Not authenticated")
+    try:
+        from datetime import datetime, timezone, timedelta
+        body = await request.json()
+        plan = body.get("plan","pro")
+        months = int(body.get("months",1))
+        expires = (datetime.now(timezone.utc)+timedelta(days=30*months)).isoformat()
+        supabase.table("businesses").update({"plan":plan,"plan_expires_at":expires,"monthly_scan_limit":1000 if plan=="pro" else 150}).eq("id",business_id).execute()
+        return {"ok":True,"plan":plan}
+    except Exception as e: raise HTTPException(500, str(e))
+
+
+@app.post("/api/plan/auto-topup")
+async def set_auto_topup(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Not authenticated")
+    try:
+        body = await request.json()
+        supabase.table("businesses").update({"auto_topup_enabled":bool(body.get("enabled",False)),"auto_topup_threshold":int(body.get("threshold",50)),"auto_topup_pack":str(body.get("pack","500"))}).eq("id",business_id).execute()
+        return {"ok":True}
+    except Exception as e: raise HTTPException(500, str(e))
+
+
 @app.get("/api/listings")
 async def get_listings(request: Request):
     business_id = require_auth(request)
@@ -5114,8 +5223,12 @@ async def get_account_info(request: Request):
             raise HTTPException(404, "Not found")
         b = biz.data[0]
         # Infer plan from scan_limit
-        plan_info = get_business_plan(business_id)
-        limit = plan_info["monthly_limit"]
+        try:
+            plan_info = get_business_plan(business_id)
+            limit = plan_info["monthly_limit"]
+        except Exception:
+            plan_info = {"plan":"free","monthly_limit":150,"monthly_used":0}
+            limit = 150
         plan_map = {25: "Free Trial", 100: "Starter", 500: "Growth", 1000: "Pro"}
         plan = plan_map.get(limit, "Custom")
         return {
