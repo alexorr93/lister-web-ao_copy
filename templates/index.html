@@ -122,7 +122,7 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 
   #exp-chart-container { grid-template-columns: 1fr !important; }
   #exp-summary-cards { grid-template-columns: 1fr 1fr !important; }
-  #exp-hero-row { grid-template-columns: repeat(3,1fr) !important; }
+  #exp-hero-row { grid-template-columns: 1fr !important; }
   #exp-main-grid { grid-template-columns: 1fr !important; }
 
   .home-right-col { display: none !important; }
@@ -1683,21 +1683,28 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
 
       <!-- Hero row: total + quick stats -->
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;" id="exp-hero-row">
-        <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:10px;padding:18px 20px;">
-          <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:0.08em;font-weight:600;margin-bottom:8px;" id="exp-hero-period">Total spend</div>
-          <div style="font-size:26px;font-weight:700;letter-spacing:-0.02em;color:#f0fdf4;" id="exp-hero-total">$0.00</div>
-          <div style="font-size:12px;color:#475569;margin-top:5px;" id="exp-hero-meta">0 transactions</div>
+      <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-bottom:20px;" id="exp-hero-row">
+        <div style="background:linear-gradient(135deg,rgba(34,197,94,0.08),rgba(6,182,212,0.05));border:1px solid rgba(34,197,94,0.2);border-radius:14px;padding:24px;position:relative;overflow:hidden;">
+          <div style="position:absolute;top:-50px;right:-50px;width:200px;height:200px;background:radial-gradient(circle,rgba(34,197,94,0.18),transparent 60%);pointer-events:none;"></div>
+          <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:600;margin-bottom:8px;position:relative;" id="exp-hero-period">Total spend</div>
+          <div style="font-size:42px;font-weight:700;line-height:1;letter-spacing:-0.03em;position:relative;" id="exp-hero-total">$0.00</div>
+          <div style="font-size:16px;color:var(--muted);margin-top:14px;position:relative;" id="exp-hero-meta">0 transactions</div>
         </div>
-        <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:10px;padding:18px 20px;">
-          <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:0.08em;font-weight:600;margin-bottom:8px;">Cost of goods</div>
-          <div style="font-size:26px;font-weight:700;letter-spacing:-0.02em;color:#f0fdf4;" id="exp-hero-cogs">$0.00</div>
-          <div style="font-size:12px;color:#475569;margin-top:5px;">of total spend</div>
-        </div>
-        <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:10px;padding:18px 20px;">
-          <div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:0.08em;font-weight:600;margin-bottom:8px;">Tax-deductible</div>
-          <div style="font-size:26px;font-weight:700;letter-spacing:-0.02em;color:#f0fdf4;" id="exp-hero-deduct">$0.00</div>
-          <div style="font-size:12px;color:#475569;margin-top:5px;">eligible expenses</div>
+        <div style="display:grid;grid-template-rows:1fr 1fr;gap:8px;">
+          <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:10px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:600;">Cost of goods</div>
+              <div style="font-size:18px;font-weight:700;margin-top:2px;" id="exp-hero-cogs">$0.00</div>
+            </div>
+            <div style="width:28px;height:28px;border-radius:7px;background:rgba(239,68,68,0.12);color:#f87171;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;">$</div>
+          </div>
+          <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:10px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <div style="font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:600;">Tax-deductible</div>
+              <div style="font-size:18px;font-weight:700;margin-top:2px;" id="exp-hero-deduct">$0.00</div>
+            </div>
+            <div style="width:28px;height:28px;border-radius:7px;background:rgba(168,85,247,0.12);color:#c084fc;display:flex;align-items:center;justify-content:center;font-size:15px;">✓</div>
+          </div>
         </div>
       </div>
 
@@ -1710,17 +1717,21 @@ select.field-input { background: #fff; color: #0f172a; }
           </div>
           <div id="exp-cat-list"></div>
         </div>
-        <div style="background:#0a0f18;border:1px solid #1a2332;border-radius:10px;padding:20px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-            <span style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:0.1em;font-weight:700;">Distribution</span>
-            <span id="exp-chart-period-tag" style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:0.08em;">--</span>
+        <div style="background:linear-gradient(180deg,rgba(74,222,128,0.025),rgba(255,255,255,0.01));border:1px solid #1a2332;border-radius:14px;padding:20px;position:relative;overflow:hidden;">
+          <div style="position:absolute;inset:0;background-image:linear-gradient(rgba(74,222,128,0.018) 1px, transparent 1px),linear-gradient(90deg, rgba(74,222,128,0.018) 1px, transparent 1px);background-size:18px 18px;pointer-events:none;"></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;position:relative;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <div style="width:6px;height:6px;border-radius:50%;background:#4ade80;box-shadow:0 0 8px rgba(74,222,128,0.6);"></div>
+              <span style="font-family:'DM Mono',monospace;font-size:11px;color:#4ade80;letter-spacing:0.18em;text-transform:uppercase;font-weight:700;">// distribution</span>
+            </div>
+            <span id="exp-chart-period-tag" style="font-family:'DM Mono',monospace;font-size:10px;color:#64748b;letter-spacing:0.12em;text-transform:uppercase;">--</span>
           </div>
           <div style="display:flex;align-items:center;justify-content:center;padding:4px 0;position:relative;">
-            <svg id="exp-chart-svg" viewBox="0 0 220 220" style="width:200px;height:200px;display:block;"></svg>
+            <svg id="exp-chart-svg" viewBox="0 0 220 220" style="width:220px;height:220px;display:block;"></svg>
             <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;">
-              <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:0.2em;font-weight:600;margin-bottom:2px;">total</div>
-              <div id="exp-chart-total" style="font-size:26px;font-weight:700;letter-spacing:-0.02em;color:#f0fdf4;line-height:1;">$0</div>
-              <div id="exp-chart-categories-count" style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:0.15em;margin-top:6px;font-weight:600;">0 categories</div>
+              <div style="font-family:'DM Mono',monospace;font-size:9px;color:#475569;text-transform:uppercase;letter-spacing:0.25em;font-weight:600;margin-bottom:2px;">total</div>
+              <div id="exp-chart-total" style="font-family:'Instrument Sans',sans-serif;font-size:30px;font-weight:800;letter-spacing:-0.02em;color:#f0f4f8;line-height:1;">$0</div>
+              <div id="exp-chart-categories-count" style="font-family:'DM Mono',monospace;font-size:9px;color:#475569;text-transform:uppercase;letter-spacing:0.18em;margin-top:6px;font-weight:600;">0 categories</div>
             </div>
           </div>
         </div>
@@ -1741,12 +1752,12 @@ select.field-input { background: #fff; color: #0f172a; }
         <div style="overflow-x:auto;">
           <table style="width:100%;border-collapse:collapse;font-size:15px;min-width:0;">
             <thead>
-              <tr>
-                <th onclick="sortExpenses('merchant')" style="padding:10px 20px;text-align:left;font-size:11px;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;cursor:pointer;user-select:none;border-bottom:1px solid #1a2332;">Merchant <span id="exp-sort-merchant">↕</span></th>
-                <th onclick="sortExpenses('date')" style="padding:10px 20px;text-align:left;font-size:11px;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;width:100px;cursor:pointer;user-select:none;border-bottom:1px solid #1a2332;">Date <span id="exp-sort-date">↕</span></th>
-                <th onclick="sortExpenses('category')" style="padding:10px 20px;text-align:left;font-size:11px;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;width:160px;cursor:pointer;user-select:none;border-bottom:1px solid #1a2332;">Category <span id="exp-sort-category">↕</span></th>
-                <th onclick="sortExpenses('amount')" style="padding:10px 20px;text-align:right;font-size:11px;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;width:100px;cursor:pointer;user-select:none;border-bottom:1px solid #1a2332;">Amount <span id="exp-sort-amount">↕</span></th>
-                <th style="padding:10px 20px;width:40px;border-bottom:1px solid #1a2332;"></th>
+              <tr style="background:rgba(0,0,0,0.15);">
+                <th onclick="sortExpenses('merchant')" style="padding:14px 24px;text-align:left;font-size:16px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.08em;cursor:pointer;user-select:none;border-bottom:1px solid var(--border);">Merchant <span id="exp-sort-merchant">↕</span></th>
+                <th onclick="sortExpenses('date')" style="padding:14px 24px;text-align:left;font-size:16px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.08em;width:120px;cursor:pointer;user-select:none;border-bottom:1px solid var(--border);">Date <span id="exp-sort-date">↕</span></th>
+                <th onclick="sortExpenses('category')" style="padding:14px 24px;text-align:left;font-size:16px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.08em;width:170px;cursor:pointer;user-select:none;border-bottom:1px solid var(--border);">Category <span id="exp-sort-category">↕</span></th>
+                <th onclick="sortExpenses('amount')" style="padding:14px 24px;text-align:right;font-size:16px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.08em;width:110px;cursor:pointer;user-select:none;border-bottom:1px solid var(--border);">Amount <span id="exp-sort-amount">↕</span></th>
+                <th style="padding:14px 24px;width:50px;border-bottom:1px solid var(--border);"></th>
               </tr>
             </thead>
             <tbody id="exp-tbody"></tbody>
