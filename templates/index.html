@@ -6955,7 +6955,7 @@ async function loadMileage() {
     var deduction = d.deduction || 0;
     var bar = document.getElementById('mileage-summary-bar');
     var txt = document.getElementById('mileage-summary-text');
-    if (bar) bar.style.display = 'grid';
+    if (bar) bar.style.display = 'flex';
     if (txt) txt.textContent = total.toFixed(1) + ' mi';
     var sub = document.getElementById('mileage-summary-sub');
     if (sub) sub.textContent = 'logged this year · $' + deduction.toFixed(2) + ' deduction at IRS $' + d.irs_rate + '/mi';
