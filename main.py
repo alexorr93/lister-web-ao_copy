@@ -2089,6 +2089,11 @@ async def export_ebay_csv(request: Request):
     # Cap at 45
     sorted_aspects = sorted_aspects[:45]
     dynamic_aspect_names = [a["name"] for a in sorted_aspects]
+    # Always include these fallback aspects even if taxonomy API fails
+    fallback_aspects = ["Type","Brand","MPN","Model","Color","Department","Size","Style","Material"]
+    for fa in fallback_aspects:
+        if fa not in dynamic_aspect_names:
+            dynamic_aspect_names.append(fa)
     dynamic_cols = [f"C:{name}" for name in dynamic_aspect_names]
     headers = base_headers + dynamic_cols
 
