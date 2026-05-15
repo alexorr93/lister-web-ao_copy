@@ -759,6 +759,20 @@ select.field-input { background: #fff; color: #0f172a; }
         <div id="home-batches-list" style="display:none;"></div>
       </div>
 
+      <!-- MILEAGE TILE -->
+      <div id="home-mileage-tile" onclick="document.querySelector('.nav-btn[data-tab=expenses]').click()" style="display:none;background:#fbbf24;border-radius:14px;padding:18px 24px;margin-top:14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:16px;">
+        <div style="display:flex;align-items:center;gap:16px;">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#7c3c00" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <div>
+            <div style="font-size:22px;font-weight:800;color:#1a0a00;letter-spacing:-0.02em;line-height:1;" id="home-mileage-text">0.0 mi logged</div>
+            <div style="font-size:13px;color:#7c3c00;margin-top:3px;" id="home-mileage-sub">calculating deduction...</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <div onclick="event.stopPropagation();document.querySelector('.nav-btn[data-tab=expenses]').click();setTimeout(openMileageModal,200);" style="background:#1a0a00;color:#fbbf24;border:none;border-radius:10px;padding:10px 16px;font-size:14px;font-weight:800;cursor:pointer;">+ Log miles</div>
+        </div>
+      </div>
+
     </div>
 
     <style>
@@ -2351,6 +2365,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     if (tab === 'dashboard') { loadScannerBatches(); }
     if (tab === 'notes') { if (typeof loadIntake === 'function') loadIntake(); }
     if (tab === 'expenses') { if (typeof loadExpenses === 'function') loadExpenses(); if (typeof loadMileage === 'function') loadMileage(); }
+    if (tab === 'home') { if (typeof loadHomeMileage === 'function') loadHomeMileage(); }
     if (tab === 'fastscan') { if (typeof checkMultiScanTier === 'function') checkMultiScanTier(); }
     if (tab === 'auction')   loadAuctionSessions();
     if (tab === 'settings')  { loadSettings(); loadAccountInfo(); loadShopifyStatus(); loadEbayOAuthStatus(); loadCostTrackingState(); loadPlanInfo(); }
@@ -6968,6 +6983,25 @@ async function saveItemSpecifics() {
 // ── MILEAGE TRACKER ─────────────────────────────────────────────
 var _mileageLogs = [];
 var _mileageYear = new Date().getFullYear();
+
+async function loadHomeMileage() {
+  try {
+    var r = await fetch('/api/mileage?year=' + new Date().getFullYear(), {credentials:'include'});
+    if (!r.ok) return;
+    var d = await r.json();
+    var logs = d.logs || [];
+    var total = logs.reduce(function(s, l) { return s + (parseFloat(l.miles) || 0); }, 0);
+    var deduction = total * (parseFloat(d.irs_rate) || 0.67);
+    var tile = document.getElementById('home-mileage-tile');
+    if (tile && total > 0) {
+      tile.style.display = 'flex';
+      var txt = document.getElementById('home-mileage-text');
+      if (txt) txt.textContent = total.toFixed(1) + ' mi logged';
+      var sub = document.getElementById('home-mileage-sub');
+      if (sub) sub.textContent = '$' + deduction.toFixed(2) + ' IRS deduction · ' + new Date().getFullYear();
+    }
+  } catch(e) {}
+}
 
 async function loadMileage() {
   try {
