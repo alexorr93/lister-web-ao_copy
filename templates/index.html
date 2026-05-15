@@ -3726,7 +3726,9 @@ function openModal(id) {
   _setVal('modal-weight-oz-input', l.weight_oz || '');
   _setVal('modal-qty-input', l.quantity || 1);
   _setVal('modal-cat-input', l.ebay_category_id || '');
-  _setText('modal-cat-name', l.ebay_category || '—');
+  _setVal('modal-cat-search', l.ebay_category || '');
+  var catNameEl = document.getElementById('modal-cat-name');
+  if (catNameEl) catNameEl.textContent = l.ebay_category_id ? 'ID: ' + l.ebay_category_id : '';
   // Load item specifics
   var specs = l.ebay_item_specifics || {};
   var specSection = document.getElementById('modal-specifics-section');
