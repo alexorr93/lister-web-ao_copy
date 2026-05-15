@@ -3022,9 +3022,7 @@ function renderTiles() {
   const showCost = window._costTrackingEnabled !== false;
   const batchLine = listings.length + ' items · ' + selected.size + ' selected · $' + totalListed.toFixed(0) + ' listed' + (showCost ? ' · $' + totalCost.toFixed(0) + ' cost' : '');
   document.getElementById('batch-summary').textContent = batchLine;
-  var si = document.getElementById('stat-items'); if(si) si.textContent = listings.length;
-  var sv = document.getElementById('stat-value'); if(sv) sv.textContent = '$' + totalListed.toFixed(0);
-  var su = document.getElementById('stat-units'); if(su) su.textContent = totalUnits;
+  try { var si = document.getElementById('stat-items'); if(si) si.textContent = listings.length; var sv = document.getElementById('stat-value'); if(sv) sv.textContent = '$' + totalListed.toFixed(0); var su = document.getElementById('stat-units'); if(su) su.textContent = totalUnits; } catch(e) {}
 
   if (scanView === 'list') {
     grid.style.display = 'block';
@@ -3716,7 +3714,7 @@ function openModal(id) {
   _setText('modal-title-count', (l.title||'').length + '/80');
   var _sub=document.getElementById('modal-subtitle-input'); if(_sub) _sub.value = l.subtitle || '';
   _setVal('modal-cond-input', l.condition || 'used');
-  _setVal('modal-sku-input', l.barcode_id || '');
+  _setVal('modal-sku-input', l.sku || l.barcode_id || '');
   _setVal('modal-desc-input', l.description || '');
   _setVal('modal-cond-notes-input', l.condition_notes || '');
 
@@ -3782,6 +3780,7 @@ async function saveModal() {
         price:       parseFloat(document.getElementById('modal-price-input').value) || 0,
         condition:   document.getElementById('modal-cond-input').value,
         barcode_id:  document.getElementById('modal-sku-input').value.trim(),
+        sku: document.getElementById('modal-sku-input').value.trim(),
         subtitle:    document.getElementById('modal-subtitle-input').value.trim(),
         condition_notes: document.getElementById('modal-cond-notes-input').value.trim(),
         listing_type:    document.getElementById('modal-format-input').value,
