@@ -4695,7 +4695,7 @@ function openInvEditModal(id) {
   document.getElementById('inv-edit-qty').value = it.quantity || 1;
   document.getElementById('inv-edit-location').value = it.storage_location || '';
   document.getElementById('inv-edit-category').value = it.general_category || 'Other';
-  document.getElementById('inv-edit-barcode').value = it.barcode_id || '(no barcode yet)';
+  var invSkuEl = document.getElementById('inv-edit-sku'); if(invSkuEl) invSkuEl.value = it.sku || it.barcode_id || '';
   document.getElementById('inv-edit-sold-price').value = it.sold_price ? Number(it.sold_price).toFixed(2) : '';
   document.getElementById('inv-edit-sold-date').value = it.sold_date || '';
   document.getElementById('inv-edit-sold-location').value = it.sold_location || '';
@@ -4724,6 +4724,7 @@ async function saveInvItem() {
     quantity: parseInt(document.getElementById('inv-edit-qty').value) || 1,
     storage_location: document.getElementById('inv-edit-location').value.trim(),
     general_category: document.getElementById('inv-edit-category').value,
+    sku: (document.getElementById('inv-edit-sku') || {}).value?.trim() || null,
   };
   if (status === 'sold') {
     const sp = parseFloat(document.getElementById('inv-edit-sold-price').value);
@@ -8808,8 +8809,8 @@ window.addEventListener('load', function() {
           </select>
         </div>
         <div>
-          <div class="acct-field-label">Barcode ID</div>
-          <input id="inv-edit-barcode" class="acct-input" readonly style="color:var(--muted);"/>
+          <div class="acct-field-label">Custom SKU</div>
+          <input id="inv-edit-sku" class="acct-input" placeholder="e.g. BATCH-001"/>
         </div>
       </div>
       <div style="display:flex;gap:8px;">
