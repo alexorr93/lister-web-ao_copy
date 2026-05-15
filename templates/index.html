@@ -2156,12 +2156,12 @@ select.field-input { background: #fff; color: #0f172a; }
           </div>
 
           <!-- eBay Category -->
-          <div style="margin-bottom:14px;">
+          <div style="margin-bottom:14px;position:relative;">
             <div class="field-label">eBay Category</div>
-            <div style="display:flex;gap:6px;align-items:center;">
-              <input type="text" class="field-input" id="modal-cat-input" placeholder="ID e.g. 15709" oninput="modalDirty=true;updateCategoryDisplay(this.value)" style="font-family:monospace;flex:0 0 110px;"/>
-              <div id="modal-cat-name" style="flex:1;padding:9px 11px;background:#060c18;border:1px solid #1e2a3a;border-radius:8px;font-size:13px;color:#64748b;">—</div>
-            </div>
+            <input type="text" class="field-input" id="modal-cat-search" placeholder="Search category name..." oninput="filterEbayCategories(this.value)" autocomplete="off" style="font-size:15px;"/>
+            <input type="hidden" id="modal-cat-input"/>
+            <div id="modal-cat-name" style="font-size:12px;color:#475569;margin-top:4px;"></div>
+            <div id="modal-cat-dropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:#0d1117;border:1px solid #1a2332;border-radius:8px;max-height:200px;overflow-y:auto;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,0.5);"></div>
           </div>
 
           <!-- Item Specifics -->
@@ -3154,6 +3154,46 @@ function initTileListeners() {
     }
   });
 }
+
+
+// ── EBAY CATEGORY SEARCH ──────────────────────────────────────
+var _ebayCats = null;
+async function loadEbayCategories() {
+  if (_ebayCats) return _ebayCats;
+  try {
+    var r = await fetch('/static/ebay_categories.json');
+    _ebayCats = await r.json();
+  } catch(e) { _ebayCats = []; }
+  return _ebayCats;
+}
+async function filterEbayCategories(q) {
+  modalDirty = true;
+  var dd = document.getElementById('modal-cat-dropdown');
+  if (!q || q.length < 2) { dd.style.display = 'none'; return; }
+  var cats = await loadEbayCategories();
+  var ql = q.toLowerCase();
+  var matches = cats.filter(function(c) { return c.name.toLowerCase().includes(ql) || c.path.toLowerCase().includes(ql); }).slice(0, 30);
+  if (!matches.length) { dd.style.display = 'none'; return; }
+  dd.innerHTML = matches.map(function(c) {
+    return '<div onclick="selectEbayCategory(\'' + c.id + '\',\'' + c.name.replace(/'/g,"\\'") + '\')" style="padding:10px 14px;cursor:pointer;font-size:14px;color:#e2e8f0;border-bottom:1px solid #1a2332;" onmouseover="this.style.background=\'#111827\'" onmouseout="this.style.background=\'\'">' +
+      '<span style="font-weight:600;">' + c.name + '</span>' +
+      '<span style="color:#475569;font-size:12px;margin-left:8px;">' + c.id + '</span>' +
+      (c.path !== c.name ? '<div style="font-size:11px;color:#334155;margin-top:2px;">' + c.path + '</div>' : '') +
+    '</div>';
+  }).join('');
+  dd.style.display = 'block';
+}
+function selectEbayCategory(id, name) {
+  document.getElementById('modal-cat-input').value = id;
+  document.getElementById('modal-cat-search').value = name;
+  document.getElementById('modal-cat-name').textContent = 'ID: ' + id;
+  document.getElementById('modal-cat-dropdown').style.display = 'none';
+  modalDirty = true;
+}
+document.addEventListener('click', function(e) {
+  var dd = document.getElementById('modal-cat-dropdown');
+  if (dd && !dd.contains(e.target) && e.target.id !== 'modal-cat-search') dd.style.display = 'none';
+});
 
 async function updateField(id, field, value) {
   try {
