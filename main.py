@@ -5837,6 +5837,7 @@ def add_to_inventory(business_id: str, listing: dict):
             "quantity": listing.get("quantity") or 1,
             "ebay_category": listing.get("ebay_category"),
             "general_category": derive_general_category(listing.get("ebay_category", "")),
+            "sku": listing.get("sku") or None,
         }
         result = supabase.table("inventory").insert(new_inv).execute()
         return result.data[0]["id"] if result.data else None
