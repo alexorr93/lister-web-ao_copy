@@ -3008,7 +3008,7 @@ function renderTiles() {
   if (!listings.length) {
     grid.innerHTML = '';
     empty.style.display = 'block';
-    document.getElementById('batch-summary').textContent = '0 items';
+    var _bs = document.getElementById('batch-summary'); if(_bs) _bs.textContent = '0 items';
     var si = document.getElementById('stat-items'); if(si) si.textContent = '0';
     var sv = document.getElementById('stat-value'); if(sv) sv.textContent = '$0';
     var su = document.getElementById('stat-units'); if(su) su.textContent = '0';
@@ -3021,7 +3021,7 @@ function renderTiles() {
   listings.forEach(l => { totalListed += (l.price||0); totalCost += (l.cost||0); totalUnits += (parseInt(l.quantity)||1); });
   const showCost = window._costTrackingEnabled !== false;
   const batchLine = listings.length + ' items · ' + selected.size + ' selected · $' + totalListed.toFixed(0) + ' listed' + (showCost ? ' · $' + totalCost.toFixed(0) + ' cost' : '');
-  document.getElementById('batch-summary').textContent = batchLine;
+  var _bs2 = document.getElementById('batch-summary'); if(_bs2) _bs2.textContent = batchLine;
   try { var si = document.getElementById('stat-items'); if(si) si.textContent = listings.length; var sv = document.getElementById('stat-value'); if(sv) sv.textContent = '$' + totalListed.toFixed(0); var su = document.getElementById('stat-units'); if(su) su.textContent = totalUnits; } catch(e) {}
 
   if (scanView === 'list') {
