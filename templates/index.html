@@ -901,20 +901,32 @@ select.field-input { background: #fff; color: #0f172a; }
     </div>
 
     <!-- DESKTOP toolbar -->
-    <div class="batch-toolbar-desktop" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:8px;flex-wrap:wrap;padding:14px 18px;background:#070a10;border:1px solid #1a2332;border-radius:12px;">
-      <div style="display:flex;align-items:baseline;gap:12px;">
-        <div style="font-size:16px;font-weight:800;color:var(--text);letter-spacing:-0.01em;">Current Batch</div>
-        <div style="font-size:13px;color:var(--muted);" id="batch-summary">—</div>
+    <!-- Stat cards -->
+    <div class="batch-toolbar-desktop" style="margin-bottom:12px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;">
+        <div style="background:#0d1117;border:1.5px solid #3b82f6;border-radius:12px;padding:18px 22px;">
+          <div style="font-size:34px;font-weight:800;color:#f0fdf4;letter-spacing:-0.02em;" id="stat-items">0</div>
+          <div style="font-size:12px;color:#475569;text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-top:4px;">Items</div>
+        </div>
+        <div style="background:#0d1117;border:1.5px solid #22c55e;border-radius:12px;padding:18px 22px;">
+          <div style="font-size:34px;font-weight:800;color:#f0fdf4;letter-spacing:-0.02em;" id="stat-value">$0</div>
+          <div style="font-size:12px;color:#475569;text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-top:4px;">Batch value</div>
+        </div>
+        <div style="background:#0d1117;border:1.5px solid #fbbf24;border-radius:12px;padding:18px 22px;">
+          <div style="font-size:34px;font-weight:800;color:#f0fdf4;letter-spacing:-0.02em;" id="stat-units">0</div>
+          <div style="font-size:12px;color:#475569;text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-top:4px;">Total units</div>
+        </div>
       </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-        <select id="dash-sort" onchange="changeDashSort()" style="background:#0a0f18;border:1px solid #1a2332;border-radius:6px;color:var(--muted);font-size:15px;padding:5px 8px;cursor:pointer;font-family:inherit;outline:none;">
-          <option value="batch_desc">Newest first</option>
-          <option value="batch_asc">Oldest first</option>
-          <option value="price_desc">Price h→l</option>
-          <option value="price_asc">Price l→h</option>
-          <option value="profit_desc">Profit h→l</option>
-          <option value="profit_asc">Profit l→h</option>
-        </select>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:#0d1117;border:1px solid #1a2332;border-radius:12px;">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <select id="dash-sort" onchange="changeDashSort()" style="display:none;">
+            <option value="batch_desc">Newest first</option>
+            <option value="batch_asc">Oldest first</option>
+            <option value="price_desc">Price h→l</option>
+            <option value="price_asc">Price l→h</option>
+            <option value="profit_desc">Profit h→l</option>
+            <option value="profit_asc">Profit l→h</option>
+          </select>
         <div style="display:flex;background:#0a0f18;border:1px solid #1a2332;border-radius:6px;overflow:hidden;">
           <button id="scan-view-grid" onclick="setScanView('grid')" style="font-size:13px;padding:6px 12px;border:none;background:var(--accent);color:#052e16;cursor:pointer;font-family:inherit;font-weight:700;">Grid</button>
           <button id="scan-view-list" onclick="setScanView('list')" style="font-size:13px;padding:6px 12px;border:none;background:transparent;color:var(--muted);cursor:pointer;font-family:inherit;">List</button>
@@ -945,7 +957,11 @@ select.field-input { background: #fff; color: #0f172a; }
             <button onclick="window.location.href='/api/export/ebay-csv';closeSubmitDropdown();" style="display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;color:var(--text);font-size:16px;padding:8px 10px;cursor:pointer;font-family:inherit;text-align:left;border-radius:6px;"><span style="display:inline-block;width:7px;height:7px;background:#06b6d4;border-radius:50%;"></span>Export eBay CSV</button>
           </div>
         </div>
-        <button class="btn btn-danger" style="font-size:15px;padding:5px 10px;" onclick="confirmClearBatch()">Clear</button>
+        </div>
+        <button onclick="confirmClearBatch()" style="display:flex;align-items:center;gap:7px;padding:9px 16px;border-radius:8px;border:1px solid rgba(239,68,68,0.4);background:rgba(239,68,68,0.08);color:#f87171;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+          Clear Batch
+        </button>
       </div>
     </div>
 
@@ -2993,16 +3009,22 @@ function renderTiles() {
     grid.innerHTML = '';
     empty.style.display = 'block';
     document.getElementById('batch-summary').textContent = '0 items';
+    var si = document.getElementById('stat-items'); if(si) si.textContent = '0';
+    var sv = document.getElementById('stat-value'); if(sv) sv.textContent = '$0';
+    var su = document.getElementById('stat-units'); if(su) su.textContent = '0';
     return;
   }
   empty.style.display = 'none';
 
   // Update batch summary line
-  let totalListed = 0, totalCost = 0;
-  listings.forEach(l => { totalListed += (l.price||0); totalCost += (l.cost||0); });
+  let totalListed = 0, totalCost = 0, totalUnits = 0;
+  listings.forEach(l => { totalListed += (l.price||0); totalCost += (l.cost||0); totalUnits += (parseInt(l.quantity)||1); });
   const showCost = window._costTrackingEnabled !== false;
   const batchLine = listings.length + ' items · ' + selected.size + ' selected · $' + totalListed.toFixed(0) + ' listed' + (showCost ? ' · $' + totalCost.toFixed(0) + ' cost' : '');
   document.getElementById('batch-summary').textContent = batchLine;
+  var si = document.getElementById('stat-items'); if(si) si.textContent = listings.length;
+  var sv = document.getElementById('stat-value'); if(sv) sv.textContent = '$' + totalListed.toFixed(0);
+  var su = document.getElementById('stat-units'); if(su) su.textContent = totalUnits;
 
   if (scanView === 'list') {
     grid.style.display = 'block';
