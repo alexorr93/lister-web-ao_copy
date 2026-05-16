@@ -3161,6 +3161,15 @@ class SubmitGroup(BaseModel):
     condition: str
     quantity:  int
 
+@app.post("/api/groups/{group_id}/rescan")
+async def rescan_group(group_id: str, request: Request):
+    business_id = require_auth(request)
+    try:
+        supabase.table("listing_groups").update({"status": "pending"}).eq("id", group_id).eq("business_id", business_id).execute()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 @app.post("/api/groups/submit")
 async def submit_group(body: SubmitGroup):
     try:
