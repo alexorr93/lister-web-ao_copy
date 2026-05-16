@@ -4455,13 +4455,15 @@ async function startFastScan(input) {
     const el = document.createElement('div');
     el.className = 'fastscan-item';
     el.id = 'fs-item-' + i;
+    el.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid #111827;';
     el.innerHTML = '<div class="fastscan-dot fs-dot-queue"></div><div style="flex:1;color:var(--muted);">Photo ' + (i+1) + '</div><span style="font-size:10px;color:var(--muted);">Queued</span>';
     queue.appendChild(el);
     return el;
   });
   for (let i = 0; i < files.length; i++) {
     const el = items[i];
-    el.innerHTML = '<div class="fastscan-dot fs-dot-upload"></div><div style="flex:1;">Photo ' + (i+1) + '</div><span style="font-size:10px;color:#f59e0b;">Uploading...</span>';
+    var _thumb = el.querySelector('img') ? el.querySelector('img').src : '';
+    el.innerHTML = '<div style="width:40px;height:40px;border-radius:8px;overflow:hidden;flex-shrink:0;background:#060810;"><img src="' + _thumb + '" style="width:100%;height:100%;object-fit:cover;"/></div><div style="flex:1;"><div style="font-size:14px;color:#e2e8f0;font-weight:600;">Photo ' + (i+1) + '</div><div style="font-size:12px;color:#fbbf24;margin-top:2px;">Uploading...</div></div><div style="width:7px;height:7px;border-radius:50%;background:#fbbf24;flex-shrink:0;"></div>';
     try {
       // Create group
       const gr = await api('POST', '/api/groups', {session_id: crypto.randomUUID(), condition: fsCond});
@@ -4474,11 +4476,13 @@ async function startFastScan(input) {
       await fetch('/api/photos/upload', {method:'POST', body: fd});
       // Submit
       await api('POST', '/api/groups/submit', {group_id: gid, condition: fsCond, quantity: 1});
-      el.innerHTML = '<div class="fastscan-dot fs-dot-done"></div><div style="flex:1;">Photo ' + (i+1) + '</div><span style="font-size:10px;color:#4ade80;">Submitted</span>';
+      var _thumb2 = el.querySelector('img') ? el.querySelector('img').src : '';
+      el.innerHTML = '<div style="width:40px;height:40px;border-radius:8px;overflow:hidden;flex-shrink:0;background:#060810;"><img src="' + _thumb2 + '" style="width:100%;height:100%;object-fit:cover;"/></div><div style="flex:1;"><div style="font-size:14px;color:#e2e8f0;font-weight:600;">Photo ' + (i+1) + '</div><div style="font-size:12px;color:#4ade80;margin-top:2px;">✓ Submitted</div></div><div style="width:7px;height:7px;border-radius:50%;background:#4ade80;flex-shrink:0;"></div>';
       // Show non-intrusive scanner tab confirmation
       showScannerToast('Photo ' + (i+1) + ' uploaded — scanning...');
     } catch(e) {
-      el.innerHTML = '<div class="fastscan-dot fs-dot-err"></div><div style="flex:1;">Photo ' + (i+1) + '</div><span style="font-size:10px;color:var(--red);">Failed</span>';
+      var _thumb3 = el.querySelector('img') ? el.querySelector('img').src : '';
+      el.innerHTML = '<div style="width:40px;height:40px;border-radius:8px;overflow:hidden;flex-shrink:0;background:#060810;"><img src="' + _thumb3 + '" style="width:100%;height:100%;object-fit:cover;"/></div><div style="flex:1;"><div style="font-size:14px;color:#e2e8f0;font-weight:600;">Photo ' + (i+1) + '</div><div style="font-size:12px;color:#f87171;margin-top:2px;">✗ Failed</div></div><button onclick="document.getElementById('fast-gallery-input').click();" style="padding:5px 12px;border-radius:7px;border:1px solid rgba(239,68,68,0.4);background:rgba(239,68,68,0.08);color:#f87171;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0;">↺ Rescan</button>';
     }
     const pct = Math.round((i+1)/files.length*100);
     document.getElementById('fs-bar').style.width = pct + '%';
