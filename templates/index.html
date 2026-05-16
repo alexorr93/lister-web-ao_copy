@@ -3267,7 +3267,7 @@ function updateProcBar(stats) {
   var grandTotal = scanned + proc;
   var wrap = document.getElementById('proc-bar-wrap');
   if (!wrap) return;
-  if (proc > 0) {
+  if (false && proc > 0) {
     wrap.style.display = '';
     var pct = grandTotal > 0 ? Math.round(scanned/grandTotal*100) : 0;
     document.getElementById('proc-bar-fill').style.width = pct + '%';
