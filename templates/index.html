@@ -4524,6 +4524,10 @@ async function startFastScan(input) {
   setTimeout(function() {
     showScannerToast(files.length + ' photo' + (files.length>1?'s':'') + ' submitted — AI scanning now ✓', 3000);
     if (typeof loadListings === 'function') loadListings();
+    var _dot = document.querySelector('#dash-scan-queue-wrap [style*="fbbf24"]');
+    if (_dot) { _dot.style.background = '#4ade80'; _dot.style.boxShadow = '0 0 8px rgba(74,222,128,0.6)'; }
+    var _label = document.querySelector('#dash-scan-queue-wrap span');
+    if (_label) _label.textContent = 'Completed';
   }, 800);
 }
 
