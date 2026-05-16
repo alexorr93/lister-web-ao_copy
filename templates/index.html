@@ -4477,7 +4477,7 @@ async function startFastScan(input) {
   if (_dashWrap) _dashWrap.style.display = 'block';
   document.getElementById('fastscan-progress').style.display = '';
   const queue = document.getElementById('dash-scan-queue') || document.getElementById('fastscan-queue');
-  queue.innerHTML = '';
+  // Don't clear — append to existing queue so previous scans stay visible
   const items = files.map((f, i) => {
     const el = document.createElement('div');
     el.className = 'fastscan-item';
