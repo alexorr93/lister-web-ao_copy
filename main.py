@@ -230,6 +230,7 @@ async def get_listings(request: Request):
                 l["listing_type"] = "fixed"
         return JSONResponse(listings)
     except Exception as e:
+        import traceback; traceback.print_exc()
         raise HTTPException(500, str(e))
 
 class UpdateField(BaseModel):
