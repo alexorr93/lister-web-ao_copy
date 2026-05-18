@@ -239,14 +239,18 @@ class UpdateField(BaseModel):
 
 
 @app.get("/api/export/ebay-csv")
-async def export_ebay_csv():
+async def export_ebay_csv(request: Request):
     import csv, io
     from fastapi.responses import StreamingResponse
     from datetime import datetime
+    business_id = require_auth(request)
     try:
-        res = supabase.table("listings").select(
+        q = supabase.table("listings").select(
             "title,description,price,price_used,price_new,quantity,condition,photo_id,ebay_category_id,description"
-        ).neq("status", "archived").execute()
+        ).neq("status", "archived")
+        if business_id:
+            q = q.eq("business_id", business_id)
+        res = q.execute()
         items = res.data or []
     except Exception as e:
         raise HTTPException(500, str(e))
