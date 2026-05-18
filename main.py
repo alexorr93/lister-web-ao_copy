@@ -177,7 +177,6 @@ async def dashboard(request: Request):
 async def get_listings(request: Request):
     business_id = require_auth(request)
     if not business_id:
-        from fastapi.responses import JSONResponse
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     try:
         res = supabase.table("listings")\
