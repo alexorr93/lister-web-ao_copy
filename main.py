@@ -439,6 +439,27 @@ class SubmitGroup(BaseModel):
     condition: str
     quantity:  int
 
+@app.post("/api/groups/{group_id}/rescan")
+async def rescan_group(group_id: str, request: Request):
+    business_id = require_auth(request)
+    try:
+        supabase.table("listing_groups").update({"status": "pending"}).eq("id", group_id).execute()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.get("/api/groups/{group_id}/listing")
+async def get_group_listing(group_id: str, request: Request):
+    try:
+        gp = supabase.table("group_photos").select("photo_id").eq("group_id", group_id).limit(1).execute()
+        if not gp.data:
+            return {"listing": None}
+        photo_id = gp.data[0]["photo_id"]
+        res = supabase.table("listings").select("id,status,title,price").eq("photo_id", photo_id).limit(1).execute()
+        return {"listing": res.data[0] if res.data else None}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 @app.post("/api/groups/submit")
 async def submit_group(body: SubmitGroup):
     try:

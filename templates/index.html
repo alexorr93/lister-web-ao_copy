@@ -321,14 +321,22 @@ select.field-input { background: #fff; color: #0f172a; }
       <div class="fastscan-title">Select photos from gallery</div>
       <div class="fastscan-sub">Each photo will be scanned as a separate item</div>
     </div>
-    <div id="fastscan-progress" style="display:none;" class="fastscan-progress">
-      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">
-        <span>Processing</span>
-        <span id="fs-count">0 / 0</span>
+    <div id="fastscan-progress" style="display:none;background:#0d1117;border:1px solid #1a2332;border-radius:12px;overflow:hidden;margin-top:16px;">
+      <div onclick="var q=document.getElementById('fastscan-queue');q.style.display=q.style.display==='none'?'block':'none';" style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;cursor:pointer;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="width:8px;height:8px;border-radius:50%;background:#fbbf24;box-shadow:0 0 8px rgba(251,191,36,0.6);"></div>
+          <span style="font-size:15px;font-weight:700;color:#f0fdf4;">Scan Queue</span>
+          <span id="fs-count" style="font-size:13px;color:#475569;">0 / 0</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:120px;height:4px;background:#111827;border-radius:2px;overflow:hidden;">
+            <div id="fs-bar" style="width:0%;height:100%;background:linear-gradient(90deg,#22c55e,#06b6d4);border-radius:2px;transition:width 0.4s;"></div>
+          </div>
+          <span style="font-size:12px;color:#475569;">▾</span>
+        </div>
       </div>
-      <div class="fastscan-progress-bar"><div class="fastscan-progress-fill" id="fs-bar" style="width:0%"></div></div>
+      <div id="fastscan-queue" style="border-top:1px solid #1a2332;display:block;"></div>
     </div>
-    <div class="fastscan-queue" id="fastscan-queue"></div>
   </div>
 
   <!-- AUCTION TAB -->
@@ -1378,42 +1386,83 @@ function setFsCond(c) {
 }
 setFsCond('new');
 
+async function rescanQueueItem(btn) {
+  var el = btn.closest('[data-gid]');
+  if (!el) return;
+  var gid = el.dataset.gid;
+  if (!gid) return;
+  btn.textContent = '...';
+  btn.disabled = true;
+  try {
+    await fetch('/api/groups/' + gid + '/rescan', {method:'POST', credentials:'include'});
+    btn.textContent = 'Rescanning';
+    btn.style.color = '#fbbf24';
+  } catch(e) {
+    btn.textContent = '✗';
+    btn.disabled = false;
+  }
+}
+
 async function startFastScan(input) {
   const files = Array.from(input.files);
   if (!files.length) return;
   document.getElementById('fastscan-progress').style.display = '';
   const queue = document.getElementById('fastscan-queue');
-  queue.innerHTML = '';
+  var _existingCount = queue.children.length;
   const items = files.map((f, i) => {
     const el = document.createElement('div');
     el.className = 'fastscan-item';
-    el.id = 'fs-item-' + i;
-    el.innerHTML = '<div class="fastscan-dot fs-dot-queue"></div><div style="flex:1;color:var(--muted);">Photo ' + (i+1) + '</div><span style="font-size:10px;color:var(--muted);">Queued</span>';
+    el.id = 'fs-item-' + (_existingCount + i);
+    el.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid #111827;';
+    var _objUrl = URL.createObjectURL(files[i]);
+    el.dataset.objUrl = _objUrl;
+    el.innerHTML = '<div onclick="window.open('' + _objUrl + '')" style="width:40px;height:40px;border-radius:8px;overflow:hidden;flex-shrink:0;background:#060810;cursor:zoom-in;"><img src="' + _objUrl + '" style="width:100%;height:100%;object-fit:cover;"/></div><div style="flex:1;min-width:0;"><div style="font-size:14px;color:#475569;font-weight:600;">Photo ' + (_existingCount+i+1) + '</div><div style="font-size:12px;color:#334155;margin-top:2px;">Queued</div></div><div style="width:7px;height:7px;border-radius:50%;background:#334155;flex-shrink:0;"></div>';
     queue.appendChild(el);
     return el;
   });
   for (let i = 0; i < files.length; i++) {
     const el = items[i];
-    el.innerHTML = '<div class="fastscan-dot fs-dot-upload"></div><div style="flex:1;">Photo ' + (i+1) + '</div><span style="font-size:10px;color:#f59e0b;">Uploading...</span>';
+    var _thumb = el.dataset.objUrl || '';
+    el.innerHTML = '<div onclick="window.open('' + _thumb + '')" style="width:40px;height:40px;border-radius:8px;overflow:hidden;flex-shrink:0;background:#060810;cursor:zoom-in;"><img src="' + _thumb + '" style="width:100%;height:100%;object-fit:cover;"/></div><div style="flex:1;"><div style="font-size:14px;color:#e2e8f0;font-weight:600;">Photo ' + (_existingCount+i+1) + '</div><div style="font-size:12px;color:#fbbf24;margin-top:2px;">Uploading...</div></div><div style="width:7px;height:7px;border-radius:50%;background:#fbbf24;flex-shrink:0;"></div>';
     try {
-      // Create group
       const gr = await api('POST', '/api/groups', {session_id: crypto.randomUUID(), condition: fsCond});
       const gid = gr.group_id || gr.id;
-      // Compress and upload
       const blob = await compressForUpload(files[i]);
       const fd = new FormData();
       fd.append('file', blob, 'photo_0.jpg');
       fd.append('group_id', gid);
       await fetch('/api/photos/upload', {method:'POST', body: fd});
-      // Submit
       await api('POST', '/api/groups/submit', {group_id: gid, condition: fsCond, quantity: 1});
-      el.innerHTML = '<div class="fastscan-dot fs-dot-done"></div><div style="flex:1;">Photo ' + (i+1) + '</div><span style="font-size:10px;color:#4ade80;">Submitted</span>';
+      el.dataset.gid = gid;
+      var _thumb2 = el.dataset.objUrl || '';
+      el.innerHTML = '<div onclick="window.open('' + _thumb2 + '')" style="width:40px;height:40px;border-radius:8px;overflow:hidden;flex-shrink:0;background:#060810;cursor:zoom-in;"><img src="' + _thumb2 + '" style="width:100%;height:100%;object-fit:cover;"/></div><div style="flex:1;"><div style="font-size:14px;color:#e2e8f0;font-weight:600;">Photo ' + (_existingCount+i+1) + '</div><div style="font-size:12px;color:#4ade80;margin-top:2px;">Sent to scanner</div></div><button onclick="rescanQueueItem(this);" style="padding:5px 12px;border-radius:7px;border:1px solid #1a2332;background:#0a0f18;color:#94a3b8;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0;">↺</button>';
+      (function(elRef, gid) {
+        var pollCount = 0;
+        var poll = setInterval(async function() {
+          pollCount++;
+          if (pollCount > 40) { clearInterval(poll); return; }
+          try {
+            var r = await fetch('/api/groups/' + gid + '/listing', {credentials:'include'});
+            if (!r.ok) return;
+            var d = await r.json();
+            if (d.listing && d.listing.status === 'scanned') {
+              clearInterval(poll);
+              var statusDiv = elRef.querySelectorAll('div > div')[1];
+              if (statusDiv) { statusDiv.textContent = 'Complete'; statusDiv.style.color = '#4ade80'; }
+              if (typeof loadListings === 'function') loadListings();
+            }
+          } catch(e) {}
+        }, 3000);
+      })(el, gid);
     } catch(e) {
-      el.innerHTML = '<div class="fastscan-dot fs-dot-err"></div><div style="flex:1;">Photo ' + (i+1) + '</div><span style="font-size:10px;color:var(--red);">Failed</span>';
+      var _thumb3 = el.dataset.objUrl || '';
+      el.innerHTML = '<div onclick="window.open('' + _thumb3 + '')" style="width:40px;height:40px;border-radius:8px;overflow:hidden;flex-shrink:0;background:#060810;cursor:zoom-in;"><img src="' + _thumb3 + '" style="width:100%;height:100%;object-fit:cover;"/></div><div style="flex:1;"><div style="font-size:14px;color:#e2e8f0;font-weight:600;">Photo ' + (_existingCount+i+1) + '</div><div style="font-size:12px;color:#f87171;margin-top:2px;">&#x2717; Failed</div></div><button onclick="rescanQueueItem(this);" style="padding:5px 12px;border-radius:7px;border:1px solid rgba(239,68,68,0.4);background:rgba(239,68,68,0.08);color:#f87171;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0;">&#x21ba; Rescan</button>';
     }
     const pct = Math.round((i+1)/files.length*100);
+    var _totalInQueue = queue.children.length;
+    var _doneInQueue = queue.querySelectorAll('[style*="4ade80"]').length;
     document.getElementById('fs-bar').style.width = pct + '%';
-    document.getElementById('fs-count').textContent = (i+1) + ' / ' + files.length;
+    document.getElementById('fs-count').textContent = _doneInQueue + ' / ' + _totalInQueue;
   }
   input.value = '';
 }
