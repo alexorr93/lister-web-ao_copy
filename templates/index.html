@@ -22,6 +22,7 @@
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* NAV */
 .nav { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 16px; display: flex; align-items: center; gap: 6px; overflow-x: auto; height: 52px; position: sticky; top: 0; z-index: 100; }
@@ -468,7 +469,7 @@ select.field-input { background: #fff; color: #0f172a; }
   <div class="modal" onclick="event.stopPropagation()">
     <div style="position:relative;z-index:5;">
       <img class="modal-img" id="modal-img" src="" alt="" style="pointer-events:none;"/>
-      <button onclick="event.stopPropagation();rotatePhoto('ccw')" title="Rotate left" style="position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,0.6);border:none;color:#fff;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;z-index:10;">↺</button><button onclick="event.stopPropagation();rotatePhoto('cw')" title="Rotate right" style="position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,0.6);border:none;color:#fff;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;z-index:10;">↻</button>
+      <button id="rotate-ccw-btn" onclick="event.stopPropagation();rotatePhoto('ccw')" title="Rotate left" style="position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,0.6);border:none;color:#fff;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;z-index:10;">↺</button><button id="rotate-cw-btn" onclick="event.stopPropagation();rotatePhoto('cw')" title="Rotate right" style="position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,0.6);border:none;color:#fff;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;z-index:10;">↻</button>
     </div>
     <div class="modal-body">
       <div class="modal-title" id="modal-title"></div>
@@ -867,6 +868,13 @@ async function startAuctionScan() {
 }
 
 // ── MODAL ──────────────────────────────────────────────────────
+function extractPhotoId(url) {
+  if (!url) return '';
+  const parts = url.split('/part-photos/');
+  if (parts.length < 2) return '';
+  return decodeURIComponent(parts[1].split('?')[0]);
+}
+
 function openModal(id) {
   id = isNaN(id) ? id : Number(id);
   const l = listings.find(x => x.id === id);
@@ -877,8 +885,10 @@ function openModal(id) {
   const photos = (l.all_photos && l.all_photos.length) ? l.all_photos : (l.full_url ? [{thumb: l.thumb_url, full: l.full_url}] : []);
   const curIdx = parseInt(tile?.dataset?.photoIdx || '0');
   const img = document.getElementById('modal-img');
-  img.src = photos[curIdx]?.full || l.full_url || '';
-  img.dataset.photoId = l.photo_id || '';
+  const curPhotoUrl = photos[curIdx]?.full || l.full_url || '';
+  img.src = curPhotoUrl;
+  // Use the photo actually being displayed (not always the item's first/primary photo) so rotate affects the right image
+  img.dataset.photoId = extractPhotoId(curPhotoUrl) || l.photo_id || '';
   img.style.cssText = 'width:100%;aspect-ratio:1;object-fit:cover;border-radius:14px 14px 0 0;image-orientation:from-image;pointer-events:none;display:' + (img.src ? 'block' : 'none') + ';';
   document.getElementById('modal-title').textContent = l.title || 'Unknown Item';
   document.getElementById('modal-meta').textContent  = `${l.ebay_category || ''} · ${(l.condition||'used').toUpperCase()}`;
@@ -1546,20 +1556,35 @@ async function rotatePhoto(dir) {
   // Use stored photo ID to avoid losing it after blob URL replacement
   let photoId = img.dataset.photoId;
   if (!photoId) {
-    const parts = img.src.split('/part-photos/');
-    if (parts.length < 2) return;
-    photoId = decodeURIComponent(parts[1].split('?')[0]);
+    photoId = extractPhotoId(img.src);
+    if (!photoId) return;
     img.dataset.photoId = photoId;
+  }
+  const btn = document.getElementById(dir === 'ccw' ? 'rotate-ccw-btn' : 'rotate-cw-btn');
+  if (btn) {
+    if (btn.disabled) return; // already spinning, ignore repeat clicks
+    btn.disabled = true;
+    btn.dataset.origHtml = btn.innerHTML;
+    btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.7s linear infinite;"></span>';
   }
   try {
     const r = await api('POST', '/api/photos/rotate', {photo_id: photoId, direction: dir || 'cw'});
     if (r && r.ok) {
       const freshUrl = '/api/photos/view/' + photoId + '?t=' + Date.now();
-      fetch(freshUrl, {cache: 'no-store'})
-        .then(res => res.blob())
-        .then(blob => { img.src = URL.createObjectURL(blob); });
+      const blob = await fetch(freshUrl, {cache: 'no-store'}).then(res => res.blob());
+      img.src = URL.createObjectURL(blob);
+    } else {
+      toast('Rotate failed', 'error');
     }
-  } catch(e) { console.warn('Rotate failed', e); }
+  } catch(e) {
+    console.warn('Rotate failed', e);
+    toast('Rotate failed', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = btn.dataset.origHtml;
+    }
+  }
 }
 
 function updatePriceByCondition() {
