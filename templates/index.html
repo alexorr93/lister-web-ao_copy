@@ -511,6 +511,8 @@ select.field-input { background: #fff; color: #0f172a; }
 let listings      = [];
 let selected      = new Set();
 let quantities    = {};
+let dirtyTitles   = {}; // id -> unsaved title text, so background refreshes don't clobber in-progress edits
+let dirtyPrices   = {}; // id -> unsaved price text
 let modalItemId   = null;
 let modalDirty    = false;
 let scanBatchId   = null;
@@ -583,7 +585,19 @@ async function loadListings() {
 function renderTiles() {
   const grid = document.getElementById('tile-grid');
   const empty = document.getElementById('dash-empty');
-  
+
+  // Remember focus + cursor position so a background refresh doesn't yank focus away mid-edit
+  const active = document.activeElement;
+  let focusInfo = null;
+  if (active && active.classList && (active.classList.contains('tile-title-input') || active.classList.contains('tile-price-input'))) {
+    focusInfo = {
+      id: active.dataset.id,
+      field: active.classList.contains('tile-title-input') ? 'title' : 'price',
+      selStart: active.selectionStart,
+      selEnd: active.selectionEnd
+    };
+  }
+
   if (!listings.length) {
     grid.innerHTML = '';
     empty.style.display = 'block';
@@ -636,14 +650,14 @@ function renderTiles() {
         </div>
       </div>
       <div class="tile-body">
-        <input class="tile-title-input" type="text" value="${(l.title||'').replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Title">
+        <input class="tile-title-input" type="text" value="${(dirtyTitles[l.id] ?? (l.title||'')).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Title">
         <div class="tile-search-btns">
           <button class="tile-search-btn" onclick="window.open('https://www.google.com/search?q='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value),'popupwin','noopener,width=1200,height=800')">Google</button>
           <button class="tile-search-btn" onclick="window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value)+'&LH_Sold=1&LH_Complete=1','popupwin','noopener,width=1200,height=800')">eBay Sold</button>
         </div>
         <div class="tile-price-cond-row">
           <span style="color:var(--muted);font-size:11px;">$</span>
-          <input class="tile-price-input" type="number" step="0.01" value="${l.price.toFixed(2)}" data-id="${l.id}">
+          <input class="tile-price-input" type="number" step="0.01" value="${dirtyPrices[l.id] ?? l.price.toFixed(2)}" data-id="${l.id}">
           <div class="tile-cond-toggle">
             <button class="tile-cond-btn${isNew?'' :' active'}" data-id="${l.id}" data-cond="used">Used</button>
             <button class="tile-cond-btn${isNew?' active':''}" data-id="${l.id}" data-cond="new">New</button>
@@ -663,17 +677,49 @@ function renderTiles() {
     </div>`;
   }).join('');
 
+  // Restore focus/cursor into the input the user was actively typing in, if it still exists
+  if (focusInfo) {
+    const selector = focusInfo.field === 'title' ? '.tile-title-input' : '.tile-price-input';
+    const el = grid.querySelector(selector + '[data-id="' + focusInfo.id + '"]');
+    if (el) {
+      el.focus();
+      try { el.setSelectionRange(focusInfo.selStart, focusInfo.selEnd); } catch(e) {}
+    }
+  }
+
   updateSubmitBtn();
 }
 
 function initTileListeners() {
+  // Mark fields dirty as the user types, so background refreshes never wipe unsaved text
+  document.getElementById('tile-grid').addEventListener('input', function(e) {
+    var el = e.target;
+    if (el.classList.contains('tile-title-input')) {
+      dirtyTitles[el.dataset.id] = el.value;
+    }
+    if (el.classList.contains('tile-price-input')) {
+      dirtyPrices[el.dataset.id] = el.value;
+    }
+  });
+  // Enter commits immediately instead of waiting for blur
+  document.getElementById('tile-grid').addEventListener('keydown', function(e) {
+    var el = e.target;
+    if (e.key === 'Enter' && (el.classList.contains('tile-title-input') || el.classList.contains('tile-price-input'))) {
+      e.preventDefault();
+      el.blur();
+    }
+  });
   document.getElementById('tile-grid').addEventListener('blur', function(e) {
     var el = e.target;
     if (el.classList.contains('tile-title-input')) {
-      updateField(el.dataset.id, 'title', el.value);
+      updateField(el.dataset.id, 'title', el.value).then(function(ok) {
+        if (ok) delete dirtyTitles[el.dataset.id];
+      });
     }
     if (el.classList.contains('tile-price-input')) {
-      updateField(el.dataset.id, 'price', parseFloat(el.value));
+      updateField(el.dataset.id, 'price', parseFloat(el.value)).then(function(ok) {
+        if (ok) delete dirtyPrices[el.dataset.id];
+      });
     }
   }, true);
   document.getElementById('tile-grid').addEventListener('click', function(e) {
@@ -692,12 +738,13 @@ function initTileListeners() {
 
 async function updateField(id, field, value) {
   try {
-    await fetch('/api/listings/'+id, {
+    const r = await fetch('/api/listings/'+id, {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({field: field, value: value})
     });
-  } catch(e) { console.error(e); }
+    return r.ok;
+  } catch(e) { console.error(e); return false; }
 }
 
 function updateProcBar(stats) {
