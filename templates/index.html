@@ -127,7 +127,7 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tile-price-cond-row { display:flex; align-items:center; gap:6px; }
 .tile-price-input { width:70px; background:transparent; border:none; border-bottom:1px solid var(--border); color:#f8fafc; font-size:14px; font-weight:800; font-family:inherit; outline:none; padding:0 0 2px; }
 .tile-price-input:focus { border-bottom-color:var(--accent); }
-.tile-title-input.dirty, .tile-price-input.dirty { color:#ffffff; text-shadow:0 0 8px rgba(250,204,21,0.6); border-bottom-color:#facc15 !important; }
+.tile-title-input.dirty, .tile-price-input.dirty { color:#ffffff; border:2px solid #facc15 !important; border-radius:4px; padding:2px 4px; box-shadow:0 0 6px rgba(250,204,21,0.4); }
 .tile-cond-toggle { display:flex; margin-left:auto; border:1px solid var(--border); border-radius:5px; overflow:hidden; }
 .tile-cond-btn { font-size:10px; padding:4px 8px; background:transparent; border:none; color:var(--muted); cursor:pointer; font-family:inherit; font-weight:600; }
 .tile-cond-btn.active { background:var(--accent); color:#fff; }
@@ -515,6 +515,8 @@ let selected      = new Set();
 let quantities    = {};
 let dirtyTitles   = {}; // id -> unsaved title text, so background refreshes don't clobber in-progress edits
 let dirtyPrices   = {}; // id -> unsaved price text
+let editedTitles  = new Set(); // ids whose title has been touched this session (for persistent visual highlight)
+let editedPrices  = new Set(); // ids whose price has been touched this session
 let modalItemId   = null;
 let modalDirty    = false;
 let scanBatchId   = null;
@@ -660,14 +662,14 @@ function renderTiles() {
         </div>
       </div>
       <div class="tile-body">
-        <input class="tile-title-input${dirtyTitles[l.id] !== undefined ? ' dirty' : ''}" type="text" value="${(dirtyTitles[l.id] ?? (l.title||'')).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Title">
+        <input class="tile-title-input${editedTitles.has(String(l.id)) ? ' dirty' : ''}" type="text" value="${(dirtyTitles[l.id] ?? (l.title||'')).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Title">
         <div class="tile-search-btns">
           <button class="tile-search-btn" onclick="window.open('https://www.google.com/search?q='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value),'popupwin','noopener,width=1200,height=800')">Google</button>
           <button class="tile-search-btn" onclick="window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value)+'&LH_Sold=1&LH_Complete=1','popupwin','noopener,width=1200,height=800')">eBay Sold</button>
         </div>
         <div class="tile-price-cond-row">
           <span style="color:var(--muted);font-size:11px;">$</span>
-          <input class="tile-price-input${dirtyPrices[l.id] !== undefined ? ' dirty' : ''}" type="number" step="0.01" value="${dirtyPrices[l.id] ?? l.price.toFixed(2)}" data-id="${l.id}">
+          <input class="tile-price-input${editedPrices.has(String(l.id)) ? ' dirty' : ''}" type="number" step="0.01" value="${dirtyPrices[l.id] ?? l.price.toFixed(2)}" data-id="${l.id}">
           <div class="tile-cond-toggle">
             <button class="tile-cond-btn${isNew?'' :' active'}" data-id="${l.id}" data-cond="used">Used</button>
             <button class="tile-cond-btn${isNew?' active':''}" data-id="${l.id}" data-cond="new">New</button>
@@ -706,10 +708,12 @@ function initTileListeners() {
     var el = e.target;
     if (el.classList.contains('tile-title-input')) {
       dirtyTitles[el.dataset.id] = el.value;
+      editedTitles.add(el.dataset.id);
       el.classList.add('dirty');
     }
     if (el.classList.contains('tile-price-input')) {
       dirtyPrices[el.dataset.id] = el.value;
+      editedPrices.add(el.dataset.id);
       el.classList.add('dirty');
     }
   });
@@ -725,12 +729,13 @@ function initTileListeners() {
     var el = e.target;
     if (el.classList.contains('tile-title-input')) {
       updateField(el.dataset.id, 'title', el.value).then(function(ok) {
-        if (ok) { delete dirtyTitles[el.dataset.id]; el.classList.remove('dirty'); }
+        if (ok) delete dirtyTitles[el.dataset.id]; // saved — server value is now trustworthy again
+        // note: box highlight (editedTitles) intentionally stays so you can see what you've touched this session
       });
     }
     if (el.classList.contains('tile-price-input')) {
       updateField(el.dataset.id, 'price', parseFloat(el.value)).then(function(ok) {
-        if (ok) { delete dirtyPrices[el.dataset.id]; el.classList.remove('dirty'); }
+        if (ok) delete dirtyPrices[el.dataset.id];
       });
     }
   }, true);
