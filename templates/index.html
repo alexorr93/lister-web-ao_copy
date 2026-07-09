@@ -127,6 +127,7 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tile-price-cond-row { display:flex; align-items:center; gap:6px; }
 .tile-price-input { width:70px; background:transparent; border:none; border-bottom:1px solid var(--border); color:#f8fafc; font-size:14px; font-weight:800; font-family:inherit; outline:none; padding:0 0 2px; }
 .tile-price-input:focus { border-bottom-color:var(--accent); }
+.tile-title-input.dirty, .tile-price-input.dirty { color:#ffffff; text-shadow:0 0 8px rgba(250,204,21,0.6); border-bottom-color:#facc15 !important; }
 .tile-cond-toggle { display:flex; margin-left:auto; border:1px solid var(--border); border-radius:5px; overflow:hidden; }
 .tile-cond-btn { font-size:10px; padding:4px 8px; background:transparent; border:none; color:var(--muted); cursor:pointer; font-family:inherit; font-weight:600; }
 .tile-cond-btn.active { background:var(--accent); color:#fff; }
@@ -583,6 +584,18 @@ async function loadListings() {
   } catch(e) { toast('Failed to load listings', 'error'); }
 }
 
+function updateStats() {
+  let totalVal = 0, totalUnits = 0;
+  listings.forEach(l => {
+    const qty = quantities[l.id] ?? l.quantity ?? 1;
+    totalVal += l.price * qty;
+    totalUnits += qty;
+  });
+  document.getElementById('stat-items').textContent = listings.length;
+  document.getElementById('stat-value').textContent = '$' + totalVal.toFixed(0);
+  document.getElementById('stat-units').textContent = totalUnits;
+}
+
 function renderTiles() {
   const grid = document.getElementById('tile-grid');
   const empty = document.getElementById('dash-empty');
@@ -609,11 +622,7 @@ function renderTiles() {
   }
   empty.style.display = 'none';
 
-  let totalVal = 0, totalUnits = 0;
-  listings.forEach(l => { totalVal += l.price; totalUnits += l.quantity; });
-  document.getElementById('stat-items').textContent = listings.length;
-  document.getElementById('stat-value').textContent = '$' + totalVal.toFixed(0);
-  document.getElementById('stat-units').textContent = totalUnits;
+  updateStats();
 
   grid.innerHTML = listings.map(l => {
     const qty = quantities[l.id] ?? l.quantity;
@@ -651,14 +660,14 @@ function renderTiles() {
         </div>
       </div>
       <div class="tile-body">
-        <input class="tile-title-input" type="text" value="${(dirtyTitles[l.id] ?? (l.title||'')).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Title">
+        <input class="tile-title-input${dirtyTitles[l.id] !== undefined ? ' dirty' : ''}" type="text" value="${(dirtyTitles[l.id] ?? (l.title||'')).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Title">
         <div class="tile-search-btns">
           <button class="tile-search-btn" onclick="window.open('https://www.google.com/search?q='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value),'popupwin','noopener,width=1200,height=800')">Google</button>
           <button class="tile-search-btn" onclick="window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value)+'&LH_Sold=1&LH_Complete=1','popupwin','noopener,width=1200,height=800')">eBay Sold</button>
         </div>
         <div class="tile-price-cond-row">
           <span style="color:var(--muted);font-size:11px;">$</span>
-          <input class="tile-price-input" type="number" step="0.01" value="${dirtyPrices[l.id] ?? l.price.toFixed(2)}" data-id="${l.id}">
+          <input class="tile-price-input${dirtyPrices[l.id] !== undefined ? ' dirty' : ''}" type="number" step="0.01" value="${dirtyPrices[l.id] ?? l.price.toFixed(2)}" data-id="${l.id}">
           <div class="tile-cond-toggle">
             <button class="tile-cond-btn${isNew?'' :' active'}" data-id="${l.id}" data-cond="used">Used</button>
             <button class="tile-cond-btn${isNew?' active':''}" data-id="${l.id}" data-cond="new">New</button>
@@ -697,9 +706,11 @@ function initTileListeners() {
     var el = e.target;
     if (el.classList.contains('tile-title-input')) {
       dirtyTitles[el.dataset.id] = el.value;
+      el.classList.add('dirty');
     }
     if (el.classList.contains('tile-price-input')) {
       dirtyPrices[el.dataset.id] = el.value;
+      el.classList.add('dirty');
     }
   });
   // Enter commits immediately instead of waiting for blur
@@ -714,12 +725,12 @@ function initTileListeners() {
     var el = e.target;
     if (el.classList.contains('tile-title-input')) {
       updateField(el.dataset.id, 'title', el.value).then(function(ok) {
-        if (ok) delete dirtyTitles[el.dataset.id];
+        if (ok) { delete dirtyTitles[el.dataset.id]; el.classList.remove('dirty'); }
       });
     }
     if (el.classList.contains('tile-price-input')) {
       updateField(el.dataset.id, 'price', parseFloat(el.value)).then(function(ok) {
-        if (ok) delete dirtyPrices[el.dataset.id];
+        if (ok) { delete dirtyPrices[el.dataset.id]; el.classList.remove('dirty'); }
       });
     }
   }, true);
@@ -805,6 +816,7 @@ async function changeQty(id, delta) {
   quantities[idStr] = qty;
   const el = document.getElementById('qty-' + idStr);
   if (el) el.textContent = qty;
+  updateStats();
   try { await api('PATCH', `/api/listings/${idStr}`, {field:'quantity', value:qty}); }
   catch(e) { toast('Failed to update quantity', 'error'); }
 }
