@@ -102,7 +102,7 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tile.selected { border-color: var(--accent); }
 .tile.ebay-draft { border-left: 3px solid var(--accent); }
 
-.tile-photo { position: relative; width: 100%; padding-top: 78%; background: #161925; overflow: hidden; }
+.tile-photo { position: relative; width: 100%; padding-top: 58%; background: #161925; overflow: hidden; }
 .tile-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; image-orientation: from-image; }
 .photo-counter { position: absolute; bottom: 44px; right: 7px; background: rgba(0,0,0,0.6); color: #fff; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 10px; }
 .photo-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.5); border: none; color: #fff; width: 24px; height: 24px; border-radius: 50%; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; }
@@ -127,12 +127,11 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tile-price-cond-row { display:flex; align-items:center; gap:6px; }
 .tile-price-input { width:70px; background:transparent; border:none; border-bottom:1px solid var(--border); color:#f8fafc; font-size:14px; font-weight:800; font-family:inherit; outline:none; padding:0 0 2px; }
 .tile-price-input:focus { border-bottom-color:var(--accent); }
-.tile-title-input.dirty, .tile-price-input.dirty { color:#ffffff; border:2px solid #facc15 !important; border-radius:4px; padding:2px 4px; box-shadow:0 0 6px rgba(250,204,21,0.4); }
-.tile-cat-input, .tile-brand-input { width:100%; background:transparent; border:1px solid var(--border); border-radius:4px; color:var(--muted); font-size:10px; font-family:inherit; outline:none; padding:3px 5px; margin-top:4px; }
-.tile-cat-input { font-size:10px; }
-.tile-brand-input { font-size:11px; font-weight:600; color:#cbd5e1; }
-.tile-cat-input:focus, .tile-brand-input:focus { border:2px solid #facc15; color:#fff; box-shadow:0 0 6px rgba(250,204,21,0.4); }
-.tile-cat-input.changed, .tile-brand-input.changed { border:2px solid #ec4899 !important; color:#fff; box-shadow:0 0 6px rgba(236,72,153,0.5); }
+.tile-cat-input, .tile-brand-input { width:100%; background:transparent; border:1px solid var(--border); border-radius:4px; color:var(--muted); font-family:inherit; outline:none; padding:3px 5px; margin-top:4px; }
+.tile-cat-input { font-size:12px; line-height:1.3; }
+.tile-brand-input { font-size:10px; font-weight:600; color:#cbd5e1; }
+.tile-title-input.field-reviewed, .tile-price-input.field-reviewed, .tile-cat-input.field-reviewed, .tile-brand-input.field-reviewed { border:2px solid #ec4899 !important; color:#fff; box-shadow:0 0 6px rgba(236,72,153,0.4); border-radius:4px; padding:2px 4px; }
+.tile-title-input.field-changed, .tile-price-input.field-changed, .tile-cat-input.field-changed, .tile-brand-input.field-changed { border:2px solid #facc15 !important; color:#fff; box-shadow:0 0 6px rgba(250,204,21,0.4); border-radius:4px; padding:2px 4px; }
 .tile-cat-input.default-warn { border:2px solid #dc2626 !important; color:#fca5a5; background:rgba(220,38,38,0.08); }
 .tile-cat-warn-label { color:#f87171; font-size:9px; font-weight:700; margin-top:2px; display:flex; align-items:center; gap:3px; }
 .tile-cond-toggle { display:flex; margin-left:auto; border:1px solid var(--border); border-radius:5px; overflow:hidden; }
@@ -565,12 +564,19 @@ let selected      = new Set();
 let quantities    = {};
 let dirtyTitles   = {}; // id -> unsaved title text, so background refreshes don't clobber in-progress edits
 let dirtyPrices   = {}; // id -> unsaved price text
-let editedTitles  = new Set(); // ids whose title has been touched this session (for persistent visual highlight)
-let editedPrices  = new Set(); // ids whose price has been touched this session
-let editedCats    = new Set(); // ids whose category has been manually changed this session
-let editedBrands  = new Set(); // ids whose brand has been manually changed this session
 let dirtyCats     = {}; // id -> unsaved category text
 let dirtyBrands   = {}; // id -> unsaved brand text
+// Unified color-state system for ALL editable fields (title/price/brand/category):
+// no color = untouched, PINK = clicked into it (reviewed/confirmed as-is), YELLOW = actually changed. Keys are "id_field".
+let reviewedFields = new Set();
+let changedFields   = new Set();
+function fieldKey(id, field) { return id + '_' + field; }
+function fieldClassFor(id, field) {
+  const key = fieldKey(id, field);
+  if (changedFields.has(key)) return ' field-changed';
+  if (reviewedFields.has(key)) return ' field-reviewed';
+  return '';
+}
 let modalItemId   = null;
 let modalDirty    = false;
 let scanBatchId   = null;
@@ -716,22 +722,22 @@ function renderTiles() {
         </div>
       </div>
       <div class="tile-body">
-        <input class="tile-title-input${editedTitles.has(String(l.id)) ? ' dirty' : ''}" type="text" value="${(dirtyTitles[l.id] ?? (l.title||'')).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Title">
+        <input class="tile-title-input${fieldClassFor(l.id,'title')}" type="text" value="${(dirtyTitles[l.id] ?? (l.title||'')).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Title">
         <div class="tile-search-btns">
           <button class="tile-search-btn" onclick="window.open('https://www.google.com/search?q='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value),'popupwin','noopener,width=1200,height=800')">Google</button>
           <button class="tile-search-btn" onclick="window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value)+'&LH_Sold=1&LH_Complete=1','popupwin','noopener,width=1200,height=800')">eBay Sold</button>
         </div>
         <div class="tile-price-cond-row">
           <span style="color:var(--muted);font-size:11px;">$</span>
-          <input class="tile-price-input${editedPrices.has(String(l.id)) ? ' dirty' : ''}" type="number" step="0.01" value="${dirtyPrices[l.id] ?? l.price.toFixed(2)}" data-id="${l.id}">
+          <input class="tile-price-input${fieldClassFor(l.id,'price')}" type="number" step="0.01" value="${dirtyPrices[l.id] ?? l.price.toFixed(2)}" data-id="${l.id}">
           <div class="tile-cond-toggle">
             <button class="tile-cond-btn${isNew?'' :' active'}" data-id="${l.id}" data-cond="used">Used</button>
             <button class="tile-cond-btn${isNew?' active':''}" data-id="${l.id}" data-cond="new">New</button>
           </div>
         </div>
-        <input class="tile-cat-input${editedCats.has(String(l.id)) ? ' changed' : ''}${l.ebay_category_is_default ? ' default-warn' : ''}" type="text" value="${(dirtyCats[l.id] ?? (l.ebay_category_path||'No category yet')).replace(/"/g,'&quot;')}" data-id="${l.id}" data-catid="${l.ebay_category_id||''}" placeholder="eBay category" title="Click to edit — type a phrase to re-match, or a number to set the ID directly">
+        <input class="tile-cat-input${fieldClassFor(l.id,'category')}${l.ebay_category_is_default ? ' default-warn' : ''}" type="text" value="${(dirtyCats[l.id] ?? (l.ebay_category_path||'No category yet')).replace(/"/g,'&quot;')}" data-id="${l.id}" data-catid="${l.ebay_category_id||''}" placeholder="eBay category" title="Click to edit — type a phrase to re-match, or a number to set the ID directly">
         ${l.ebay_category_is_default ? '<div class="tile-cat-warn-label">⚠️ Generic fallback — needs a real match</div>' : ''}
-        <input class="tile-brand-input${editedBrands.has(String(l.id)) ? ' changed' : ''}" type="text" value="${(dirtyBrands[l.id] ?? (l.brand||'')).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Brand">
+        <input class="tile-brand-input${fieldClassFor(l.id,'brand')}" type="text" value="${(dirtyBrands[l.id] ?? (l.brand||'')).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Brand">
       </div>
       <div class="tile-controls">
         <div class="tile-check${isSel?' checked':''}" onclick="toggleSelect('${l.id}')"></div>
@@ -760,42 +766,54 @@ function renderTiles() {
 }
 
 function initTileListeners() {
-  // Mark fields dirty as the user types, so background refreshes never wipe unsaved text
-  document.getElementById('tile-grid').addEventListener('input', function(e) {
-    var el = e.target;
-    if (el.classList.contains('tile-title-input')) {
-      dirtyTitles[el.dataset.id] = el.value;
-      editedTitles.add(el.dataset.id);
-      el.classList.add('dirty');
-    }
-    if (el.classList.contains('tile-price-input')) {
-      dirtyPrices[el.dataset.id] = el.value;
-      editedPrices.add(el.dataset.id);
-      el.classList.add('dirty');
-    }
-    if (el.classList.contains('tile-brand-input')) {
-      dirtyBrands[el.dataset.id] = el.value;
-      editedBrands.add(el.dataset.id);
-      el.classList.add('changed');
-    }
-    if (el.classList.contains('tile-cat-input')) {
-      dirtyCats[el.dataset.id] = el.value;
+  function fieldNameFor(el) {
+    if (el.classList.contains('tile-title-input')) return 'title';
+    if (el.classList.contains('tile-price-input')) return 'price';
+    if (el.classList.contains('tile-brand-input')) return 'brand';
+    if (el.classList.contains('tile-cat-input')) return 'category';
+    return null;
+  }
+
+  // Click/focus into a field = PINK (reviewed/confirmed as-is), unless it's already been changed (stays yellow)
+  document.getElementById('tile-grid').addEventListener('focusin', function(e) {
+    var el = e.target, field = fieldNameFor(el);
+    if (!field) return;
+    var key = fieldKey(el.dataset.id, field);
+    if (!changedFields.has(key)) {
+      reviewedFields.add(key);
+      el.classList.add('field-reviewed');
     }
   });
+
+  // Actually typing a different value = YELLOW (changed), overrides pink, persists for the session
+  document.getElementById('tile-grid').addEventListener('input', function(e) {
+    var el = e.target, field = fieldNameFor(el);
+    if (!field) return;
+    var id = el.dataset.id, key = fieldKey(id, field);
+    changedFields.add(key);
+    reviewedFields.delete(key);
+    el.classList.remove('field-reviewed');
+    el.classList.add('field-changed');
+    if (field === 'title') dirtyTitles[id] = el.value;
+    if (field === 'price') dirtyPrices[id] = el.value;
+    if (field === 'brand') dirtyBrands[id] = el.value;
+    if (field === 'category') dirtyCats[id] = el.value;
+  });
+
   // Enter commits immediately instead of waiting for blur
   document.getElementById('tile-grid').addEventListener('keydown', function(e) {
     var el = e.target;
-    if (e.key === 'Enter' && (el.classList.contains('tile-title-input') || el.classList.contains('tile-price-input') || el.classList.contains('tile-brand-input') || el.classList.contains('tile-cat-input'))) {
+    if (e.key === 'Enter' && fieldNameFor(el)) {
       e.preventDefault();
       el.blur();
     }
   });
+
   document.getElementById('tile-grid').addEventListener('blur', function(e) {
     var el = e.target;
     if (el.classList.contains('tile-title-input')) {
       updateField(el.dataset.id, 'title', el.value).then(function(ok) {
-        if (ok) delete dirtyTitles[el.dataset.id]; // saved — server value is now trustworthy again
-        // note: box highlight (editedTitles) intentionally stays so you can see what you've touched this session
+        if (ok) delete dirtyTitles[el.dataset.id];
       });
     }
     if (el.classList.contains('tile-price-input')) {
@@ -811,8 +829,6 @@ function initTileListeners() {
     if (el.classList.contains('tile-cat-input')) {
       var id = el.dataset.id, val = el.value.trim();
       if (!val || val === 'No category yet') return;
-      el.classList.add('changed');
-      editedCats.add(id);
       if (/^\d+$/.test(val)) {
         // Pure number typed — treat as a direct category ID override, no lookup needed
         updateField(id, 'ebay_category_id', val).then(function(ok) {
@@ -823,8 +839,15 @@ function initTileListeners() {
         fetch('/api/listings/' + id + '/auto-category?query=' + encodeURIComponent(val), {method:'POST'})
           .then(function(r) { return r.json(); })
           .then(function(r) {
-            if (r.path) { el.value = r.path; delete dirtyCats[id]; toast('Matched: ' + r.path + ' ✓'); }
-            else { toast('No match found for "' + val + '"', 'error'); }
+            if (r.path) {
+              el.value = r.path;
+              delete dirtyCats[id];
+              var l = listings.find(x => x.id == id);
+              if (l) { l.ebay_category_id = r.category_id; l.ebay_category_path = r.path; l.ebay_category_is_default = false; }
+              toast('Matched: ' + r.path + ' ✓');
+            } else {
+              toast('No match found for "' + val + '"', 'error');
+            }
           })
           .catch(function() { toast('Category re-match failed', 'error'); });
       }
@@ -1067,7 +1090,14 @@ async function autoCategoryModal() {
     statusEl.textContent = `✅ Matched: ${r.path} (ID ${r.category_id})`;
     lastCategoryTried[modalItemId] = r.category_id;
     const l = listings.find(x => x.id === modalItemId);
-    if (l) l.ebay_category_id = r.category_id;
+    if (l) {
+      l.ebay_category_id = r.category_id;
+      l.ebay_category_path = r.path;
+      l.ebay_category_is_default = false;
+    }
+    changedFields.add(modalItemId + '_category');
+    delete dirtyCats[modalItemId];
+    renderTiles(); // actually reflect the new match on the tile — this was missing before
     toast('Category matched ✓ (click again to see the next-best match)');
   } catch(e) {
     statusEl.textContent = '⚠️ ' + e.message;
