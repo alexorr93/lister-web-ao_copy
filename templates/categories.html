@@ -6,7 +6,7 @@
 <title>eBay Categories — Lister AI</title>
 <style>
 :root {
-  --bg: #1a0611; --card: #1e2535; --border: #2d3348; --text: #f1f5f9; --muted: #64748b; --accent: #2563eb;
+  --bg: #1a0611; --card: #1e2535; --border: #2d3348; --text: #f1f5f9; --muted: #64748b; --accent: #2563eb; --green: #4ade80;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
@@ -17,28 +17,25 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .nav-btn.active { color: #fff; background: var(--accent); }
 .nav-spacer { flex: 1; }
 .nav-download { padding: 6px 12px; background: #1e2535; border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; }
-.main { max-width: 900px; margin: 0 auto; padding: 20px 16px; }
-.search-box { width: 100%; padding: 10px 14px; background: #fff; color: #0f172a; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; margin-bottom: 16px; }
-.section-title { font-size: 16px; font-weight: 800; margin: 20px 0 10px; display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
-.section-title .arrow { transition: transform 0.15s; font-size: 12px; }
-.section-title.collapsed .arrow { transform: rotate(-90deg); }
-.tree-node { margin-left: 16px; }
-.tree-row { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 5px; cursor: pointer; font-size: 13px; }
-.tree-row:hover { background: var(--card); }
-.tree-row .arrow { width: 14px; font-size: 10px; color: var(--muted); transition: transform 0.15s; flex-shrink: 0; }
-.tree-row.collapsed .arrow { transform: rotate(-90deg); }
-.tree-row .name { flex: 1; }
-.tree-row .id { color: var(--muted); font-size: 11px; font-family: monospace; }
-.tree-row.leaf { color: #4ade80; font-weight: 600; }
-.tree-row.leaf:hover { background: rgba(74,222,128,0.1); }
-.tree-row.branch-with-id { color: #94a3b8; }
-.tree-row.branch-with-id .id { color: #64748b; font-style: italic; }
-.tree-children { display: block; }
-.tree-children.collapsed { display: none; }
-.copy-toast { position: fixed; bottom: 20px; right: 20px; background: var(--card); border: 1px solid #4ade80; border-radius: 8px; padding: 10px 16px; font-size: 13px; font-weight: 600; transform: translateY(100px); transition: transform 0.2s; }
-.copy-toast.show { transform: translateY(0); }
+.main { max-width: 1000px; margin: 0 auto; padding: 20px 16px; }
+h1 { font-size: 20px; margin-bottom: 4px; }
+.sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+.search-box { width: 100%; padding: 12px 14px; background: #fff; color: #0f172a; border: 1px solid var(--border); border-radius: 8px; font-size: 15px; margin-bottom: 20px; }
+.section-title { font-size: 16px; font-weight: 800; margin: 24px 0 8px; color: var(--text); }
+.count { color: var(--muted); font-weight: 500; font-size: 13px; }
+.cat-list { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.cat-line { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; font-size: 13px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.cat-line:last-child { border-bottom: none; }
+.cat-line:hover { background: var(--card); }
+.cat-line.leaf { color: var(--green); }
+.cat-line.leaf:hover { background: rgba(74,222,128,0.1); }
+.cat-line.branch { color: var(--muted); }
+.cat-line .path { flex: 1; }
+.cat-line .id { font-family: monospace; color: var(--muted); flex-shrink: 0; }
+.cat-line.leaf .id { color: var(--green); font-weight: 700; }
 .loading { color: var(--muted); font-size: 13px; padding: 20px 0; }
-.other-toggle { color: var(--accent); cursor: pointer; font-size: 13px; font-weight: 600; margin-top: 20px; display: inline-block; }
+.copy-toast { position: fixed; bottom: 20px; right: 20px; background: var(--card); border: 1px solid var(--green); border-radius: 8px; padding: 10px 16px; font-size: 13px; font-weight: 600; transform: translateY(100px); transition: transform 0.2s; }
+.copy-toast.show { transform: translateY(0); }
 </style>
 </head>
 <body>
@@ -56,175 +53,89 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
   <a class="nav-download" href="/logout" style="color:#ef4444;border-color:#7f1d1d;">⏻ Logout</a>
 </nav>
 <div class="main">
-  <h1 style="font-size:20px;margin-bottom:4px;">📂 eBay Category Browser</h1>
-  <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">Click any green leaf category to copy its ID. Business & Industrial and Motors are shown by default since that's most of your inventory.</p>
-  <input type="text" class="search-box" id="search-input" placeholder="Filter categories by name..." oninput="filterTree()"/>
+  <h1>📂 eBay Category Browser</h1>
+  <p class="sub">Every Business & Industrial and eBay Motors category, listed in order with its ID. Green = usable for a listing. Click a green line to copy its ID. Type below to filter — no need to press Enter.</p>
+  <input type="text" class="search-box" id="search-input" placeholder="Type to filter (matches anywhere)..." oninput="filterLines()"/>
 
-  <div id="biz-section">
-    <div class="section-title" onclick="toggleSection('biz')"><span class="arrow">▾</span> Business & Industrial</div>
-    <div id="biz-tree" class="loading">Loading...</div>
-  </div>
+  <div class="section-title">Business & Industrial <span class="count" id="biz-count"></span></div>
+  <div class="cat-list" id="biz-list"><div class="loading">Loading...</div></div>
 
-  <div id="motors-section">
-    <div class="section-title" onclick="toggleSection('motors')"><span class="arrow">▾</span> eBay Motors</div>
-    <div id="motors-tree" class="loading">Loading...</div>
-  </div>
-
-  <div id="other-section" style="display:none;">
-    <div class="section-title" onclick="toggleSection('other')"><span class="arrow">▾</span> Everything Else</div>
-    <div id="other-tree" class="loading">Loading...</div>
-  </div>
-  <span class="other-toggle" id="other-link" onclick="loadOther()">+ Show all other categories</span>
+  <div class="section-title">eBay Motors <span class="count" id="motors-count"></span></div>
+  <div class="cat-list" id="motors-list"><div class="loading">Loading...</div></div>
 </div>
 <div class="copy-toast" id="copy-toast">Copied!</div>
 
 <script>
-let fullTreeData = {biz: null, motors: null, other: null};
-
-function toggleSection(key) {
-  const title = document.querySelector(`#${key}-section .section-title`);
-  const tree = document.getElementById(`${key}-tree`);
-  title.classList.toggle('collapsed');
-  tree.style.display = title.classList.contains('collapsed') ? 'none' : 'block';
-}
-
-function renderNode(name, node, depth) {
-  const hasChildren = Object.keys(node.__children__ || {}).length > 0;
-  const hasId = !!node.__id__;
-  const isLeaf = node.__leaf__ && hasId;
-  const div = document.createElement('div');
-  div.className = 'tree-node';
-
-  const row = document.createElement('div');
-  row.className = 'tree-row' + (isLeaf ? ' leaf' : hasId ? ' branch-with-id' : '');
-  row.dataset.name = name.toLowerCase();
-
-  const arrow = document.createElement('span');
-  arrow.className = 'arrow';
-  arrow.textContent = hasChildren ? '▾' : (isLeaf ? '●' : '');
-  row.appendChild(arrow);
-
-  const nameSpan = document.createElement('span');
-  nameSpan.className = 'name';
-  nameSpan.textContent = name;
-  row.appendChild(nameSpan);
-
-  if (hasId) {
-    const idSpan = document.createElement('span');
-    idSpan.className = 'id';
-    idSpan.textContent = node.__id__ + (isLeaf ? '' : ' (not listable — has subcategories)');
-    row.appendChild(idSpan);
-  }
-
-  div.appendChild(row);
-
-  let childrenDiv = null;
-  if (hasChildren) {
-    childrenDiv = document.createElement('div');
-    childrenDiv.className = 'tree-children' + (depth > 0 ? ' collapsed' : '');
-    if (depth > 0) row.classList.add('collapsed');
-    const sortedKeys = Object.keys(node.__children__).sort();
-    sortedKeys.forEach(childName => {
-      childrenDiv.appendChild(renderNode(childName, node.__children__[childName], depth + 1));
-    });
-    div.appendChild(childrenDiv);
-  }
-
-  // Single click handler covers both cases correctly (this fixes the earlier bug where
-  // childrenDiv was referenced before it existed, so clicking silently did nothing)
-  row.onclick = function(e) {
-    e.stopPropagation();
-    if (hasChildren) {
-      row.classList.toggle('collapsed');
-      childrenDiv.classList.toggle('collapsed');
-    } else if (isLeaf) {
-      copyId(node.__id__, name);
-    } else if (hasId) {
-      toast('This category has no items directly — expand it or pick a subcategory');
+function flatten(node, out) {
+  // Depth-first, preserving natural tree order — this becomes our simple line-by-line list
+  const sortedKeys = Object.keys(node.__children__ || {}).sort();
+  for (const key of sortedKeys) {
+    const child = node.__children__[key];
+    if (child.__id__) {
+      out.push({ path: child.__path__, id: child.__id__, leaf: child.__leaf__ });
     }
-  };
-  if (isLeaf) row.title = 'Click to copy ID ' + node.__id__;
-
-  return div;
+    flatten(child, out);
+  }
 }
 
-function toast(msg) {
-  const t = document.getElementById('copy-toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2500);
+function attachPaths(node, prefix) {
+  const sortedKeys = Object.keys(node.__children__ || {}).sort();
+  for (const key of sortedKeys) {
+    const child = node.__children__[key];
+    child.__path__ = prefix ? prefix + ' > ' + key : key;
+    attachPaths(child, child.__path__);
+  }
 }
 
-function copyId(id, name) {
+function renderList(containerId, countId, lines) {
+  const container = document.getElementById(containerId);
+  document.getElementById(countId).textContent = '(' + lines.length + ')';
+  if (!lines.length) {
+    container.innerHTML = '<div class="loading">No categories found — try Sync Categories in Settings first.</div>';
+    return;
+  }
+  container.innerHTML = lines.map(l =>
+    `<div class="cat-line ${l.leaf ? 'leaf' : 'branch'}" data-text="${(l.path + ' ' + l.id).toLowerCase()}" ${l.leaf ? `onclick="copyId('${l.id}', '${l.path.replace(/'/g,"\\'")}')"` : ''}>
+      <span class="path">${l.path}</span>
+      <span class="id">${l.id}${l.leaf ? '' : ' (not listable)'}</span>
+    </div>`
+  ).join('');
+}
+
+async function loadSection(root, listId, countId) {
+  try {
+    const r = await fetch('/api/ebay/categories-tree?root=' + encodeURIComponent(root));
+    const data = await r.json();
+    const rootNode = data.tree[root];
+    if (!rootNode) { renderList(listId, countId, []); return; }
+    rootNode.__path__ = root;
+    attachPaths(rootNode, root);
+    const lines = [];
+    flatten(rootNode, lines);
+    renderList(listId, countId, lines);
+  } catch(e) {
+    document.getElementById(listId).innerHTML = '<div class="loading">Failed to load: ' + e.message + '</div>';
+  }
+}
+
+function copyId(id, path) {
   navigator.clipboard.writeText(id).then(() => {
     const t = document.getElementById('copy-toast');
-    t.textContent = `Copied "${name}" → ${id}`;
+    t.textContent = `Copied "${path.split(' > ').pop()}" → ${id}`;
     t.classList.add('show');
     setTimeout(() => t.classList.remove('show'), 2000);
   });
 }
 
-async function loadTree(root, containerId, key) {
-  try {
-    const url = root ? `/api/ebay/categories-tree?root=${encodeURIComponent(root)}` : '/api/ebay/categories-tree';
-    const r = await fetch(url);
-    const data = await r.json();
-    fullTreeData[key] = data.tree;
-    const container = document.getElementById(containerId);
-    container.innerHTML = '';
-    // The tree is rooted one level above (e.g. tree["Business & Industrial"]) — descend into it if a root filter was used
-    let node = data.tree;
-    if (root && node[root]) node = node[root].__children__;
-    const sortedKeys = Object.keys(node).sort();
-    if (!sortedKeys.length) {
-      container.innerHTML = '<div class="loading">No categories found — try Sync Categories in Settings first.</div>';
-      return;
-    }
-    sortedKeys.forEach(name => container.appendChild(renderNode(name, node[name], 1)));
-  } catch(e) {
-    document.getElementById(containerId).innerHTML = '<div class="loading">Failed to load: ' + e.message + '</div>';
-  }
-}
-
-function loadOther() {
-  document.getElementById('other-section').style.display = 'block';
-  document.getElementById('other-link').style.display = 'none';
-  loadTree(null, 'other-tree', 'other').then(() => {
-    // Strip out Business & Industrial and eBay Motors from the "everything else" view since they're shown above
-    const container = document.getElementById('other-tree');
-    Array.from(container.children).forEach(child => {
-      const nameEl = child.querySelector('.name');
-      if (nameEl && (nameEl.textContent.includes('Business & Industrial') || nameEl.textContent.includes('eBay Motors'))) {
-        child.remove();
-      }
-    });
-  });
-}
-
-function filterTree() {
+function filterLines() {
   const q = document.getElementById('search-input').value.toLowerCase().trim();
-  document.querySelectorAll('.tree-row').forEach(row => {
-    if (!q) { row.style.display = ''; return; }
-    const matches = row.dataset.name.includes(q);
-    row.style.display = matches ? '' : 'none';
-    // Expand ancestors of any match so it's actually visible
-    if (matches) {
-      let el = row.closest('.tree-node');
-      while (el) {
-        const parentChildren = el.closest('.tree-children');
-        if (parentChildren) {
-          parentChildren.classList.remove('collapsed');
-          const parentRow = parentChildren.previousElementSibling;
-          if (parentRow) { parentRow.classList.remove('collapsed'); parentRow.style.display = ''; }
-        }
-        el = parentChildren ? parentChildren.closest('.tree-node') : null;
-      }
-    }
+  document.querySelectorAll('.cat-line').forEach(line => {
+    line.style.display = (!q || line.dataset.text.includes(q)) ? '' : 'none';
   });
 }
 
-loadTree('Business & Industrial', 'biz-tree', 'biz');
-loadTree('eBay Motors', 'motors-tree', 'motors');
+loadSection('Business & Industrial', 'biz-list', 'biz-count');
+loadSection('eBay Motors', 'motors-list', 'motors-count');
 </script>
 </body>
 </html>
