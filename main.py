@@ -38,21 +38,22 @@ async def auto_fill_worker():
     import asyncio
     while True:
         try:
-            res = supabase.table("listings").select("id,title,brand,ebay_category_id")\
+            res = supabase.table("listings").select("id,title,brand,ebay_category_id,business_id")\
                 .neq("status", "archived").is_("ebay_category_id", "null").limit(10).execute()
             for row in (res.data or []):
                 title = row.get("title") or ""
-                if not title or title == "Scanning...":
+                biz_id = row.get("business_id")
+                if not title or title == "Scanning..." or not biz_id:
                     continue
                 updates = {}
                 if not row.get("brand"):
                     updates["brand"] = guess_brand_from_title(title)
                 try:
-                    suggestion = suggest_ebay_category(title, restrict=True)
+                    suggestion = suggest_ebay_category(title, biz_id, restrict=True)
                     if suggestion:
                         updates["ebay_category_id"] = suggestion["category_id"]
                     else:
-                        fallback = get_ebay_settings().get("EBAY_DEFAULT_CATEGORY_ID", "")
+                        fallback = get_ebay_settings(biz_id).get("EBAY_DEFAULT_CATEGORY_ID", "")
                         if fallback:
                             updates["ebay_category_id"] = fallback
                 except Exception as e:
@@ -80,8 +81,8 @@ def photo_url(photo_id: str, thumb: bool = False) -> str:
 # ── EBAY INVENTORY API ───────────────────────────────────────── #
 EBAY_API_BASE = "https://api.ebay.com"
 
-def get_ebay_settings() -> dict:
-    res = supabase.table("app_settings").select("*").execute()
+def get_ebay_settings(business_id: str) -> dict:
+    res = supabase.table("app_settings").select("*").eq("business_id", business_id).execute()
     return {row["key"]: row["value"] for row in (res.data or [])}
 
 def ebay_headers(token: str, content_language: bool = True) -> dict:
@@ -119,7 +120,10 @@ def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None,
     import requests as _req
     from datetime import timedelta
 
-    settings = get_ebay_settings()
+    biz_id = listing.get("business_id")
+    if not biz_id:
+        raise Exception("Listing has no business_id — cannot look up eBay settings safely")
+    settings = get_ebay_settings(biz_id)
     token = settings.get("EBAY_USER_TOKEN", "")
     if not token:
         raise Exception("No eBay User Token saved in Settings")
@@ -429,7 +433,7 @@ async def get_listings(request: Request, archived: bool = False):
             except Exception as e:
                 print(f"category path lookup failed: {e}")
 
-        default_cat_id = str(get_ebay_settings().get("EBAY_DEFAULT_CATEGORY_ID", "") or "")
+        default_cat_id = str(get_ebay_settings(business_id).get("EBAY_DEFAULT_CATEGORY_ID", "") or "")
 
         for l in listings:
             pid = str(l.get("photo_id") or "")
@@ -632,8 +636,8 @@ async def submit_to_ebay(item_id: str, body: EbaySubmit, request: Request):
         supabase.table("listings").update({"ebay_status": "failed", "ebay_error": str(e)}).eq("id", item_id).execute()
         raise HTTPException(500, str(e))
 
-def get_gemini_key() -> str:
-    settings = get_ebay_settings()
+def get_gemini_key(business_id: str) -> str:
+    settings = get_ebay_settings(business_id)
     return settings.get("GEMINI_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
 
 def sync_ebay_categories(token: str) -> int:
@@ -672,14 +676,14 @@ def sync_ebay_categories(token: str) -> int:
         supabase.table("ebay_categories").upsert(batch, on_conflict="category_id").execute()
     return len(all_nodes)
 
-def suggest_ebay_category(title: str, restrict: bool = True, exclude_id: str = None) -> dict:
+def suggest_ebay_category(title: str, business_id: str, restrict: bool = True, exclude_id: str = None) -> dict:
     """Match an item title to the best eBay leaf category using eBay's OWN live category-suggestion
     engine (same one that correctly found 'Other Business & Industrial' = 26261) — this is far more
     accurate than local keyword matching, since it's eBay's real algorithm trained on real listings.
     restrict=True limits results to Business & Industrial / eBay Motors (your usual categories).
     exclude_id lets a repeat click skip the previous pick and try the next-best suggestion."""
     import requests as _req
-    settings = get_ebay_settings()
+    settings = get_ebay_settings(business_id)
     token = settings.get("EBAY_USER_TOKEN", "")
     if not token:
         return {}
@@ -713,7 +717,7 @@ async def api_sync_categories(request: Request):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
-    settings = get_ebay_settings()
+    settings = get_ebay_settings(business_id)
     token = settings.get("EBAY_USER_TOKEN", "")
     if not token:
         raise HTTPException(400, "No eBay User Token saved in Settings yet")
@@ -733,7 +737,7 @@ async def api_auto_category(item_id: str, request: Request, broad: bool = False,
         if not res.data:
             raise HTTPException(404, "Listing not found")
         title = query if query else res.data[0].get("title", "")
-        suggestion = suggest_ebay_category(title, restrict=not broad, exclude_id=exclude)
+        suggestion = suggest_ebay_category(title, business_id, restrict=not broad, exclude_id=exclude)
         if not suggestion:
             raise HTTPException(404, "No matching category found — try 'Search all categories' or check your eBay token")
         supabase.table("listings").update({"ebay_category_id": suggestion["category_id"]}).eq("id", item_id).execute()
@@ -806,7 +810,7 @@ async def ebay_category_search(q: str, request: Request):
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     import requests as _req
-    settings = get_ebay_settings()
+    settings = get_ebay_settings(business_id)
     token = settings.get("EBAY_USER_TOKEN", "")
     if not token:
         raise HTTPException(400, "No eBay User Token saved in Settings yet")
@@ -832,7 +836,7 @@ async def list_ebay_policies(request: Request):
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     import requests as _req
-    settings = get_ebay_settings()
+    settings = get_ebay_settings(business_id)
     token = settings.get("EBAY_USER_TOKEN", "")
     if not token:
         raise HTTPException(400, "No eBay User Token saved in Settings yet")
@@ -2468,7 +2472,7 @@ async def get_settings(request: Request):
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     try:
-        res = supabase.table("app_settings").select("*").execute()
+        res = supabase.table("app_settings").select("*").eq("business_id", business_id).execute()
         return {row["key"]: row["value"] for row in (res.data or [])}
     except Exception:
         return {}
@@ -2483,7 +2487,11 @@ async def save_setting(body: SaveSetting, request: Request):
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     try:
-        supabase.table("app_settings").upsert({"key": body.key, "value": body.value}).execute()
+        existing = supabase.table("app_settings").select("key").eq("business_id", business_id).eq("key", body.key).limit(1).execute()
+        if existing.data:
+            supabase.table("app_settings").update({"value": body.value}).eq("business_id", business_id).eq("key", body.key).execute()
+        else:
+            supabase.table("app_settings").insert({"business_id": business_id, "key": body.key, "value": body.value}).execute()
         return {"ok": True}
     except Exception as e:
         raise HTTPException(500, str(e))
