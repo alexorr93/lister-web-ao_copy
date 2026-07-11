@@ -760,7 +760,7 @@ async def categories_page(request: Request):
     if not business_id:
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/login", status_code=302)
-    return templates.TemplateResponse("categories.html", {"request": request})
+    return templates.TemplateResponse("categories.html", {"request": request, "is_admin": is_admin})
 
 @app.get("/api/ebay/category-search")
 async def ebay_category_search(q: str):
@@ -848,7 +848,7 @@ async def archive_page(request: Request):
     if not business_id:
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/login", status_code=302)
-    return templates.TemplateResponse("archive.html", {"request": request})
+    return templates.TemplateResponse("archive.html", {"request": request, "is_admin": is_admin})
 
 @app.post("/api/listings/archive-batch")
 async def archive_batch():
