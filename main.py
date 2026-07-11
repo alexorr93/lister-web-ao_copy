@@ -537,6 +537,54 @@ async def submit_to_ebay(item_id: str, body: EbaySubmit):
         supabase.table("listings").update({"ebay_status": "failed", "ebay_error": str(e)}).eq("id", item_id).execute()
         raise HTTPException(500, str(e))
 
+@app.get("/api/ebay/category-search")
+async def ebay_category_search(q: str):
+    """Look up valid LEAF category IDs by keyword, using the token already saved in Settings."""
+    import requests as _req
+    settings = get_ebay_settings()
+    token = settings.get("EBAY_USER_TOKEN", "")
+    if not token:
+        raise HTTPException(400, "No eBay User Token saved in Settings yet")
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    r = _req.get(
+        "https://api.ebay.com/commerce/taxonomy/v1_beta/category_tree/0/get_category_suggestions",
+        headers=headers, params={"q": q}, timeout=15
+    )
+    if r.status_code != 200:
+        raise HTTPException(500, f"{r.status_code}: {r.text}")
+    data = r.json()
+    out = []
+    for s in data.get("categorySuggestions", []):
+        cat = s.get("category", {})
+        path = " > ".join(a.get("categoryName","") for a in s.get("categoryTreeNodeAncestors", [])[::-1])
+        out.append({"id": cat.get("categoryId"), "name": cat.get("categoryName"), "path": path})
+    return {"results": out}
+
+@app.get("/api/ebay/policies")
+async def list_ebay_policies():
+    """Fetch payment/return/fulfillment policy IDs using the token already saved in Settings."""
+    import requests as _req
+    settings = get_ebay_settings()
+    token = settings.get("EBAY_USER_TOKEN", "")
+    if not token:
+        raise HTTPException(400, "No eBay User Token saved in Settings yet")
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    base = "https://api.ebay.com/sell/account/v1"
+    out = {}
+    mapping = {
+        "payment_policy": ("paymentPolicies", "paymentPolicyId"),
+        "return_policy": ("returnPolicies", "returnPolicyId"),
+        "fulfillment_policy": ("fulfillmentPolicies", "fulfillmentPolicyId"),
+    }
+    for kind, (list_key, id_key) in mapping.items():
+        r = _req.get(f"{base}/{kind}?marketplace_id=EBAY_US", headers=headers, timeout=15)
+        if r.status_code != 200:
+            out[kind] = {"error": f"{r.status_code}: {r.text}"}
+            continue
+        data = r.json()
+        out[kind] = [{"name": p.get("name"), "id": p.get(id_key)} for p in data.get(list_key, [])]
+    return out
+
 @app.post("/api/listings/{item_id}/rescan")
 async def rescan_listing(item_id: str):
     try:
