@@ -234,6 +234,7 @@ select.field-input { background: #fff; color: #0f172a; }
   <a class="nav-btn" href="/archive" style="text-decoration:none;display:inline-block;">🗄️ Archive</a>
   <div class="nav-spacer"></div>
   <a class="nav-download" href="#" onclick="window.location.href='/api/export/ebay-csv';return false;">⬇️ eBay CSV</a>
+  {% if account_label %}<span style="font-size:12px;color:var(--muted);margin-right:4px;white-space:nowrap;">👤 {{ account_label }}</span>{% endif %}
   <a class="nav-download" href="/logout" style="color:#ef4444;border-color:#7f1d1d;">⏻ Logout</a>
 </nav>
 
@@ -249,8 +250,9 @@ select.field-input { background: #fff; color: #0f172a; }
       <div class="proc-bar-track"><div class="proc-bar-fill" id="proc-bar-fill" style="width:0%"></div></div>
       <div class="proc-pills">
         <span class="proc-pill proc-pill-done" id="proc-pill-done">0 complete</span>
-        <span class="proc-pill proc-pill-scan" id="proc-pill-scan">0 scanning</span>
-        <button onclick="fetch('/api/reset-queue',{method:'POST'}).then(()=>location.reload())" style="margin-left:8px;font-size:10px;padding:3px 8px;background:#1e2535;border:1px solid #2d3348;border-radius:6px;color:#64748b;cursor:pointer;" title="Clear stuck queue">↺ Reset</button>
+        <span class="proc-pill proc-pill-scan" id="proc-pill-scan" style="cursor:pointer;text-decoration:underline;" onclick="showStuckItems()" title="Click to see what's stuck">0 scanning</span>
+        <div id="stuck-items-panel" style="display:none;margin-top:10px;background:#161925;border:1px solid var(--border);border-radius:8px;padding:10px;"></div>
+        <button onclick="showStuckItems()" style="margin-left:8px;font-size:10px;padding:3px 8px;background:#1e2535;border:1px solid #2d3348;border-radius:6px;color:#64748b;cursor:pointer;" title="See what's stuck">↺ Reset</button>
       </div>
     </div>
     <div class="stats">
@@ -893,6 +895,55 @@ async function updateField(id, field, value) {
     });
     return r.ok;
   } catch(e) { console.error(e); return false; }
+}
+
+async function showStuckItems() {
+  const panel = document.getElementById('stuck-items-panel');
+  if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  panel.innerHTML = '<div style="color:var(--muted);font-size:12px;">Loading...</div>';
+  try {
+    const r = await api('GET', '/api/stuck-groups');
+    if (!r.stuck.length) {
+      panel.innerHTML = '<div style="color:var(--muted);font-size:12px;">Nothing stuck right now.</div>';
+      return;
+    }
+    panel.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:10px;">` +
+      r.stuck.map(s => {
+        const mins = s.created_at ? Math.round((Date.now() - new Date(s.created_at)) / 60000) : '?';
+        const photoHtml = s.thumb_url
+          ? `<img src="${s.thumb_url}" style="width:90px;height:90px;object-fit:cover;border-radius:8px;"/>`
+          : `<div style="width:90px;height:90px;background:#0d1117;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1.5rem;">📷</div>`;
+        return `<div style="text-align:center;">
+          ${photoHtml}
+          <div style="font-size:10px;color:var(--muted);margin-top:4px;">~${mins}m stuck</div>
+          <div style="display:flex;gap:3px;margin-top:4px;">
+            <button onclick="retryStuckGroup('${s.group_id}')" style="flex:1;font-size:9px;padding:3px;background:#1e2535;border:1px solid var(--border);border-radius:4px;color:var(--muted);cursor:pointer;">↻ Retry</button>
+            <button onclick="archiveStuckGroup('${s.group_id}')" style="flex:1;font-size:9px;padding:3px;background:#1e2535;border:1px solid var(--red);border-radius:4px;color:var(--red);cursor:pointer;">🗄️ Archive</button>
+          </div>
+        </div>`;
+      }).join('') + `</div>`;
+  } catch(e) {
+    panel.innerHTML = '<div style="color:var(--red);font-size:12px;">Failed to load: ' + e.message + '</div>';
+  }
+}
+
+async function retryStuckGroup(groupId) {
+  try {
+    await fetch('/api/groups/' + groupId + '/rescan', {method:'POST'});
+    toast('Requeued for another scan attempt ✓');
+    showStuckItems(); showStuckItems(); // close then reopen to refresh
+  } catch(e) { toast('Retry failed', 'error'); }
+}
+
+async function archiveStuckGroup(groupId) {
+  if (!confirm('Give up on this scan and move it to Archive?')) return;
+  try {
+    await api('POST', '/api/stuck-groups/' + groupId + '/clear');
+    toast('Sent to Archive ✓');
+    showStuckItems(); showStuckItems();
+    loadListings();
+  } catch(e) { toast('Failed to archive', 'error'); }
 }
 
 function updateProcBar(stats) {
