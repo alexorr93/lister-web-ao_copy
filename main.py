@@ -28,6 +28,46 @@ if _os.path.isdir("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
+def guess_brand_from_title(title: str) -> str:
+    first_word = (title or "").split()[0].strip(",.;:-") if title else ""
+    return first_word if first_word else "Unbranded"
+
+async def auto_fill_worker():
+    """Runs continuously in the background. Any listing missing a brand or eBay category
+    gets one filled in automatically within seconds of the scan finishing — no manual click needed."""
+    import asyncio
+    while True:
+        try:
+            res = supabase.table("listings").select("id,title,brand,ebay_category_id")\
+                .neq("status", "archived").is_("ebay_category_id", "null").limit(10).execute()
+            for row in (res.data or []):
+                title = row.get("title") or ""
+                if not title or title == "Scanning...":
+                    continue
+                updates = {}
+                if not row.get("brand"):
+                    updates["brand"] = guess_brand_from_title(title)
+                try:
+                    suggestion = suggest_ebay_category(title, restrict=True)
+                    if suggestion:
+                        updates["ebay_category_id"] = suggestion["category_id"]
+                    else:
+                        fallback = get_ebay_settings().get("EBAY_DEFAULT_CATEGORY_ID", "")
+                        if fallback:
+                            updates["ebay_category_id"] = fallback
+                except Exception as e:
+                    print(f"auto_fill_worker category error for {row['id']}: {e}")
+                if updates:
+                    supabase.table("listings").update(updates).eq("id", row["id"]).execute()
+        except Exception as e:
+            print(f"auto_fill_worker error: {e}")
+        await asyncio.sleep(8)
+
+@app.on_event("startup")
+async def start_background_jobs():
+    import asyncio
+    asyncio.create_task(auto_fill_worker())
+
 EBAY_DESCRIPTION = "Shipped primarily with UPS and sometimes USPS. If you have special packing or shipping needs, please send a message. This item is sold in as-is condition. The seller assumes no liability for the use, operation, or installation of this product. Due to the technical nature of this equipment, the buyer is responsible for having the item professionally inspected and installed by a certified technician prior to use."
 
 def photo_url(photo_id: str, thumb: bool = False) -> str:
@@ -369,12 +409,26 @@ async def get_listings(request: Request):
                 print(f"   Search grounding failed: {search_err}")
 
 
+        # Batch-fetch readable category paths for any listings that have a category set
+        cat_ids = list({str(l["ebay_category_id"]) for l in listings if l.get("ebay_category_id")})
+        cat_path_map = {}
+        if cat_ids:
+            try:
+                cat_res = supabase.table("ebay_categories").select("category_id,path").in_("category_id", cat_ids[:200]).execute()
+                cat_path_map = {row["category_id"]: row["path"] for row in (cat_res.data or [])}
+            except Exception as e:
+                print(f"category path lookup failed: {e}")
+
+        default_cat_id = str(get_ebay_settings().get("EBAY_DEFAULT_CATEGORY_ID", "") or "")
+
         for l in listings:
             pid = str(l.get("photo_id") or "")
             all_photos = group_photo_map.get(pid, [pid] if pid else [])
             l["thumb_url"]  = photo_url(pid, thumb=True)
             l["full_url"]   = photo_url(pid)
             l["all_photos"] = [{"thumb": photo_url(p, thumb=True), "full": photo_url(p)} for p in all_photos if p]
+            l["ebay_category_path"] = cat_path_map.get(str(l.get("ebay_category_id") or ""), "")
+            l["ebay_category_is_default"] = bool(default_cat_id) and str(l.get("ebay_category_id") or "") == default_cat_id
             # Coerce types
             l["price"]      = float(l.get("price") or 0)
             l["price_used"] = float(l.get("price_used") or 0)
@@ -648,12 +702,12 @@ async def api_sync_categories():
         raise HTTPException(500, str(e))
 
 @app.post("/api/listings/{item_id}/auto-category")
-async def api_auto_category(item_id: str, broad: bool = False, exclude: str = None):
+async def api_auto_category(item_id: str, broad: bool = False, exclude: str = None, query: str = None):
     try:
         res = supabase.table("listings").select("title").eq("id", item_id).limit(1).execute()
         if not res.data:
             raise HTTPException(404, "Listing not found")
-        title = res.data[0].get("title", "")
+        title = query if query else res.data[0].get("title", "")
         suggestion = suggest_ebay_category(title, restrict=not broad, exclude_id=exclude)
         if not suggestion:
             raise HTTPException(404, "No matching category found — try 'Search all categories' or check your eBay token")
@@ -663,6 +717,49 @@ async def api_auto_category(item_id: str, broad: bool = False, exclude: str = No
         raise
     except Exception as e:
         raise HTTPException(500, str(e))
+
+@app.get("/api/ebay/categories-tree")
+async def categories_tree(root: str = None):
+    """Build a nested tree from the locally synced ebay_categories table, so the
+    Categories page can render a collapsible tree instead of a flat list."""
+    try:
+        all_rows = []
+        offset = 0
+        page_size = 1000
+        while True:
+            q = supabase.table("ebay_categories").select("category_id,name,path")
+            if root:
+                q = q.ilike("path", f"{root}%")
+            res = q.range(offset, offset + page_size - 1).execute()
+            batch = res.data or []
+            all_rows.extend(batch)
+            if len(batch) < page_size:
+                break
+            offset += page_size
+
+        tree = {}
+        for row in all_rows:
+            parts = [p.strip() for p in (row.get("path") or "").split(">") if p.strip()]
+            if not parts:
+                continue
+            node = tree
+            for i, part in enumerate(parts):
+                if part not in node:
+                    node[part] = {"__children__": {}, "__id__": None}
+                if i == len(parts) - 1:
+                    node[part]["__id__"] = row["category_id"]
+                node = node[part]["__children__"]
+        return {"tree": tree}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.get("/categories", response_class=HTMLResponse)
+async def categories_page(request: Request):
+    business_id, is_admin = get_business_info(request)
+    if not business_id:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("categories.html", {"request": request})
 
 @app.get("/api/ebay/category-search")
 async def ebay_category_search(q: str):
