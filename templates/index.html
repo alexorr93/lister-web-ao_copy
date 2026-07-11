@@ -264,6 +264,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <button class="btn" onclick="selectAll()">☑ Select All</button>
       <button class="btn" onclick="deselectAll()">☐ Deselect</button>
       <button class="btn btn-primary" id="submit-ebay-btn" style="display:none" onclick="submitSelected()">⏰ Schedule to eBay</button>
+      <button class="btn" id="archive-selected-btn" style="display:none;color:var(--red);border-color:#991b1b;" onclick="archiveSelected()">🗄️ Archive Selected</button>
       <div class="spacer"></div>
       <button class="btn btn-danger" onclick="confirmClearBatch()">🗑️ Clear Batch</button>
     </div>
@@ -994,6 +995,26 @@ function updateSubmitBtn() {
   const btn = document.getElementById('submit-ebay-btn');
   btn.style.display = selected.size > 0 ? 'inline-block' : 'none';
   btn.textContent = `⏰ Schedule ${selected.size} to eBay`;
+  const archBtn = document.getElementById('archive-selected-btn');
+  archBtn.style.display = selected.size > 0 ? 'inline-block' : 'none';
+  archBtn.textContent = `🗄️ Archive ${selected.size} Selected`;
+}
+
+async function archiveSelected() {
+  if (!selected.size) return;
+  const ids = Array.from(selected);
+  if (!confirm(`Archive ${ids.length} selected item(s)? You can restore them from the Archive page anytime.`)) return;
+  let success = 0, failed = 0;
+  for (const id of ids) {
+    try {
+      await api('PATCH', '/api/listings/' + id, {field: 'status', value: 'archived'});
+      listings = listings.filter(l => String(l.id) !== id);
+      success++;
+    } catch(e) { failed++; }
+  }
+  selected.clear();
+  renderTiles();
+  toast(`Archived ${success} item(s)${failed ? ', ' + failed + ' failed' : ''} ✓`);
 }
 
 async function changeQty(id, delta) {
