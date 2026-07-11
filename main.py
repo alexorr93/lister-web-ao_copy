@@ -621,8 +621,9 @@ def get_gemini_key() -> str:
     return settings.get("GEMINI_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
 
 def sync_ebay_categories(token: str) -> int:
-    """Download eBay's full leaf-category tree once and save it locally, so future
-    category matching never needs a live API call or web search — just a local lookup."""
+    """Download eBay's full category tree once and save it locally — EVERY node, not just leaves,
+    so parent/grouping categories show their real IDs too, not just listable leaf categories.
+    is_leaf marks which ones are actually valid for listing an item (eBay requires a leaf category)."""
     import requests as _req
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     r = _req.get("https://api.ebay.com/commerce/taxonomy/v1/category_tree/0", headers=headers, timeout=60)
@@ -630,28 +631,30 @@ def sync_ebay_categories(token: str) -> int:
         raise Exception(f"getCategoryTree failed: {r.status_code} {r.text}")
     tree = r.json()
 
-    leaves = []
+    all_nodes = []
     def walk(node, path):
         cat = node.get("category", {})
         name = cat.get("categoryName", "")
         cid = cat.get("categoryId", "")
         new_path = path + [name] if name else path
         children = node.get("childCategoryTreeNodes", [])
-        if not children and cid:
-            leaves.append({"category_id": str(cid), "name": name, "path": " > ".join(new_path)})
-        else:
-            for child in children:
-                walk(child, new_path)
+        if cid:
+            all_nodes.append({
+                "category_id": str(cid), "name": name, "path": " > ".join(new_path),
+                "is_leaf": not bool(children),
+            })
+        for child in children:
+            walk(child, new_path)
 
     root = tree.get("rootCategoryNode", {})
     for child in root.get("childCategoryTreeNodes", []):
         walk(child, [])
 
     # Upsert in batches so we don't blow request size limits
-    for i in range(0, len(leaves), 500):
-        batch = leaves[i:i+500]
+    for i in range(0, len(all_nodes), 500):
+        batch = all_nodes[i:i+500]
         supabase.table("ebay_categories").upsert(batch, on_conflict="category_id").execute()
-    return len(leaves)
+    return len(all_nodes)
 
 def suggest_ebay_category(title: str, restrict: bool = True, exclude_id: str = None) -> dict:
     """Match an item title to the best eBay leaf category using eBay's OWN live category-suggestion
@@ -727,7 +730,7 @@ async def categories_tree(root: str = None):
         offset = 0
         page_size = 1000
         while True:
-            q = supabase.table("ebay_categories").select("category_id,name,path")
+            q = supabase.table("ebay_categories").select("category_id,name,path,is_leaf")
             if root:
                 q = q.ilike("path", f"{root}%")
             res = q.range(offset, offset + page_size - 1).execute()
@@ -745,9 +748,10 @@ async def categories_tree(root: str = None):
             node = tree
             for i, part in enumerate(parts):
                 if part not in node:
-                    node[part] = {"__children__": {}, "__id__": None}
+                    node[part] = {"__children__": {}, "__id__": None, "__leaf__": False}
                 if i == len(parts) - 1:
                     node[part]["__id__"] = row["category_id"]
+                    node[part]["__leaf__"] = bool(row.get("is_leaf"))
                 node = node[part]["__children__"]
         return {"tree": tree}
     except Exception as e:
