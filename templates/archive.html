@@ -125,7 +125,7 @@ function render() {
   document.getElementById('count-label').textContent = items.length + ' archived item' + (items.length === 1 ? '' : 's');
 
   grid.innerHTML = items.map(l => {
-    const isSel = selected.has(l.id);
+    const isSel = selected.has(String(l.id));
     const photoHtml = l.thumb_url
       ? `<img src="${l.thumb_url}" alt="" loading="lazy"/>`
       : `<div class="photo-placeholder">📷</div>`;
@@ -145,18 +145,19 @@ function render() {
 }
 
 function toggleSelect(id) {
+  id = String(id);
   if (selected.has(id)) selected.delete(id); else selected.add(id);
   document.getElementById('restore-selected-btn').style.display = selected.size ? 'inline-block' : 'none';
   render();
 }
-function selectAll() { items.forEach(l => selected.add(l.id)); render(); document.getElementById('restore-selected-btn').style.display = 'inline-block'; }
+function selectAll() { items.forEach(l => selected.add(String(l.id))); render(); document.getElementById('restore-selected-btn').style.display = 'inline-block'; }
 function deselectAll() { selected.clear(); render(); document.getElementById('restore-selected-btn').style.display = 'none'; }
 
 async function restoreOne(id) {
   try {
     await fetch('/api/listings/restore', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids:[id]})});
-    items = items.filter(l => l.id !== id);
-    selected.delete(id);
+    items = items.filter(l => String(l.id) !== String(id));
+    selected.delete(String(id));
     render();
     toast('Restored ✓ — back on your dashboard');
   } catch(e) { toast('Restore failed: ' + e.message); }
@@ -167,7 +168,7 @@ async function restoreSelected() {
   const ids = Array.from(selected);
   try {
     await fetch('/api/listings/restore', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids})});
-    items = items.filter(l => !selected.has(l.id));
+    items = items.filter(l => !selected.has(String(l.id)));
     selected.clear();
     render();
     toast(`Restored ${ids.length} item(s) ✓`);
