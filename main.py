@@ -598,25 +598,37 @@ async def clear_stuck_group(group_id: str, request: Request):
         # Stop it from ever being retried or counted as "processing" again
         supabase.table("listing_groups").update({"status": "archived"}).eq("id", group_id).eq("business_id", business_id).execute()
 
-        # If a placeholder/partial listing already exists for this group's photo, archive it too —
-        # give it a readable title based on when it was scanned, since no real title was ever generated
+        # If a listing already exists for this group's photo, archive it. If not (scanning never
+        # got far enough to create one), create a minimal archived placeholder so it's actually
+        # visible on the Archive page instead of silently vanishing.
         gp = supabase.table("group_photos").select("photo_id").eq("group_id", group_id).limit(1).execute()
         if gp.data:
             pid = gp.data[0]["photo_id"]
+            title = "Failed scan (unknown date)"
+            if created_at:
+                try:
+                    dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                    title = f"Failed scan — {dt.strftime('%b %d, %Y %I:%M %p')}"
+                except Exception:
+                    pass
+
             existing = supabase.table("listings").select("id,title").eq("photo_id", pid).eq("business_id", business_id).limit(1).execute()
             if existing.data:
                 update = {"status": "archived"}
                 cur_title = (existing.data[0].get("title") or "").strip()
                 if not cur_title or cur_title == "Scanning...":
-                    if created_at:
-                        try:
-                            dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-                            update["title"] = f"Failed scan — {dt.strftime('%b %d, %Y %I:%M %p')}"
-                        except Exception:
-                            update["title"] = "Failed scan (unknown date)"
-                    else:
-                        update["title"] = "Failed scan (unknown date)"
+                    update["title"] = title
                 supabase.table("listings").update(update).eq("id", existing.data[0]["id"]).execute()
+            else:
+                supabase.table("listings").insert({
+                    "business_id": business_id,
+                    "photo_id": pid,
+                    "title": title,
+                    "status": "archived",
+                    "price": 0,
+                    "quantity": 1,
+                    "condition": "used",
+                }).execute()
         return {"ok": True}
     except Exception as e:
         raise HTTPException(500, str(e))
