@@ -1,2066 +1,1708 @@
-"""
-Lister AI — FastAPI Web Dashboard
-Replaces Streamlit for real-time performance.
-"""
-import os
-import csv
-import io
-from datetime import datetime
-from dotenv import load_dotenv
-from fastapi import FastAPI, Request, HTTPException, UploadFile, File
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from supabase import create_client
-from pydantic import BaseModel
-from typing import Optional
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>Lister AI</title>
+<style>
+:root {
+  --bg:       #1a0611;
+  --surface:  #1a1f2e;
+  --card:     #1e2535;
+  --border:   #2d3348;
+  --text:     #f1f5f9;
+  --muted:    #64748b;
+  --accent:   #2563eb;
+  --green:    #16a34a;
+  --orange:   #ea580c;
+  --amber:    #b45309;
+  --red:      #dc2626;
+  --radius:   12px; 
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
-load_dotenv()
+/* NAV */
+.nav { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 16px; display: flex; align-items: center; gap: 6px; overflow-x: auto; height: 52px; position: sticky; top: 0; z-index: 100; }
+.nav-logo { font-weight: 800; font-size: 15px; color: var(--text); margin-right: 8px; white-space: nowrap; }
+.nav-btn { padding: 6px 14px; border-radius: 8px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; background: transparent; color: var(--muted); transition: all 0.15s; }
+.nav-btn:hover { background: var(--card); color: var(--text); }
+.nav-btn.active { color: #fff; }
+.nav-btn[data-tab="dashboard"].active { background: var(--accent); }
+.nav-btn[data-tab="scan"].active { background: var(--orange); }
+.nav-btn[data-tab="upload"].active { background: #0891b2; }
+.nav-btn[data-tab="auction"].active { background: var(--amber); }
+.pdf-drop-zone { border: 2px dashed var(--border); border-radius: 12px; padding: 28px; text-align: center; cursor: pointer; transition: border-color 0.15s; position: relative; overflow: hidden; margin-bottom: 14px; }
+.pdf-drop-zone:hover { border-color: var(--amber); }
+.pdf-drop-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.pdf-result-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
+.pdf-result-table th { background: var(--surface); color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-size: 10px; padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+.pdf-result-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text); vertical-align: top; }
+.pdf-result-table tr:hover td { background: var(--surface); }
+.pdf-value-high { color: #4ade80; font-weight: 700; }
+.pdf-value-low { color: #f59e0b; font-weight: 700; }
+.nav-btn[data-tab="settings"].active { background: #475569; }
+.nav-btn[data-tab="fastscan"].active { background: #16a34a; }
+.fastscan-zone { border: 2px dashed var(--border); border-radius: 12px; padding: 32px; text-align: center; cursor: pointer; transition: border-color 0.15s; position: relative; overflow: hidden; }
+.fastscan-zone:hover { border-color: #16a34a; }
+.fastscan-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; font-size: 0; }
+.fastscan-icon { font-size: 2.5rem; margin-bottom: 10px; }
+.fastscan-title { font-size: 18px; font-weight: 800; color: var(--text); margin-bottom: 6px; }
+.fastscan-sub { font-size: 13px; color: var(--muted); }
+.fastscan-queue { display: flex; flex-direction: column; gap: 6px; margin-top: 16px; }
+.fastscan-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
+.fastscan-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.fs-dot-queue { background: #475569; }
+.fs-dot-upload { background: #f59e0b; animation: pulse 1s infinite; }
+.fs-dot-done { background: #16a34a; }
+.fs-dot-err { background: var(--red); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+.fastscan-progress { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-top: 12px; }
+.fastscan-progress-bar { height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; margin: 8px 0; }
+.fastscan-progress-fill { height: 100%; background: #16a34a; border-radius: 3px; transition: width 0.4s; }
+.fastscan-cond { display: flex; gap: 8px; margin-bottom: 16px; }
+.fastscan-cond-btn { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.fastscan-cond-btn.active { background: #16a34a; border-color: #16a34a; color: #fff; }
+  .nav-btn[data-tab="parts"].active { background: #7c3aed; }
+.nav-spacer { flex: 1; }
+.nav-download { padding: 6px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; }
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-print(f"Connecting to Supabase: {SUPABASE_URL}")
-supabase     = create_client(SUPABASE_URL, SUPABASE_KEY)
+/* MAIN */
+.main { padding: 16px; max-width: 1200px; margin: 0 auto; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
 
-app = FastAPI(title="Lister AI")
-import os as _os
-if _os.path.isdir("static"):
-    app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+/* STATS */
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+.stat { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; border-top: 3px solid var(--c, var(--accent)); }
+.stat-num { font-size: 24px; font-weight: 800; color: var(--text); letter-spacing: -0.5px; }
+.stat-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; margin-top: 3px; }
 
-EBAY_DESCRIPTION = "Shipped primarily with UPS and sometimes USPS. If you have special packing or shipping needs, please send a message. This item is sold in as-is condition. The seller assumes no liability for the use, operation, or installation of this product. Due to the technical nature of this equipment, the buyer is responsible for having the item professionally inspected and installed by a certified technician prior to use."
+/* ACTION BAR */
+.action-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.btn { padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+.btn:hover { background: var(--border); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary:hover { background: #1d4ed8; }
+.btn-green { background: var(--green); border-color: var(--green); color: #fff; box-shadow: 0 4px 14px rgba(22,163,74,0.4); }
+.btn-green:hover { background: #15803d; }
+.btn-danger { border-color: #991b1b; color: var(--red); }
+.btn-danger:hover { background: #1f0000; }
+.spacer { flex: 1; }
 
-def photo_url(photo_id: str, thumb: bool = False) -> str:
-    if not photo_id or photo_id in ("", "nan", "0"):
-        return ""
-    if thumb:
-        return f"{SUPABASE_URL}/storage/v1/render/image/public/part-photos/{photo_id}?width=500&height=500&resize=cover&quality=80"
-    return f"{SUPABASE_URL}/storage/v1/object/public/part-photos/{photo_id}"
+/* TILE GRID */
+.tile-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+@media (max-width: 700px) { .tile-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; } }
+@media (max-width: 400px) { .tile-grid { grid-template-columns: 1fr; } }
 
-# ── PAGES ─────────────────────────────────────────────────────── #
+.tile { background: var(--card); border: 1.5px solid var(--border); border-radius: 14px; overflow: hidden; cursor: pointer; transition: transform 0.12s, border-color 0.12s; }
+.tile:hover { transform: translateY(-1px); }
+.tile.selected { border-color: var(--accent); }
+.tile.ebay-draft { border-left: 3px solid var(--accent); }
 
-@app.get("/auction/research", response_class=HTMLResponse)
-async def auction_research_page(request: Request):
-    import os
-    with open(os.path.join(os.path.dirname(__file__), "templates", "auction_research.html")) as f:
-        html = f.read()
-    return HTMLResponse(content=html, headers={
-        "Content-Security-Policy": "default-src * blob: data:; script-src * blob: data: 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline'; img-src * blob: data:;"
-    })
+.tile-photo { position: relative; width: 100%; padding-top: 100%; background: #161925; overflow: hidden; }
+.tile-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; image-orientation: from-image; }
+.photo-counter { position: absolute; bottom: 44px; right: 7px; background: rgba(0,0,0,0.6); color: #fff; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 10px; }
+.photo-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.5); border: none; color: #fff; width: 24px; height: 24px; border-radius: 50%; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; }
+.photo-nav-prev { left: 5px; }
+.photo-nav-next { right: 5px; }
+.tile-photo-placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; color: #3d4663; }
+.tile-badge-tl { position: absolute; top: 7px; left: 7px; background: rgba(0,0,0,0.65); border-radius: 5px; padding: 2px 7px; font-size: 9px; font-weight: 700; }
+.tile-badge-tr { position: absolute; top: 7px; right: 7px; }
+.tile-price-overlay { position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(transparent, rgba(0,0,0,0.85)); padding: 28px 10px 8px; }
+.tile-price-main { color: #fff; font-size: 22px; font-weight: 900; letter-spacing: -0.5px; line-height: 1; }
+.tile-price-ref { color: #94a3b8; font-size: 10px; font-weight: 600; margin-top: 2px; }
+.tile-body { padding: 10px 11px 8px; }
+.tile-title { font-size: 13px; font-weight: 700; color: #f8fafc; line-height: 1.4; min-height: 38px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tile-category { font-size: 10px; color: #475569; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile-controls { padding: 0 10px 10px; display: flex; gap: 6px; align-items: center; }
+.tile-title-input { width:100%; background:transparent; border:none; border-bottom:1px solid transparent; color:#f8fafc; font-size:13px; font-weight:700; line-height:1.4; font-family:inherit; outline:none; padding:0 0 2px; margin-bottom:6px; transition:border-color 0.15s; }
+.tile-title-input:hover { border-bottom-color:var(--border); }
+.tile-title-input:focus { border-bottom-color:var(--accent); }
+.tile-search-btns { display:flex; gap:5px; margin-bottom:6px; }
+.tile-search-btn { flex:1; font-size:10px; padding:4px 6px; border-radius:5px; border:1px solid var(--border); background:transparent; color:var(--muted); cursor:pointer; font-family:inherit; font-weight:600; }
+.tile-search-btn:hover { background:var(--border); color:var(--text); }
+.tile-price-cond-row { display:flex; align-items:center; gap:6px; }
+.tile-price-input { width:70px; background:transparent; border:none; border-bottom:1px solid var(--border); color:#f8fafc; font-size:14px; font-weight:800; font-family:inherit; outline:none; padding:0 0 2px; }
+.tile-price-input:focus { border-bottom-color:var(--accent); }
+.tile-title-input.dirty, .tile-price-input.dirty { color:#ffffff; border:2px solid #facc15 !important; border-radius:4px; padding:2px 4px; box-shadow:0 0 6px rgba(250,204,21,0.4); }
+.tile-cond-toggle { display:flex; margin-left:auto; border:1px solid var(--border); border-radius:5px; overflow:hidden; }
+.tile-cond-btn { font-size:10px; padding:4px 8px; background:transparent; border:none; color:var(--muted); cursor:pointer; font-family:inherit; font-weight:600; }
+.tile-cond-btn.active { background:var(--accent); color:#fff; }
+.proc-bar-wrap { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px 14px; margin-bottom:14px; }
+.proc-bar-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:7px; font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:0.06em; }
+.proc-bar-track { height:5px; background:var(--border); border-radius:3px; overflow:hidden; margin-bottom:7px; }
+.proc-bar-fill { height:100%; background:#16a34a; border-radius:3px; transition:width 0.5s; }
+.proc-pills { display:flex; gap:5px; flex-wrap:wrap; }
+.proc-pill { font-size:10px; padding:2px 8px; border-radius:20px; }
+.proc-pill-done { background:rgba(22,163,74,0.15); color:#4ade80; }
+.proc-pill-scan { background:rgba(245,158,11,0.15); color:#f59e0b; }
+.tile-check { width: 18px; height: 18px; border-radius: 4px; border: 1.5px solid var(--border); cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.tile-check.checked { background: var(--accent); border-color: var(--accent); }
+.tile-check.checked::after { content: '✓'; color: #fff; font-size: 11px; font-weight: 900; }
+.qty-row { display: flex; align-items: center; background: #161925; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; flex: 1; }
+.qty-btn { width: 28px; height: 26px; background: none; border: none; cursor: pointer; font-size: 15px; font-weight: 900; display: flex; align-items: center; justify-content: center; }
+.qty-btn.minus { color: var(--red); }
+.qty-btn.plus  { color: var(--green); }
+.qty-btn:hover { background: var(--border); }
+.qty-num { flex: 1; text-align: center; font-size: 12px; font-weight: 700; color: var(--text); border-left: 1px solid var(--border); border-right: 1px solid var(--border); height: 26px; line-height: 26px; }
+.tile-rescan { padding: 4px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--muted); font-size: 10px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.tile-rescan:hover { color: var(--text); background: var(--border); }
 
-@app.get("/auction", response_class=HTMLResponse)
-async def auction_page(request: Request):
-    business_id = require_auth(request)
-    if not business_id:
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse("/login", status_code=302)
-    import os
-    with open(os.path.join(os.path.dirname(__file__), "templates", "auction.html")) as f:
-        html = f.read()
-    return HTMLResponse(content=html, headers={
-        "Content-Security-Policy": "default-src * blob: data:; script-src * blob: data: 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline'; img-src * blob: data:;"
-    })
+/* MODAL */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 200; display: none; align-items: center; justify-content: center; padding: 16px; }
+.modal-overlay.open { display: flex; }
+.modal { background: var(--card); border: 1px solid var(--border); border-radius: 18px; max-width: 420px; width: 100%; max-height: 90vh; overflow-y: auto; }
+.modal-img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 14px 14px 0 0; background: #161925; }
+.modal-body { padding: 16px; }
+.modal-title { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+.modal-meta { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+.modal-price { font-size: 28px; font-weight: 900; color: #fff; }
+.modal-refs { font-size: 12px; color: var(--muted); margin-top: 4px; margin-bottom: 16px; }
+.modal-fields { display: flex; flex-direction: column; gap: 10px; }
+.field-label { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 3px; }
+.field-input { width: 100%; padding: 8px 10px; background: #fff; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; }
+.field-input:focus { outline: none; border-color: var(--accent); }
+.modal-close { width: 100%; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 12px; }
+.modal-close:hover { background: var(--border); }
 
-@app.get("/v2", response_class=HTMLResponse)
-async def dashboard_v2(request: Request):
-    from fastapi.responses import HTMLResponse
-    import os
-    with open(os.path.join(os.path.dirname(__file__), "templates", "v2.html")) as f:
-        html = f.read()
-    return HTMLResponse(content=html, headers={
-        "Content-Security-Policy": "default-src * blob: data:; script-src * blob: data: 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline'; img-src * blob: data:;"
-    })
+/* BATCH UPLOAD */
+.upload-zone { border: 2px dashed var(--border); border-radius: 14px; padding: 32px; text-align: center; cursor: pointer; transition: border-color 0.15s; }
+.upload-zone:hover { border-color: #0891b2; }
+.upload-zone.dragover { border-color: #0891b2; background: rgba(8,145,178,0.05); }
+.photo-thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 6px; margin: 12px 0; }
+.photo-thumb { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; }
+.photo-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.photo-thumb-del { position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,0.6); border: none; color: #fff; border-radius: 50%; width: 18px; height: 18px; font-size: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
 
-@app.get("/admin", response_class=HTMLResponse)
-async def admin_page(request: Request):
-    with open(os.path.join(os.path.dirname(__file__), "templates", "admin.html")) as f:
-        return HTMLResponse(f.read())
+/* AUCTION */
+.auction-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 12px; margin-bottom: 10px; display: flex; gap: 12px; }
+.auction-img { width: 80px; height: 80px; border-radius: 10px; object-fit: cover; flex-shrink: 0; background: #161925; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; color: #3d4663; }
+.auction-info { flex: 1; min-width: 0; }
+.auction-title { font-size: 13px; font-weight: 600; color: var(--text); line-height: 1.35; margin-bottom: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.auction-desc { font-size: 11px; color: var(--muted); margin-bottom: 8px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.auction-prices { display: flex; gap: 16px; align-items: flex-end; }
+.price-block-label { font-size: 9px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 2px; }
+.price-block-val { font-size: 20px; font-weight: 900; letter-spacing: -0.3px; line-height: 1; }
+.price-divider { width: 1px; background: var(--border); align-self: stretch; }
+.margin-badge { padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 700; align-self: center; }
+.comparable-badge { background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.3); border-radius: 6px; padding: 3px 8px; margin-top: 6px; display: inline-block; font-size: 10px; color: #f59e0b; font-weight: 600; }
+.auction-actions { display: flex; flex-direction: column; gap: 6px; align-items: center; flex-shrink: 0; }
+.fav-btn { font-size: 20px; cursor: pointer; background: none; border: none; }
 
-@app.patch("/api/admin/businesses/{business_id}")
-async def admin_update_business(business_id: str, request: Request):
-    try:
-        body = await request.json()
-        allowed = {k: v for k, v in body.items() if k in ("scan_limit", "scan_count", "is_admin")}
-        supabase.table("businesses").update(allowed).eq("id", business_id).execute()
-        return {"ok": True}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+/* SETTINGS */
+.settings-section { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 16px; }
+.settings-title { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+.settings-sub { font-size: 12px; color: var(--muted); margin-bottom: 14px; }
 
-@app.delete("/api/admin/businesses/{business_id}")
-async def admin_delete_business(business_id: str):
-    try:
-        supabase.table("sessions").delete().eq("business_id", business_id).execute()
-        supabase.table("listings").delete().eq("business_id", business_id).execute()
-        supabase.table("listing_groups").delete().eq("business_id", business_id).execute()
-        supabase.table("businesses").delete().eq("id", business_id).execute()
-        return {"ok": True}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+/* EMPTY STATE */
+.empty { text-align: center; padding: 4rem 1rem; }
+.empty-icon { font-size: 3.5rem; margin-bottom: 12px; }
+.empty-title { font-size: 18px; font-weight: 700; color: var(--text); }
+.empty-sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
 
-@app.get("/api/admin/businesses")
-async def admin_businesses():
-    try:
-        biz = supabase.table("businesses").select("id,name,email,created_at,scan_count,scan_limit,is_admin").order("created_at", desc=True).execute()
-        businesses = biz.data or []
-        for b in businesses:
-            lid = supabase.table("listings").select("id", count="exact").eq("business_id", b["id"]).execute()
-            b["listing_count"] = lid.count or 0
-            sid = supabase.table("auction_research_sessions").select("id,created_at", count="exact").eq("business_id", b["id"]).order("created_at", desc=True).limit(1).execute()
-            b["scan_count"] = sid.count or 0
-            b["last_active"] = sid.data[0]["created_at"] if sid.data else None
-        return {"businesses": businesses}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+/* TOAST */
+.toast { position: fixed; bottom: 20px; right: 20px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; font-size: 13px; font-weight: 600; color: var(--text); z-index: 300; transform: translateY(100px); transition: transform 0.3s; max-width: 280px; }
+.toast.show { transform: translateY(0); }
+.toast.success { border-color: var(--green); }
+.toast.error   { border-color: var(--red); }
 
-@app.get("/paywall", response_class=HTMLResponse)
-async def paywall_page(request: Request):
-    with open(os.path.join(os.path.dirname(__file__), "templates", "paywall.html")) as f:
-        return HTMLResponse(f.read())
+/* SELECT dropdown */
+select.field-input { background: #fff; color: #0f172a; }
+</style>
+</head>
+<body>
 
-@app.get("/team", response_class=HTMLResponse)
-async def team_portal(request: Request):
-    with open(os.path.join(os.path.dirname(__file__), "templates", "team_portal.html")) as f:
-        return HTMLResponse(f.read())
+<nav class="nav">
+  <div class="nav-logo">📦 Lister AI</div>
+  <button class="nav-btn active" data-tab="dashboard">📊 Dashboard</button>
+  <button class="nav-btn" data-tab="upload">📸 Upload</button>
+  <button class="nav-btn" data-tab="fastscan">⚡ Fast Scan</button>
+  {% if is_admin %}<button class="nav-btn" data-tab="auction">🔨 Auctions</button>{% endif %}
+  {% if is_admin %}<button class="nav-btn" data-tab="parts">🔍 Parts Lookup</button>{% endif %}
+  <button class="nav-btn" data-tab="settings">⚙️ Settings</button>
+  <div class="nav-spacer"></div>
+  <a class="nav-download" href="#" onclick="window.location.href='/api/export/ebay-csv';return false;">⬇️ eBay CSV</a>
+  <a class="nav-download" href="/logout" style="color:#ef4444;border-color:#7f1d1d;">⏻ Logout</a>
+</nav>
 
-@app.get("/portal", response_class=HTMLResponse)
-async def portal(request: Request):
-    import os
-    with open(os.path.join(os.path.dirname(__file__), "templates", "portal.html")) as f:
-        html = f.read()
-    from fastapi.responses import HTMLResponse
-    return HTMLResponse(content=html, headers={
-        "Content-Security-Policy": "default-src * blob: data:; script-src * blob: data: 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline'; img-src * blob: data:;"
-    })
+<div class="main">
 
+  <!-- DASHBOARD TAB -->
+  <div class="tab-content active" id="tab-dashboard">
+    <div class="proc-bar-wrap" id="proc-bar-wrap" style="display:none">
+      <div class="proc-bar-header">
+        <span>Processing queue</span>
+        <span id="proc-bar-count">0 of 0 done</span>
+      </div>
+      <div class="proc-bar-track"><div class="proc-bar-fill" id="proc-bar-fill" style="width:0%"></div></div>
+      <div class="proc-pills">
+        <span class="proc-pill proc-pill-done" id="proc-pill-done">0 complete</span>
+        <span class="proc-pill proc-pill-scan" id="proc-pill-scan">0 scanning</span>
+        <button onclick="fetch('/api/reset-queue',{method:'POST'}).then(()=>location.reload())" style="margin-left:8px;font-size:10px;padding:3px 8px;background:#1e2535;border:1px solid #2d3348;border-radius:6px;color:#64748b;cursor:pointer;" title="Clear stuck queue">↺ Reset</button>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="stat" style="--c:#2563eb"><div class="stat-num" id="stat-items">—</div><div class="stat-lbl">Items</div></div>
+      <div class="stat" style="--c:#16a34a"><div class="stat-num" id="stat-value">—</div><div class="stat-lbl">Batch Value</div></div>
+      <div class="stat" style="--c:#f59e0b"><div class="stat-num" id="stat-units">—</div><div class="stat-lbl">Total Units</div></div>
+    </div>
+    <div class="action-bar">
+      <button class="btn" onclick="selectAll()">☑ Select All</button>
+      <button class="btn" onclick="deselectAll()">☐ Deselect</button>
+      <button class="btn btn-primary" id="submit-ebay-btn" style="display:none" onclick="submitSelected()">🏷️ Submit to eBay</button>
+      <div class="spacer"></div>
+      <button class="btn btn-danger" onclick="confirmClearBatch()">🗑️ Clear Batch</button>
+    </div>
+    <div class="tile-grid" id="tile-grid"></div>
+    <div class="empty" id="dash-empty" style="display:none">
+      <div class="empty-icon">📭</div>
+      <div class="empty-title">No items in batch</div>
+      <div class="empty-sub">Use Scan or Upload to add items</div>
+    </div>
+  </div>
 
-def require_auth(request: Request):
-    """Returns business_id if authenticated, else None."""
-    token = request.cookies.get("session_id")
-    if not token:
-        return None
-    try:
-        res = supabase.table("sessions").select("business_id").eq("token", token).execute()
-        if res.data:
-            return res.data[0]["business_id"]
-    except Exception:
-        pass
-    return None
+  <!-- UPLOAD TAB -->
+  <div class="tab-content" id="tab-upload">
+    <div id="upload-start">
+      <div style="text-align:center;padding:2rem 0 1.5rem;">
+        <div style="font-size:3.5rem;margin-bottom:12px;">🗂️</div>
+        <div style="font-size:20px;font-weight:800;color:var(--text);">Batch Upload</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px;">Select multiple photos from your library.</div>
+      </div>
+      <div style="margin-bottom:16px;">
+        <div class="field-label">Batch Condition</div>
+        <div style="display:flex;gap:10px;margin-top:6px;">
+          <button class="btn btn-primary" id="up-cond-new" onclick="setUpCondition('new')" style="flex:1;">✓ New</button>
+          <button class="btn" id="up-cond-used" onclick="setUpCondition('used')" style="flex:1;">Used</button>
+        </div>
+      </div>
+      <button class="btn btn-green" style="width:100%;font-size:16px;padding:14px;" onclick="startUploadBatch()">🚀 Start Batch</button>
+    </div>
+    <div id="upload-active" style="display:none;">
+      <div style="background:var(--surface);border:1px solid var(--border);border-left:4px solid #0891b2;border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">
+        <div><div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;">Upload Batch</div><div style="font-size:13px;color:var(--text);font-weight:600;" id="up-item-label">Item 1</div></div>
+        <button class="btn btn-danger" onclick="endUploadBatch()">End</button>
+      </div>
+      <input type="file" id="upload-file-input" accept="image/*,image/heic" multiple style="display:none;" onchange="handleUploadFiles(this)"/>
+      <div id="upload-thumbs" class="photo-thumbs"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;"><button class="btn" style="font-size:14px;padding:12px;" onclick="document.getElementById('upload-camera-input').click()">📷 Take Photo</button><button class="btn" style="font-size:14px;padding:12px;" onclick="document.getElementById('upload-file-input').click()">🖼️ Gallery</button></div><input type="file" id="upload-camera-input" accept="image/*" capture="environment" multiple style="display:none;" onchange="handleUploadFiles(this)"/>
+      <div style="margin-bottom:12px;">
+        <div class="field-label">Quantity</div>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:6px;">
+          <button class="btn" style="width:44px;height:44px;font-size:20px;padding:0;color:var(--red);" onclick="upQty(-1)">−</button>
+          <div id="up-qty-display" style="flex:1;text-align:center;font-size:22px;font-weight:800;">1</div>
+          <button class="btn" style="width:44px;height:44px;font-size:20px;padding:0;color:var(--green);" onclick="upQty(1)">+</button>
+        </div>
+      </div>
+      <div id="up-progress" style="display:none;margin-bottom:8px;">
+        <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;"><div id="up-progress-bar" style="height:100%;background:#0891b2;width:0%;transition:width 0.3s;"></div></div>
+        <div id="up-progress-text" style="font-size:12px;color:var(--muted);margin-top:4px;text-align:center;"></div>
+      </div>
+      <button class="btn" style="width:100%;font-size:15px;padding:13px;background:#0891b2;border-color:#0891b2;color:#fff;" id="up-done-btn" onclick="submitUploadItem()">✓ Done — Next Item →</button>
+    </div>
+    <div id="upload-items-list" style="margin-top:16px;"></div>
+  </div>
 
-def get_business_info(request: Request):
-    """Returns (business_id, is_admin) or (None, False)."""
-    token = request.cookies.get("session_id")
-    if not token:
-        return None, False
-    try:
-        res = supabase.table("sessions").select("business_id").eq("token", token).execute()
-        if not res.data:
-            return None, False
-        bid = res.data[0]["business_id"]
-        biz = supabase.table("businesses").select("is_admin").eq("id", bid).execute()
-        is_admin = bool(biz.data[0]["is_admin"]) if biz.data else False
-        return bid, is_admin
-    except Exception:
-        pass
-    return None, False
+  <!-- FAST SCAN TAB -->
+  <div class="tab-content" id="tab-fastscan">
+    <div style="padding:1.5rem 0 1rem;text-align:center;">
+      <div style="font-size:2.5rem;margin-bottom:10px;">⚡</div>
+      <div style="font-size:20px;font-weight:800;color:var(--text);margin-bottom:6px;">Fast Scan</div>
+      <div style="font-size:13px;color:var(--muted);">Select multiple photos — each becomes its own listing.</div>
+    </div>
+    <div class="fastscan-cond">
+      <button class="fastscan-cond-btn" id="fs-cond-new" onclick="setFsCond('new')">✓ New</button>
+      <button class="fastscan-cond-btn" id="fs-cond-used" onclick="setFsCond('used')">Used</button>
+    </div>
+    <div class="fastscan-zone" id="fastscan-zone">
+      <input type="file" id="fastscan-input" accept="image/*,image/heic" multiple onchange="startFastScan(this)">
+      <div class="fastscan-icon">📷</div>
+      <div class="fastscan-title">Select photos from gallery</div>
+      <div class="fastscan-sub">Each photo will be scanned as a separate item</div>
+    </div>
+    <div id="fastscan-progress" style="display:none;background:#0d1117;border:1px solid #1a2332;border-radius:12px;overflow:hidden;margin-top:16px;">
+      <div onclick="var q=document.getElementById('fastscan-queue');q.style.display=q.style.display==='none'?'block':'none';" style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;cursor:pointer;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="width:8px;height:8px;border-radius:50%;background:#fbbf24;box-shadow:0 0 8px rgba(251,191,36,0.6);"></div>
+          <span style="font-size:15px;font-weight:700;color:#f0fdf4;">Scan Queue</span>
+          <span id="fs-count" style="font-size:13px;color:#475569;">0 / 0</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:120px;height:4px;background:#111827;border-radius:2px;overflow:hidden;">
+            <div id="fs-bar" style="width:0%;height:100%;background:linear-gradient(90deg,#22c55e,#06b6d4);border-radius:2px;transition:width 0.4s;"></div>
+          </div>
+          <span style="font-size:12px;color:#475569;">▾</span>
+        </div>
+      </div>
+      <div id="fastscan-queue" style="border-top:1px solid #1a2332;display:block;"></div>
+    </div>
+  </div>
 
-@app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    business_id, is_admin = get_business_info(request)
-    if not business_id:
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse("/login", status_code=302)
-    return templates.TemplateResponse("index.html", {"request": request, "is_admin": is_admin})
+  <!-- AUCTION TAB -->
+  <div class="tab-content" id="tab-auction">
+    <!-- PDF Auction Scanner -->
+    <div style="margin-bottom:20px;">
+      <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:10px;">📄 PDF Auction Scanner</div>
+      <div class="pdf-drop-zone" id="pdf-drop-zone">
+        <input type="file" id="pdf-input" accept=".pdf" onchange="scanPdfAuction(this)">
+        <div style="font-size:2rem;margin-bottom:8px;">📄</div>
+        <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;">Upload auction PDF</div>
+        <div style="font-size:12px;color:var(--muted);">Gemini will extract all items and estimate values</div>
+      </div>
+      <div id="pdf-scanning" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div style="font-size:12px;font-weight:600;color:var(--amber);text-transform:uppercase;letter-spacing:0.06em;" id="pdf-scan-label">Reading PDF...</div>
+          <div style="font-size:11px;color:var(--muted);" id="pdf-scan-pct">0%</div>
+        </div>
+        <div style="height:5px;background:var(--border);border-radius:3px;overflow:hidden;margin-bottom:10px;">
+          <div id="pdf-scan-bar" style="height:100%;background:var(--amber);border-radius:3px;width:0%;transition:width 0.6s ease;"></div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);text-align:center;">Items will appear below as each section completes</div>
+      </div>
+      <div id="pdf-results" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div style="font-size:13px;font-weight:700;color:var(--text);" id="pdf-result-title">Results</div>
+          <button class="btn" style="font-size:11px;padding:4px 12px;" onclick="downloadPdfCsv()">⬇️ Download CSV</button>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="pdf-result-table" id="pdf-result-table">
+            <thead><tr><th>Lot</th><th>Title (click for eBay sold)</th><th>Est. Low</th><th>Est. High</th><th>Your Value</th><th>Notes</th></tr></thead>
+            <tbody id="pdf-result-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div style="border-top:1px solid var(--border);padding-top:16px;margin-bottom:10px;font-size:14px;font-weight:700;color:var(--text);">🔗 URL Scanner</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+      <input type="url" id="auction-url-input" class="field-input" style="flex:1;min-width:200px;" placeholder="https://www.bidspotter.com/..."/>
+      <button class="btn btn-primary" onclick="startAuctionScan()">Scan URL</button>
+    </div>
+    <div id="auction-scan-progress" style="display:none;margin-bottom:10px;">
+      <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;"><div id="auction-scan-bar" style="height:100%;background:var(--amber);width:0%;transition:width 2s;"></div></div>
+      <div id="auction-scan-text" style="font-size:12px;color:var(--muted);margin-top:4px;text-align:center;">Scanning...</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+      <select id="auction-session-select" class="field-input" style="flex:1;min-width:200px;" onchange="loadAuctionItems(this.value)">
+        <option value="">Select a scan...</option>
+      </select>
+      <button class="btn" onclick="archiveAuctionSession()">📦 Archive</button>
+    </div>
+    <div id="auction-list"></div>
+    <div class="empty" id="auction-empty" style="display:none;">
+      <div class="empty-icon">🔨</div>
+      <div class="empty-title">No auction scans</div>
+      <div class="empty-sub">Use the web dashboard to scan auction URLs</div>
+    </div>
+  </div>
 
-# ── API: LISTINGS ─────────────────────────────────────────────── #
+  <!-- PARTS LOOKUP TAB -->
+  <div class="tab-content" id="tab-parts">
+    <div style="margin-bottom:16px;">
+      <div style="font-size:18px;font-weight:800;color:var(--text);margin-bottom:4px;">🔍 Parts Photo Lookup</div>
+      <div style="font-size:13px;color:var(--muted);">Paste part numbers below, then scan your photos. Gemini Vision will read each photo and flag any matches.</div>
+    </div>
 
-@app.get("/api/listings")
-async def get_listings(request: Request):
-    business_id = require_auth(request)
-    if not business_id:
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
-    try:
-        res = supabase.table("listings")\
-            .select("*")\
-            .eq("business_id", business_id)\
-            .neq("status", "archived")\
-            .order("created_at", desc=True)\
-            .execute()
-        listings = res.data or []
+    <div class="settings-section" style="border-left:4px solid #7c3aed;">
+      <div class="settings-title">Part Numbers to Search</div>
+      <div class="settings-sub">One part number per line. Up to 200 numbers.</div>
+      <textarea id="parts-input" class="field-input" rows="8" style="font-family:monospace;font-size:13px;" placeholder="ABC-12345&#10;XYZ-67890&#10;MOD-11111"></textarea>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <div style="font-size:12px;color:var(--muted);">Scan:</div>
+        <button class="btn btn-primary" onclick="startPartsScan('all')" style="background:#7c3aed;border-color:#7c3aed;">📷 All Photos</button>
+        <button class="btn" onclick="startPartsScan('recent')" style="border-color:#7c3aed;color:#7c3aed;">📅 Last 100 Only</button>
+      </div>
+    </div>
 
-        # Batch fetch all group photos for these listings
-        primary_pids = [str(l.get("photo_id") or "") for l in listings if l.get("photo_id")]
-        group_photo_map = {}  # photo_id -> [all photo_ids in same group]
-        if primary_pids:
-            try:
-                gp_res = supabase.table("group_photos")                    .select("group_id, photo_id")                    .in_("photo_id", primary_pids[:100])                    .execute()
-                # Map primary photo -> group_id
-                pid_to_gid = {row["photo_id"]: row["group_id"] for row in (gp_res.data or [])}
-                group_ids = list(set(pid_to_gid.values()))
-                if group_ids:
-                    all_gp = supabase.table("group_photos")                        .select("group_id, photo_id")                        .in_("group_id", group_ids)                        .execute()
-                    # Build group_id -> [photo_ids]
-                    gid_to_photos = {}
-                    for row in (all_gp.data or []):
-                        gid_to_photos.setdefault(row["group_id"], []).append(row["photo_id"])
-                    # Map primary photo_id -> all photos in its group
-                    for pid, gid in pid_to_gid.items():
-                        group_photo_map[pid] = gid_to_photos.get(gid, [pid])
-            except Exception as search_err:
-                print(f"   Search grounding failed: {search_err}")
+    <div id="parts-progress" style="display:none;margin-bottom:16px;">
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+          <span style="font-size:13px;font-weight:600;color:var(--text);" id="parts-progress-label">Scanning...</span>
+          <span style="font-size:12px;color:var(--muted);" id="parts-progress-count">0 / 0</span>
+        </div>
+        <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
+          <div id="parts-progress-bar" style="height:100%;background:#7c3aed;width:0%;transition:width 0.3s;"></div>
+        </div>
+        <button class="btn btn-danger" style="margin-top:10px;width:100%;" onclick="stopPartsScan()">Stop Scan</button>
+      </div>
+    </div>
 
+    <div id="parts-matches" style="display:none;margin-bottom:16px;">
+      <div style="font-size:15px;font-weight:700;color:#16a34a;margin-bottom:10px;" id="parts-match-header"></div>
+      <div id="parts-match-list"></div>
+    </div>
 
-        for l in listings:
-            pid = str(l.get("photo_id") or "")
-            all_photos = group_photo_map.get(pid, [pid] if pid else [])
-            l["thumb_url"]  = photo_url(pid, thumb=True)
-            l["full_url"]   = photo_url(pid)
-            l["all_photos"] = [{"thumb": photo_url(p, thumb=True), "full": photo_url(p)} for p in all_photos if p]
-            # Coerce types
-            l["price"]      = float(l.get("price") or 0)
-            l["price_used"] = float(l.get("price_used") or 0)
-            l["price_new"]  = float(l.get("price_new") or 0)
-            l["quantity"]   = int(l.get("quantity") or 1)
-            # Normalize condition — default to "used" if blank/null
-            cond = str(l.get("condition") or "").strip().lower()
-            l["condition"] = cond if cond in ("new", "used") else "used"
-            # Normalize listing_type — items from batch upload are not auctions
-            lt = str(l.get("listing_type") or "").strip().lower()
-            if lt not in ("auction", "fixed"):
-                l["listing_type"] = "fixed"
-        return JSONResponse(listings)
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        raise HTTPException(500, str(e))
+    <div id="parts-no-matches" style="display:none;">
+      <div style="font-size:13px;color:var(--muted);margin-bottom:10px;" id="parts-no-match-header"></div>
+      <details>
+        <summary style="font-size:12px;color:var(--muted);cursor:pointer;">Show all scanned (no match)</summary>
+        <div id="parts-no-match-list" style="margin-top:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:6px;"></div>
+      </details>
+    </div>
+  </div>
 
-class UpdateField(BaseModel):
-    field: str
-    value: object
+    <!-- SETTINGS TAB -->
+  <div class="tab-content" id="tab-settings">
+    <div class="settings-section" style="border-left:4px solid var(--accent);">
+      <div class="settings-title">🤖 Google Gemini API</div>
+      <div class="settings-sub">Used for AI scanning and value research.</div>
+      <div class="field-label">API Key</div>
+      <input type="password" class="field-input" id="set-gemini" placeholder="AIza..." style="margin-bottom:10px;"/>
+      <button class="btn btn-primary" style="width:100%;" onclick="saveSetting('GEMINI_API_KEY','set-gemini')">Save</button>
+    </div>
+    <div class="settings-section" style="border-left:4px solid var(--orange);">
+      <div class="settings-title">🏷️ eBay API Credentials</div>
+      <div class="settings-sub">For direct listing submission. Find at developer.ebay.com</div>
+      <div class="field-label">App ID</div><input type="text" class="field-input" id="set-ebay-app" style="margin-bottom:8px;"/>
+      <div class="field-label">Dev ID</div><input type="text" class="field-input" id="set-ebay-dev" style="margin-bottom:8px;"/>
+      <div class="field-label">Cert ID</div><input type="password" class="field-input" id="set-ebay-cert" style="margin-bottom:8px;"/>
+      <div class="field-label">User Token</div><input type="password" class="field-input" id="set-ebay-token" style="margin-bottom:10px;"/>
+      <button class="btn btn-primary" style="width:100%;" onclick="saveEbaySettings()">Save eBay Settings</button>
+    </div>
+    <div class="settings-section" style="border-left:4px solid var(--orange);">
+      <div class="settings-title">📦 eBay Listing Setup</div>
+      <div class="settings-sub">Required before any listing can publish or schedule. Find policy IDs under Account → Business Policies on eBay.</div>
+      <div class="field-label">Payment Policy ID</div><input type="text" class="field-input" id="set-ebay-payment-policy" style="margin-bottom:8px;"/>
+      <div class="field-label">Return Policy ID</div><input type="text" class="field-input" id="set-ebay-return-policy" style="margin-bottom:8px;"/>
+      <div class="field-label">Fulfillment (Shipping) Policy ID</div><input type="text" class="field-input" id="set-ebay-fulfillment-policy" style="margin-bottom:8px;"/>
+      <div class="field-label">Merchant Location Key</div><input type="text" class="field-input" id="set-ebay-location-key" placeholder="e.g. WAREHOUSE_1" style="margin-bottom:8px;"/>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+        <div><div class="field-label">Location ZIP</div><input type="text" class="field-input" id="set-ebay-location-zip"/></div>
+        <div><div class="field-label">Location Country</div><input type="text" class="field-input" id="set-ebay-location-country" value="US"/></div>
+      </div>
+      <div class="field-label">Default eBay Category ID (fallback)</div><input type="text" class="field-input" id="set-ebay-default-category" style="margin-bottom:10px;"/>
+      <button class="btn btn-primary" style="width:100%;" onclick="saveEbayListingSettings()">Save Listing Setup</button>
+    </div>
+  </div>
 
+</div><!-- /main -->
 
+<!-- PHOTO MODAL -->
+<div class="modal-overlay" id="modal" onclick="closeModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div style="position:relative;z-index:5;">
+      <img class="modal-img" id="modal-img" src="" alt="" style="pointer-events:none;"/>
+      <button id="rotate-ccw-btn" onclick="event.stopPropagation();rotatePhoto('ccw')" title="Rotate left" style="position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,0.6);border:none;color:#fff;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;z-index:10;">↺</button><button id="rotate-cw-btn" onclick="event.stopPropagation();rotatePhoto('cw')" title="Rotate right" style="position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,0.6);border:none;color:#fff;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;z-index:10;">↻</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-title" id="modal-title"></div>
+      <div class="modal-meta" id="modal-meta"></div>
+      <div class="modal-price" id="modal-price"></div>
+      <div class="modal-refs" id="modal-refs"></div>
+      <div class="modal-fields">
+        <div>
+          <div class="field-label">Title</div>
+          <input type="text" class="field-input" id="modal-title-input" maxlength="80" oninput="modalDirty=true"/>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div>
+            <div class="field-label">Price</div>
+            <input type="number" class="field-input" id="modal-price-input" step="0.01" oninput="modalDirty=true"/>
+          </div>
+          <div>
+            <div class="field-label">Condition</div>
+            <select class="field-input" id="modal-cond-input" onchange="modalDirty=true; updatePriceByCondition()">
+              <option value="used">Used</option>
+              <option value="new">New</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="field-label">eBay Description</div>
+        <textarea class="field-input" id="modal-desc-input" rows="4" oninput="modalDirty=true" style="resize:vertical;font-size:12px;line-height:1.5;"></textarea>
+      </div>
+      <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:14px;">
+        <div class="field-label" style="margin-bottom:8px;">eBay Listing</div>
+        <div id="modal-ebay-status" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <button class="btn" onclick="submitToEbay('draft')">📝 Save as Draft</button>
+          <button class="btn btn-primary" onclick="submitToEbay('now')">🚀 Publish Now</button>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="number" class="field-input" id="modal-ebay-hours" value="24" min="0.5" step="0.5" style="width:80px;" title="Hours from now"/>
+          <span style="font-size:12px;color:var(--muted);">hours from now</span>
+          <button class="btn" style="flex:1;" onclick="submitToEbay('schedule')">⏰ Schedule</button>
+        </div>
+      </div>
+      <button class="modal-close" onclick="saveModal()">💾 Save & Close</button>
+    </div>
+  </div>
+</div>
 
-@app.get("/api/export/ebay-csv")
-async def export_ebay_csv(request: Request):
-    import csv, io
-    from fastapi.responses import StreamingResponse
-    from datetime import datetime
-    business_id = require_auth(request)
-    try:
-        q = supabase.table("listings").select(
-            "title,description,price,price_used,price_new,quantity,condition,photo_id,ebay_category_id,description"
-        ).neq("status", "archived")
-        if business_id:
-            q = q.eq("business_id", business_id)
-        res = q.execute()
-        items = res.data or []
-    except Exception as e:
-        raise HTTPException(500, str(e))
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
 
-    output = io.StringIO()
+<script>
+// ── STATE ──────────────────────────────────────────────────────
+let listings      = [];
+let selected      = new Set();
+let quantities    = {};
+let dirtyTitles   = {}; // id -> unsaved title text, so background refreshes don't clobber in-progress edits
+let dirtyPrices   = {}; // id -> unsaved price text
+let editedTitles  = new Set(); // ids whose title has been touched this session (for persistent visual highlight)
+let editedPrices  = new Set(); // ids whose price has been touched this session
+let modalItemId   = null;
+let modalDirty    = false;
+let scanBatchId   = null;
+let scanGroupId   = null;
+let scanCondition = 'used';
+let scanQtyVal    = 1;
+let scanPhotos    = [];
+let scanItems     = [];
+let upBatchId     = null;
+let upGroupId     = null;
+let upCondition   = 'new';
+let upQtyVal      = 1;
+let upPhotos      = [];
+let upItems       = [];
+let activeTab     = 'dashboard';
+let auctionSessions = [];
+let activeSession = null;
 
-    # eBay draft flat file headers — same format as the working version
-    output.write('#INFO,Version=0.0.2,Template= eBay-draft-listings-template_US,,,,,,,,\n')
-    output.write('#INFO Action and Category ID are required fields.,,,,,,,,,,\n')
-    output.write('#INFO,,,,,,,,,,\n')
-    output.write('Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8),Custom label (SKU),Category ID,Title,UPC,Price,Quantity,Item photo URL,Condition ID,Description,Format\n')
+// ── NAV ────────────────────────────────────────────────────────
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + tab).classList.add('active');
+    activeTab = tab;
+    if (tab === 'dashboard') loadListings();
+    if (tab === 'auction')   loadAuctionSessions();
+    if (tab === 'settings')  loadSettings();
+  });
+});
 
-    writer = csv.writer(output, quoting=csv.QUOTE_ALL)
+// ── TOAST ──────────────────────────────────────────────────────
+function toast(msg, type='success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast ${type} show`;
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
 
-    for item in items:
-        cond = str(item.get("condition") or "used").strip().lower()
-        cond_id = "NEW" if cond == "new" else "USED"
-        pid = str(item.get("photo_id") or "")
-        # Look up all photos for this listing via group_photos table
-        try:
-            _gp = supabase.table("group_photos").select("photo_id").eq("group_id",
-                (supabase.table("group_photos").select("group_id").eq("photo_id", pid).execute().data or [{}])[0].get("group_id", "")
-            ).execute()
-            _all_pids = [r["photo_id"] for r in (_gp.data or [])] if _gp.data else [pid]
-            pic = "|".join(photo_url(p) for p in _all_pids if p) if _all_pids else (photo_url(pid) if pid else "")
-        except Exception:
-            pic = photo_url(pid) if pid else ""
-        category_id = "12576"
-        price = float(item.get("price") or item.get("price_used") or 0)
-        writer.writerow([
-            "Draft",
-            "",
-            category_id,
-            str(item.get("title",""))[:80],
-            "",
-            f"{price:.2f}",
-            str(int(item.get("quantity") or 1)),
-            pic,
-            cond_id,
-            str(item.get('description','') or EBAY_DESCRIPTION),
-            "FixedPrice",
-        ])
+// ── API HELPERS ────────────────────────────────────────────────
+async function api(method, url, body) {
+  const opts = { method, headers: {'Content-Type': 'application/json'} };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const r = await fetch(url, opts);
+  if (r.status === 402) { window.location.href = '/paywall'; return; }
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
 
-    csv_bytes = output.getvalue().encode("utf-8")
-    fn = f"ebay_export_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
-    return StreamingResponse(
-        io.BytesIO(csv_bytes),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={fn}"}
-    )
+// ── LISTINGS ───────────────────────────────────────────────────
+window._defaultDesc = 'Shipped primarily with UPS and sometimes USPS. If you have special packing or shipping needs, please send a message. This item is sold in as-is condition. The seller assumes no liability for the use, operation, or installation of this product. Due to the technical nature of this equipment, the buyer is responsible for having the item professionally inspected and installed by a certified technician prior to use.';
+// Safety: ensure modal is closed on page load
+document.addEventListener('DOMContentLoaded', function() {
+  document.getElementById('modal').classList.remove('open');
+});
 
+async function loadListings() {
+  try {
+    listings = await api('GET', '/api/listings');
+    renderTiles();
+    try {
+      const stats = await api('GET', '/api/stats');
+      updateProcBar(stats);
+    } catch(e) {}
+  } catch(e) { toast('Failed to load listings', 'error'); }
+}
 
-@app.get("/api/photos/view/{photo_id}")
-async def view_photo(photo_id: str, t: str = ""):
-    from fastapi.responses import Response
-    img_bytes = supabase.storage.from_("part-photos").download(photo_id)
-    return Response(content=img_bytes, media_type="image/jpeg", headers={
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        "Pragma": "no-cache",
-        "Expires": "0"
-    })
+function updateStats() {
+  let totalVal = 0, totalUnits = 0;
+  listings.forEach(l => {
+    const qty = quantities[l.id] ?? l.quantity ?? 1;
+    totalVal += l.price * qty;
+    totalUnits += qty;
+  });
+  document.getElementById('stat-items').textContent = listings.length;
+  document.getElementById('stat-value').textContent = '$' + totalVal.toFixed(0);
+  document.getElementById('stat-units').textContent = totalUnits;
+}
 
-@app.post("/api/photos/rotate")
-async def rotate_photo(request: Request):
-    from PIL import Image
-    import io
-    body = await request.json()
-    photo_id = body.get("photo_id", "")
-    if not photo_id:
-        raise HTTPException(400, "photo_id required")
-    try:
-        img_bytes = supabase.storage.from_("part-photos").download(photo_id)
-        img = Image.open(io.BytesIO(img_bytes))
-        direction = body.get('direction', 'cw')
-        img = img.rotate(90 if direction == 'ccw' else -90, expand=True)
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=90)
-        buf.seek(0)
-        supabase.storage.from_("part-photos").upload(
-            path=photo_id,
-            file=buf.read(),
-            file_options={"content-type": "image/jpeg", "upsert": "true"}
-        )
-        return {"ok": True}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+function renderTiles() {
+  const grid = document.getElementById('tile-grid');
+  const empty = document.getElementById('dash-empty');
 
-@app.post("/api/reset-queue")
-async def reset_queue():
-    try:
-        supabase.table("listing_groups").update({"status": "waiting"}).in_("status", ["processing", "pending"]).execute()
-        return {"ok": True}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+  // Remember focus + cursor position so a background refresh doesn't yank focus away mid-edit
+  const active = document.activeElement;
+  let focusInfo = null;
+  if (active && active.classList && (active.classList.contains('tile-title-input') || active.classList.contains('tile-price-input'))) {
+    focusInfo = {
+      id: active.dataset.id,
+      field: active.classList.contains('tile-title-input') ? 'title' : 'price',
+      selStart: active.selectionStart,
+      selEnd: active.selectionEnd
+    };
+  }
 
-@app.get("/api/stats")
-async def get_stats(request: Request):
-    try:
-        business_id = require_auth(request)
-        if not business_id:
-            return {"total": 0, "processing": 0, "value": 0}
-        res = supabase.table("listings").select("price, status").eq("business_id", business_id).neq("status", "archived").execute()
-        items = res.data or []
-        total = len(items)
-        value = sum(float(i.get("price") or 0) for i in items)
-        pending = supabase.table("listing_groups").select("id").eq("business_id", business_id).in_("status", ["pending", "processing"]).execute()
-        processing = len(pending.data or [])
-        return {"total": total, "processing": processing, "value": round(value, 2)}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+  if (!listings.length) {
+    grid.innerHTML = '';
+    empty.style.display = 'block';
+    document.getElementById('stat-items').textContent = '0';
+    document.getElementById('stat-value').textContent = '$0';
+    document.getElementById('stat-units').textContent = '0';
+    return;
+  }
+  empty.style.display = 'none';
 
-@app.patch("/api/listings/{item_id}")
-async def update_listing(item_id: str, body: UpdateField):
-    try:
-        supabase.table("listings").update({body.field: body.value}).eq("id", item_id).execute()
-        return {"ok": True}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+  updateStats();
 
-@app.post("/api/listings/{item_id}/rescan")
-async def rescan_listing(item_id: str):
-    try:
-        res = supabase.table("listings").select("photo_id").eq("id", item_id).limit(1).execute()
-        pid = (res.data[0].get("photo_id", "") if res.data else "")
-        if pid:
-            grp = supabase.table("group_photos").select("group_id").eq("photo_id", pid).limit(1).execute()
-            if grp.data:
-                gid = grp.data[0]["group_id"]
-                supabase.table("listing_groups").update({"status": "pending"}).eq("id", gid).execute()
-        supabase.table("listings").update({"status": "pending", "title": "Scanning..."}).eq("id", item_id).execute()
-        return {"ok": True}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+  grid.innerHTML = listings.map(l => {
+    const qty = quantities[l.id] ?? l.quantity;
+    const isSel = selected.has(l.id);
+    const cond = (l.condition || 'used').toString().toLowerCase().trim();
+    const isNew = cond === 'new';
+    const condCol = isNew ? '#16a34a' : '#3b82f6';
+    const refs = [l.price_used > 0 ? `U:$${l.price_used.toFixed(0)}` : '', l.price_new > 0 ? `N:$${l.price_new.toFixed(0)}` : ''].filter(Boolean).join('  ');
+    const ebayDraft = l.ebay_status === 'draft' && l.ebay_item_id;
+    const fallback = (l.price_note === 'new' || l.price_note === 'used');
+    const statusBadge = ebayDraft
+      ? `<a href="https://www.ebay.com/itm/${l.ebay_item_id}" target="_blank" style="background:rgba(37,99,235,0.8);color:#fff;border-radius:5px;font-size:9px;font-weight:700;padding:2px 6px;text-decoration:none;">eBay</a>`
+      : fallback ? `<span style="background:rgba(245,158,11,0.8);color:#fff;border-radius:5px;font-size:9px;font-weight:700;padding:2px 5px;">⚠</span>` : '';
+    const photos = l.all_photos || (l.thumb_url ? [{thumb: l.thumb_url, full: l.full_url}] : []);
+    const photoCount = photos.length;
+    const firstThumb = photos[0]?.thumb || '';
+    const photoHtml = firstThumb
+      ? `<img src="${firstThumb}" alt="" loading="lazy" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;image-orientation:from-image;" id="photo-img-${l.id}"/>`
+      : `<div class="tile-photo-placeholder">📷</div>`;
+    const photoNavHtml = photoCount > 1
+      ? `<button class="photo-nav photo-nav-prev" onclick="event.stopPropagation();cyclePhoto('${l.id}',-1)">‹</button>
+         <button class="photo-nav photo-nav-next" onclick="event.stopPropagation();cyclePhoto('${l.id}',1)">›</button>
+         <div class="photo-counter" id="photo-counter-${l.id}">1/${photoCount}</div>`
+      : '';
 
-@app.post("/api/listings/archive-batch")
-async def archive_batch():
-    try:
-        res = supabase.table("listings").select("*").neq("status", "archived").execute()
-        items = res.data or []
-        if items:
-            ids = [str(i["id"]) for i in items]
-            supabase.table("listings").update({"status": "archived"}).in_("id", ids).execute()
-        return {"ok": True, "count": len(items)}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+    return `<div class="tile${isSel?' selected':''}${ebayDraft?' ebay-draft':''}" id="tile-${l.id}" data-photos='${JSON.stringify(photos)}' data-photo-idx="0">
+      <div class="tile-photo" onclick="openModal('${l.id}')">
+        ${photoHtml}
+        ${photoNavHtml}
+        <div class="tile-badge-tl" style="color:${condCol};">${isNew?'NEW':'USED'}</div>
+        <div class="tile-badge-tr">${statusBadge}</div>
+        <div class="tile-price-overlay">
+          <div class="tile-price-main">$${l.price.toFixed(2)}</div>
+          ${refs ? `<div class="tile-price-ref">${refs}</div>` : ''}
+        </div>
+      </div>
+      <div class="tile-body">
+        <input class="tile-title-input${editedTitles.has(String(l.id)) ? ' dirty' : ''}" type="text" value="${(dirtyTitles[l.id] ?? (l.title||'')).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Title">
+        <div class="tile-search-btns">
+          <button class="tile-search-btn" onclick="window.open('https://www.google.com/search?q='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value),'popupwin','noopener,width=1200,height=800')">Google</button>
+          <button class="tile-search-btn" onclick="window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value)+'&LH_Sold=1&LH_Complete=1','popupwin','noopener,width=1200,height=800')">eBay Sold</button>
+        </div>
+        <div class="tile-price-cond-row">
+          <span style="color:var(--muted);font-size:11px;">$</span>
+          <input class="tile-price-input${editedPrices.has(String(l.id)) ? ' dirty' : ''}" type="number" step="0.01" value="${dirtyPrices[l.id] ?? l.price.toFixed(2)}" data-id="${l.id}">
+          <div class="tile-cond-toggle">
+            <button class="tile-cond-btn${isNew?'' :' active'}" data-id="${l.id}" data-cond="used">Used</button>
+            <button class="tile-cond-btn${isNew?' active':''}" data-id="${l.id}" data-cond="new">New</button>
+          </div>
+        </div>
+      </div>
+      <div class="tile-controls">
+        <div class="tile-check${isSel?' checked':''}" onclick="toggleSelect('${l.id}')"></div>
+        <div class="qty-row">
+          <button class="qty-btn minus" onclick="changeQty('${l.id}',-1)">−</button>
+          <div class="qty-num" id="qty-${l.id}">${qty}</div>
+          <button class="qty-btn plus" onclick="changeQty('${l.id}',1)">+</button>
+        </div>
+        <button class="tile-rescan" onclick="rescanItem('${l.id}')">🔄</button>
+        <button class="tile-rescan" style="color:var(--red);border-color:#991b1b;" onclick="deleteItem('${l.id}')">✕</button>
+      </div>
+    </div>`;
+  }).join('');
 
-# ── API: BATCH UPLOAD ─────────────────────────────────────────── #
+  // Restore focus/cursor into the input the user was actively typing in, if it still exists
+  if (focusInfo) {
+    const selector = focusInfo.field === 'title' ? '.tile-title-input' : '.tile-price-input';
+    const el = grid.querySelector(selector + '[data-id="' + focusInfo.id + '"]');
+    if (el) {
+      el.focus();
+      try { el.setSelectionRange(focusInfo.selStart, focusInfo.selEnd); } catch(e) {}
+    }
+  }
 
-class CreateGroup(BaseModel):
-    session_id: str
-    condition:  str
+  updateSubmitBtn();
+}
 
-@app.post("/api/groups")
-async def create_group(body: CreateGroup, request: Request):
-    try:
-        business_id = require_auth(request)
-        # Check scan limit
-        biz = supabase.table("businesses").select("scan_count,scan_limit").eq("id", business_id).execute()
-        if biz.data:
-            scan_count = biz.data[0].get("scan_count") or 0
-            scan_limit = biz.data[0].get("scan_limit") or 50
-            if scan_count >= scan_limit:
-                raise HTTPException(402, "Scan limit reached. Please contact us to upgrade your plan.")
-            # Increment scan count
-            supabase.table("businesses").update({"scan_count": scan_count + 1}).eq("id", business_id).execute()
-        res = supabase.table("listing_groups").insert({
-            "session_id": body.session_id,
-            "status":     "waiting",
-            "quantity":   1,
-            "condition":  body.condition,
-            "business_id": business_id,
-        }).execute()
-        import traceback
-        print(f"Group insert result: {res}")
-        data = res.data
-        gid = data[0]["id"] if isinstance(data, list) and data else (data.get("id") if isinstance(data, dict) else None)
-        if not gid:
-            raise Exception(f"No ID returned. data={data}")
-        return {"id": gid}
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        raise HTTPException(500, str(e))
+function initTileListeners() {
+  // Mark fields dirty as the user types, so background refreshes never wipe unsaved text
+  document.getElementById('tile-grid').addEventListener('input', function(e) {
+    var el = e.target;
+    if (el.classList.contains('tile-title-input')) {
+      dirtyTitles[el.dataset.id] = el.value;
+      editedTitles.add(el.dataset.id);
+      el.classList.add('dirty');
+    }
+    if (el.classList.contains('tile-price-input')) {
+      dirtyPrices[el.dataset.id] = el.value;
+      editedPrices.add(el.dataset.id);
+      el.classList.add('dirty');
+    }
+  });
+  // Enter commits immediately instead of waiting for blur
+  document.getElementById('tile-grid').addEventListener('keydown', function(e) {
+    var el = e.target;
+    if (e.key === 'Enter' && (el.classList.contains('tile-title-input') || el.classList.contains('tile-price-input'))) {
+      e.preventDefault();
+      el.blur();
+    }
+  });
+  document.getElementById('tile-grid').addEventListener('blur', function(e) {
+    var el = e.target;
+    if (el.classList.contains('tile-title-input')) {
+      updateField(el.dataset.id, 'title', el.value).then(function(ok) {
+        if (ok) delete dirtyTitles[el.dataset.id]; // saved — server value is now trustworthy again
+        // note: box highlight (editedTitles) intentionally stays so you can see what you've touched this session
+      });
+    }
+    if (el.classList.contains('tile-price-input')) {
+      updateField(el.dataset.id, 'price', parseFloat(el.value)).then(function(ok) {
+        if (ok) delete dirtyPrices[el.dataset.id];
+      });
+    }
+  }, true);
+  document.getElementById('tile-grid').addEventListener('click', function(e) {
+    var el = e.target;
+    if (el.classList.contains('tile-cond-btn')) {
+      var id = el.dataset.id, cond = el.dataset.cond;
+      el.parentElement.querySelectorAll('.tile-cond-btn').forEach(function(b){b.classList.remove('active');});
+      el.classList.add('active');
+      updateField(id, 'condition', cond);
+      // Update badge
+      var badge = document.querySelector('#tile-'+id+' .tile-badge-tl');
+      if (badge) { badge.textContent = cond.toUpperCase(); badge.style.color = cond==='new'?'#4ade80':'#60a5fa'; }
+    }
+  });
+}
 
-class SubmitGroup(BaseModel):
-    group_id:  str
-    condition: str
-    quantity:  int
+async function updateField(id, field, value) {
+  try {
+    const r = await fetch('/api/listings/'+id, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({field: field, value: value})
+    });
+    return r.ok;
+  } catch(e) { console.error(e); return false; }
+}
 
-@app.post("/api/groups/{group_id}/rescan")
-async def rescan_group(group_id: str, request: Request):
-    business_id = require_auth(request)
-    try:
-        supabase.table("listing_groups").update({"status": "pending"}).eq("id", group_id).execute()
-        return {"ok": True}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+function updateProcBar(stats) {
+  var scanned = stats.total || 0;
+  var proc = stats.processing || 0;
+  var grandTotal = scanned + proc;
+  var wrap = document.getElementById('proc-bar-wrap');
+  if (!wrap) return;
+  if (proc > 0) {
+    wrap.style.display = '';
+    var pct = grandTotal > 0 ? Math.round(scanned/grandTotal*100) : 0;
+    document.getElementById('proc-bar-fill').style.width = pct + '%';
+    document.getElementById('proc-bar-count').textContent = scanned + ' of ' + grandTotal + ' done';
+    document.getElementById('proc-pill-done').textContent = scanned + ' complete';
+    document.getElementById('proc-pill-scan').textContent = proc + ' scanning';
+  } else {
+    wrap.style.display = 'none';
+  }
+}
 
-@app.get("/api/groups/{group_id}/listing")
-async def get_group_listing(group_id: str, request: Request):
-    try:
-        gp = supabase.table("group_photos").select("photo_id").eq("group_id", group_id).limit(1).execute()
-        if not gp.data:
-            return {"listing": None}
-        photo_id = gp.data[0]["photo_id"]
-        res = supabase.table("listings").select("id,status,title,price").eq("photo_id", photo_id).limit(1).execute()
-        return {"listing": res.data[0] if res.data else None}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+function cyclePhoto(id, dir) {
+  const tile = document.getElementById('tile-' + id);
+  if (!tile) return;
+  const photos = JSON.parse(tile.dataset.photos || '[]');
+  if (photos.length <= 1) return;
+  let idx = parseInt(tile.dataset.photoIdx || '0') + dir;
+  if (idx < 0) idx = photos.length - 1;
+  if (idx >= photos.length) idx = 0;
+  tile.dataset.photoIdx = idx;
+  const img = document.getElementById('photo-img-' + id);
+  if (img) img.src = photos[idx].thumb;
+  const counter = document.getElementById('photo-counter-' + id);
+  if (counter) counter.textContent = (idx + 1) + '/' + photos.length;
+}
 
-@app.post("/api/groups/submit")
-async def submit_group(body: SubmitGroup):
-    try:
-        supabase.table("listing_groups").update({
-            "condition": body.condition,
-            "quantity":  body.quantity,
-            "status":    "pending",
-        }).eq("id", body.group_id).execute()
-        return {"ok": True}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+function toggleSelect(id) {
+  if (selected.has(id)) selected.delete(id); else selected.add(id);
+  const tile = document.getElementById('tile-' + id);
+  const chk  = tile.querySelector('.tile-check');
+  tile.classList.toggle('selected', selected.has(id));
+  chk.classList.toggle('checked', selected.has(id));
+  updateSubmitBtn();
+}
+function selectAll()   { listings.forEach(l => selected.add(l.id)); renderTiles(); }
+function deselectAll() { selected.clear(); renderTiles(); }
+function updateSubmitBtn() {
+  const btn = document.getElementById('submit-ebay-btn');
+  btn.style.display = selected.size > 0 ? 'inline-block' : 'none';
+  btn.textContent = `🏷️ Submit ${selected.size} to eBay`;
+}
 
-@app.post("/api/photos/upload")
-async def upload_photo(request: Request):
-    try:
-        form     = await request.form()
-        file     = form["file"]
-        gid      = str(form["group_id"])
-        idx      = int(form.get("index", 0))
-        contents = await file.read()
-        dt  = datetime.now()
-        fn  = f"{dt.strftime('%d%m%y')}_{dt.strftime('%H%M%S')}_{idx}.jpg"
-        print(f"Uploading photo: {fn}, size={len(contents)}, group={gid}")
-        supabase.storage.from_("part-photos").upload(
-            path=fn,
-            file=contents,
-            file_options={"content-type": "image/jpeg", "upsert": "true"}
-        )
-        supabase.table("group_photos").insert({"group_id": gid, "photo_id": fn}).execute()
-        return {"ok": True, "photo_id": fn, "url": photo_url(fn, thumb=True)}
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        raise HTTPException(500, str(e))
+async function changeQty(id, delta) {
+  const idStr = String(id);
+  const listing = listings.find(l => String(l.id) === idStr);
+  const cur = quantities[idStr] ?? (listing?.quantity ?? 1);
+  const qty = Math.max(0, cur + delta);
+  quantities[idStr] = qty;
+  const el = document.getElementById('qty-' + idStr);
+  if (el) el.textContent = qty;
+  updateStats();
+  try { await api('PATCH', `/api/listings/${idStr}`, {field:'quantity', value:qty}); }
+  catch(e) { toast('Failed to update quantity', 'error'); }
+}
 
+async function rescanItem(id) {
+  try {
+    await api('POST', `/api/listings/${id}/rescan`);
+    toast('Resubmitted to scanner ✓');
+    setTimeout(loadListings, 1500);
+  } catch(e) { toast('Re-scan failed', 'error'); }
+}
 
+async function confirmClearBatch() {
+  if (!confirm(`Archive all ${listings.length} items and clear this batch?`)) return;
+  try {
+    const r = await api('POST', '/api/listings/archive-batch');
+    toast(`✅ ${r.count} items archived`);
+    loadListings();
+  } catch(e) { toast('Failed to clear batch', 'error'); }
+}
 
-# ── API: FULL DEEP RESEARCH ──────────────────────────────────── #
+function submitSelected() {
+  toast('eBay direct submit coming soon — use eBay CSV for now');
+}
 
-@app.post("/api/auction/deep-research-full")
-async def deep_research_full(request: Request):
-    import os, json, base64, asyncio, fitz
-    from concurrent.futures import ThreadPoolExecutor
-    import google.generativeai as genai
+async function deleteItem(id) {
+  const l = listings.find(x => x.id === id);
+  const name = (l && l.title) ? l.title.slice(0,40) : 'this item';
+  if (!confirm('Delete "' + name + '" from this batch?')) return;
+  try {
+    await api('PATCH', '/api/listings/' + id, {field:'status', value:'archived'});
+    listings = listings.filter(l => l.id !== id);
+    selected.delete(id);
+    renderTiles();
+    toast('Item removed from batch');
+  } catch(e) { toast('Delete failed', 'error'); }
+}
 
-    form = await request.form()
-    items_json = form.get("items", "[]")
-    items = json.loads(items_json)
-    gemini_key = os.getenv("GEMINI_API_KEY", "")
-    if not gemini_key:
-        raise HTTPException(400, "GEMINI_API_KEY not set")
+async function startAuctionScan() {
+  const url = document.getElementById('auction-url-input').value.trim();
+  if (!url) { toast('Enter an auction URL first', 'error'); return; }
+  const prog = document.getElementById('auction-scan-progress');
+  const bar  = document.getElementById('auction-scan-bar');
+  const txt  = document.getElementById('auction-scan-text');
+  prog.style.display = 'block';
+  bar.style.width = '0%';
+  txt.textContent = 'Starting scan...';
+  setTimeout(() => { bar.style.width = '60%'; txt.textContent = 'Scraping auction page...'; }, 300);
+  try {
+    const r = await api('POST', '/api/auction/scan', {url});
+    bar.style.width = '100%';
+    txt.textContent = 'Found ' + r.count + ' items. Researching values in background...';
+    setTimeout(() => { prog.style.display = 'none'; }, 3000);
+    document.getElementById('auction-url-input').value = '';
+    await loadAuctionSessions();
+    toast('Scanned ' + r.count + ' items');
+  } catch(e) {
+    prog.style.display = 'none';
+    toast('Scan failed: ' + e.message, 'error');
+  }
+}
 
-    pdf_bytes = None
-    pdf_file = form.get("pdf")
-    if pdf_file and hasattr(pdf_file, "read"):
-        pdf_bytes = await pdf_file.read()
+// ── MODAL ──────────────────────────────────────────────────────
+function extractPhotoId(url) {
+  if (!url) return '';
+  const parts = url.split('/part-photos/');
+  if (parts.length < 2) return '';
+  return decodeURIComponent(parts[1].split('?')[0]);
+}
 
-    genai.configure(api_key=gemini_key)
-    model = genai.GenerativeModel("gemini-2.5-flash")
-    loop = asyncio.get_event_loop()
-    executor = ThreadPoolExecutor(max_workers=1)
+function openModal(id) {
+  id = isNaN(id) ? id : Number(id);
+  const l = listings.find(x => x.id === id);
+  if (!l) return;
+  modalItemId = id;
+  modalDirty  = false;
+  const tile = document.getElementById('tile-' + id);
+  const photos = (l.all_photos && l.all_photos.length) ? l.all_photos : (l.full_url ? [{thumb: l.thumb_url, full: l.full_url}] : []);
+  const curIdx = parseInt(tile?.dataset?.photoIdx || '0');
+  const img = document.getElementById('modal-img');
+  const curPhotoUrl = photos[curIdx]?.full || l.full_url || '';
+  img.src = curPhotoUrl;
+  // Use the photo actually being displayed (not always the item's first/primary photo) so rotate affects the right image
+  img.dataset.photoId = extractPhotoId(curPhotoUrl) || l.photo_id || '';
+  img.style.cssText = 'width:100%;aspect-ratio:1;object-fit:cover;border-radius:14px 14px 0 0;image-orientation:from-image;pointer-events:none;display:' + (img.src ? 'block' : 'none') + ';';
+  document.getElementById('modal-title').textContent = l.title || 'Unknown Item';
+  document.getElementById('modal-meta').textContent  = `${l.ebay_category || ''} · ${(l.condition||'used').toUpperCase()}`;
+  window._modalListing = l;
+  document.getElementById('modal-price').textContent = `$${l.price.toFixed(2)}`;
+  const refs = [l.price_used > 0 ? `Used: $${l.price_used.toFixed(0)}` : '', l.price_new > 0 ? `New: $${l.price_new.toFixed(0)}` : ''].filter(Boolean).join('  ·  ');
+  document.getElementById('modal-refs').textContent  = refs;
+  document.getElementById('modal-title-input').value = l.title || '';
+  document.getElementById('modal-price-input').value = l.price.toFixed(2);
+  document.getElementById('modal-cond-input').value  = l.condition || 'used';
+  document.getElementById('modal-desc-input').value = l.description || window._defaultDesc || '';
+  const ebayStatusEl = document.getElementById('modal-ebay-status');
+  if (ebayStatusEl) {
+    if (l.ebay_status === 'published' && l.ebay_item_id) {
+      ebayStatusEl.innerHTML = `✅ Live on eBay — <a href="https://www.ebay.com/itm/${l.ebay_item_id}" target="_blank" style="color:var(--accent);">View listing ↗</a>`;
+    } else if (l.ebay_status === 'scheduled') {
+      ebayStatusEl.textContent = `⏰ Scheduled for ${l.ebay_scheduled_at ? new Date(l.ebay_scheduled_at).toLocaleString() : 'a future time'}`;
+    } else if (l.ebay_status === 'draft') {
+      ebayStatusEl.textContent = '📝 Saved as draft (not yet visible on eBay)';
+    } else if (l.ebay_status === 'failed') {
+      ebayStatusEl.textContent = '⚠️ Last attempt failed: ' + (l.ebay_error || 'unknown error');
+      ebayStatusEl.style.color = 'var(--red)';
+    } else {
+      ebayStatusEl.textContent = 'Not yet sent to eBay';
+    }
+  }
+  document.getElementById('modal').classList.add('open');
+}
 
-    def extract_single_image(pdf_bytes, img_index):
-        try:
-            import fitz
-            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-            seen = set()
-            all_images = []
-            for page in doc:
-                for img in page.get_images(full=True):
-                    xref = img[0]
-                    if xref in seen: continue
-                    seen.add(xref)
-                    bi = doc.extract_image(xref)
-                    if bi and len(bi.get("image","")) > 8000:
-                        all_images.append(bi["image"])
-            doc.close()
-            if img_index < len(all_images):
-                return [all_images[img_index]]
-            return []
-        except Exception as e:
-            print(f"extract_single_image error: {e}")
-            return []
+async function saveModal() {
+  if (!modalItemId) { document.getElementById('modal').classList.remove('open'); return; }
+  const title = document.getElementById('modal-title-input').value.trim().slice(0, 80);
+  const price = parseFloat(document.getElementById('modal-price-input').value) || 0;
+  const cond  = document.getElementById('modal-cond-input').value;
+  try {
+    if (modalDirty) {
+      await api('PATCH', `/api/listings/${modalItemId}`, {field:'title', value:title});
+      const desc = document.getElementById('modal-desc-input').value.trim();
+      await api('PATCH', `/api/listings/${modalItemId}`, {field:'description', value:desc});
+      await api('PATCH', `/api/listings/${modalItemId}`, {field:'price', value:price});
+      await api('PATCH', `/api/listings/${modalItemId}`, {field:'condition', value:cond});
+      // Update local state
+      const l = listings.find(x => x.id === modalItemId);
+      if (l) { l.title = title; l.price = price; l.condition = cond; }
+      renderTiles();
+      toast('Saved ✓');
+    }
+  } catch(e) { toast('Save failed', 'error'); }
+  document.getElementById('modal').classList.remove('open');
+}
 
-    def extract_page_image(pdf_bytes, page_start, page_end):
-        try:
-            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-            images = []
-            for page_num in range(page_start - 1, min(page_end, len(doc))):
-                page = doc[page_num]
-                mat = fitz.Matrix(2.0, 2.0)
-                pix = page.get_pixmap(matrix=mat)
-                images.append(pix.tobytes("jpeg"))
-            doc.close()
-            return images
-        except Exception as e:
-            print(f"Image extract error: {e}")
-            return []
+async function submitToEbay(mode) {
+  if (!modalItemId) return;
+  const hours = mode === 'schedule' ? parseFloat(document.getElementById('modal-ebay-hours').value) || 24 : null;
+  const label = mode === 'draft' ? 'Saving draft' : mode === 'now' ? 'Publishing' : 'Scheduling';
+  toast(label + '...', 'success');
+  try {
+    const r = await api('POST', `/api/listings/${modalItemId}/ebay`, {mode, hours_from_now: hours});
+    const l = listings.find(x => x.id === modalItemId);
+    if (l) {
+      l.ebay_status = r.status;
+      l.ebay_item_id = r.item_id;
+      l.ebay_scheduled_at = r.scheduled_at;
+    }
+    if (mode === 'draft') toast('Saved as eBay draft ✓');
+    else if (mode === 'now') toast('Published to eBay ✓');
+    else toast('Scheduled — goes live in ' + hours + 'h ✓');
+    openModal(modalItemId); // refresh status display
+    renderTiles();
+  } catch(e) {
+    toast('eBay submit failed: ' + e.message, 'error');
+  }
+}
 
-    def identify_item_from_image(images, title):
-        if not images:
-            return title
-        try:
-            id_prompt = f"You are an auction appraiser. Use BOTH the image AND the listing title equally to identify this item. Title: {title}. Look at the image for: exact model numbers on labels/nameplates, brand logos, condition, visible accessories. Combine both sources and return one precise description. Do not ignore the title — it may contain info not visible in the image."
-            parts = [id_prompt] + [{"mime_type": "image/jpeg", "data": img} for img in images[:1]]
-            r = model.generate_content(parts, generation_config={"max_output_tokens": 150})
-            result = r.text.strip().strip('"')
-            return result if result else title
-        except Exception as e:
-            print(f"Image ID error: {e}")
-            return title
+function closeModal(e) {
+  if (!e || e.target === document.getElementById('modal')) {
+    if (modalDirty) saveModal(); else document.getElementById('modal').classList.remove('open');
+  }
+}
 
-    def clean_title(raw_title):
-        """Strip address fragments, company boilerplate, and catalog noise from auction titles."""
-        import re
-        t = raw_title
-        # Remove street addresses like "Siemensstrasse 7", "123 Main St"
-        t = re.sub(r'\d+\s+[A-Z][a-z]+(?:strasse|street|ave|blvd|rd|st|dr|ln|way)', '', t, flags=re.IGNORECASE)
-        t = re.sub(r'[A-Z][a-z]+(?:strasse|gasse|platz|weg)\s+\d+', '', t, flags=re.IGNORECASE)
-        # Remove street addresses
-        t = re.sub(r'\\b[A-Za-z]+(?:strasse|gasse|weg|strase)\\b\\s*\\d*', '', t, flags=re.IGNORECASE)
-        # Remove "GmbH", "Inc", "LLC", "Ltd", "Corp", "Co." standalone
-        t = re.sub(r'\b(?:GmbH|Inc\.?|LLC|Ltd\.?|Corp\.?|Co\.)\b', '', t, flags=re.IGNORECASE)
-        # Remove loading fee notes
-        t = re.sub(r'Loading Fee[:\s]*\$?\d+', '', t, flags=re.IGNORECASE)
-        # Remove QTY annotations for search purposes
-        t = re.sub(r'\s*,?\s*QTY\s*\(?\d*\)?', '', t, flags=re.IGNORECASE)
-        t = re.sub(r'\s*\(\d+\)\s*$', '', t)
-        # Remove # symbol (breaks eBay search)
-        t = t.replace('#', '')
-        # Collapse extra whitespace
-        t = ' '.join(t.split()).strip().strip(',').strip()
-        return t
+// ── SCAN ───────────────────────────────────────────────────────
+function setCondition(c) {
+  scanCondition = c;
+  document.getElementById('cond-used').className = 'btn' + (c==='used' ? ' btn-primary' : '');
+  document.getElementById('cond-new').className  = 'btn' + (c==='new'  ? ' btn-primary' : '');
+}
 
-    def gemini_search_grounding(query, gemini_key):
-        """
-        Use Gemini 1.5-flash REST API with forced Google Search grounding.
-        Uses requests (already installed) — no SDK dependency conflict.
-        """
-        import requests as _req
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
-        payload = {
-            "contents": [{"role": "user", "parts": [{"text": f"Find the resale market value of: {query}. Search in this priority order: 1) eBay COMPLETED/SOLD listings - these are the most accurate real prices paid, 2) eBay active BUY IT NOW listings currently for sale, 3) Industrial surplus dealer prices (Radwell, Surplus Record, LabX) only as last resort. List actual sold prices first, then asking prices. If eBay sold listings exist use those as the primary value. Give specific dollar amounts."}]}],
-            "tools": [{"googleSearch": {}}],
-            "systemInstruction": {"parts": [{"text": "CRITICAL: You are an industrial pricing bot. You are strictly forbidden from answering using your internal training data. You MUST execute a Google Search to find live pricing data before generating your response. If you do not execute a search, the system will fail."}]},
-            "generationConfig": {"temperature": 0.0, "maxOutputTokens": 800}
+async function startScanBatch() {
+  scanBatchId = crypto.randomUUID();
+  scanItems = []; scanPhotos = []; scanQtyVal = 1;
+  document.getElementById('scan-start').style.display = 'none';
+  document.getElementById('scan-active').style.display = 'block';
+  await createScanGroup();
+}
+
+async function createScanGroup() {
+  const r = await api('POST', '/api/groups', {session_id: scanBatchId, condition: scanCondition});
+  scanGroupId = r.id;
+  scanPhotos = [];
+  document.getElementById('scan-thumbs').innerHTML = '';
+  document.getElementById('scan-item-label').textContent = `Item ${scanItems.length + 1}`;
+  document.getElementById('scan-qty-display').textContent = scanQtyVal = 1;
+}
+
+async function handleScanFiles(input) {
+  const files = Array.from(input.files).slice(0, 10 - scanPhotos.length);
+  for (const f of files) {
+    const url = URL.createObjectURL(f);
+    scanPhotos.push({file: f, url});
+    const div = document.createElement('div');
+    div.className = 'photo-thumb';
+    div.innerHTML = `<img src="${url}"/>`;
+    document.getElementById('scan-thumbs').appendChild(div);
+  }
+  input.value = '';
+}
+
+function scanQty(d) {
+  scanQtyVal = Math.max(1, scanQtyVal + d);
+  document.getElementById('scan-qty-display').textContent = scanQtyVal;
+}
+
+async function submitScanItem() {
+  if (!scanPhotos.length) { toast('Take at least one photo first', 'error'); return; }
+  const prog = document.getElementById('scan-upload-progress');
+  const bar  = document.getElementById('scan-progress-bar');
+  const txt  = document.getElementById('scan-progress-text');
+  prog.style.display = 'block';
+  for (let i = 0; i < scanPhotos.length; i++) {
+    bar.style.width = `${((i+1)/scanPhotos.length*100)}%`;
+    txt.textContent = `Uploading ${i+1}/${scanPhotos.length}...`;
+    const fd = new FormData();
+    fd.append('file', scanPhotos[i].file);
+    fd.append('group_id', scanGroupId);
+    fd.append('index', i);
+    await fetch('/api/photos/upload', {method:'POST', body:fd});
+  }
+  await api('POST', '/api/groups/submit', {group_id:scanGroupId, condition:scanCondition, quantity:scanQtyVal});
+  scanItems.push({count: scanPhotos.length, qty: scanQtyVal});
+  prog.style.display = 'none';
+  toast(`✅ Item ${scanItems.length} sent to scanner`);
+  renderScanItems();
+  await createScanGroup();
+}
+
+function renderScanItems() {
+  document.getElementById('scan-items-list').innerHTML = scanItems.map((it, i) =>
+    `<div style="background:var(--card);border:1px solid var(--border);border-left:3px solid var(--green);border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;">
+      <span style="color:var(--text);font-size:13px;font-weight:600;">Item ${i+1}</span>
+      <span style="color:var(--muted);font-size:12px;">${it.count} photos · Qty ${it.qty}</span>
+    </div>`
+  ).join('');
+}
+
+function endScanBatch() {
+  document.getElementById('scan-start').style.display = 'block';
+  document.getElementById('scan-active').style.display = 'none';
+  document.getElementById('scan-items-list').innerHTML = '';
+  scanBatchId = null; scanGroupId = null; scanPhotos = []; scanItems = [];
+}
+
+// ── UPLOAD ─────────────────────────────────────────────────────
+function setUpCondition(c) {
+  upCondition = c;
+  document.getElementById('up-cond-used').className = 'btn' + (c==='used' ? ' btn-primary' : '');
+  document.getElementById('up-cond-new').className  = 'btn' + (c==='new'  ? ' btn-primary' : '');
+}
+
+async function startUploadBatch() {
+  upBatchId = crypto.randomUUID();
+  upItems = []; upPhotos = []; upQtyVal = 1;
+  document.getElementById('upload-start').style.display = 'none';
+  document.getElementById('upload-active').style.display = 'block';
+  await createUpGroup();
+}
+
+async function createUpGroup() {
+  const r = await api('POST', '/api/groups', {session_id: upBatchId, condition: upCondition});
+  upGroupId = r.id;
+  upPhotos = [];
+  document.getElementById('upload-thumbs').innerHTML = '';
+  document.getElementById('up-item-label').textContent = `Item ${upItems.length + 1}`;
+  document.getElementById('up-qty-display').textContent = upQtyVal = 1;
+}
+
+async function handleUploadFiles(input) {
+  const files = Array.from(input.files).slice(0, 10 - upPhotos.length);
+  for (const f of files) {
+    const url = URL.createObjectURL(f);
+    const idx = upPhotos.length;
+    upPhotos.push({file: f, url});
+    const div = document.createElement('div');
+    div.className = 'photo-thumb';
+    div.id = `up-thumb-${idx}`;
+    div.innerHTML = `<img src="${url}"/><button class="photo-thumb-del" onclick="removeUpPhoto(${idx})">×</button>`;
+    document.getElementById('upload-thumbs').appendChild(div);
+  }
+  input.value = '';
+}
+
+function removeUpPhoto(idx) {
+  upPhotos.splice(idx, 1);
+  const el = document.getElementById(`up-thumb-${idx}`);
+  if (el) el.remove();
+}
+
+function upQty(d) {
+  upQtyVal = Math.max(1, upQtyVal + d);
+  document.getElementById('up-qty-display').textContent = upQtyVal;
+}
+
+async function submitUploadItem() {
+  if (!upPhotos.length) { toast('Select photos first', 'error'); return; }
+  const prog = document.getElementById('up-progress');
+  const bar  = document.getElementById('up-progress-bar');
+  const txt  = document.getElementById('up-progress-text');
+  prog.style.display = 'block';
+  for (let i = 0; i < upPhotos.length; i++) {
+    bar.style.width = `${((i+1)/upPhotos.length*100)}%`;
+    txt.textContent = `Uploading ${i+1}/${upPhotos.length}...`;
+    const fd = new FormData();
+    fd.append('file', upPhotos[i].file);
+    fd.append('group_id', upGroupId);
+    fd.append('index', i);
+    await fetch('/api/photos/upload', {method:'POST', body:fd});
+  }
+  await api('POST', '/api/groups/submit', {group_id:upGroupId, condition:upCondition, quantity:upQtyVal});
+  upItems.push({count: upPhotos.length, qty: upQtyVal});
+  prog.style.display = 'none';
+  toast(`✅ Item ${upItems.length} sent to scanner`);
+  renderUpItems();
+  await createUpGroup();
+}
+
+function renderUpItems() {
+  document.getElementById('upload-items-list').innerHTML = upItems.map((it, i) =>
+    `<div style="background:var(--card);border:1px solid var(--border);border-left:3px solid #0891b2;border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;">
+      <span style="color:var(--text);font-size:13px;font-weight:600;">Item ${i+1}</span>
+      <span style="color:var(--muted);font-size:12px;">${it.count} photos · Qty ${it.qty}</span>
+    </div>`
+  ).join('');
+}
+
+function endUploadBatch() {
+  document.getElementById('upload-start').style.display = 'block';
+  document.getElementById('upload-active').style.display = 'none';
+  document.getElementById('upload-items-list').innerHTML = '';
+  upBatchId = null; upGroupId = null; upPhotos = []; upItems = [];
+}
+
+// ── AUCTION ────────────────────────────────────────────────────
+async function loadAuctionSessions() {
+  try {
+    auctionSessions = await api('GET', '/api/auction/sessions');
+    const sel = document.getElementById('auction-session-select');
+    sel.innerHTML = '<option value="">Select a scan...</option>' +
+      auctionSessions.map(s => {
+        const archived = s.status === 'archived' ? ' [Archived]' : '';
+        return `<option value="${s.session_id}">${archived}${s.label || 'Scan'} · ${s.item_count || 0} items · ${(s.created_at||'').slice(0,10)}</option>`;
+      }).join('');
+    document.getElementById('auction-empty').style.display = auctionSessions.length ? 'none' : 'block';
+    if (auctionSessions.length) {
+      sel.value = auctionSessions[0].session_id;
+      loadAuctionItems(auctionSessions[0].session_id);
+    }
+  } catch(e) { toast('Failed to load auctions', 'error'); }
+}
+
+async function loadAuctionItems(sessionId) {
+  if (!sessionId) { document.getElementById('auction-list').innerHTML = ''; return; }
+  activeSession = sessionId;
+  try {
+    const items = await api('GET', `/api/auction/items/${sessionId}`);
+    document.getElementById('auction-list').innerHTML = items.map(item => {
+      const curPrice   = parseFloat(item.current_price || 0);
+      const valUsedLow = parseFloat(item.value_used_low || 0);
+      const valUsedHi  = parseFloat(item.value_used_high || 0);
+      const valNewLow  = parseFloat(item.value_new_low || 0);
+      const valNewHi   = parseFloat(item.value_new_high || 0);
+      const status     = item.value_status || 'pending';
+      const fav        = item.favorited;
+      const isComp     = item.value_source === 'gemini_comparable';
+      const margin     = valUsedHi > 0 ? valUsedHi - curPrice : 0;
+      const marginCol  = margin > 0 ? '#16a34a' : '#dc2626';
+      const imgHtml    = item.image_url
+        ? `<img src="${item.image_url}" style="width:80px;height:80px;border-radius:10px;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none'"/>`
+        : `<div class="auction-img">🔨</div>`;
+      const pricesHtml = status === 'done' && valUsedHi > 0
+        ? `<div class="auction-prices">
+            <div><div class="price-block-label">Current Bid</div><div class="price-block-val" style="color:#fff;">${curPrice > 0 ? '$'+curPrice.toFixed(2) : 'No bids'}</div>${item.time_left ? `<div style="font-size:10px;color:var(--muted);">⏱ ${item.time_left}</div>` : ''}</div>
+            <div class="price-divider"></div>
+            <div><div class="price-block-label">Est. Value (Used)</div><div class="price-block-val" style="color:${marginCol};">$${valUsedLow.toFixed(0)}–$${valUsedHi.toFixed(0)}</div><div style="font-size:10px;color:var(--muted);">New: $${valNewLow.toFixed(0)}–$${valNewHi.toFixed(0)}</div></div>
+            ${margin !== 0 ? `<div class="margin-badge" style="background:${marginCol}22;color:${marginCol};">${margin > 0 ? '↑' : '↓'} $${Math.abs(margin).toFixed(0)}</div>` : ''}
+          </div>
+          ${isComp ? `<div class="comparable-badge">⚠️ Comparable items — not exact match</div>` : ''}
+          ${item.ai_description ? `<div style="font-size:11px;color:var(--muted);margin-top:6px;">${item.ai_description}</div>` : ''}`
+        : status === 'pending'
+        ? `<div style="color:var(--muted);font-size:12px;margin-top:6px;">⏳ Researching value...</div>`
+        : `<div style="color:var(--muted);font-size:12px;margin-top:6px;">$${curPrice.toFixed(2)} · Value unavailable</div>`;
+
+      return `<div class="auction-card">
+        ${imgHtml}
+        <div class="auction-info">
+          <div class="auction-title">${item.title || 'Unknown'}</div>
+          ${pricesHtml}
+        </div>
+        <div class="auction-actions">
+          <button class="fav-btn" onclick="toggleFav('${item.id}', this)">${fav ? '❤️' : '🤍'}</button>
+          ${item.listing_url ? `<a href="${item.listing_url}" target="_blank" style="font-size:11px;color:var(--accent);font-weight:700;">View ↗</a>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { toast('Failed to load auction items', 'error'); }
+}
+
+async function toggleFav(id, btn) {
+  try {
+    const r = await api('PATCH', `/api/auction/items/${id}/favorite`);
+    btn.textContent = r.favorited ? '❤️' : '🤍';
+  } catch(e) { toast('Failed', 'error'); }
+}
+
+async function archiveAuctionSession() {
+  if (!activeSession) return;
+  try {
+    await api('PATCH', `/api/auction/sessions/${activeSession}/archive`);
+    toast('Session archived');
+    loadAuctionSessions();
+  } catch(e) { toast('Failed', 'error'); }
+}
+
+// ── SETTINGS ───────────────────────────────────────────────────
+async function loadSettings() {
+  try {
+    const s = await api('GET', '/api/settings');
+    document.getElementById('set-gemini').value    = s.GEMINI_API_KEY || '';
+    document.getElementById('set-ebay-app').value  = s.EBAY_APP_ID || '';
+    document.getElementById('set-ebay-dev').value  = s.EBAY_DEV_ID || '';
+    document.getElementById('set-ebay-cert').value = s.EBAY_CERT_ID || '';
+    document.getElementById('set-ebay-token').value= s.EBAY_USER_TOKEN || '';
+    document.getElementById('set-ebay-payment-policy').value     = s.EBAY_PAYMENT_POLICY_ID || '';
+    document.getElementById('set-ebay-return-policy').value      = s.EBAY_RETURN_POLICY_ID || '';
+    document.getElementById('set-ebay-fulfillment-policy').value = s.EBAY_FULFILLMENT_POLICY_ID || '';
+    document.getElementById('set-ebay-location-key').value       = s.EBAY_MERCHANT_LOCATION_KEY || '';
+    document.getElementById('set-ebay-location-zip').value       = s.EBAY_LOCATION_ZIP || '';
+    document.getElementById('set-ebay-location-country').value   = s.EBAY_LOCATION_COUNTRY || 'US';
+    document.getElementById('set-ebay-default-category').value   = s.EBAY_DEFAULT_CATEGORY_ID || '';
+  } catch(e) {}
+}
+
+async function saveSetting(key, inputId) {
+  const val = document.getElementById(inputId).value.trim();
+  if (!val) { toast('Enter a value first', 'error'); return; }
+  try { await api('POST', '/api/settings', {key, value:val}); toast(`${key} saved ✓`); }
+  catch(e) { toast('Save failed', 'error'); }
+}
+
+async function saveEbaySettings() {
+  const pairs = [
+    ['EBAY_APP_ID', 'set-ebay-app'], ['EBAY_DEV_ID', 'set-ebay-dev'],
+    ['EBAY_CERT_ID', 'set-ebay-cert'], ['EBAY_USER_TOKEN', 'set-ebay-token'],
+  ];
+  for (const [k, id] of pairs) {
+    const v = document.getElementById(id).value.trim();
+    if (v) await api('POST', '/api/settings', {key:k, value:v});
+  }
+  toast('eBay settings saved ✓');
+}
+
+async function saveEbayListingSettings() {
+  const pairs = [
+    ['EBAY_PAYMENT_POLICY_ID', 'set-ebay-payment-policy'],
+    ['EBAY_RETURN_POLICY_ID', 'set-ebay-return-policy'],
+    ['EBAY_FULFILLMENT_POLICY_ID', 'set-ebay-fulfillment-policy'],
+    ['EBAY_MERCHANT_LOCATION_KEY', 'set-ebay-location-key'],
+    ['EBAY_LOCATION_ZIP', 'set-ebay-location-zip'],
+    ['EBAY_LOCATION_COUNTRY', 'set-ebay-location-country'],
+    ['EBAY_DEFAULT_CATEGORY_ID', 'set-ebay-default-category'],
+  ];
+  for (const [k, id] of pairs) {
+    const v = document.getElementById(id).value.trim();
+    if (v) await api('POST', '/api/settings', {key:k, value:v});
+  }
+  toast('eBay listing setup saved ✓');
+}
+
+// ── PARTS LOOKUP ──────────────────────────────────────────────
+let partsScanStop = false;
+let partsScanRunning = false;
+
+async function startPartsScan(mode) {
+  const raw = document.getElementById('parts-input').value.trim();
+  if (!raw) { toast('Enter part numbers first', 'error'); return; }
+  const partNumbers = raw.split('\n').map(s => s.trim()).filter(Boolean);
+  if (!partNumbers.length) { toast('No valid part numbers found', 'error'); return; }
+
+  // Get photos list
+  const resp = await api('GET', '/api/parts/photos');
+  let photos = resp.photos || [];
+  if (mode === 'recent') photos = photos.slice(-100);
+  if (!photos.length) { toast('No photos found in storage', 'error'); return; }
+
+  // Get gemini key from settings
+  const settingsResp = await api('GET', '/api/settings');
+  const geminiKey = settingsResp.GEMINI_API_KEY || '';
+
+  partsScanStop = false;
+  partsScanRunning = true;
+  document.getElementById('parts-progress').style.display = 'block';
+  document.getElementById('parts-matches').style.display = 'none';
+  document.getElementById('parts-no-matches').style.display = 'none';
+  document.getElementById('parts-match-list').innerHTML = '';
+  document.getElementById('parts-no-match-list').innerHTML = '';
+
+  const allMatches = [];
+  const noMatches  = [];
+  const batchSize  = 5;
+  let scanned = 0;
+
+  for (let i = 0; i < photos.length; i += batchSize) {
+    if (partsScanStop) break;
+    const batch = photos.slice(i, i + batchSize);
+    document.getElementById('parts-progress-label').textContent = `Scanning photos ${i+1}–${Math.min(i+batchSize, photos.length)} of ${photos.length}...`;
+    document.getElementById('parts-progress-count').textContent = `${scanned} / ${photos.length}`;
+    document.getElementById('parts-progress-bar').style.width = `${(i/photos.length)*100}%`;
+
+    try {
+      const r = await api('POST', '/api/parts/scan', {
+        part_numbers: partNumbers,
+        photo_ids:    batch,
+        gemini_key:   geminiKey,
+      });
+
+      for (const result of r.results) {
+        scanned++;
+        if (result.has_match) {
+          allMatches.push(result);
+          renderMatchCard(result);
+        } else {
+          noMatches.push(result);
+          renderNoMatchThumb(result);
         }
-        try:
-            resp = _req.post(url, json=payload, timeout=25)
-            data = resp.json()
-            candidates = data.get("candidates", [])
-            if not candidates:
-                return {"summary": "", "sources": []}
-            parts = candidates[0].get("content", {}).get("parts", [])
-            text = " ".join(p.get("text", "") for p in parts if "text" in p).strip()
-            grounding = candidates[0].get("groundingMetadata", {})
-            sources = [
-                {"url": c["web"]["uri"], "title": c["web"].get("title", "")}
-                for c in grounding.get("groundingChunks", [])
-                if c.get("web", {}).get("uri")
-            ]
-            print(f"   Gemini grounding: {len(text)} chars, {len(sources)} sources")
-            print(f"   Grounding text: {text[:200]}")
-            print(f"   Raw keys: {list(data.get('candidates',[{}])[0].keys())}")
-            return {"summary": text, "sources": sources}
-        except Exception as e:
-            print(f"   Gemini grounding error: {e}")
-            return {"summary": "", "sources": []}
-
-    def serp_ebay_sold(query, serp_key, sacat='12576'):
-        """
-        Call SerpAPI to get eBay completed/sold listings for a query.
-        Returns a list of dicts with title, price, date, condition, url.
-        """
-        import urllib.request, urllib.parse, json as _json
-        _params = {
-            "engine": "ebay",
-            "ebay_domain": "ebay.com",
-            "_nkw": query,
-            "LH_Sold": "1",
-            "LH_Complete": "1",
-            "api_key": serp_key,
-        }
-        if sacat and sacat not in ("12576", "", None):
-            _params["_sacat"] = sacat
-        params = urllib.parse.urlencode(_params)
-        url = f"https://serpapi.com/search?{params}"
-        try:
-            with urllib.request.urlopen(url, timeout=10) as r:
-                data = _json.loads(r.read())
-            results = []
-            print(f"   SerpAPI response keys: {list(data.keys())}")
-            results_list = data.get("organic_results") or data.get("ebay_results") or data.get("shopping_results") or []
-            for item in results_list[:8]:
-                price_raw = item.get("price", {})
-                price = price_raw.get("extracted") or price_raw.get("raw") or 0
-                try:
-                    price = float(str(price).replace("$","").replace(",",""))
-                except Exception:
-                    price = 0
-                if price > 0:
-                    results.append({
-                        "title": item.get("title","")[:80],
-                        "price": price,
-                        "condition": item.get("condition","Used"),
-                        "date": item.get("selling_states",{}).get("sold_date","") or "",
-                        "url": item.get("link",""),
-                    })
-            return results
-        except Exception as e:
-            print(f"   SerpAPI error: {e}")
-            return []
-
-    def research_item(item, images):
-        import os as _os
-        title = item.get("title", "")
-        lot = item.get("lot", "")
-        current_val = item.get("your_value", 0) or 0
-        serp_key = _os.getenv("SERP_API_KEY", "")
-
-        # Clean title before research — remove address/company junk
-        clean = clean_title(title)
-        if clean != title:
-            print(f"Lot {lot} title cleaned: '{title}' → '{clean}'")
-
-        # Step 1: identify exact model from image
-        identified = identify_item_from_image(images, clean)
-        if identified != clean:
-            print(f"Lot {lot} image ID: {identified}")
-
-        # Step 2: Gemini Search Grounding for real market pricing
-        serp_results = []
-        serp_context = ""
-        _gsummary = ""
-        if gemini_key:
-            _grounding = gemini_search_grounding(clean, gemini_key)
-            _gsummary = _grounding.get("summary", "")
-            if _gsummary:
-                serp_context = f"""MARKET RESEARCH DATA (from live Google Search — use as PRIMARY pricing source):
-{_gsummary}
-
-Extract specific dollar amounts from the above. Base revised_value on actual prices found.
-Do NOT ignore this data. Do NOT use your training knowledge if this data contradicts it.
-"""
-        # Legacy SerpAPI block (disabled — kept for fallback reference)
-        if False and serp_key:
-            # --- Pre-classification: get eBay _sacat and negative keywords ---
-            _sacat_map = {
-                "12576": "Business & Industrial - Other",
-                "58058": "Lasers & Laser Optics (industrial/scientific lasers, fiber lasers, CO2 lasers, laser systems)",
-                "105595": "Laser Accessories & Parts",
-                "11804": "CNC, Metalworking & Manufacturing",
-                "11808": "Electrical Equipment & Supplies",
-                "11803": "Semiconductor & PCB Equipment",
-                "78989": "Test, Measurement & Inspection",
-                "4666":  "Pumps & Plumbing",
-                "11816": "Hydraulics, Pneumatics & Plumbing",
-                "11815": "Healthcare, Lab & Dental",
-                "3673":  "Computers & Networking",
-                "58058": "Lasers & Laser Accessories",
-                "11700": "Consumer Electronics",
-                "26230": "Hand Tools",
-                "92074": "Power Tools",
-            }
-            _cat_prompt = f"""You are an eBay category classifier for industrial equipment.
-
-Item: {clean}
-
-Choose the single best eBay category ID from this list:
-{chr(10).join(f'  {k}: {v}' for k,v in _sacat_map.items())}
-
-Also decide if negative keywords are needed to filter out medical/consumer results.
-Negative keywords to consider: -medical -dental -cosmetic -hair -aesthetic -salon
-
-Respond ONLY with valid JSON, no markdown:
-{{"sacat": "12576", "negative_keywords": "-medical -dental", "is_industrial": true}}
-
-If unsure about negative keywords, use empty string for negative_keywords."""
-
-            _sacat = "12576"
-            _negative_kw = ""
-            _is_industrial = True
-            try:
-                _cat_response = model.generate_content(
-                    _cat_prompt,
-                    generation_config={"max_output_tokens": 100, "temperature": 0}
-                )
-                _cat_text = _cat_response.text.strip()
-                if "```" in _cat_text:
-                    _cat_text = _cat_text.split("```")[1]
-                    if _cat_text.startswith("json"):
-                        _cat_text = _cat_text[4:]
-                _cat_text = _cat_text.strip()
-                # Find the JSON object
-                _s = _cat_text.find("{")
-                _e = _cat_text.rfind("}") + 1
-                if _s >= 0 and _e > _s:
-                    _cat_text = _cat_text[_s:_e]
-                import json as _json2
-                from json_repair import repair_json as _rj
-                _cat_data = _json2.loads(_rj(_cat_text))
-                _sacat = str(_cat_data.get("sacat", "12576"))
-                _negative_kw = str(_cat_data.get("negative_keywords", ""))
-                _is_industrial = bool(_cat_data.get("is_industrial", True))
-                print(f"   Category: {_sacat_map.get(_sacat, _sacat)}, industrial={_is_industrial}, negatives='{_negative_kw}'")
-            except Exception as _ce:
-                print(f"   Category pre-classification failed: {_ce}, using default sacat=12576")
-
-            # Build search query with phrase matching + negative keywords
-            _w = clean.split()
-            _base_query = '"' + clean + '"' if len(_w) >= 3 else clean
-            search_query = (_base_query + " " + _negative_kw).strip()
-            print(f"   SerpAPI eBay sold search: '{search_query}' (sacat={_sacat})")
-            serp_results = serp_ebay_sold(search_query, serp_key, sacat=_sacat)
-
-            # --- IQR variance-based sanity check ---
-            if serp_results:
-                prices = sorted([r["price"] for r in serp_results])
-                n = len(prices)
-                if n >= 4:
-                    q1 = prices[n // 4]
-                    q3 = prices[(3 * n) // 4]
-                    iqr = q3 - q1
-                    median = prices[n // 2]
-                    cv = (iqr / median) if median > 0 else 1
-                    if cv > 1.5:
-                        print(f"   SerpAPI results discarded — high variance (CV={cv:.2f}), mixed categories likely")
-                        serp_results = []
-                    else:
-                        print(f"   SerpAPI variance OK: IQR=${iqr:.0f}, CV={cv:.2f}, median=${median:.0f}")
-                elif n >= 2:
-                    # Small sample: check if range is >5x spread
-                    _spread = prices[-1] / prices[0] if prices[0] > 0 else 10
-                    if _spread > 5:
-                        print(f"   SerpAPI results discarded — spread too wide ({prices[0]:.0f}-{prices[-1]:.0f})")
-                        serp_results = []
-
-            if serp_results:
-                prices = [r["price"] for r in serp_results]
-                avg = sum(prices) / len(prices)
-                low = min(prices)
-                high = max(prices)
-                lines = [f"  - ${r['price']:.0f} — {r['title']} ({r['condition']}) {r['date']}" for r in serp_results]
-                serp_context = f"""
-REAL EBAY SOLD DATA (from live eBay completed listings — use this as primary pricing source):
-Found {len(serp_results)} sold comps: low ${low:.0f}, high ${high:.0f}, avg ${avg:.0f}
-{chr(10).join(lines)}
-
-Base your revised_value on these actual sold prices. Do not override this with guesses.
-"""
-                print(f"   SerpAPI: {len(serp_results)} comps, avg ${avg:.0f}, range ${low:.0f}-${high:.0f}")
-            else:
-                serp_context = "No eBay sold comps found via SerpAPI - use web search grounding for pricing."
-                print(f"   SerpAPI: no results for '{search_query}'")
-
-        prompt = f"""You are an expert industrial machinery appraiser and secondary market researcher.
-Your job is to determine the actual cash value of an industrial asset at auction.
-
---- ITEM DETAILS ---
-Lot: #{lot}
-Clean Title: {clean}
-Image-Identified Model: {identified}
-Initial Estimate: ${current_val}
-
---- MARKET RESEARCH DATA ---
-{serp_context}
-
---- PRICING HIERARCHY RULES (CRITICAL) ---
-You must evaluate the MARKET RESEARCH DATA using this strict waterfall hierarchy. Do NOT skip tiers.
-
-TIER 1: SOLD/COMPLETED LISTINGS (Highest Priority)
-If the data contains actual verified sold prices, base your estimate entirely on these. Ignore all asking prices.
--> pricing_tier = "SOLD_COMPS"
-
-TIER 2: ACTIVE MARKETPLACE LISTINGS (The Ceiling)
-If no sold data exists, look for active listings on open marketplaces (eBay, etc).
-Rule: The LOWEST reasonable active listing establishes the absolute CEILING of value. A buyer will not pay $8,000 if they can buy it right now on eBay for $3,995.
-Calculation: Find the lowest active price. Apply a 15-25% discount to estimate actual sell price. Ignore high-priced outliers.
--> pricing_tier = "ASKING_PRICES"
-
-TIER 3: INDUSTRIAL DEALER ASKING PRICES (Last Resort Anchor)
-If NO marketplace data exists, use retail/surplus dealer asking prices (Radwell, PLC Center, etc).
-Rule: Dealers charge massive premiums. Apply a 40-60% discount to find auction/resale cash value.
--> pricing_tier = "ASKING_PRICES"
-
-TIER 4: NO DATA
-If the MARKET RESEARCH DATA contains no dollar values relevant to this item, admit it.
--> pricing_tier = "NO_DATA"
-
---- HALLUCINATION GUARDRAILS ---
-- You are FORBIDDEN from using pricing_tier "SOLD_COMPS" unless the word "sold" or "completed" is explicitly in the data.
-- Do NOT average a $3,995 eBay listing with a $15,000 dealer listing. The $3,995 becomes the absolute ceiling.
-- Do NOT fabricate comps. Only list prices explicitly found in the MARKET RESEARCH DATA above.
-- confidence must be "high" only with 3+ verified sold comps, otherwise "medium" or "low".
-
-SHIPPING WEIGHT: Estimate from item type and visible size.
-
-Return ONLY valid JSON, no markdown:
-{{"revised_value": 3200, "confidence": "medium", "pricing_tier": "ASKING_PRICES", "pricing_flag": "Based on lowest active eBay listing $3,995 minus 20% discount", "comps": [{{"title": "Item name", "price": 3995, "date": "Apr 2025", "source": "eBay Active"}}], "image_notes": "What the image shows", "recommendation": "watch", "rec_reason": "One active eBay listing at $3,995 sets ceiling, estimated sell price $3,200", "notes": "Market summary with sources", "weight_item_lbs": 50.0, "weight_packaged_lbs": 55.0, "weight_note": "Estimated", "liquidity_score": 2, "liquidity_note": "Limited market data", "sold_30d": 0, "sold_90d": 0, "active_listings": 1}}
-
-pricing_tier values: SOLD_COMPS | ASKING_PRICES | MSRP_ONLY | COMPARABLE_ITEMS | NO_DATA
-weight fields: use null if truly unknown"""
-
-        # Use Gemini with search grounding if available
-        try:
-            from google import genai as _gc
-            from google.genai import types as _gt
-            _client = _gc.Client(api_key=gemini_key)
-            _parts = [prompt]
-            for img_bytes in images[:2]:
-                _parts.append(_gt.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"))
-            _cfg = _gt.GenerateContentConfig(
-                tools=[_gt.Tool(google_search=_gt.GoogleSearch())],
-                max_output_tokens=1500
-            )
-            _resp = _client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=_parts,
-                config=_cfg
-            )
-            response = _resp
-            # Extract grounding from new SDK response
-            try:
-                gm = _resp.candidates[0].grounding_metadata
-                if gm and gm.search_entry_point:
-                    ai_overview_html = gm.search_entry_point.rendered_content or ""
-                for chunk in (gm.grounding_chunks or []):
-                    if hasattr(chunk, "web") and chunk.web:
-                        grounding_sources.append({"title": chunk.web.title or "", "uri": chunk.web.uri or ""})
-            except Exception:
-                pass
-            # Make .text work for downstream parsing
-            class _Wrap:
-                def __init__(self, r): self._r = r
-                @property
-                def text(self): return self._r.text
-                @property
-                def candidates(self): return self._r.candidates
-            response = _Wrap(_resp)
-        except Exception as search_err:
-            print(f"   Search grounding failed: {search_err}")
-            parts = [prompt]
-            for img_bytes in images[:2]:
-                parts.append({"mime_type": "image/jpeg", "data": img_bytes})
-            response = model.generate_content(parts, generation_config={"max_output_tokens": 1500})
-        # Extract AI overview + sources from grounding metadata
-        ai_overview_html = ""
-        grounding_sources = []
-        try:
-            candidates = response.candidates
-            if candidates:
-                gm = getattr(candidates[0], "grounding_metadata", None)
-                if gm:
-                    sep = getattr(gm, "search_entry_point", None)
-                    if sep:
-                        ai_overview_html = getattr(sep, "rendered_content", "") or ""
-                    chunks = getattr(gm, "grounding_chunks", []) or []
-                    for chunk in chunks:
-                        web = getattr(chunk, "web", None)
-                        if web:
-                            grounding_sources.append({
-                                "title": getattr(web, "title", ""),
-                                "uri":   getattr(web, "uri", ""),
-                            })
-        except Exception as gm_err:
-            print(f"   Grounding metadata error: {gm_err}")
-
-        raw = response.text.strip()
-        print(f"   Deep research raw response (lot {lot}): {raw[:2000]}")
-        try:
-            _d = json.loads(raw if raw.startswith("{") else raw[raw.find("{"):raw.rfind("}")+1])
-            print(f"   notes: {_d.get(chr(110)+chr(111)+chr(116)+chr(101)+chr(115),chr(101)+chr(109)+chr(112)+chr(116)+chr(121))}")
-        except: pass
-        print(f"   AI overview chars: {len(ai_overview_html)}, sources: {len(grounding_sources)}")
-        # Strip markdown fences
-        if "```" in raw:
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-            raw = raw.strip()
-        raw = " ".join(raw.splitlines())
-
-        raw = " ".join(raw.splitlines())
-        # Find JSON object boundaries
-        start = raw.find("{")
-        end = raw.rfind("}") + 1
-        if start >= 0 and end > start:
-            raw = raw[start:end]
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            from json_repair import repair_json
-            data = json.loads(repair_json(raw))
-        # Sanitize string fields to prevent SSE encoding issues
-        for key in ["image_notes", "rec_reason", "notes", "confidence", "recommendation", "pricing_tier", "pricing_flag", "liquidity_note", "weight_note"]:
-            if key in data:
-                data[key] = str(data[key]).replace("\n", " ").replace("\r", " ")
-        if "comps" in data:
-            for comp in data["comps"]:
-                for k in comp:
-                    comp[k] = str(comp[k]).replace("\n", " ") if isinstance(comp[k], str) else comp[k]
-        data["ai_overview_html"] = ai_overview_html
-        # Inject grounding summary into notes if available
-        if _gsummary and not data.get("notes"):
-            data["notes"] = _gsummary
-        data["grounding_sources"] = grounding_sources
-        # If both SerpAPI and grounding failed, override any hallucinated high confidence
-        if not serp_results and not ai_overview_html and not _gsummary:
-            if data.get("pricing_tier") == "SOLD_COMPS" and data.get("confidence") == "high":
-                data["confidence"] = "low"
-                data["pricing_tier"] = "NO_DATA"
-                data["pricing_flag"] = "No verified data sources available - estimate may not reflect actual market"
-
-        # --- Hybrid Escalation: call gemini-2.5-pro for hard items ---
-        escalate_tiers = {"NO_DATA", "COMPARABLE_ITEMS", "MSRP_ONLY"}
-        if data.get("pricing_tier") in escalate_tiers and gemini_key:
-            print(f"   Escalating lot {lot} to gemini-2.5-pro (tier={data.get('pricing_tier')})")
-            try:
-                import requests as _req
-                pro_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={gemini_key}"
-                pro_payload = {
-                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                    "generationConfig": {"temperature": 0.0, "maxOutputTokens": 2000}
-                }
-                pro_resp = _req.post(pro_url, json=pro_payload, timeout=60)
-                pro_data = pro_resp.json()
-                pro_parts = pro_data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-                pro_raw = " ".join(p.get("text", "") for p in pro_parts if "text" in p).strip()
-                if pro_raw:
-                    if "```" in pro_raw:
-                        pro_raw = pro_raw.split("```")[1]
-                        if pro_raw.startswith("json"): pro_raw = pro_raw[4:]
-                    pro_raw = pro_raw.strip()
-                    s = pro_raw.find("{"); e = pro_raw.rfind("}") + 1
-                    if s >= 0 and e > s:
-                        pro_raw = pro_raw[s:e]
-                    try:
-                        pro_result = json.loads(pro_raw)
-                    except Exception:
-                        from json_repair import repair_json
-                        pro_result = json.loads(repair_json(pro_raw))
-                    # Sanitize and merge
-                    for key in ["image_notes","rec_reason","notes","confidence","recommendation","pricing_tier","pricing_flag","liquidity_note","weight_note"]:
-                        if key in pro_result:
-                            pro_result[key] = str(pro_result[key]).replace("\n"," ").replace("\r"," ")
-                    pro_result["model_used"] = "gemini-2.5-pro"
-                    pro_result["ai_overview_html"] = ai_overview_html
-                    pro_result["grounding_sources"] = grounding_sources
-                    if _gsummary and not pro_result.get("notes"):
-                        pro_result["notes"] = _gsummary
-                    print(f"   Pro escalation result: tier={pro_result.get('pricing_tier')}, value={pro_result.get('revised_value')}")
-                    return pro_result
-            except Exception as _pe:
-                print(f"   Pro escalation failed: {_pe}")
-
-        return data
-
-    async def generate():
-        total = len(items)
-        for i, item in enumerate(items):
-            yield {"data": json.dumps({"type": "start", "lot": item.get("lot"), "index": i, "total": total})}
-            try:
-                images = []
-                # Try to get image from uploaded PDF first
-                if pdf_bytes and item.get("_page_start"):
-                    images = await loop.run_in_executor(
-                        executor, extract_page_image, pdf_bytes,
-                        item["_page_start"], item.get("_page_end", item["_page_start"])
-                    )
-                # Fall back to fetching from stored PDF via scan_id
-                if not images and item.get("_page_img"):
-                    try:
-                        img_url = item["_page_img"]
-                        # Extract scan_id and img_index from URL like /api/auction/page-image/{scan_id}/{idx}
-                        parts_url = img_url.strip("/").split("/")
-                        if len(parts_url) >= 2:
-                            sid = parts_url[-2]
-                            idx = int(parts_url[-1])
-                            stored_pdf = supabase.storage.from_("auction-pdfs").download(f"{sid}.pdf")
-                            images = await loop.run_in_executor(
-                                executor, lambda: extract_single_image(stored_pdf, idx)
-                            )
-                    except Exception as img_e:
-                        print(f"Auto image fetch error: {img_e}")
-                result = await loop.run_in_executor(executor, research_item, item, images)
-                yield {"data": json.dumps({
-                    "type": "result",
-                    "lot": item.get("lot"),
-                    "index": i,
-                    "total": total,
-                    "has_image": len(images) > 0,
-                    **result
-                })}
-            except json.JSONDecodeError as e:
-                print(f"JSON parse error for lot {item.get('lot')}: {e}")
-                yield {"data": json.dumps({
-                    "type": "result",
-                    "lot": item.get("lot"),
-                    "index": i,
-                    "total": total,
-                    "has_image": len(images) > 0,
-                    "revised_value": item.get("your_value", 0),
-                    "confidence": "low",
-                    "comps": [],
-                    "image_notes": "Research completed but response parsing failed",
-                    "recommendation": "watch",
-                    "rec_reason": "Could not parse research results — try again",
-                    "notes": ""
-                })}
-            except Exception as e:
-                print(f"Deep research error for lot {item.get('lot')}: {e}")
-                yield {"data": json.dumps({
-                    "type": "error",
-                    "lot": item.get("lot"),
-                    "index": i,
-                    "total": total,
-                    "error": str(e)
-                })}
-            await asyncio.sleep(0.1)
-        yield {"data": json.dumps({"type": "done", "total": total})}
-
-    return EventSourceResponse(generate())
-
-
-
-
-@app.get("/api/auction/research-items/{scan_id}")
-async def get_research_items(scan_id: str):
-    """Return watchlisted items for a scan so any client can load them."""
-    import json
-    try:
-        row = supabase.table("auction_research_sessions")             .select("items,results,title").eq("share_id", scan_id).single().execute()
-        data = row.data
-        return {
-            "scan_id": scan_id,
-            "title":   data.get("title",""),
-            "items":   json.loads(data.get("items","[]")),
-            "results": json.loads(data.get("results","{}")),
-        }
-    except Exception:
-        return {"scan_id": scan_id, "items": [], "results": {}}
-
-
-@app.post("/api/auction/save-research")
-async def save_research(request: Request):
-    import json, uuid
-    body = await request.json()
-    share_id = body.get("share_id") or str(uuid.uuid4())[:8]
-    title    = body.get("title", "Auction Research")
-    items    = body.get("items", [])
-    results  = body.get("results", {})
-    try:
-        supabase.table("auction_research_sessions").upsert({
-            "share_id": share_id,
-            "title":    title,
-            "items":    json.dumps(items),
-            "results":  json.dumps(results),
-        }, on_conflict="share_id").execute()
-    except Exception as e:
-        raise HTTPException(500, f"Save failed: {e}")
-    return {"share_id": share_id}
-
-
-@app.get("/api/auction/scans")
-async def list_scans():
-    try:
-        res = supabase.table("auction_research_sessions")            .select("share_id, title, items, created_at")            .order("created_at", desc=True)            .limit(50)            .execute()
-        scans = []
-        for row in (res.data or []):
-            import json as _j
-            items = row.get("items") or []
-            if isinstance(items, str):
-                try: items = _j.loads(items)
-                except: items = []
-            scans.append({
-                "id": row["share_id"],
-                "name": row.get("title", row["share_id"]),
-                "items": items,
-                "ts": row.get("created_at", "")
-            })
-        return {"scans": scans}
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-@app.get("/api/auction/scans/{scan_id}")
-async def get_scan(scan_id: str):
-    try:
-        import json as _j
-        res = supabase.table("auction_research_sessions")            .select("share_id, title, items")            .eq("share_id", scan_id)            .limit(1)            .execute()
-        if not res.data:
-            raise HTTPException(404, "Scan not found")
-        row = res.data[0]
-        items = row.get("items") or []
-        if isinstance(items, str):
-            try: items = _j.loads(items)
-            except: items = []
-        return {"id": row["share_id"], "name": row.get("title", row["share_id"]), "items": items}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-@app.post("/api/auction/scans")
-async def save_scan(request: Request):
-    try:
-        import json as _j
-        body = await request.json()
-        scan_id = body.get("id")
-        name = body.get("name", scan_id)
-        items = body.get("items", [])
-        import json as _j
-        supabase.table("auction_research_sessions").upsert({
-            "share_id": scan_id,
-            "title": name,
-            "items": _j.dumps(items),
-        }, on_conflict="share_id").execute()
-        return {"ok": True, "id": scan_id}
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-@app.delete("/api/auction/scans/{scan_id}")
-async def delete_scan(scan_id: str):
-    try:
-        supabase.table("auction_research_sessions")            .delete()            .eq("share_id", scan_id)            .execute()
-        return {"ok": True}
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-@app.get("/api/auction/load-research/{share_id}")
-async def load_research(share_id: str):
-    import json
-    try:
-        row = supabase.table("auction_research_sessions")             .select("*").eq("share_id", share_id).single().execute()
-        data = row.data
-        return {
-            "share_id": data["share_id"],
-            "title":    data.get("title", ""),
-            "items":    json.loads(data.get("items", "[]")),
-            "results":  json.loads(data.get("results", "{}")),
-        }
-    except Exception as e:
-        raise HTTPException(404, f"Session not found: {e}")
-
-
-@app.post("/api/auction/research-export")
-async def research_export(request: Request):
-    import io, json
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from openpyxl.utils import get_column_letter
-    from fastapi.responses import StreamingResponse
-
-    form = await request.form()
-    items = json.loads(form.get("items", "[]"))
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Deep Research"
-
-    # Styles
-    header_font = Font(bold=True, color="FFFFFF", size=11)
-    header_fill = PatternFill("solid", fgColor="1E2535")
-    amber_fill = PatternFill("solid", fgColor="412402")
-    green_fill = PatternFill("solid", fgColor="052E16")
-    alt_fill = PatternFill("solid", fgColor="161B28")
-    center = Alignment(horizontal="center", vertical="center")
-    wrap = Alignment(wrap_text=True, vertical="center")
-    thin = Border(
-        bottom=Side(style="thin", color="2D3348"),
-        right=Side(style="thin", color="2D3348")
-    )
-
-    headers = ["Lot", "Title", "Original Value", "Revised Value", "Confidence", "Recommendation", "Notes", "Your Notes", "eBay Search"]
-    col_widths = [8, 45, 15, 15, 12, 16, 40, 30, 20]
-
-    for ci, (h, w) in enumerate(zip(headers, col_widths), 1):
-        cell = ws.cell(row=1, column=ci, value=h)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = center
-        ws.column_dimensions[get_column_letter(ci)].width = w
-
-    ws.row_dimensions[1].height = 22
-
-    for ri, item in enumerate(items, 2):
-        row_data = [
-            item.get("lot", ""),
-            item.get("title", ""),
-            item.get("original_value", 0),
-            item.get("revised_value", 0),
-            item.get("confidence", "").capitalize(),
-            item.get("recommendation", "").capitalize(),
-            item.get("rec_reason") or item.get("image_notes", ""),
-            item.get("user_note", ""),
-            "View eBay Sold"
-        ]
-        rec = item.get("recommendation", "").lower()
-        fill = green_fill if rec == "buy" else amber_fill if rec == "watch" else (alt_fill if ri % 2 == 0 else None)
-
-        for ci, val in enumerate(row_data, 1):
-            cell = ws.cell(row=ri, column=ci, value=val)
-            if fill:
-                cell.fill = fill
-            cell.border = thin
-            cell.alignment = wrap if ci in (2, 7) else center
-            if ci in (3, 4) and isinstance(val, (int, float)):
-                cell.number_format = '"$"#,##0'
-            if ci == 8 and item.get("ebay_search"):
-                ws.cell(row=ri, column=ci).hyperlink = item["ebay_search"]
-                ws.cell(row=ri, column=ci).font = Font(color="4A9EFF", underline="single")
-        ws.row_dimensions[ri].height = 20
-
-    ws.freeze_panes = "A2"
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return StreamingResponse(
-        buf,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=deep_research.xlsx"}
-    )
-
-
-@app.post("/api/auction/research-export")
-async def research_export(request: Request):
-    import io, json
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from openpyxl.utils import get_column_letter
-    from fastapi.responses import StreamingResponse
-
-    form = await request.form()
-    items = json.loads(form.get("items", "[]"))
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Deep Research"
-
-    # Styles
-    header_font = Font(bold=True, color="FFFFFF", size=11)
-    header_fill = PatternFill("solid", fgColor="1E2535")
-    amber_fill = PatternFill("solid", fgColor="412402")
-    green_fill = PatternFill("solid", fgColor="052E16")
-    alt_fill = PatternFill("solid", fgColor="161B28")
-    center = Alignment(horizontal="center", vertical="center")
-    wrap = Alignment(wrap_text=True, vertical="center")
-    thin = Border(
-        bottom=Side(style="thin", color="2D3348"),
-        right=Side(style="thin", color="2D3348")
-    )
-
-    headers = ["Lot", "Title", "Original Value", "Revised Value", "Confidence", "Recommendation", "Notes", "eBay Search"]
-    col_widths = [8, 45, 15, 15, 12, 16, 40, 20]
-
-    for ci, (h, w) in enumerate(zip(headers, col_widths), 1):
-        cell = ws.cell(row=1, column=ci, value=h)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = center
-        ws.column_dimensions[get_column_letter(ci)].width = w
-
-    ws.row_dimensions[1].height = 22
-
-    for ri, item in enumerate(items, 2):
-        row_data = [
-            item.get("lot", ""),
-            item.get("title", ""),
-            item.get("original_value", 0),
-            item.get("revised_value", 0),
-            item.get("confidence", "").capitalize(),
-            item.get("recommendation", "").capitalize(),
-            item.get("rec_reason") or item.get("image_notes", ""),
-            item.get("user_note", ""),
-            "View eBay Sold"
-        ]
-        rec = item.get("recommendation", "").lower()
-        fill = green_fill if rec == "buy" else amber_fill if rec == "watch" else (alt_fill if ri % 2 == 0 else None)
-
-        for ci, val in enumerate(row_data, 1):
-            cell = ws.cell(row=ri, column=ci, value=val)
-            if fill:
-                cell.fill = fill
-            cell.border = thin
-            cell.alignment = wrap if ci in (2, 7) else center
-            if ci in (3, 4) and isinstance(val, (int, float)):
-                cell.number_format = '"$"#,##0'
-            if ci == 8 and item.get("ebay_search"):
-                ws.cell(row=ri, column=ci).hyperlink = item["ebay_search"]
-                ws.cell(row=ri, column=ci).font = Font(color="4A9EFF", underline="single")
-        ws.row_dimensions[ri].height = 20
-
-    ws.freeze_panes = "A2"
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return StreamingResponse(
-        buf,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=deep_research.xlsx"}
-    )
-
-# ── API: AUCTION DEEP RESEARCH ───────────────────────────────── #
-
-class DeepResearch(BaseModel):
-    title: str
-    current_value: float = 0
-
-@app.post("/api/auction/deep-research")
-async def deep_research(body: DeepResearch):
-    import os, asyncio, json
-    from concurrent.futures import ThreadPoolExecutor
-    import google.generativeai as genai
-    gemini_key = os.getenv("GEMINI_API_KEY", "")
-    if not gemini_key:
-        raise HTTPException(400, "GEMINI_API_KEY not set")
-    genai.configure(api_key=gemini_key)
-    model = genai.GenerativeModel("gemini-2.5-flash")
-    prompt = f"""You are an expert industrial equipment appraiser.
-Research this auction item thoroughly: "{body.title}"
-Current estimate: ${body.current_value}
-
-Check eBay sold listings, industrial dealers, and recent auction results.
-Assume working used condition.
-
-Return ONLY a JSON object (no markdown):
-{{"your_value": 5000, "notes": "Sold $4,500-$6,000 on eBay 2024"}}
-
-your_value must be an integer."""
-
-    loop = asyncio.get_event_loop()
-    executor = ThreadPoolExecutor(max_workers=1)
-    try:
-        response = await loop.run_in_executor(executor, lambda: model.generate_content(prompt, generation_config={"max_output_tokens": 300}))
-        raw = response.text.strip().replace("```json","").replace("```","").strip()
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            from json_repair import repair_json
-            data = json.loads(repair_json(raw))
-        data["ai_overview_html"] = ai_overview_html
-        data["grounding_sources"] = grounding_sources
-        return data
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-
-# ── API: EXCEL EXPORT ─────────────────────────────────────────── #
-
-@app.post("/api/auction/export-excel")
-async def export_excel(request: Request):
-    import io
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment
-    body = await request.json()
-    items = body.get("items", [])
-    name = body.get("name", "Auction Scan")
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = name[:31]
-
-    hdr_font = Font(bold=True, color="FFFFFF", size=11)
-    hdr_fill = PatternFill("solid", fgColor="1A1F2E")
-    hv_fill = PatternFill("solid", fgColor="5C3A00")
-    hv_font = Font(color="FAC775", bold=True)
-
-    headers = ["Lot", "Title", "Est. Value", "Notes", "Deep Scan", "Watchlisted"]
-    ws.append(headers)
-    for col in range(1, 7):
-        cell = ws.cell(row=1, column=col)
-        cell.font = hdr_font
-        cell.fill = hdr_fill
-        cell.alignment = Alignment(horizontal="center")
-
-    for item in items:
-        val = int(item.get("your_value", 0) or 0)
-        row = [
-            str(item.get("lot", "")),
-            str(item.get("title", "")),
-            f"${val:,}",
-            str(item.get("notes", "")),
-            "Yes" if item.get("_deep") else "",
-            "Yes" if item.get("_watch") else "",
-        ]
-        ws.append(row)
-        if val >= 500:
-            r = ws.max_row
-            for col in range(1, 7):
-                ws.cell(row=r, column=col).fill = hv_fill
-                ws.cell(row=r, column=col).font = hv_font
-
-    ws.column_dimensions["A"].width = 8
-    ws.column_dimensions["B"].width = 50
-    ws.column_dimensions["C"].width = 14
-    ws.column_dimensions["D"].width = 45
-    ws.column_dimensions["E"].width = 12
-    ws.column_dimensions["F"].width = 12
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-
-    from datetime import datetime
-    fn = f"auction_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
-    return StreamingResponse(
-        buf,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={fn}"}
-    )
-
-
-# ── API: AUCTION PAGE IMAGE ───────────────────────────────────── #
-
-@app.get("/api/auction/page-image/{scan_id}/{img_index}")
-async def get_page_image(scan_id: str, img_index: int):
-    import fitz
-    from fastapi.responses import Response
-    try:
-        pdf_data = supabase.storage.from_("auction-pdfs").download(f"{scan_id}.pdf")
-        doc = fitz.open(stream=pdf_data, filetype="pdf")
-        # Collect all large embedded images (skip logos/watermarks < 5KB)
-        all_images = []
-        seen_xrefs = set()
-        for page in doc:
-            for img in page.get_images(full=True):
-                xref = img[0]
-                if xref in seen_xrefs:
-                    continue
-                seen_xrefs.add(xref)
-                try:
-                    base_image = doc.extract_image(xref)
-                    if base_image and base_image.get("image") and len(base_image["image"]) > 8000:
-                        all_images.append(base_image)
-                except Exception as search_err:
-                    print(f"   Search grounding failed: {search_err}")
-                    pass
-        # Fallback: render page and crop item image area for image-only PDFs
-        if not all_images or img_index < 0 or img_index >= len(all_images):
-            doc2 = fitz.open(stream=pdf_data, filetype="pdf")
-            items_per_page = 3
-            page_num = img_index // items_per_page
-            slot = img_index % items_per_page
-            if page_num >= len(doc2):
-                page_num = len(doc2) - 1
-            page = doc2[page_num]
-            pw, ph = page.rect.width, page.rect.height
-            slot_h = ph / items_per_page
-            clip = fitz.Rect(0, slot * slot_h, pw * 0.28, (slot + 1) * slot_h)
-            mat = fitz.Matrix(2.0, 2.0)
-            pix = page.get_pixmap(matrix=mat, clip=clip)
-            doc2.close()
-            return Response(content=pix.tobytes("jpeg"), media_type="image/jpeg",
-                          headers={"Cache-Control": "public, max-age=86400"})
-        img_data = all_images[img_index]
-        ext = img_data.get("ext", "jpeg")
-        mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/" + ext
-        return Response(content=img_data["image"], media_type=mime, headers={"Cache-Control": "public, max-age=86400"})
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-# ── API: PDF AUCTION SCAN ─────────────────────────────────────── #
-
-from sse_starlette.sse import EventSourceResponse
-
-@app.post("/api/auction/scan-txt")
-async def scan_txt_auction(file: UploadFile = File(...)):
-    import os, json, asyncio
-    import google.generativeai as genai
-
-    contents = await file.read()
-    text = contents.decode("utf-8", errors="ignore")
-
-    gemini_key = os.getenv("GEMINI_API_KEY", "")
-    if not gemini_key:
-        raise HTTPException(400, "GEMINI_API_KEY not set")
-
-    genai.configure(api_key=gemini_key)
-    model = genai.GenerativeModel("gemini-2.5-flash")
-
-    prompt_template = """You are a world-class auction appraiser with deep expertise in industrial equipment, lab instruments, and commercial goods.
-
-Extract EVERY auction lot from this catalog text.
-
-For each lot return a JSON object:
-- lot: lot number as string
-- title: full item title as written
-- description: one sentence description
-- estimate_low: integer dollar amount
-- estimate_high: integer dollar amount
-- your_value: integer (your single best estimate - total lot value)
-- notes: brief market note with price source
-
-PRICING RULES:
-- All values MUST be plain integers (no $, no text)
-- Base on ACTUAL used market values from eBay sold listings
-- If no lots found, return: []
-- Return ONLY a JSON array, no markdown"""
-
-    # Split text into chunks of ~8000 chars
-    chunk_size = 8000
-    chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
-    if not chunks:
-        chunks = [text]
-
-    from sse_starlette.sse import EventSourceResponse
-
-    async def generate():
-        loop = asyncio.get_event_loop()
-        from concurrent.futures import ThreadPoolExecutor
-        executor = ThreadPoolExecutor(max_workers=1)
-        all_items = []
-        total = len(chunks)
-
-        for i, chunk in enumerate(chunks):
-            try:
-                def call_gemini(c=chunk, idx=i):
-                    response = model.generate_content(
-                        [prompt_template, f"\nCATALOG SECTION {idx+1}/{total}:\n{c}"],
-                        generation_config={"max_output_tokens": 16000}
-                    )
-                    return response.text
-
-                raw = await loop.run_in_executor(executor, call_gemini)
-                raw = " ".join(raw.splitlines())
-                if "```" in raw:
-                    raw = raw.split("```")[1]
-                    if raw.startswith("json"):
-                        raw = raw[4:]
-                    raw = raw.strip()
-                start = raw.find("[")
-                end = raw.rfind("]") + 1
-                if start >= 0 and end > start:
-                    raw = raw[start:end]
-                try:
-                    items = json.loads(raw)
-                except Exception:
-                    from json_repair import repair_json
-                    items = json.loads(repair_json(raw))
-                all_items.extend(items)
-                yield {
-                    "data": json.dumps({
-                        "chunk": i + 1,
-                        "total_chunks": total,
-                        "items": items,
-                        "scan_id": None,
-                        "done": False
-                    }, separators=(',', ':'))
-                }
-            except Exception as e:
-                print(f"TXT chunk {i+1} error: {e}")
-            await asyncio.sleep(0.1)
-
-        yield {"data": json.dumps({"done": True, "total": len(all_items), "scan_id": None})}
-
-    return EventSourceResponse(generate())
-
-
-@app.post("/api/auction/scan-pdf")
-async def scan_pdf_auction(file: UploadFile = File(...)):
-    import os, base64, json, fitz, asyncio, uuid
-    import google.generativeai as genai
-
-    contents = await file.read()
-    gemini_key = os.getenv("GEMINI_API_KEY", "")
-    if not gemini_key:
-        raise HTTPException(400, "GEMINI_API_KEY not set")
-
-    # Store PDF in Supabase for later image retrieval
-    scan_id = str(uuid.uuid4())[:8]
-    try:
-        supabase.storage.from_("auction-pdfs").upload(
-            path=f"{scan_id}.pdf",
-            file=contents,
-            file_options={"content-type": "application/pdf", "upsert": "true"}
-        )
-    except Exception as upload_err:
-        print(f"PDF storage warning: {upload_err}")
-        scan_id = None
-
-    # Extract text chunks — fall back to image rendering for image-only PDFs
-    try:
-        doc = fitz.open(stream=contents, filetype="pdf")
-        total_pages = len(doc)
-        chunk_size = 2
-        page_chunks = []
-        page_images = []  # list of (page_num, jpeg_bytes) for image fallback
-        for start in range(0, total_pages, chunk_size):
-            end = min(start + chunk_size, total_pages)
-            chunk_text = ""
-            for page_num in range(start, end):
-                chunk_text += doc[page_num].get_text() + "\n"
-            if chunk_text.strip():
-                page_chunks.append(chunk_text)
-
-        # If no text found, render pages as images
-        if not page_chunks:
-            print(f"PDF has no text — switching to image scan ({total_pages} pages)")
-            for page_num in range(total_pages):
-                page = doc[page_num]
-                mat = fitz.Matrix(2.0, 2.0)
-                pix = page.get_pixmap(matrix=mat)
-                page_images.append((page_num, pix.tobytes("jpeg")))
-        doc.close()
-    except Exception as e:
-        raise HTTPException(500, f"PDF read error: {e}")
-
-    genai.configure(api_key=gemini_key)
-    model = genai.GenerativeModel("gemini-2.5-flash")
-
-    prompt_template = """You are a world-class auction appraiser with deep expertise in industrial equipment, lab instruments, and commercial goods.
-
-Extract EVERY auction lot from this catalog section.
-
-For each lot return a JSON object:
-- lot: lot number as string
-- title: full item title as written
-- description: one sentence description
-- estimate_low: integer dollar amount
-- estimate_high: integer dollar amount
-- your_value: integer (your single best estimate - total lot value)
-- notes: brief market note with price source
-
-EXPERT AUCTION TITLE INTERPRETATION:
-- Quantities: "(2)", "QTY (3)", "SET OF 4", "PAIR", "x3" = price TOTAL for ALL units combined
-- Vague lots: "SHELF OF...", "PALLET OF...", "BOX OF..." = estimate total resale of all contents
-- Condition notes like "AS-IS", "UNTESTED", "ACTIVATION NOT GUARANTEED" = still price as normal working condition
-- Always search for the SPECIFIC brand + model for accurate pricing
-- Ignore auction house names, catalog numbers, location references in titles
-
-PRICING RULES:
-- All values MUST be plain integers (no $, no text)
-- Base on ACTUAL used market values from eBay sold listings
-- If no lots found, return: []
-- Return ONLY a JSON array, no markdown
-
-Example: [{"lot":"5","title":"Oakton pH Meter","description":"Portable pH/ORP meter with case","estimate_low":80,"estimate_high":150,"your_value":100,"notes":"Sells $80-150 used on eBay"}]"""
-
-    def call_gemini(chunk_text, i, total):
-        response = model.generate_content(
-            [prompt_template, f"\nCATALOG SECTION {i+1}/{total}:\n{chunk_text[:10000]}"],
-            generation_config={"max_output_tokens": 16000}
-        )
-        return response.text
-
-    def call_gemini_image(page_num, img_bytes, total):
-        """Send a rendered page image to Gemini Vision for lot extraction."""
-        print(f"   Image scan page {page_num+1}/{total}")
-        img_prompt = prompt_template + f"\n\nThis is page {page_num+1} of {total} of an auction catalog. Extract all lots visible in this image."
-        response = model.generate_content(
-            [img_prompt, {"mime_type": "image/jpeg", "data": img_bytes}],
-            generation_config={"max_output_tokens": 16000}
-        )
-        return response.text
-
-    async def generate():
-        import asyncio
-        from concurrent.futures import ThreadPoolExecutor
-        loop = asyncio.get_event_loop()
-        executor = ThreadPoolExecutor(max_workers=1)
-        all_items = []
-
-        # Image-only PDF path
-        if page_images and not page_chunks:
-            total_chunks = len(page_images)
-            for i, (page_num, img_bytes) in enumerate(page_images):
-                try:
-                    raw = await loop.run_in_executor(executor, call_gemini_image, page_num, img_bytes, total_chunks)
-                    raw = " ".join(raw.splitlines())
-                    if "```" in raw:
-                        raw = raw.split("```")[1]
-                        if raw.startswith("json"): raw = raw[4:]
-                        raw = raw.strip()
-                    start = raw.find("[")
-                    end = raw.rfind("]") + 1
-                    if start >= 0 and end > start:
-                        raw = raw[start:end]
-                    try:
-                        items = json.loads(raw)
-                    except Exception:
-                        from json_repair import repair_json
-                        items = json.loads(repair_json(raw))
-                    base_idx = len(all_items)
-                    all_items.extend(items)
-                    for item in items:
-                        item["_page_start"] = page_num + 1
-                        item["_page_end"] = page_num + 1
-                        if scan_id:
-                            item["_page_img"] = f"/api/auction/page-image/{scan_id}/{base_idx + items.index(item)}"
-                    yield {
-                        "data": json.dumps({
-                            "chunk": i + 1,
-                            "total_chunks": total_chunks,
-                            "items": items,
-                            "scan_id": scan_id,
-                            "done": False
-                        }, separators=(',', ':'))
-                    }
-                except Exception as e:
-                    print(f"Image page {page_num+1} error: {e}")
-                await asyncio.sleep(0.1)
-            yield {"data": json.dumps({"done": True, "total": len(all_items), "scan_id": scan_id})}
-            return
-
-        total_chunks = len(page_chunks)
-
-        for i, chunk_text in enumerate(page_chunks):
-            try:
-                raw = await loop.run_in_executor(executor, call_gemini, chunk_text, i, total_chunks)
-                raw = " ".join(raw.splitlines())
-                if "```" in raw:
-                    raw = raw.split("```")[1]
-                    if raw.startswith("json"):
-                        raw = raw[4:]
-                    raw = raw.strip()
-                start = raw.find("[")
-                end = raw.rfind("]") + 1
-                if start >= 0 and end > start:
-                    raw = raw[start:end]
-                try:
-                    items = json.loads(raw)
-                except Exception as search_err:
-                    print(f"   Search grounding failed: {search_err}")
-                    from json_repair import repair_json
-                    items = json.loads(repair_json(raw))
-                base_idx = len(all_items)
-                all_items.extend(items)
-                page_start = i * chunk_size + 1
-                page_end = min((i + 1) * chunk_size, total_pages)
-                for item in items:
-                    item["_page_start"] = page_start
-                    item["_page_end"] = page_end
-                    if scan_id:
-                        item["_page_img"] = f"/api/auction/page-image/{scan_id}/{base_idx + items.index(item)}"
-                yield {
-                    "data": json.dumps({
-                        "chunk": i + 1,
-                        "total_chunks": total_chunks,
-                        "items": items,
-                        "scan_id": scan_id,
-                        "done": False
-                    }, separators=(',', ':'))
-                }
-            except Exception as e:
-                print(f"Chunk {i+1} error: {e}")
-            await asyncio.sleep(0.1)
-
-        yield {"data": json.dumps({"done": True, "total": len(all_items), "scan_id": scan_id})}
-
-    return EventSourceResponse(generate())
-
-
-def get_unmatched_photos():
-    """Get all photos from storage that haven't been matched yet."""
-    try:
-        # Get all files in part-photos bucket
-        res = supabase.storage.from_("part-photos").list()
-        files = [f["name"] for f in (res or []) if f.get("name") and not f["name"].startswith(".")]
-        return {"photos": files, "count": len(files)}
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-class ScanPartsBody(BaseModel):
-    part_numbers: list
-    photo_ids:    list
-    gemini_key:   Optional[str] = None
-
-@app.post("/api/parts/scan")
-async def scan_parts(body: ScanPartsBody):
-    """
-    Scan a batch of photos through Gemini Vision.
-    For each photo, extract any visible part numbers and check against the list.
-    Returns matches with confidence.
-    """
-    import threading
-    gemini_key = body.gemini_key or os.getenv("GEMINI_API_KEY", "")
-    if not gemini_key:
-        raise HTTPException(400, "Gemini API key required")
-    if not body.part_numbers:
-        raise HTTPException(400, "No part numbers provided")
-
-    results = []
-    part_set = [str(p).strip().upper() for p in body.part_numbers if str(p).strip()]
-
-    try:
-        import google.generativeai as genai
-        genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel("gemini-2.5-flash")
-    except Exception:
-        try:
-            from google import genai as genai2
-            from google.genai import types
-            client = genai2.Client(api_key=gemini_key)
-        except Exception as e:
-            raise HTTPException(500, f"Gemini init failed: {e}")
-
-    for photo_id in body.photo_ids[:50]:  # max 50 at a time
-        try:
-            # Download photo from Supabase
-            img_bytes = supabase.storage.from_("part-photos").download(photo_id)
-            if not img_bytes:
-                continue
-
-            # Build prompt
-            parts_list = "\n".join(part_set[:200])
-            prompt = f"""Examine this image carefully. 
-Read ALL visible text including: part numbers, model numbers, serial numbers, labels, stamps, engravings, stickers, tags.
-
-I am looking for matches to this list of part numbers:
-{parts_list}
-
-Return ONLY a JSON object:
-{{
-  "visible_text": ["list", "of", "all", "text", "you", "can", "read"],
-  "part_numbers_found": ["any", "part", "numbers", "you", "see"],
-  "matches": ["part numbers that exactly or closely match the search list"],
-  "confidence": "high/medium/low",
-  "notes": "brief note on what you see"
-}}
-
-If no text visible or no matches, still return the JSON with empty arrays."""
-
-            try:
-                import google.generativeai as genai
-                genai.configure(api_key=gemini_key)
-                model = genai.GenerativeModel("gemini-2.5-flash")
-                import PIL.Image
-                import io
-                img = PIL.Image.open(io.BytesIO(img_bytes))
-                response = model.generate_content([prompt, img])
-                raw = response.text or ""
-            except Exception as search_err:
-                print(f"   Search grounding failed: {search_err}")
-                try:
-                    from google import genai as gc
-                    from google.genai import types as gt
-                    cl = gc.Client(api_key=gemini_key)
-                    models = [m.name for m in cl.models.list()]
-                    best = next((m for m in models if "gemini-2.5" in m or "gemini-2.0" in m), models[0] if models else "models/gemini-1.5-pro")
-                    resp = cl.models.generate_content(
-                        model=best,
-                        contents=[gt.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"), prompt]
-                    )
-                    raw = resp.text or ""
-                except Exception as e2:
-                    results.append({"photo_id": photo_id, "error": str(e2), "matches": []})
-                    continue
-
-            import re, json
-            raw = re.sub(r"^```[a-z]*\n?", "", raw, flags=re.IGNORECASE)
-            raw = re.sub(r"\n?```$", "", raw).strip()
-            jm = re.search(r'\{.*\}', raw, re.DOTALL)
-            if jm:
-                data = json.loads(jm.group())
-                results.append({
-                    "photo_id":        photo_id,
-                    "url":             photo_url(photo_id, thumb=True),
-                    "full_url":        photo_url(photo_id),
-                    "visible_text":    data.get("visible_text", []),
-                    "part_numbers_found": data.get("part_numbers_found", []),
-                    "matches":         data.get("matches", []),
-                    "confidence":      data.get("confidence", ""),
-                    "notes":           data.get("notes", ""),
-                    "has_match":       len(data.get("matches", [])) > 0,
-                })
-            else:
-                results.append({"photo_id": photo_id, "matches": [], "notes": "Could not parse response"})
-
-        except Exception as e:
-            results.append({"photo_id": photo_id, "error": str(e), "matches": []})
-
-    matches    = [r for r in results if r.get("has_match")]
-    no_matches = [r for r in results if not r.get("has_match")]
-    return {
-        "results":     results,
-        "matches":     matches,
-        "no_matches":  no_matches,
-        "match_count": len(matches),
-        "scanned":     len(results),
+      }
+
+      // Update match header live
+      if (allMatches.length > 0) {
+        document.getElementById('parts-matches').style.display = 'block';
+        document.getElementById('parts-match-header').textContent = `✅ ${allMatches.length} match${allMatches.length>1?'es':''} found`;
+      }
+    } catch(e) {
+      console.error('Batch error:', e);
+    }
+  }
+
+  document.getElementById('parts-progress').style.display = 'none';
+  document.getElementById('parts-progress-bar').style.width = '100%';
+  partsScanRunning = false;
+
+  if (noMatches.length > 0) {
+    document.getElementById('parts-no-matches').style.display = 'block';
+    document.getElementById('parts-no-match-header').textContent = `${noMatches.length} photos scanned — no match`;
+  }
+
+  if (allMatches.length === 0) toast('Scan complete — no matches found', 'error');
+  else toast(`Scan complete — ${allMatches.length} match${allMatches.length>1?'es':''} found!`);
+}
+
+function stopPartsScan() {
+  partsScanStop = true;
+  document.getElementById('parts-progress').style.display = 'none';
+  toast('Scan stopped');
+}
+
+function renderMatchCard(r) {
+  const list = document.getElementById('parts-match-list');
+  const matchStr = r.matches.join(', ');
+  const div = document.createElement('div');
+  div.style.cssText = 'background:var(--card);border:1.5px solid #16a34a;border-radius:12px;padding:12px;margin-bottom:10px;display:flex;gap:12px;';
+  div.innerHTML = `
+    <img src="${r.url||''}" style="width:90px;height:90px;border-radius:8px;object-fit:cover;flex-shrink:0;background:#161925;" onerror="this.style.display='none'"/>
+    <div style="flex:1;min-width:0;">
+      <div style="font-size:13px;font-weight:700;color:#16a34a;margin-bottom:4px;">✅ Match: ${matchStr}</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Photo: ${r.photo_id}</div>
+      ${r.part_numbers_found.length ? '<div style="font-size:11px;color:var(--text);margin-bottom:4px;">Found on item: ' + r.part_numbers_found.join(', ') + '</div>' : ''}
+      ${r.notes ? '<div style="font-size:11px;color:var(--muted);">' + r.notes + '</div>' : ''}
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <a href="${r.full_url||r.url||''}" target="_blank" style="font-size:11px;color:var(--accent);font-weight:600;">View full photo ↗</a>
+        <span style="font-size:11px;color:var(--muted);font-weight:600;background:rgba(22,163,74,0.1);padding:2px 8px;border-radius:10px;">${r.confidence||''}</span>
+      </div>
+    </div>`;
+  list.appendChild(div);
+}
+
+function renderNoMatchThumb(r) {
+  const list = document.getElementById('parts-no-match-list');
+  const div = document.createElement('div');
+  div.style.cssText = 'aspect-ratio:1;border-radius:8px;overflow:hidden;background:#161925;';
+  div.innerHTML = r.url ? `<img src="${r.url}" style="width:100%;height:100%;object-fit:cover;" loading="lazy"/>` : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#3d4663;">📷</div>';
+  list.appendChild(div);
+}
+
+// ── PDF AUCTION SCAN ──────────────────────────────────────────
+let pdfCsvBlob = null;
+let pdfAllItems = [];
+
+async function scanPdfAuction(input) {
+  if (!input.files[0]) return;
+  pdfAllItems = [];
+  document.getElementById('pdf-scanning').style.display = '';
+  document.getElementById('pdf-results').style.display = '';
+  document.getElementById('pdf-drop-zone').style.display = 'none';
+  document.getElementById('pdf-result-body').innerHTML = '';
+  document.getElementById('pdf-result-title').textContent = 'Scanning...';
+  document.getElementById('pdf-scan-bar').style.width = '0%';
+  document.getElementById('pdf-scan-pct').textContent = '0%';
+  document.getElementById('pdf-scan-label').textContent = 'Uploading PDF...';
+
+  try {
+    const fd = new FormData();
+    fd.append('file', input.files[0]);
+    const r = await fetch('/api/auction/scan-pdf', {method: 'POST', body: fd});
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      toast('PDF scan failed: ' + (err.detail || 'Unknown error'), 'error');
+      document.getElementById('pdf-scanning').style.display = 'none';
+      document.getElementById('pdf-drop-zone').style.display = '';
+      return;
     }
 
-# ── SETTINGS ──────────────────────────────────────────────────── #
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
 
-@app.get("/api/settings")
-async def get_settings():
-    try:
-        res = supabase.table("app_settings").select("*").execute()
-        return {row["key"]: row["value"] for row in (res.data or [])}
-    except Exception:
-        return {}
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, {stream: true});
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const msg = JSON.parse(line.slice(6));
+          if (msg.done) {
+            document.getElementById('pdf-scan-bar').style.width = '100%';
+            document.getElementById('pdf-scan-pct').textContent = '100%';
+            document.getElementById('pdf-scan-label').textContent = 'Complete!';
+            document.getElementById('pdf-result-title').textContent = 'Results — ' + pdfAllItems.length + ' items';
+            setTimeout(() => { document.getElementById('pdf-scanning').style.display = 'none'; }, 600);
+            buildPdfCsv();
+          } else {
+            const pct = Math.round((msg.chunk / msg.total_chunks) * 95);
+            document.getElementById('pdf-scan-bar').style.width = pct + '%';
+            document.getElementById('pdf-scan-pct').textContent = pct + '%';
+            document.getElementById('pdf-scan-label').textContent = 'Section ' + msg.chunk + ' of ' + msg.total_chunks + ' — ' + msg.items.length + ' items found';
+            document.getElementById('pdf-result-title').textContent = 'Results — ' + (pdfAllItems.length + msg.items.length) + ' items so far';
+            appendPdfItems(msg.items);
+          }
+        } catch(e) {}
+      }
+    }
+  } catch(e) {
+    toast('PDF scan error: ' + e.message, 'error');
+    document.getElementById('pdf-scanning').style.display = 'none';
+    document.getElementById('pdf-drop-zone').style.display = '';
+  }
+  input.value = '';
+}
 
-class SaveSetting(BaseModel):
-    key:   str
-    value: str
+function appendPdfItems(items) {
+  const tbody = document.getElementById('pdf-result-body');
+  items.forEach(item => {
+    pdfAllItems.push(item);
+    const val = parseInt(item.your_value) || 0;
+    const color = val > 100 ? 'pdf-value-high' : val > 0 ? 'pdf-value-low' : '';
+    const ebayUrl = 'https://www.ebay.com/sch/i.html?_nkw=' + encodeURIComponent(item.title || '') + '&LH_Sold=1&LH_Complete=1';
+    tbody.innerHTML += '<tr>' +
+      '<td style="color:var(--muted);white-space:nowrap">' + (item.lot||'') + '</td>' +
+      '<td style="max-width:200px"><a href="' + ebayUrl + '" target="_blank" style="color:var(--accent);font-weight:600;font-size:12px;">' + (item.title||'') + '</a></td>' +
+      '<td style="white-space:nowrap">$' + (item.estimate_low||0) + '</td>' +
+      '<td style="white-space:nowrap">$' + (item.estimate_high||0) + '</td>' +
+      '<td class="' + color + '" style="white-space:nowrap">$' + (item.your_value||0) + '</td>' +
+      '<td style="font-size:11px;color:var(--muted)">' + (item.notes||'') + '</td>' +
+      '</tr>';
+  });
+}
 
-@app.post("/api/settings")
-async def save_setting(body: SaveSetting):
-    try:
-        supabase.table("app_settings").upsert({"key": body.key, "value": body.value}).execute()
-        return {"ok": True}
-    except Exception as e:
-        raise HTTPException(500, str(e))
-import hashlib, secrets
+function buildPdfCsv() {
+  const rows = [['Lot','Title','Description','Est. Low','Est. High','Your Value','Notes']];
+  pdfAllItems.forEach(item => {
+    rows.push([item.lot||'', item.title||'', item.description||'',
+      '$'+(item.estimate_low||0), '$'+(item.estimate_high||0),
+      '$'+(item.your_value||0), item.notes||'']);
+  });
+  const csv = rows.map(r => r.map(c => '"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
+  pdfCsvBlob = new Blob([csv], {type: 'text/csv'});
+}
 
-def hash_password(password: str) -> str:
-    salt = secrets.token_hex(16)
-    hashed = hashlib.sha256((salt + password).encode()).hexdigest()
-    return f"{salt}:{hashed}"
+function downloadPdfCsv() {
+  if (!pdfCsvBlob) return;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(pdfCsvBlob);
+  a.download = 'auction_scan.csv';
+  a.click();
+}
 
-def verify_password(password: str, stored: str) -> bool:
-    try:
-        salt, hashed = stored.split(":")
-        return hashlib.sha256((salt + password).encode()).hexdigest() == hashed
-    except Exception:
-        return False
+// ── FAST SCAN ─────────────────────────────────────────────────
+var fsCond = 'new';
 
-def get_business_id(request: Request):
-    """Get business_id from session cookie."""
-    session = request.cookies.get("session_id")
-    if not session:
-        return None
-    try:
-        res = supabase.table("sessions").select("business_id").eq("token", session).execute()
-        if res.data:
-            return res.data[0]["business_id"]
-    except Exception:
-        pass
-    return None
+function setFsCond(c) {
+  fsCond = c;
+  document.getElementById('fs-cond-new').className = 'fastscan-cond-btn' + (c==='new' ? ' active' : '');
+  document.getElementById('fs-cond-used').className = 'fastscan-cond-btn' + (c==='used' ? ' active' : '');
+}
+setFsCond('new');
 
-@app.get("/login")
-async def login_page(request: Request, error: str = ""):
-    return templates.TemplateResponse("login.html", {"request": request, "error": error})
+async function rescanQueueItem(btn) {
+  var el = btn.closest('[data-gid]');
+  if (!el) return;
+  var gid = el.dataset.gid;
+  if (!gid) return;
+  btn.textContent = '...';
+  btn.disabled = true;
+  try {
+    await fetch('/api/groups/' + gid + '/rescan', {method:'POST', credentials:'include'});
+    btn.textContent = 'Rescanning';
+    btn.style.color = '#fbbf24';
+  } catch(e) {
+    btn.textContent = '✗';
+    btn.disabled = false;
+  }
+}
 
-@app.post("/login")
-async def login_submit(request: Request):
-    form = await request.form()
-    email = str(form.get("email", "")).strip().lower()
-    password = str(form.get("password", ""))
-    try:
-        res = supabase.table("businesses").select("id,password_hash").eq("email", email).execute()
-        if not res.data:
-            return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid email or password"})
-        biz = res.data[0]
-        if not verify_password(password, biz["password_hash"]):
-            return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid email or password"})
-        token = secrets.token_hex(32)
-        supabase.table("sessions").insert({"token": token, "business_id": biz["id"]}).execute()
-        from fastapi.responses import RedirectResponse
-        resp = RedirectResponse("/", status_code=302)
-        resp.set_cookie("session_id", token, httponly=True, max_age=60*60*24*30)
-        return resp
-    except Exception as e:
-        return templates.TemplateResponse("login.html", {"request": request, "error": f"Login failed: {e}"})
+async function startFastScan(input) {
+  const files = Array.from(input.files);
+  if (!files.length) return;
+  document.getElementById('fastscan-progress').style.display = '';
+  const queue = document.getElementById('fastscan-queue');
+  var _existingCount = queue.children.length;
+  const items = files.map((f, i) => {
+    const el = document.createElement('div');
+    el.className = 'fastscan-item';
+    el.id = 'fs-item-' + (_existingCount + i);
+    el.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid #111827;';
+    var _objUrl = URL.createObjectURL(files[i]);
+    el.dataset.objUrl = _objUrl;
+    el.innerHTML = '<div  style="width:40px;height:40px;border-radius:8px;overflow:hidden;flex-shrink:0;background:#060810;cursor:zoom-in;"><img src="' + _objUrl + '" style="width:100%;height:100%;object-fit:cover;"/></div><div style="flex:1;min-width:0;"><div style="font-size:14px;color:#475569;font-weight:600;">Photo ' + (_existingCount+i+1) + '</div><div style="font-size:12px;color:#334155;margin-top:2px;">Queued</div></div><div style="width:7px;height:7px;border-radius:50%;background:#334155;flex-shrink:0;"></div>';
+    queue.appendChild(el);
+    return el;
+  });
+  for (let i = 0; i < files.length; i++) {
+    const el = items[i];
+    var _thumb = el.dataset.objUrl || '';
+    el.innerHTML = '<div onclick="" style="width:40px;height:40px;border-radius:8px;overflow:hidden;flex-shrink:0;background:#060810;cursor:zoom-in;"><img src="' + _thumb + '" style="width:100%;height:100%;object-fit:cover;"/></div><div style="flex:1;"><div style="font-size:14px;color:#e2e8f0;font-weight:600;">Photo ' + (_existingCount+i+1) + '</div><div style="font-size:12px;color:#fbbf24;margin-top:2px;">Uploading...</div></div><div style="width:7px;height:7px;border-radius:50%;background:#fbbf24;flex-shrink:0;"></div>';
+    try {
+      const gr = await api('POST', '/api/groups', {session_id: crypto.randomUUID(), condition: fsCond});
+      const gid = gr.group_id || gr.id;
+      const blob = await compressForUpload(files[i]);
+      const fd = new FormData();
+      fd.append('file', blob, 'photo_0.jpg');
+      fd.append('group_id', gid);
+      await fetch('/api/photos/upload', {method:'POST', body: fd});
+      await api('POST', '/api/groups/submit', {group_id: gid, condition: fsCond, quantity: 1});
+      el.dataset.gid = gid;
+      var _thumb2 = el.dataset.objUrl || '';
+      el.innerHTML = '<div onclick="window.open(this.parentElement.parentElement.dataset.objUrl)" style="width:40px;height:40px;border-radius:8px;overflow:hidden;flex-shrink:0;background:#060810;cursor:zoom-in;"><img src="' + _thumb2 + '" style="width:100%;height:100%;object-fit:cover;"/></div><div style="flex:1;"><div style="font-size:14px;color:#e2e8f0;font-weight:600;">Photo ' + (_existingCount+i+1) + '</div><div style="font-size:12px;color:#4ade80;margin-top:2px;">Sent to scanner</div></div><button onclick="rescanQueueItem(this);" style="padding:5px 12px;border-radius:7px;border:1px solid #1a2332;background:#0a0f18;color:#94a3b8;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0;">↺</button>';
+      (function(elRef, gid) {
+        var pollCount = 0;
+        var poll = setInterval(async function() {
+          pollCount++;
+          if (pollCount > 40) { clearInterval(poll); return; }
+          try {
+            var r = await fetch('/api/groups/' + gid + '/listing', {credentials:'include'});
+            if (!r.ok) return;
+            var d = await r.json();
+            if (d.listing && d.listing.status === 'scanned') {
+              clearInterval(poll);
+              var statusDiv = elRef.querySelectorAll('div > div')[1];
+              if (statusDiv) { statusDiv.textContent = 'Complete'; statusDiv.style.color = '#4ade80'; }
+              if (typeof loadListings === 'function') loadListings();
+            }
+          } catch(e) {}
+        }, 3000);
+      })(el, gid);
+    } catch(e) {
+      var _thumb3 = el.dataset.objUrl || '';
+      el.innerHTML = '<div onclick="window.open(this.parentElement.parentElement.dataset.objUrl)" style="width:40px;height:40px;border-radius:8px;overflow:hidden;flex-shrink:0;background:#060810;cursor:zoom-in;"><img src="' + _thumb3 + '" style="width:100%;height:100%;object-fit:cover;"/></div><div style="flex:1;"><div style="font-size:14px;color:#e2e8f0;font-weight:600;">Photo ' + (_existingCount+i+1) + '</div><div style="font-size:12px;color:#f87171;margin-top:2px;">&#x2717; Failed</div></div><button onclick="rescanQueueItem(this);" style="padding:5px 12px;border-radius:7px;border:1px solid rgba(239,68,68,0.4);background:rgba(239,68,68,0.08);color:#f87171;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0;">&#x21ba; Rescan</button>';
+    }
+    const pct = Math.round((i+1)/files.length*100);
+    var _totalInQueue = queue.children.length;
+    var _doneInQueue = queue.querySelectorAll('[style*="4ade80"]').length;
+    document.getElementById('fs-bar').style.width = pct + '%';
+    document.getElementById('fs-count').textContent = _doneInQueue + ' / ' + _totalInQueue;
+  }
+  input.value = '';
+}
 
-@app.get("/register")
-async def register_page(request: Request, error: str = ""):
-    return templates.TemplateResponse("register.html", {"request": request, "error": error})
+async function compressForUpload(file) {
+  return new Promise(resolve => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      let w = img.width, h = img.height, max = 1600;
+      if (w > max || h > max) { if (w > h) { h = Math.round(h*max/w); w = max; } else { w = Math.round(w*max/h); h = max; } }
+      canvas.width = w; canvas.height = h;
+      ctx.drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      canvas.toBlob(resolve, 'image/jpeg', 0.88);
+    };
+    img.src = url;
+  });
+}
 
-@app.post("/register")
-async def register_submit(request: Request):
-    form = await request.form()
-    business_name = str(form.get("business_name", "")).strip()
-    email = str(form.get("email", "")).strip().lower()
-    password = str(form.get("password", ""))
-    if not business_name or not email or not password:
-        return templates.TemplateResponse("register.html", {"request": request, "error": "All fields required"})
-    if len(password) < 8:
-        return templates.TemplateResponse("register.html", {"request": request, "error": "Password must be at least 8 characters"})
-    try:
-        existing = supabase.table("businesses").select("id").eq("email", email).execute()
-        if existing.data:
-            return templates.TemplateResponse("register.html", {"request": request, "error": "Email already registered"})
-        password_hash = hash_password(password)
-        res = supabase.table("businesses").insert({
-            "name": business_name,
-            "email": email,
-            "password_hash": password_hash
-        }).execute()
-        business_id = res.data[0]["id"]
-        token = secrets.token_hex(32)
-        supabase.table("sessions").insert({"token": token, "business_id": business_id}).execute()
-        from fastapi.responses import RedirectResponse
-        resp = RedirectResponse("/", status_code=302)
-        resp.set_cookie("session_id", token, httponly=True, max_age=60*60*24*30)
-        return resp
-    except Exception as e:
-        return templates.TemplateResponse("register.html", {"request": request, "error": f"Registration failed: {e}"})
+// ── INIT ───────────────────────────────────────────────────────
+loadListings();
+initTileListeners();
 
-@app.get("/logout")
-async def logout(request: Request):
-    from fastapi.responses import RedirectResponse
-    token = request.cookies.get("session_id")
-    if token:
-        try:
-            supabase.table("sessions").delete().eq("token", token).execute()
-        except Exception:
-            pass
-    resp = RedirectResponse("/login", status_code=302)
-    resp.delete_cookie("session_id")
-    return resp
+// Auto-refresh dashboard every 30s when on that tab
+setInterval(() => { if (activeTab === 'dashboard') loadListings(); }, 30000);
+setInterval(() => { if (activeTab === 'auction' && activeSession) loadAuctionItems(activeSession); }, 30000);
 
+async function rotatePhoto(dir) {
+  const img = document.getElementById('modal-img');
+  if (!img) return;
+  // Use stored photo ID to avoid losing it after blob URL replacement
+  let photoId = img.dataset.photoId;
+  if (!photoId) {
+    photoId = extractPhotoId(img.src);
+    if (!photoId) return;
+    img.dataset.photoId = photoId;
+  }
+  const btn = document.getElementById(dir === 'ccw' ? 'rotate-ccw-btn' : 'rotate-cw-btn');
+  if (btn) {
+    if (btn.disabled) return; // already spinning, ignore repeat clicks
+    btn.disabled = true;
+    btn.dataset.origHtml = btn.innerHTML;
+    btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.7s linear infinite;"></span>';
+  }
+  try {
+    const r = await api('POST', '/api/photos/rotate', {photo_id: photoId, direction: dir || 'cw'});
+    if (r && r.ok) {
+      const freshUrl = '/api/photos/view/' + photoId + '?t=' + Date.now();
+      const blob = await fetch(freshUrl, {cache: 'no-store'}).then(res => res.blob());
+      img.src = URL.createObjectURL(blob);
+    } else {
+      toast('Rotate failed', 'error');
+    }
+  } catch(e) {
+    console.warn('Rotate failed', e);
+    toast('Rotate failed', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = btn.dataset.origHtml;
+    }
+  }
+}
 
+function updatePriceByCondition() {
+  var l = window._modalListing;
+  if (!l) return;
+  var cond = document.getElementById('modal-cond-input').value;
+  var p = cond === 'new' ? (l.price_new || l.price) : (l.price_used || l.price);
+  if (p > 0) {
+    document.getElementById('modal-price-input').value = p.toFixed(2);
+    document.getElementById('modal-price').textContent = '$' + p.toFixed(2);
+  }
+}
+</script>
+</body>
+</html>
