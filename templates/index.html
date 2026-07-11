@@ -127,9 +127,9 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tile-price-cond-row { display:flex; align-items:center; gap:6px; }
 .tile-price-input { width:70px; background:transparent; border:none; border-bottom:1px solid var(--border); color:#f8fafc; font-size:14px; font-weight:800; font-family:inherit; outline:none; padding:0 0 2px; }
 .tile-price-input:focus { border-bottom-color:var(--accent); }
-.tile-cat-input, .tile-brand-input { width:100%; background:transparent; border:1px solid var(--border); border-radius:4px; color:var(--muted); font-family:inherit; outline:none; padding:3px 5px; margin-top:4px; }
-.tile-cat-input { font-size:12px; line-height:1.3; }
-.tile-brand-input { font-size:10px; font-weight:600; color:#cbd5e1; }
+.tile-cat-input, .tile-brand-input { width:100%; background:transparent; border:1px solid var(--border); border-radius:4px; color:#f8fafc; font-family:inherit; outline:none; padding:4px 6px; margin-top:4px; font-weight:800; }
+.tile-cat-input { font-size:14px; line-height:1.35; resize:none; white-space:normal; overflow-wrap:break-word; display:block; min-height:38px; }
+.tile-brand-input { font-size:14px; }
 .tile-title-input.field-reviewed, .tile-price-input.field-reviewed, .tile-cat-input.field-reviewed, .tile-brand-input.field-reviewed { border:2px solid #ec4899 !important; color:#fff; box-shadow:0 0 6px rgba(236,72,153,0.4); border-radius:4px; padding:2px 4px; }
 .tile-title-input.field-changed, .tile-price-input.field-changed, .tile-cat-input.field-changed, .tile-brand-input.field-changed { border:2px solid #facc15 !important; color:#fff; box-shadow:0 0 6px rgba(250,204,21,0.4); border-radius:4px; padding:2px 4px; }
 .tile-cat-input.default-warn { border:2px solid #dc2626 !important; color:#fca5a5; background:rgba(220,38,38,0.08); }
@@ -654,7 +654,7 @@ function updateStats() {
     totalUnits += qty;
   });
   document.getElementById('stat-items').textContent = listings.length;
-  document.getElementById('stat-value').textContent = '$' + totalVal.toFixed(0);
+  document.getElementById('stat-value').textContent = '$' + Math.round(totalVal).toLocaleString('en-US');
   document.getElementById('stat-units').textContent = totalUnits;
 }
 
@@ -735,7 +735,7 @@ function renderTiles() {
             <button class="tile-cond-btn${isNew?' active':''}" data-id="${l.id}" data-cond="new">New</button>
           </div>
         </div>
-        <input class="tile-cat-input${fieldClassFor(l.id,'category')}${l.ebay_category_is_default ? ' default-warn' : ''}" type="text" value="${(dirtyCats[l.id] ?? (l.ebay_category_path||'No category yet')).replace(/"/g,'&quot;')}" data-id="${l.id}" data-catid="${l.ebay_category_id||''}" placeholder="eBay category" title="Click to edit — type a phrase to re-match, or a number to set the ID directly">
+        <textarea class="tile-cat-input${fieldClassFor(l.id,'category')}${l.ebay_category_is_default ? ' default-warn' : ''}" rows="2" data-id="${l.id}" data-catid="${l.ebay_category_id||''}" placeholder="eBay category" title="Click to edit — type a phrase to re-match, or a number to set the ID directly. Double-click to open full editor." ondblclick="openModal('${l.id}')">${(dirtyCats[l.id] ?? (l.ebay_category_path||'No category yet')).replace(/</g,'&lt;')}</textarea>
         ${l.ebay_category_is_default ? '<div class="tile-cat-warn-label">⚠️ Generic fallback — needs a real match</div>' : ''}
         <input class="tile-brand-input${fieldClassFor(l.id,'brand')}" type="text" value="${(dirtyBrands[l.id] ?? (l.brand||'')).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Brand">
       </div>
