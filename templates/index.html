@@ -1005,17 +1005,21 @@ function guessBrand(title) {
   return w.replace(/[,.;:]+$/, '');
 }
 
+let lastCategoryTried = {}; // itemId -> category_id, so re-clicking Auto-pick tries the NEXT suggestion, not the same one
+
 async function autoCategoryModal() {
   if (!modalItemId) return;
   const statusEl = document.getElementById('modal-category-status');
   const broad = document.getElementById('modal-broad-category').checked;
   statusEl.textContent = 'Matching category...';
   try {
-    const r = await api('POST', `/api/listings/${modalItemId}/auto-category?broad=${broad}`);
+    const excludeParam = lastCategoryTried[modalItemId] ? `&exclude=${lastCategoryTried[modalItemId]}` : '';
+    const r = await api('POST', `/api/listings/${modalItemId}/auto-category?broad=${broad}${excludeParam}`);
     statusEl.textContent = `✅ Matched: ${r.path} (ID ${r.category_id})`;
+    lastCategoryTried[modalItemId] = r.category_id;
     const l = listings.find(x => x.id === modalItemId);
     if (l) l.ebay_category_id = r.category_id;
-    toast('Category matched ✓');
+    toast('Category matched ✓ (click again to see the next-best match)');
   } catch(e) {
     statusEl.textContent = '⚠️ ' + e.message;
     toast('Category match failed', 'error');
