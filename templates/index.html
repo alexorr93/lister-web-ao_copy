@@ -523,6 +523,13 @@ select.field-input { background: #fff; color: #0f172a; }
       <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:14px;">
         <div class="field-label" style="margin-bottom:8px;">eBay Listing</div>
         <div id="modal-ebay-status" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></div>
+        <div style="margin-bottom:8px;">
+          <div class="field-label">Brand (for eBay item specifics)</div>
+          <input type="text" class="field-input" id="modal-brand-input" placeholder="e.g. SURSUM"/>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);margin-bottom:8px;cursor:pointer;">
+          <input type="checkbox" id="modal-broad-category"> Search all categories (not just Business & Industrial / Motors)
+        </label>
         <button class="btn" style="width:100%;margin-bottom:8px;" onclick="autoCategoryModal()">🎯 Auto-pick eBay Category</button>
         <div id="modal-category-status" style="font-size:11px;color:var(--muted);margin-bottom:8px;"></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
@@ -949,6 +956,7 @@ function openModal(id) {
   const refs = [l.price_used > 0 ? `Used: $${l.price_used.toFixed(0)}` : '', l.price_new > 0 ? `New: $${l.price_new.toFixed(0)}` : ''].filter(Boolean).join('  ·  ');
   document.getElementById('modal-refs').textContent  = refs;
   document.getElementById('modal-title-input').value = l.title || '';
+  document.getElementById('modal-brand-input').value = l.brand || guessBrand(l.title || '');
   document.getElementById('modal-price-input').value = l.price.toFixed(2);
   document.getElementById('modal-cond-input').value  = l.condition || 'used';
   document.getElementById('modal-desc-input').value = l.description || window._defaultDesc || '';
@@ -992,12 +1000,18 @@ async function saveModal() {
   document.getElementById('modal').classList.remove('open');
 }
 
+function guessBrand(title) {
+  const w = (title || '').trim().split(/\s+/)[0] || '';
+  return w.replace(/[,.;:]+$/, '');
+}
+
 async function autoCategoryModal() {
   if (!modalItemId) return;
   const statusEl = document.getElementById('modal-category-status');
+  const broad = document.getElementById('modal-broad-category').checked;
   statusEl.textContent = 'Matching category...';
   try {
-    const r = await api('POST', `/api/listings/${modalItemId}/auto-category`);
+    const r = await api('POST', `/api/listings/${modalItemId}/auto-category?broad=${broad}`);
     statusEl.textContent = `✅ Matched: ${r.path} (ID ${r.category_id})`;
     const l = listings.find(x => x.id === modalItemId);
     if (l) l.ebay_category_id = r.category_id;
@@ -1011,15 +1025,17 @@ async function autoCategoryModal() {
 async function submitToEbay(mode) {
   if (!modalItemId) return;
   const hours = mode === 'schedule' ? parseFloat(document.getElementById('modal-ebay-hours').value) || 24 : null;
+  const brand = document.getElementById('modal-brand-input').value.trim() || null;
   const label = mode === 'draft' ? 'Saving draft' : mode === 'now' ? 'Publishing' : 'Scheduling';
   toast(label + '...', 'success');
   try {
-    const r = await api('POST', `/api/listings/${modalItemId}/ebay`, {mode, hours_from_now: hours});
+    const r = await api('POST', `/api/listings/${modalItemId}/ebay`, {mode, hours_from_now: hours, brand});
     const l = listings.find(x => x.id === modalItemId);
     if (l) {
       l.ebay_status = r.status;
       l.ebay_item_id = r.item_id;
       l.ebay_scheduled_at = r.scheduled_at;
+      l.brand = r.brand;
     }
     if (mode === 'draft') toast('Saved as eBay draft ✓');
     else if (mode === 'now') toast('Published to eBay ✓');
