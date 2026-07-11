@@ -463,7 +463,7 @@ select.field-input { background: #fff; color: #0f172a; }
     </div>
     <div class="settings-section" style="border-left:4px solid var(--orange);">
       <div class="settings-title">🏷️ eBay API Credentials</div>
-      <div class="settings-sub">For direct listing submission. Find at developer.ebay.com</div>
+      <div class="settings-sub">For direct listing submission. Find at developer.ebay.com<br><strong style="color:var(--amber);">⚠️ If these are set as Railway environment variables, that value is used instead — this form is a fallback only. Edit in Railway for security.</strong></div>
       <div class="field-label">App ID</div><input type="text" class="field-input" id="set-ebay-app" style="margin-bottom:8px;"/>
       <div class="field-label">Dev ID</div><input type="text" class="field-input" id="set-ebay-dev" style="margin-bottom:8px;"/>
       <div class="field-label">Cert ID</div><input type="password" class="field-input" id="set-ebay-cert" style="margin-bottom:8px;"/>
