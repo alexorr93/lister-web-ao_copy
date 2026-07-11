@@ -71,7 +71,7 @@ def ensure_ebay_location(token: str, location_key: str, zip_code: str, country: 
 def ebay_condition(cond: str) -> str:
     return "NEW" if (cond or "").lower() == "new" else "USED_GOOD"
 
-def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None) -> dict:
+def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None, brand_override: str = None) -> dict:
     """
     mode: 'draft' | 'now' | 'schedule'
     Returns dict with offer_id, item_id (if published), status, scheduled_at
@@ -106,12 +106,17 @@ def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None)
     images = [photo_url(pid)] if pid else []
 
     # 1. Create/replace inventory item
+    brand = (brand_override or listing.get("brand") or "").strip()
+    if not brand:
+        first_word = title.split()[0].strip(",.;:-") if title else ""
+        brand = first_word if first_word else "Unbranded"
     inv_body = {
         "condition": ebay_condition(listing.get("condition")),
         "product": {
             "title": title,
             "description": desc,
             "imageUrls": images,
+            "aspects": {"Brand": [brand]},
         },
         "availability": {"shipToLocationAvailability": {"quantity": qty}},
     }
@@ -158,7 +163,7 @@ def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None)
             raise Exception(f"createOffer failed: {r.status_code} {r.text}")
         offer_id = r.json().get("offerId")
 
-    result = {"offer_id": offer_id, "sku": sku, "item_id": None, "status": "draft", "scheduled_at": None}
+    result = {"offer_id": offer_id, "sku": sku, "item_id": None, "status": "draft", "scheduled_at": None, "brand": brand}
 
     if mode == "draft":
         return result
@@ -510,6 +515,7 @@ async def update_listing(item_id: str, body: UpdateField):
 class EbaySubmit(BaseModel):
     mode: str  # 'draft' | 'now' | 'schedule'
     hours_from_now: Optional[float] = None
+    brand: Optional[str] = None
 
 @app.post("/api/listings/{item_id}/ebay")
 async def submit_to_ebay(item_id: str, body: EbaySubmit):
@@ -518,12 +524,13 @@ async def submit_to_ebay(item_id: str, body: EbaySubmit):
         if not res.data:
             raise HTTPException(404, "Listing not found")
         listing = res.data[0]
-        result = push_listing_to_ebay(listing, body.mode, body.hours_from_now)
+        result = push_listing_to_ebay(listing, body.mode, body.hours_from_now, body.brand)
         update = {
             "ebay_offer_id": result["offer_id"],
             "ebay_sku": result["sku"],
             "ebay_status": result["status"],
             "ebay_error": None,
+            "brand": result.get("brand"),
         }
         if result["item_id"]:
             update["ebay_item_id"] = result["item_id"]
@@ -574,9 +581,11 @@ def sync_ebay_categories(token: str) -> int:
         supabase.table("ebay_categories").upsert(batch, on_conflict="category_id").execute()
     return len(leaves)
 
-def suggest_ebay_category(title: str) -> dict:
+def suggest_ebay_category(title: str, restrict: bool = True) -> dict:
     """Match an item title to the best saved eBay leaf category — shortlist locally by
-    keyword overlap, then let Gemini pick the best one from that shortlist only (no open web search)."""
+    keyword overlap, then let Gemini pick the best one from that shortlist only (no open web search).
+    By default, restricted to Business & Industrial and eBay Motors, since that's ~85% of this catalog —
+    pass restrict=False to search the full category tree instead (for rare exceptions)."""
     words = [w.lower() for w in title.split() if len(w) > 2]
     if not words:
         return {}
@@ -584,7 +593,10 @@ def suggest_ebay_category(title: str) -> dict:
     # Pull a broad set of candidates via keyword match on name/path (case-insensitive)
     candidates = {}
     for w in words[:6]:
-        res = supabase.table("ebay_categories").select("category_id,name,path").ilike("path", f"%{w}%").limit(15).execute()
+        q = supabase.table("ebay_categories").select("category_id,name,path").ilike("path", f"%{w}%")
+        if restrict:
+            q = q.or_("path.ilike.%Business & Industrial%,path.ilike.%eBay Motors%")
+        res = q.limit(15).execute()
         for row in (res.data or []):
             candidates[row["category_id"]] = row
 
@@ -631,13 +643,13 @@ async def api_sync_categories():
         raise HTTPException(500, str(e))
 
 @app.post("/api/listings/{item_id}/auto-category")
-async def api_auto_category(item_id: str):
+async def api_auto_category(item_id: str, broad: bool = False):
     try:
         res = supabase.table("listings").select("title").eq("id", item_id).limit(1).execute()
         if not res.data:
             raise HTTPException(404, "Listing not found")
         title = res.data[0].get("title", "")
-        suggestion = suggest_ebay_category(title)
+        suggestion = suggest_ebay_category(title, restrict=not broad)
         if not suggestion:
             raise HTTPException(404, "No matching category found — try syncing categories first")
         supabase.table("listings").update({"ebay_category_id": suggestion["category_id"]}).eq("id", item_id).execute()
