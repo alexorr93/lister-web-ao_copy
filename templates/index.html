@@ -102,7 +102,7 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tile.selected { border-color: var(--accent); }
 .tile.ebay-draft { border-left: 3px solid var(--accent); }
 
-.tile-photo { position: relative; width: 100%; padding-top: 58%; background: #161925; overflow: hidden; }
+.tile-photo { position: relative; width: 100%; padding-top: 40%; background: #161925; overflow: hidden; }
 .tile-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; image-orientation: from-image; }
 .photo-counter { position: absolute; bottom: 44px; right: 7px; background: rgba(0,0,0,0.6); color: #fff; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 10px; }
 .photo-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.5); border: none; color: #fff; width: 24px; height: 24px; border-radius: 50%; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; }
@@ -128,7 +128,7 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tile-price-input { width:70px; background:transparent; border:none; border-bottom:1px solid var(--border); color:#f8fafc; font-size:14px; font-weight:800; font-family:inherit; outline:none; padding:0 0 2px; }
 .tile-price-input:focus { border-bottom-color:var(--accent); }
 .tile-cat-input, .tile-brand-input { width:100%; background:transparent; border:1px solid var(--border); border-radius:4px; color:#f8fafc; font-family:inherit; outline:none; padding:4px 6px; margin-top:4px; font-weight:800; }
-.tile-cat-input { font-size:14px; line-height:1.35; resize:none; white-space:normal; overflow-wrap:break-word; display:block; min-height:38px; }
+.tile-cat-input { font-size:14px; line-height:1.35; resize:none; white-space:normal; overflow-wrap:break-word; display:block; overflow:hidden; }
 .tile-brand-input { font-size:14px; }
 .tile-title-input.field-reviewed, .tile-price-input.field-reviewed, .tile-cat-input.field-reviewed, .tile-brand-input.field-reviewed { border:2px solid #ec4899 !important; color:#fff; box-shadow:0 0 6px rgba(236,72,153,0.4); border-radius:4px; padding:2px 4px; }
 .tile-title-input.field-changed, .tile-price-input.field-changed, .tile-cat-input.field-changed, .tile-brand-input.field-changed { border:2px solid #facc15 !important; color:#fff; box-shadow:0 0 6px rgba(250,204,21,0.4); border-radius:4px; padding:2px 4px; }
@@ -763,8 +763,15 @@ function renderTiles() {
   }
 
   updateSubmitBtn();
+  autoResizeCatFields();
 }
 
+function autoResizeCatFields() {
+  document.querySelectorAll('.tile-cat-input').forEach(function(ta) {
+    ta.style.height = 'auto';
+    ta.style.height = ta.scrollHeight + 'px';
+  });
+}
 function initTileListeners() {
   function fieldNameFor(el) {
     if (el.classList.contains('tile-title-input')) return 'title';
@@ -797,7 +804,11 @@ function initTileListeners() {
     if (field === 'title') dirtyTitles[id] = el.value;
     if (field === 'price') dirtyPrices[id] = el.value;
     if (field === 'brand') dirtyBrands[id] = el.value;
-    if (field === 'category') dirtyCats[id] = el.value;
+    if (field === 'category') {
+      dirtyCats[id] = el.value;
+      el.style.height = 'auto';
+      el.style.height = el.scrollHeight + 'px';
+    }
   });
 
   // Enter commits immediately instead of waiting for blur
