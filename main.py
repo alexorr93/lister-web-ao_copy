@@ -701,6 +701,7 @@ def suggest_ebay_category(title: str, business_id: str, restrict: bool = True, e
     settings = get_ebay_settings(business_id)
     token = settings.get("EBAY_USER_TOKEN", "")
     if not token:
+        print("suggest_ebay_category: NO TOKEN FOUND in settings for this business")
         return {}
 
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
@@ -709,6 +710,7 @@ def suggest_ebay_category(title: str, business_id: str, restrict: bool = True, e
         headers=headers, params={"q": title}, timeout=15
     )
     if r.status_code != 200:
+        print(f"suggest_ebay_category: eBay API returned {r.status_code}: {r.text[:500]}")
         return {}
     data = r.json()
 
