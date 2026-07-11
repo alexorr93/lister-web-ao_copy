@@ -537,6 +537,116 @@ async def submit_to_ebay(item_id: str, body: EbaySubmit):
         supabase.table("listings").update({"ebay_status": "failed", "ebay_error": str(e)}).eq("id", item_id).execute()
         raise HTTPException(500, str(e))
 
+def get_gemini_key() -> str:
+    settings = get_ebay_settings()
+    return settings.get("GEMINI_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
+
+def sync_ebay_categories(token: str) -> int:
+    """Download eBay's full leaf-category tree once and save it locally, so future
+    category matching never needs a live API call or web search — just a local lookup."""
+    import requests as _req
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    r = _req.get("https://api.ebay.com/commerce/taxonomy/v1/category_tree/0", headers=headers, timeout=60)
+    if r.status_code != 200:
+        raise Exception(f"getCategoryTree failed: {r.status_code} {r.text}")
+    tree = r.json()
+
+    leaves = []
+    def walk(node, path):
+        cat = node.get("category", {})
+        name = cat.get("categoryName", "")
+        cid = cat.get("categoryId", "")
+        new_path = path + [name] if name else path
+        children = node.get("childCategoryTreeNodes", [])
+        if not children and cid:
+            leaves.append({"category_id": str(cid), "name": name, "path": " > ".join(new_path)})
+        else:
+            for child in children:
+                walk(child, new_path)
+
+    root = tree.get("rootCategoryNode", {})
+    for child in root.get("childCategoryTreeNodes", []):
+        walk(child, [])
+
+    # Upsert in batches so we don't blow request size limits
+    for i in range(0, len(leaves), 500):
+        batch = leaves[i:i+500]
+        supabase.table("ebay_categories").upsert(batch, on_conflict="category_id").execute()
+    return len(leaves)
+
+def suggest_ebay_category(title: str) -> dict:
+    """Match an item title to the best saved eBay leaf category — shortlist locally by
+    keyword overlap, then let Gemini pick the best one from that shortlist only (no open web search)."""
+    words = [w.lower() for w in title.split() if len(w) > 2]
+    if not words:
+        return {}
+
+    # Pull a broad set of candidates via keyword match on name/path (case-insensitive)
+    candidates = {}
+    for w in words[:6]:
+        res = supabase.table("ebay_categories").select("category_id,name,path").ilike("path", f"%{w}%").limit(15).execute()
+        for row in (res.data or []):
+            candidates[row["category_id"]] = row
+
+    if not candidates:
+        return {}
+
+    gemini_key = get_gemini_key()
+    if not gemini_key:
+        # No AI available — just return the first keyword match as a best-effort guess
+        first = next(iter(candidates.values()))
+        return {"category_id": first["category_id"], "name": first["name"], "path": first["path"]}
+
+    import google.generativeai as genai
+    genai.configure(api_key=gemini_key)
+    model = genai.GenerativeModel("gemini-2.5-flash")
+    options_text = "\n".join(f"{c['category_id']}: {c['path']}" for c in candidates.values())
+    prompt = f"""Item title: "{title}"
+
+Pick the single best-matching eBay category ID from this list ONLY (do not invent a new one):
+{options_text}
+
+Respond with ONLY the category ID number, nothing else."""
+    try:
+        resp = model.generate_content(prompt, generation_config={"max_output_tokens": 20, "temperature": 0})
+        picked_id = resp.text.strip()
+        if picked_id in candidates:
+            return candidates[picked_id]
+    except Exception as e:
+        print(f"Category AI pick failed: {e}")
+    # Fallback if Gemini's answer wasn't a clean match
+    first = next(iter(candidates.values()))
+    return {"category_id": first["category_id"], "name": first["name"], "path": first["path"]}
+
+@app.post("/api/ebay/sync-categories")
+async def api_sync_categories():
+    settings = get_ebay_settings()
+    token = settings.get("EBAY_USER_TOKEN", "")
+    if not token:
+        raise HTTPException(400, "No eBay User Token saved in Settings yet")
+    try:
+        count = sync_ebay_categories(token)
+        return {"ok": True, "count": count}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.post("/api/listings/{item_id}/auto-category")
+async def api_auto_category(item_id: str):
+    try:
+        res = supabase.table("listings").select("title").eq("id", item_id).limit(1).execute()
+        if not res.data:
+            raise HTTPException(404, "Listing not found")
+        title = res.data[0].get("title", "")
+        suggestion = suggest_ebay_category(title)
+        if not suggestion:
+            raise HTTPException(404, "No matching category found — try syncing categories first")
+        supabase.table("listings").update({"ebay_category_id": suggestion["category_id"]}).eq("id", item_id).execute()
+        return {"ok": True, **suggestion}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 @app.get("/api/ebay/category-search")
 async def ebay_category_search(q: str):
     """Look up valid LEAF category IDs by keyword, using the token already saved in Settings."""
@@ -547,7 +657,7 @@ async def ebay_category_search(q: str):
         raise HTTPException(400, "No eBay User Token saved in Settings yet")
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     r = _req.get(
-        "https://api.ebay.com/commerce/taxonomy/v1_beta/category_tree/0/get_category_suggestions",
+        "https://api.ebay.com/commerce/taxonomy/v1/category_tree/0/get_category_suggestions",
         headers=headers, params={"q": q}, timeout=15
     )
     if r.status_code != 200:
