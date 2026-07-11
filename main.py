@@ -374,17 +374,14 @@ async def dashboard(request: Request):
 # ── API: LISTINGS ─────────────────────────────────────────────── #
 
 @app.get("/api/listings")
-async def get_listings(request: Request):
+async def get_listings(request: Request, archived: bool = False):
     business_id = require_auth(request)
     if not business_id:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     try:
-        res = supabase.table("listings")\
-            .select("*")\
-            .eq("business_id", business_id)\
-            .neq("status", "archived")\
-            .order("created_at", desc=True)\
-            .execute()
+        q = supabase.table("listings").select("*").eq("business_id", business_id)
+        q = q.eq("status", "archived") if archived else q.neq("status", "archived")
+        res = q.order("created_at", desc=True).execute()
         listings = res.data or []
 
         # Batch fetch all group photos for these listings
@@ -827,6 +824,31 @@ async def rescan_listing(item_id: str):
         return {"ok": True}
     except Exception as e:
         raise HTTPException(500, str(e))
+
+class RestoreItems(BaseModel):
+    ids: Optional[list] = None  # None/omitted = restore ALL archived items
+
+@app.post("/api/listings/restore")
+async def restore_listings(request: Request, body: RestoreItems):
+    business_id = require_auth(request)
+    if not business_id:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        q = supabase.table("listings").update({"status": "pending"}).eq("business_id", business_id).eq("status", "archived")
+        if body.ids:
+            q = q.in_("id", [str(i) for i in body.ids])
+        res = q.execute()
+        return {"ok": True, "count": len(res.data or [])}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.get("/archive", response_class=HTMLResponse)
+async def archive_page(request: Request):
+    business_id, is_admin = get_business_info(request)
+    if not business_id:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("archive.html", {"request": request})
 
 @app.post("/api/listings/archive-batch")
 async def archive_batch():
