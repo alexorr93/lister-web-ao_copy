@@ -1812,6 +1812,16 @@ async function compressForUpload(file) {
 loadListings();
 initTileListeners();
 
+// Allow linking directly to a tab from other pages, e.g. /?tab=upload
+(function() {
+  const params = new URLSearchParams(window.location.search);
+  const wantTab = params.get('tab');
+  if (wantTab) {
+    const btn = document.querySelector('.nav-btn[data-tab="' + wantTab + '"]');
+    if (btn) btn.click();
+  }
+})();
+
 // Auto-refresh dashboard every 30s when on that tab
 setInterval(() => { if (activeTab === 'dashboard') loadListings(); }, 30000);
 setInterval(() => { if (activeTab === 'auction' && activeSession) loadAuctionItems(activeSession); }, 30000);
