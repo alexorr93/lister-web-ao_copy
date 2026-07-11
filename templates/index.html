@@ -461,6 +461,20 @@ select.field-input { background: #fff; color: #0f172a; }
       <div class="field-label">User Token</div><input type="password" class="field-input" id="set-ebay-token" style="margin-bottom:10px;"/>
       <button class="btn btn-primary" style="width:100%;" onclick="saveEbaySettings()">Save eBay Settings</button>
     </div>
+    <div class="settings-section" style="border-left:4px solid var(--orange);">
+      <div class="settings-title">📦 eBay Listing Setup</div>
+      <div class="settings-sub">Required before any listing can publish or schedule. Find policy IDs under Account → Business Policies on eBay.</div>
+      <div class="field-label">Payment Policy ID</div><input type="text" class="field-input" id="set-ebay-payment-policy" style="margin-bottom:8px;"/>
+      <div class="field-label">Return Policy ID</div><input type="text" class="field-input" id="set-ebay-return-policy" style="margin-bottom:8px;"/>
+      <div class="field-label">Fulfillment (Shipping) Policy ID</div><input type="text" class="field-input" id="set-ebay-fulfillment-policy" style="margin-bottom:8px;"/>
+      <div class="field-label">Merchant Location Key</div><input type="text" class="field-input" id="set-ebay-location-key" placeholder="e.g. WAREHOUSE_1" style="margin-bottom:8px;"/>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+        <div><div class="field-label">Location ZIP</div><input type="text" class="field-input" id="set-ebay-location-zip"/></div>
+        <div><div class="field-label">Location Country</div><input type="text" class="field-input" id="set-ebay-location-country" value="US"/></div>
+      </div>
+      <div class="field-label">Default eBay Category ID (fallback)</div><input type="text" class="field-input" id="set-ebay-default-category" style="margin-bottom:10px;"/>
+      <button class="btn btn-primary" style="width:100%;" onclick="saveEbayListingSettings()">Save Listing Setup</button>
+    </div>
   </div>
 
 </div><!-- /main -->
@@ -499,6 +513,19 @@ select.field-input { background: #fff; color: #0f172a; }
       <div>
         <div class="field-label">eBay Description</div>
         <textarea class="field-input" id="modal-desc-input" rows="4" oninput="modalDirty=true" style="resize:vertical;font-size:12px;line-height:1.5;"></textarea>
+      </div>
+      <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:14px;">
+        <div class="field-label" style="margin-bottom:8px;">eBay Listing</div>
+        <div id="modal-ebay-status" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <button class="btn" onclick="submitToEbay('draft')">📝 Save as Draft</button>
+          <button class="btn btn-primary" onclick="submitToEbay('now')">🚀 Publish Now</button>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="number" class="field-input" id="modal-ebay-hours" value="24" min="0.5" step="0.5" style="width:80px;" title="Hours from now"/>
+          <span style="font-size:12px;color:var(--muted);">hours from now</span>
+          <button class="btn" style="flex:1;" onclick="submitToEbay('schedule')">⏰ Schedule</button>
+        </div>
       </div>
       <button class="modal-close" onclick="saveModal()">💾 Save & Close</button>
     </div>
@@ -917,6 +944,21 @@ function openModal(id) {
   document.getElementById('modal-price-input').value = l.price.toFixed(2);
   document.getElementById('modal-cond-input').value  = l.condition || 'used';
   document.getElementById('modal-desc-input').value = l.description || window._defaultDesc || '';
+  const ebayStatusEl = document.getElementById('modal-ebay-status');
+  if (ebayStatusEl) {
+    if (l.ebay_status === 'published' && l.ebay_item_id) {
+      ebayStatusEl.innerHTML = `✅ Live on eBay — <a href="https://www.ebay.com/itm/${l.ebay_item_id}" target="_blank" style="color:var(--accent);">View listing ↗</a>`;
+    } else if (l.ebay_status === 'scheduled') {
+      ebayStatusEl.textContent = `⏰ Scheduled for ${l.ebay_scheduled_at ? new Date(l.ebay_scheduled_at).toLocaleString() : 'a future time'}`;
+    } else if (l.ebay_status === 'draft') {
+      ebayStatusEl.textContent = '📝 Saved as draft (not yet visible on eBay)';
+    } else if (l.ebay_status === 'failed') {
+      ebayStatusEl.textContent = '⚠️ Last attempt failed: ' + (l.ebay_error || 'unknown error');
+      ebayStatusEl.style.color = 'var(--red)';
+    } else {
+      ebayStatusEl.textContent = 'Not yet sent to eBay';
+    }
+  }
   document.getElementById('modal').classList.add('open');
 }
 
@@ -940,6 +982,29 @@ async function saveModal() {
     }
   } catch(e) { toast('Save failed', 'error'); }
   document.getElementById('modal').classList.remove('open');
+}
+
+async function submitToEbay(mode) {
+  if (!modalItemId) return;
+  const hours = mode === 'schedule' ? parseFloat(document.getElementById('modal-ebay-hours').value) || 24 : null;
+  const label = mode === 'draft' ? 'Saving draft' : mode === 'now' ? 'Publishing' : 'Scheduling';
+  toast(label + '...', 'success');
+  try {
+    const r = await api('POST', `/api/listings/${modalItemId}/ebay`, {mode, hours_from_now: hours});
+    const l = listings.find(x => x.id === modalItemId);
+    if (l) {
+      l.ebay_status = r.status;
+      l.ebay_item_id = r.item_id;
+      l.ebay_scheduled_at = r.scheduled_at;
+    }
+    if (mode === 'draft') toast('Saved as eBay draft ✓');
+    else if (mode === 'now') toast('Published to eBay ✓');
+    else toast('Scheduled — goes live in ' + hours + 'h ✓');
+    openModal(modalItemId); // refresh status display
+    renderTiles();
+  } catch(e) {
+    toast('eBay submit failed: ' + e.message, 'error');
+  }
 }
 
 function closeModal(e) {
@@ -1208,6 +1273,13 @@ async function loadSettings() {
     document.getElementById('set-ebay-dev').value  = s.EBAY_DEV_ID || '';
     document.getElementById('set-ebay-cert').value = s.EBAY_CERT_ID || '';
     document.getElementById('set-ebay-token').value= s.EBAY_USER_TOKEN || '';
+    document.getElementById('set-ebay-payment-policy').value     = s.EBAY_PAYMENT_POLICY_ID || '';
+    document.getElementById('set-ebay-return-policy').value      = s.EBAY_RETURN_POLICY_ID || '';
+    document.getElementById('set-ebay-fulfillment-policy').value = s.EBAY_FULFILLMENT_POLICY_ID || '';
+    document.getElementById('set-ebay-location-key').value       = s.EBAY_MERCHANT_LOCATION_KEY || '';
+    document.getElementById('set-ebay-location-zip').value       = s.EBAY_LOCATION_ZIP || '';
+    document.getElementById('set-ebay-location-country').value   = s.EBAY_LOCATION_COUNTRY || 'US';
+    document.getElementById('set-ebay-default-category').value   = s.EBAY_DEFAULT_CATEGORY_ID || '';
   } catch(e) {}
 }
 
@@ -1228,6 +1300,23 @@ async function saveEbaySettings() {
     if (v) await api('POST', '/api/settings', {key:k, value:v});
   }
   toast('eBay settings saved ✓');
+}
+
+async function saveEbayListingSettings() {
+  const pairs = [
+    ['EBAY_PAYMENT_POLICY_ID', 'set-ebay-payment-policy'],
+    ['EBAY_RETURN_POLICY_ID', 'set-ebay-return-policy'],
+    ['EBAY_FULFILLMENT_POLICY_ID', 'set-ebay-fulfillment-policy'],
+    ['EBAY_MERCHANT_LOCATION_KEY', 'set-ebay-location-key'],
+    ['EBAY_LOCATION_ZIP', 'set-ebay-location-zip'],
+    ['EBAY_LOCATION_COUNTRY', 'set-ebay-location-country'],
+    ['EBAY_DEFAULT_CATEGORY_ID', 'set-ebay-default-category'],
+  ];
+  for (const [k, id] of pairs) {
+    const v = document.getElementById(id).value.trim();
+    if (v) await api('POST', '/api/settings', {key:k, value:v});
+  }
+  toast('eBay listing setup saved ✓');
 }
 
 // ── PARTS LOOKUP ──────────────────────────────────────────────
