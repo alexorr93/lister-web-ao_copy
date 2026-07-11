@@ -261,7 +261,7 @@ select.field-input { background: #fff; color: #0f172a; }
     <div class="action-bar">
       <button class="btn" onclick="selectAll()">☑ Select All</button>
       <button class="btn" onclick="deselectAll()">☐ Deselect</button>
-      <button class="btn btn-primary" id="submit-ebay-btn" style="display:none" onclick="submitSelected()">🏷️ Submit to eBay</button>
+      <button class="btn btn-primary" id="submit-ebay-btn" style="display:none" onclick="submitSelected()">⏰ Schedule to eBay</button>
       <div class="spacer"></div>
       <button class="btn btn-danger" onclick="confirmClearBatch()">🗑️ Clear Batch</button>
     </div>
@@ -690,7 +690,7 @@ function renderTiles() {
 
   grid.innerHTML = listings.map(l => {
     const qty = quantities[l.id] ?? l.quantity;
-    const isSel = selected.has(l.id);
+    const isSel = selected.has(String(l.id));
     const cond = (l.condition || 'used').toString().toLowerCase().trim();
     const isNew = cond === 'new';
     const condCol = isNew ? '#16a34a' : '#3b82f6';
@@ -929,6 +929,7 @@ function cyclePhoto(id, dir) {
 }
 
 function toggleSelect(id) {
+  id = String(id);
   if (selected.has(id)) selected.delete(id); else selected.add(id);
   const tile = document.getElementById('tile-' + id);
   const chk  = tile.querySelector('.tile-check');
@@ -936,12 +937,12 @@ function toggleSelect(id) {
   chk.classList.toggle('checked', selected.has(id));
   updateSubmitBtn();
 }
-function selectAll()   { listings.forEach(l => selected.add(l.id)); renderTiles(); }
+function selectAll()   { listings.forEach(l => selected.add(String(l.id))); renderTiles(); }
 function deselectAll() { selected.clear(); renderTiles(); }
 function updateSubmitBtn() {
   const btn = document.getElementById('submit-ebay-btn');
   btn.style.display = selected.size > 0 ? 'inline-block' : 'none';
-  btn.textContent = `🏷️ Submit ${selected.size} to eBay`;
+  btn.textContent = `⏰ Schedule ${selected.size} to eBay`;
 }
 
 async function changeQty(id, delta) {
@@ -974,17 +975,33 @@ async function confirmClearBatch() {
   } catch(e) { toast('Failed to clear batch', 'error'); }
 }
 
-function submitSelected() {
-  toast('eBay direct submit coming soon — use eBay CSV for now');
+async function submitSelected() {
+  if (!selected.size) return;
+  const ids = Array.from(selected);
+  const ok = confirm(`Schedule ${ids.length} item(s) to go live on eBay in 24 hours?\n\nSchedule is the only bulk action here — nothing publishes immediately. You can still adjust or cancel any item individually before it goes live.`);
+  if (!ok) return;
+  toast(`Scheduling ${ids.length} item(s)...`);
+  let success = 0, failed = 0;
+  for (const id of ids) {
+    try {
+      const r = await api('POST', `/api/listings/${id}/ebay`, {mode: 'schedule', hours_from_now: 24});
+      const l = listings.find(x => String(x.id) === id);
+      if (l) { l.ebay_status = r.status; l.ebay_item_id = r.item_id; l.ebay_scheduled_at = r.scheduled_at; }
+      success++;
+    } catch(e) { failed++; }
+  }
+  renderTiles();
+  toast(`Scheduled ${success} item(s)${failed ? ', ' + failed + ' failed' : ''} ✓`);
 }
 
 async function deleteItem(id) {
-  const l = listings.find(x => x.id === id);
+  id = String(id);
+  const l = listings.find(x => String(x.id) === id);
   const name = (l && l.title) ? l.title.slice(0,40) : 'this item';
   if (!confirm('Delete "' + name + '" from this batch?')) return;
   try {
     await api('PATCH', '/api/listings/' + id, {field:'status', value:'archived'});
-    listings = listings.filter(l => l.id !== id);
+    listings = listings.filter(l => String(l.id) !== id);
     selected.delete(id);
     renderTiles();
     toast('Item removed from batch');
