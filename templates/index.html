@@ -70,7 +70,7 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .nav-download { padding: 6px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; }
 
 /* MAIN */
-.main { padding: 16px; max-width: 1200px; margin: 0 auto; }
+.main { padding: 16px; max-width: 1700px; margin: 0 auto; }
 .tab-content { display: none; }
 .tab-content.active { display: block; }
 
@@ -93,7 +93,8 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .spacer { flex: 1; }
 
 /* TILE GRID */
-.tile-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+.tile-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+@media (max-width: 1100px) { .tile-grid { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 700px) { .tile-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; } }
 @media (max-width: 400px) { .tile-grid { grid-template-columns: 1fr; } }
 
@@ -102,8 +103,8 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tile.selected { border-color: var(--accent); }
 .tile.ebay-draft { border-left: 3px solid var(--accent); }
 
-.tile-photo { position: relative; width: 100%; padding-top: 40%; background: #161925; overflow: hidden; }
-.tile-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; image-orientation: from-image; }
+.tile-photo { position: relative; width: 100%; padding-top: 55%; background: #161925; overflow: hidden; }
+.tile-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; image-orientation: from-image; }
 .photo-counter { position: absolute; bottom: 44px; right: 7px; background: rgba(0,0,0,0.6); color: #fff; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 10px; }
 .photo-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.5); border: none; color: #fff; width: 24px; height: 24px; border-radius: 50%; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; }
 .photo-nav-prev { left: 5px; }
