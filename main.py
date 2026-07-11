@@ -723,11 +723,19 @@ async def categories_tree(root: str = None):
     """Build a nested tree from the locally synced ebay_categories table, so the
     Categories page can render a collapsible tree instead of a flat list."""
     try:
+        # Detect whether is_leaf column exists yet (older syncs won't have it) — probe once up front
+        use_is_leaf = True
+        try:
+            supabase.table("ebay_categories").select("is_leaf").limit(1).execute()
+        except Exception:
+            use_is_leaf = False
+
+        select_fields = "category_id,name,path,is_leaf" if use_is_leaf else "category_id,name,path"
         all_rows = []
         offset = 0
         page_size = 1000
         while True:
-            q = supabase.table("ebay_categories").select("category_id,name,path,is_leaf")
+            q = supabase.table("ebay_categories").select(select_fields)
             if root:
                 q = q.ilike("path", f"{root}%")
             res = q.range(offset, offset + page_size - 1).execute()
@@ -748,7 +756,8 @@ async def categories_tree(root: str = None):
                     node[part] = {"__children__": {}, "__id__": None, "__leaf__": False}
                 if i == len(parts) - 1:
                     node[part]["__id__"] = row["category_id"]
-                    node[part]["__leaf__"] = bool(row.get("is_leaf"))
+                    # Old schema (no is_leaf column) only ever stored leaf categories, so default True there
+                    node[part]["__leaf__"] = bool(row.get("is_leaf")) if use_is_leaf else True
                 node = node[part]["__children__"]
         return {"tree": tree}
     except Exception as e:
