@@ -110,14 +110,31 @@ def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None,
     if not brand:
         first_word = title.split()[0].strip(",.;:-") if title else ""
         brand = first_word if first_word else "Unbranded"
+
+    # Guess MPN: the longest alphanumeric (letters+digits) token in the title that isn't the brand —
+    # usually the true part number rather than a shorter model class label
+    mpn = None
+    alnum_tokens = [
+        w.strip(",.;:-") for w in title.split()
+        if w.lower().strip(",.;:-") != brand.lower()
+        and any(c.isdigit() for c in w) and any(c.isalpha() for c in w)
+    ]
+    if alnum_tokens:
+        mpn = max(alnum_tokens, key=len)
+
+    product_data = {
+        "title": title,
+        "description": desc,
+        "imageUrls": images,
+        "aspects": {"Brand": [brand]},
+    }
+    if mpn:
+        product_data["mpn"] = mpn
+        product_data["aspects"]["MPN"] = [mpn]
+
     inv_body = {
         "condition": ebay_condition(listing.get("condition")),
-        "product": {
-            "title": title,
-            "description": desc,
-            "imageUrls": images,
-            "aspects": {"Brand": [brand]},
-        },
+        "product": product_data,
         "availability": {"shipToLocationAvailability": {"quantity": qty}},
     }
     r = _req.put(f"{EBAY_API_BASE}/sell/inventory/v1/inventory_item/{sku}",
@@ -141,6 +158,7 @@ def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None,
             "paymentPolicyId": payment_policy,
             "returnPolicyId": return_policy,
             "fulfillmentPolicyId": fulfillment_policy,
+            "bestOfferTerms": {"bestOfferEnabled": True},  # always on, per your standing preference
         },
         "pricingSummary": {"price": {"value": f"{price:.2f}", "currency": "USD"}},
         "merchantLocationKey": location_key,
@@ -581,54 +599,41 @@ def sync_ebay_categories(token: str) -> int:
         supabase.table("ebay_categories").upsert(batch, on_conflict="category_id").execute()
     return len(leaves)
 
-def suggest_ebay_category(title: str, restrict: bool = True) -> dict:
-    """Match an item title to the best saved eBay leaf category — shortlist locally by
-    keyword overlap, then let Gemini pick the best one from that shortlist only (no open web search).
-    By default, restricted to Business & Industrial and eBay Motors, since that's ~85% of this catalog —
-    pass restrict=False to search the full category tree instead (for rare exceptions)."""
-    words = [w.lower() for w in title.split() if len(w) > 2]
-    if not words:
+def suggest_ebay_category(title: str, restrict: bool = True, exclude_id: str = None) -> dict:
+    """Match an item title to the best eBay leaf category using eBay's OWN live category-suggestion
+    engine (same one that correctly found 'Other Business & Industrial' = 26261) — this is far more
+    accurate than local keyword matching, since it's eBay's real algorithm trained on real listings.
+    restrict=True limits results to Business & Industrial / eBay Motors (your usual categories).
+    exclude_id lets a repeat click skip the previous pick and try the next-best suggestion."""
+    import requests as _req
+    settings = get_ebay_settings()
+    token = settings.get("EBAY_USER_TOKEN", "")
+    if not token:
         return {}
 
-    # Pull a broad set of candidates via keyword match on name/path (case-insensitive)
-    candidates = {}
-    for w in words[:6]:
-        q = supabase.table("ebay_categories").select("category_id,name,path").ilike("path", f"%{w}%")
-        if restrict:
-            q = q.or_("path.ilike.%Business & Industrial%,path.ilike.%eBay Motors%")
-        res = q.limit(15).execute()
-        for row in (res.data or []):
-            candidates[row["category_id"]] = row
-
-    if not candidates:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    r = _req.get(
+        "https://api.ebay.com/commerce/taxonomy/v1/category_tree/0/get_category_suggestions",
+        headers=headers, params={"q": title}, timeout=15
+    )
+    if r.status_code != 200:
         return {}
+    data = r.json()
 
-    gemini_key = get_gemini_key()
-    if not gemini_key:
-        # No AI available — just return the first keyword match as a best-effort guess
-        first = next(iter(candidates.values()))
-        return {"category_id": first["category_id"], "name": first["name"], "path": first["path"]}
+    results = []
+    for s in data.get("categorySuggestions", []):
+        cat = s.get("category", {})
+        ancestors = s.get("categoryTreeNodeAncestors", [])
+        path = " > ".join(a.get("categoryName", "") for a in ancestors[::-1])
+        full_path = f"{path} > {cat.get('categoryName','')}" if path else cat.get("categoryName", "")
+        results.append({"category_id": cat.get("categoryId"), "name": cat.get("categoryName"), "path": full_path})
 
-    import google.generativeai as genai
-    genai.configure(api_key=gemini_key)
-    model = genai.GenerativeModel("gemini-2.5-flash")
-    options_text = "\n".join(f"{c['category_id']}: {c['path']}" for c in candidates.values())
-    prompt = f"""Item title: "{title}"
+    if restrict:
+        results = [r for r in results if "Business & Industrial" in r["path"] or "eBay Motors" in r["path"]]
+    if exclude_id:
+        results = [r for r in results if r["category_id"] != exclude_id]
 
-Pick the single best-matching eBay category ID from this list ONLY (do not invent a new one):
-{options_text}
-
-Respond with ONLY the category ID number, nothing else."""
-    try:
-        resp = model.generate_content(prompt, generation_config={"max_output_tokens": 20, "temperature": 0})
-        picked_id = resp.text.strip()
-        if picked_id in candidates:
-            return candidates[picked_id]
-    except Exception as e:
-        print(f"Category AI pick failed: {e}")
-    # Fallback if Gemini's answer wasn't a clean match
-    first = next(iter(candidates.values()))
-    return {"category_id": first["category_id"], "name": first["name"], "path": first["path"]}
+    return results[0] if results else {}
 
 @app.post("/api/ebay/sync-categories")
 async def api_sync_categories():
@@ -643,15 +648,15 @@ async def api_sync_categories():
         raise HTTPException(500, str(e))
 
 @app.post("/api/listings/{item_id}/auto-category")
-async def api_auto_category(item_id: str, broad: bool = False):
+async def api_auto_category(item_id: str, broad: bool = False, exclude: str = None):
     try:
         res = supabase.table("listings").select("title").eq("id", item_id).limit(1).execute()
         if not res.data:
             raise HTTPException(404, "Listing not found")
         title = res.data[0].get("title", "")
-        suggestion = suggest_ebay_category(title, restrict=not broad)
+        suggestion = suggest_ebay_category(title, restrict=not broad, exclude_id=exclude)
         if not suggestion:
-            raise HTTPException(404, "No matching category found — try syncing categories first")
+            raise HTTPException(404, "No matching category found — try 'Search all categories' or check your eBay token")
         supabase.table("listings").update({"ebay_category_id": suggestion["category_id"]}).eq("id", item_id).execute()
         return {"ok": True, **suggestion}
     except HTTPException:
