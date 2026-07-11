@@ -273,11 +273,18 @@ async def dashboard_v2(request: Request):
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page(request: Request):
+    business_id, is_admin = get_business_info(request)
+    if not business_id or not is_admin:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login", status_code=302)
     with open(os.path.join(os.path.dirname(__file__), "templates", "admin.html")) as f:
         return HTMLResponse(f.read())
 
 @app.patch("/api/admin/businesses/{business_id}")
 async def admin_update_business(business_id: str, request: Request):
+    auth_business_id, is_admin = get_business_info(request)
+    if not auth_business_id or not is_admin:
+        raise HTTPException(401, "Unauthorized")
     try:
         body = await request.json()
         allowed = {k: v for k, v in body.items() if k in ("scan_limit", "scan_count", "is_admin")}
@@ -287,7 +294,10 @@ async def admin_update_business(business_id: str, request: Request):
         raise HTTPException(500, str(e))
 
 @app.delete("/api/admin/businesses/{business_id}")
-async def admin_delete_business(business_id: str):
+async def admin_delete_business(business_id: str, request: Request):
+    auth_business_id, is_admin = get_business_info(request)
+    if not auth_business_id or not is_admin:
+        raise HTTPException(401, "Unauthorized")
     try:
         supabase.table("sessions").delete().eq("business_id", business_id).execute()
         supabase.table("listings").delete().eq("business_id", business_id).execute()
@@ -298,7 +308,10 @@ async def admin_delete_business(business_id: str):
         raise HTTPException(500, str(e))
 
 @app.get("/api/admin/businesses")
-async def admin_businesses():
+async def admin_businesses(request: Request):
+    auth_business_id, is_admin = get_business_info(request)
+    if not auth_business_id or not is_admin:
+        raise HTTPException(401, "Unauthorized")
     try:
         biz = supabase.table("businesses").select("id,name,email,created_at,scan_count,scan_limit,is_admin").order("created_at", desc=True).execute()
         businesses = biz.data or []
@@ -574,7 +587,10 @@ async def get_stats(request: Request):
         raise HTTPException(500, str(e))
 
 @app.patch("/api/listings/{item_id}")
-async def update_listing(item_id: str, body: UpdateField):
+async def update_listing(item_id: str, body: UpdateField, request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
     try:
         supabase.table("listings").update({body.field: body.value}).eq("id", item_id).execute()
         return {"ok": True}
@@ -587,7 +603,10 @@ class EbaySubmit(BaseModel):
     brand: Optional[str] = None
 
 @app.post("/api/listings/{item_id}/ebay")
-async def submit_to_ebay(item_id: str, body: EbaySubmit):
+async def submit_to_ebay(item_id: str, body: EbaySubmit, request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
     try:
         res = supabase.table("listings").select("*").eq("id", item_id).limit(1).execute()
         if not res.data:
@@ -690,7 +709,10 @@ def suggest_ebay_category(title: str, restrict: bool = True, exclude_id: str = N
     return results[0] if results else {}
 
 @app.post("/api/ebay/sync-categories")
-async def api_sync_categories():
+async def api_sync_categories(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
     settings = get_ebay_settings()
     token = settings.get("EBAY_USER_TOKEN", "")
     if not token:
@@ -702,7 +724,10 @@ async def api_sync_categories():
         raise HTTPException(500, str(e))
 
 @app.post("/api/listings/{item_id}/auto-category")
-async def api_auto_category(item_id: str, broad: bool = False, exclude: str = None, query: str = None):
+async def api_auto_category(item_id: str, request: Request, broad: bool = False, exclude: str = None, query: str = None):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
     try:
         res = supabase.table("listings").select("title").eq("id", item_id).limit(1).execute()
         if not res.data:
@@ -719,9 +744,12 @@ async def api_auto_category(item_id: str, broad: bool = False, exclude: str = No
         raise HTTPException(500, str(e))
 
 @app.get("/api/ebay/categories-tree")
-async def categories_tree(root: str = None):
+async def categories_tree(request: Request, root: str = None):
     """Build a nested tree from the locally synced ebay_categories table, so the
     Categories page can render a collapsible tree instead of a flat list."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
     try:
         # Detect whether is_leaf column exists yet (older syncs won't have it) — probe once up front
         use_is_leaf = True
@@ -772,8 +800,11 @@ async def categories_page(request: Request):
     return templates.TemplateResponse("categories.html", {"request": request, "is_admin": is_admin})
 
 @app.get("/api/ebay/category-search")
-async def ebay_category_search(q: str):
+async def ebay_category_search(q: str, request: Request):
     """Look up valid LEAF category IDs by keyword, using the token already saved in Settings."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
     import requests as _req
     settings = get_ebay_settings()
     token = settings.get("EBAY_USER_TOKEN", "")
@@ -795,8 +826,11 @@ async def ebay_category_search(q: str):
     return {"results": out}
 
 @app.get("/api/ebay/policies")
-async def list_ebay_policies():
+async def list_ebay_policies(request: Request):
     """Fetch payment/return/fulfillment policy IDs using the token already saved in Settings."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
     import requests as _req
     settings = get_ebay_settings()
     token = settings.get("EBAY_USER_TOKEN", "")
@@ -820,7 +854,10 @@ async def list_ebay_policies():
     return out
 
 @app.post("/api/listings/{item_id}/rescan")
-async def rescan_listing(item_id: str):
+async def rescan_listing(item_id: str, request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
     try:
         res = supabase.table("listings").select("photo_id").eq("id", item_id).limit(1).execute()
         pid = (res.data[0].get("photo_id", "") if res.data else "")
@@ -860,9 +897,12 @@ async def archive_page(request: Request):
     return templates.TemplateResponse("archive.html", {"request": request, "is_admin": is_admin})
 
 @app.post("/api/listings/archive-batch")
-async def archive_batch():
+async def archive_batch(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
     try:
-        res = supabase.table("listings").select("*").neq("status", "archived").execute()
+        res = supabase.table("listings").select("*").eq("business_id", business_id).neq("status", "archived").execute()
         items = res.data or []
         if items:
             ids = [str(i["id"]) for i in items]
@@ -935,7 +975,10 @@ async def get_group_listing(group_id: str, request: Request):
         raise HTTPException(500, str(e))
 
 @app.post("/api/groups/submit")
-async def submit_group(body: SubmitGroup):
+async def submit_group(body: SubmitGroup, request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
     try:
         supabase.table("listing_groups").update({
             "condition": body.condition,
@@ -2420,7 +2463,10 @@ If no text visible or no matches, still return the JSON with empty arrays."""
 # ── SETTINGS ──────────────────────────────────────────────────── #
 
 @app.get("/api/settings")
-async def get_settings():
+async def get_settings(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
     try:
         res = supabase.table("app_settings").select("*").execute()
         return {row["key"]: row["value"] for row in (res.data or [])}
@@ -2432,7 +2478,10 @@ class SaveSetting(BaseModel):
     value: str
 
 @app.post("/api/settings")
-async def save_setting(body: SaveSetting):
+async def save_setting(body: SaveSetting, request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
     try:
         supabase.table("app_settings").upsert({"key": body.key, "value": body.value}).execute()
         return {"ok": True}
