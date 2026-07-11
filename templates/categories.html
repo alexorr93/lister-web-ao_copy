@@ -106,6 +106,14 @@ async function loadSection(root, listId, countId) {
   try {
     const r = await fetch('/api/ebay/categories-tree?root=' + encodeURIComponent(root));
     const data = await r.json();
+    if (!r.ok) {
+      document.getElementById(listId).innerHTML = '<div class="loading">Server error: ' + (data.detail || r.status) + '</div>';
+      return;
+    }
+    if (!data.tree) {
+      document.getElementById(listId).innerHTML = '<div class="loading">Unexpected response — no tree data returned.</div>';
+      return;
+    }
     const rootNode = data.tree[root];
     if (!rootNode) { renderList(listId, countId, []); return; }
     rootNode.__path__ = root;
