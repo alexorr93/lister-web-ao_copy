@@ -28,6 +28,8 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tree-row .id { color: var(--muted); font-size: 11px; font-family: monospace; }
 .tree-row.leaf { color: #4ade80; font-weight: 600; }
 .tree-row.leaf:hover { background: rgba(74,222,128,0.1); }
+.tree-row.branch-with-id { color: #94a3b8; }
+.tree-row.branch-with-id .id { color: #64748b; font-style: italic; }
 .tree-children { display: block; }
 .tree-children.collapsed { display: none; }
 .copy-toast { position: fixed; bottom: 20px; right: 20px; background: var(--card); border: 1px solid #4ade80; border-radius: 8px; padding: 10px 16px; font-size: 13px; font-weight: 600; transform: translateY(100px); transition: transform 0.2s; }
@@ -76,51 +78,37 @@ function toggleSection(key) {
 
 function renderNode(name, node, depth) {
   const hasChildren = Object.keys(node.__children__ || {}).length > 0;
-  const isLeaf = node.__id__ && !hasChildren;
+  const hasId = !!node.__id__;
+  const isLeaf = node.__leaf__ && hasId;
   const div = document.createElement('div');
   div.className = 'tree-node';
 
   const row = document.createElement('div');
-  row.className = 'tree-row' + (isLeaf ? ' leaf' : '');
+  row.className = 'tree-row' + (isLeaf ? ' leaf' : hasId ? ' branch-with-id' : '');
   row.dataset.name = name.toLowerCase();
 
-  if (hasChildren) {
-    const arrow = document.createElement('span');
-    arrow.className = 'arrow';
-    arrow.textContent = '▾';
-    row.appendChild(arrow);
-    row.onclick = function(e) {
-      e.stopPropagation();
-      row.classList.toggle('collapsed');
-      childrenDiv.classList.toggle('collapsed');
-    };
-  } else {
-    const spacer = document.createElement('span');
-    spacer.className = 'arrow';
-    spacer.textContent = isLeaf ? '●' : '';
-    row.appendChild(spacer);
-    if (isLeaf) {
-      row.onclick = function() { copyId(node.__id__, name); };
-      row.title = 'Click to copy ID ' + node.__id__;
-    }
-  }
+  const arrow = document.createElement('span');
+  arrow.className = 'arrow';
+  arrow.textContent = hasChildren ? '▾' : (isLeaf ? '●' : '');
+  row.appendChild(arrow);
 
   const nameSpan = document.createElement('span');
   nameSpan.className = 'name';
   nameSpan.textContent = name;
   row.appendChild(nameSpan);
 
-  if (isLeaf) {
+  if (hasId) {
     const idSpan = document.createElement('span');
     idSpan.className = 'id';
-    idSpan.textContent = node.__id__;
+    idSpan.textContent = node.__id__ + (isLeaf ? '' : ' (not listable — has subcategories)');
     row.appendChild(idSpan);
   }
 
   div.appendChild(row);
 
+  let childrenDiv = null;
   if (hasChildren) {
-    const childrenDiv = document.createElement('div');
+    childrenDiv = document.createElement('div');
     childrenDiv.className = 'tree-children' + (depth > 0 ? ' collapsed' : '');
     if (depth > 0) row.classList.add('collapsed');
     const sortedKeys = Object.keys(node.__children__).sort();
@@ -130,7 +118,29 @@ function renderNode(name, node, depth) {
     div.appendChild(childrenDiv);
   }
 
+  // Single click handler covers both cases correctly (this fixes the earlier bug where
+  // childrenDiv was referenced before it existed, so clicking silently did nothing)
+  row.onclick = function(e) {
+    e.stopPropagation();
+    if (hasChildren) {
+      row.classList.toggle('collapsed');
+      childrenDiv.classList.toggle('collapsed');
+    } else if (isLeaf) {
+      copyId(node.__id__, name);
+    } else if (hasId) {
+      toast('This category has no items directly — expand it or pick a subcategory');
+    }
+  };
+  if (isLeaf) row.title = 'Click to copy ID ' + node.__id__;
+
   return div;
+}
+
+function toast(msg) {
+  const t = document.getElementById('copy-toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
 }
 
 function copyId(id, name) {
