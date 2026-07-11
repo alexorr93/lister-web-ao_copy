@@ -81,9 +81,24 @@ def photo_url(photo_id: str, thumb: bool = False) -> str:
 # ── EBAY INVENTORY API ───────────────────────────────────────── #
 EBAY_API_BASE = "https://api.ebay.com"
 
+EBAY_ENV_KEYS = [
+    "EBAY_USER_TOKEN", "EBAY_APP_ID", "EBAY_DEV_ID", "EBAY_CERT_ID",
+    "EBAY_PAYMENT_POLICY_ID", "EBAY_RETURN_POLICY_ID", "EBAY_FULFILLMENT_POLICY_ID",
+    "EBAY_MERCHANT_LOCATION_KEY", "EBAY_LOCATION_ZIP", "EBAY_LOCATION_COUNTRY",
+    "EBAY_DEFAULT_CATEGORY_ID",
+]
+
 def get_ebay_settings(business_id: str) -> dict:
     res = supabase.table("app_settings").select("*").eq("business_id", business_id).execute()
-    return {row["key"]: row["value"] for row in (res.data or [])}
+    settings = {row["key"]: row["value"] for row in (res.data or [])}
+    # eBay credentials prefer Railway environment variables (private to this service only) over the
+    # shared Supabase database, so the original (non-forked) app has no way to ever read them —
+    # they simply don't exist in any database it can query.
+    for key in EBAY_ENV_KEYS:
+        env_val = os.getenv(key)
+        if env_val:
+            settings[key] = env_val
+    return settings
 
 def ebay_headers(token: str, content_language: bool = True) -> dict:
     h = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
@@ -2472,8 +2487,7 @@ async def get_settings(request: Request):
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     try:
-        res = supabase.table("app_settings").select("*").eq("business_id", business_id).execute()
-        return {row["key"]: row["value"] for row in (res.data or [])}
+        return get_ebay_settings(business_id)
     except Exception:
         return {}
 
