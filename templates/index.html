@@ -102,7 +102,7 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tile.selected { border-color: var(--accent); }
 .tile.ebay-draft { border-left: 3px solid var(--accent); }
 
-.tile-photo { position: relative; width: 100%; padding-top: 100%; background: #161925; overflow: hidden; }
+.tile-photo { position: relative; width: 100%; padding-top: 78%; background: #161925; overflow: hidden; }
 .tile-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; image-orientation: from-image; }
 .photo-counter { position: absolute; bottom: 44px; right: 7px; background: rgba(0,0,0,0.6); color: #fff; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 10px; }
 .photo-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.5); border: none; color: #fff; width: 24px; height: 24px; border-radius: 50%; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; }
@@ -128,6 +128,13 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tile-price-input { width:70px; background:transparent; border:none; border-bottom:1px solid var(--border); color:#f8fafc; font-size:14px; font-weight:800; font-family:inherit; outline:none; padding:0 0 2px; }
 .tile-price-input:focus { border-bottom-color:var(--accent); }
 .tile-title-input.dirty, .tile-price-input.dirty { color:#ffffff; border:2px solid #facc15 !important; border-radius:4px; padding:2px 4px; box-shadow:0 0 6px rgba(250,204,21,0.4); }
+.tile-cat-input, .tile-brand-input { width:100%; background:transparent; border:1px solid var(--border); border-radius:4px; color:var(--muted); font-size:10px; font-family:inherit; outline:none; padding:3px 5px; margin-top:4px; }
+.tile-cat-input { font-size:10px; }
+.tile-brand-input { font-size:11px; font-weight:600; color:#cbd5e1; }
+.tile-cat-input:focus, .tile-brand-input:focus { border:2px solid #facc15; color:#fff; box-shadow:0 0 6px rgba(250,204,21,0.4); }
+.tile-cat-input.changed, .tile-brand-input.changed { border:2px solid #ec4899 !important; color:#fff; box-shadow:0 0 6px rgba(236,72,153,0.5); }
+.tile-cat-input.default-warn { border:2px solid #dc2626 !important; color:#fca5a5; background:rgba(220,38,38,0.08); }
+.tile-cat-warn-label { color:#f87171; font-size:9px; font-weight:700; margin-top:2px; display:flex; align-items:center; gap:3px; }
 .tile-cond-toggle { display:flex; margin-left:auto; border:1px solid var(--border); border-radius:5px; overflow:hidden; }
 .tile-cond-btn { font-size:10px; padding:4px 8px; background:transparent; border:none; color:var(--muted); cursor:pointer; font-family:inherit; font-weight:600; }
 .tile-cond-btn.active { background:var(--accent); color:#fff; }
@@ -223,6 +230,7 @@ select.field-input { background: #fff; color: #0f172a; }
   {% if is_admin %}<button class="nav-btn" data-tab="auction">🔨 Auctions</button>{% endif %}
   {% if is_admin %}<button class="nav-btn" data-tab="parts">🔍 Parts Lookup</button>{% endif %}
   <button class="nav-btn" data-tab="settings">⚙️ Settings</button>
+  <a class="nav-btn" href="/categories" style="text-decoration:none;display:inline-block;">📂 Categories</a>
   <div class="nav-spacer"></div>
   <a class="nav-download" href="#" onclick="window.location.href='/api/export/ebay-csv';return false;">⬇️ eBay CSV</a>
   <a class="nav-download" href="/logout" style="color:#ef4444;border-color:#7f1d1d;">⏻ Logout</a>
@@ -532,14 +540,14 @@ select.field-input { background: #fff; color: #0f172a; }
         </label>
         <button class="btn" style="width:100%;margin-bottom:8px;" onclick="autoCategoryModal()">🎯 Auto-pick eBay Category</button>
         <div id="modal-category-status" style="font-size:11px;color:var(--muted);margin-bottom:8px;"></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-          <button class="btn" onclick="submitToEbay('draft')">📝 Save as Draft</button>
-          <button class="btn btn-primary" onclick="submitToEbay('now')">🚀 Publish Now</button>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
           <input type="number" class="field-input" id="modal-ebay-hours" value="24" min="0.5" step="0.5" style="width:80px;" title="Hours from now"/>
           <span style="font-size:12px;color:var(--muted);">hours from now</span>
-          <button class="btn" style="flex:1;" onclick="submitToEbay('schedule')">⏰ Schedule</button>
+        </div>
+        <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px;margin-bottom:8px;" onclick="submitToEbay('schedule')">⏰ Schedule</button>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <button class="btn" style="font-size:11px;" onclick="submitToEbay('draft')">📝 Save as Draft</button>
+          <button class="btn" style="font-size:11px;color:var(--amber);border-color:var(--amber);" onclick="confirmPublishNow()">🚀 Publish Now</button>
         </div>
       </div>
       <button class="modal-close" onclick="saveModal()">💾 Save & Close</button>
@@ -559,6 +567,10 @@ let dirtyTitles   = {}; // id -> unsaved title text, so background refreshes don
 let dirtyPrices   = {}; // id -> unsaved price text
 let editedTitles  = new Set(); // ids whose title has been touched this session (for persistent visual highlight)
 let editedPrices  = new Set(); // ids whose price has been touched this session
+let editedCats    = new Set(); // ids whose category has been manually changed this session
+let editedBrands  = new Set(); // ids whose brand has been manually changed this session
+let dirtyCats     = {}; // id -> unsaved category text
+let dirtyBrands   = {}; // id -> unsaved brand text
 let modalItemId   = null;
 let modalDirty    = false;
 let scanBatchId   = null;
@@ -717,6 +729,9 @@ function renderTiles() {
             <button class="tile-cond-btn${isNew?' active':''}" data-id="${l.id}" data-cond="new">New</button>
           </div>
         </div>
+        <input class="tile-cat-input${editedCats.has(String(l.id)) ? ' changed' : ''}${l.ebay_category_is_default ? ' default-warn' : ''}" type="text" value="${(dirtyCats[l.id] ?? (l.ebay_category_path||'No category yet')).replace(/"/g,'&quot;')}" data-id="${l.id}" data-catid="${l.ebay_category_id||''}" placeholder="eBay category" title="Click to edit — type a phrase to re-match, or a number to set the ID directly">
+        ${l.ebay_category_is_default ? '<div class="tile-cat-warn-label">⚠️ Generic fallback — needs a real match</div>' : ''}
+        <input class="tile-brand-input${editedBrands.has(String(l.id)) ? ' changed' : ''}" type="text" value="${(dirtyBrands[l.id] ?? (l.brand||'')).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Brand">
       </div>
       <div class="tile-controls">
         <div class="tile-check${isSel?' checked':''}" onclick="toggleSelect('${l.id}')"></div>
@@ -758,11 +773,19 @@ function initTileListeners() {
       editedPrices.add(el.dataset.id);
       el.classList.add('dirty');
     }
+    if (el.classList.contains('tile-brand-input')) {
+      dirtyBrands[el.dataset.id] = el.value;
+      editedBrands.add(el.dataset.id);
+      el.classList.add('changed');
+    }
+    if (el.classList.contains('tile-cat-input')) {
+      dirtyCats[el.dataset.id] = el.value;
+    }
   });
   // Enter commits immediately instead of waiting for blur
   document.getElementById('tile-grid').addEventListener('keydown', function(e) {
     var el = e.target;
-    if (e.key === 'Enter' && (el.classList.contains('tile-title-input') || el.classList.contains('tile-price-input'))) {
+    if (e.key === 'Enter' && (el.classList.contains('tile-title-input') || el.classList.contains('tile-price-input') || el.classList.contains('tile-brand-input') || el.classList.contains('tile-cat-input'))) {
       e.preventDefault();
       el.blur();
     }
@@ -779,6 +802,32 @@ function initTileListeners() {
       updateField(el.dataset.id, 'price', parseFloat(el.value)).then(function(ok) {
         if (ok) delete dirtyPrices[el.dataset.id];
       });
+    }
+    if (el.classList.contains('tile-brand-input')) {
+      updateField(el.dataset.id, 'brand', el.value).then(function(ok) {
+        if (ok) delete dirtyBrands[el.dataset.id];
+      });
+    }
+    if (el.classList.contains('tile-cat-input')) {
+      var id = el.dataset.id, val = el.value.trim();
+      if (!val || val === 'No category yet') return;
+      el.classList.add('changed');
+      editedCats.add(id);
+      if (/^\d+$/.test(val)) {
+        // Pure number typed — treat as a direct category ID override, no lookup needed
+        updateField(id, 'ebay_category_id', val).then(function(ok) {
+          if (ok) { delete dirtyCats[id]; toast('Category ID set to ' + val + ' ✓'); }
+        });
+      } else {
+        // Free text typed — re-match against eBay using this phrase instead of the item title
+        fetch('/api/listings/' + id + '/auto-category?query=' + encodeURIComponent(val), {method:'POST'})
+          .then(function(r) { return r.json(); })
+          .then(function(r) {
+            if (r.path) { el.value = r.path; delete dirtyCats[id]; toast('Matched: ' + r.path + ' ✓'); }
+            else { toast('No match found for "' + val + '"', 'error'); }
+          })
+          .catch(function() { toast('Category re-match failed', 'error'); });
+      }
     }
   }, true);
   document.getElementById('tile-grid').addEventListener('click', function(e) {
@@ -1024,6 +1073,13 @@ async function autoCategoryModal() {
     statusEl.textContent = '⚠️ ' + e.message;
     toast('Category match failed', 'error');
   }
+}
+
+function confirmPublishNow() {
+  const titleEl = document.getElementById('modal-title-input');
+  const priceEl = document.getElementById('modal-price-input');
+  const ok = confirm(`Publish this LIVE right now?\n\n"${titleEl.value}"\n$${priceEl.value}\n\nThis makes it publicly visible and buyable immediately. Scheduling is safer if you're not 100% sure.`);
+  if (ok) submitToEbay('now');
 }
 
 async function submitToEbay(mode) {
