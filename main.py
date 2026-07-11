@@ -394,7 +394,11 @@ async def dashboard(request: Request):
     if not business_id:
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/login", status_code=302)
-    return templates.TemplateResponse("index.html", {"request": request, "is_admin": is_admin})
+    biz = supabase.table("businesses").select("name,email").eq("id", business_id).limit(1).execute()
+    account_label = ""
+    if biz.data:
+        account_label = biz.data[0].get("email") or biz.data[0].get("name") or ""
+    return templates.TemplateResponse("index.html", {"request": request, "is_admin": is_admin, "account_label": account_label})
 
 # ── API: LISTINGS ─────────────────────────────────────────────── #
 
@@ -579,6 +583,63 @@ async def reset_queue():
     try:
         supabase.table("listing_groups").update({"status": "waiting"}).in_("status", ["processing", "pending"]).execute()
         return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.post("/api/stuck-groups/{group_id}/clear")
+async def clear_stuck_group(group_id: str, request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    try:
+        group_res = supabase.table("listing_groups").select("created_at").eq("id", group_id).limit(1).execute()
+        created_at = group_res.data[0]["created_at"] if group_res.data else None
+
+        # Stop it from ever being retried or counted as "processing" again
+        supabase.table("listing_groups").update({"status": "archived"}).eq("id", group_id).eq("business_id", business_id).execute()
+
+        # If a placeholder/partial listing already exists for this group's photo, archive it too —
+        # give it a readable title based on when it was scanned, since no real title was ever generated
+        gp = supabase.table("group_photos").select("photo_id").eq("group_id", group_id).limit(1).execute()
+        if gp.data:
+            pid = gp.data[0]["photo_id"]
+            existing = supabase.table("listings").select("id,title").eq("photo_id", pid).eq("business_id", business_id).limit(1).execute()
+            if existing.data:
+                update = {"status": "archived"}
+                cur_title = (existing.data[0].get("title") or "").strip()
+                if not cur_title or cur_title == "Scanning...":
+                    if created_at:
+                        try:
+                            dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                            update["title"] = f"Failed scan — {dt.strftime('%b %d, %Y %I:%M %p')}"
+                        except Exception:
+                            update["title"] = "Failed scan (unknown date)"
+                    else:
+                        update["title"] = "Failed scan (unknown date)"
+                supabase.table("listings").update(update).eq("id", existing.data[0]["id"]).execute()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.get("/api/stuck-groups")
+async def get_stuck_groups(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    try:
+        groups = supabase.table("listing_groups").select("id,status,created_at")\
+            .eq("business_id", business_id).in_("status", ["pending", "processing"]).execute()
+        out = []
+        for g in (groups.data or []):
+            gp = supabase.table("group_photos").select("photo_id").eq("group_id", g["id"]).limit(1).execute()
+            pid = gp.data[0]["photo_id"] if gp.data else ""
+            out.append({
+                "group_id": g["id"],
+                "status": g["status"],
+                "created_at": g.get("created_at"),
+                "thumb_url": photo_url(pid, thumb=True) if pid else "",
+            })
+        return {"stuck": out}
     except Exception as e:
         raise HTTPException(500, str(e))
 
