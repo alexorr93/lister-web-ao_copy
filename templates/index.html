@@ -281,6 +281,10 @@ select.field-input { background: #fff; color: #0f172a; }
       <button class="btn" style="color:#dc2626;border-color:#dc2626;" onclick="archiveBothPublished()">🗄️ Archive Published (eBay+Shopify)</button>
       <button class="btn btn-danger" onclick="confirmClearBatch()">🗄️ Archive Batch</button>
     </div>
+    <div id="batch-submit-progress" style="display:none;margin-bottom:10px;">
+      <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;"><div id="batch-submit-bar" style="height:100%;background:var(--accent);width:0%;transition:width 0.2s;"></div></div>
+      <div id="batch-submit-text" style="font-size:12px;color:var(--muted);margin-top:4px;text-align:center;"></div>
+    </div>
     <div class="tile-grid" id="tile-grid"></div>
     <div class="empty" id="dash-empty" style="display:none">
       <div class="empty-icon">📭</div>
@@ -1130,23 +1134,37 @@ async function confirmClearBatch() {
   } catch(e) { toast('Failed to clear batch', 'error'); }
 }
 
+function showBatchProgress(current, total, label) {
+  const wrap = document.getElementById('batch-submit-progress');
+  const bar  = document.getElementById('batch-submit-bar');
+  const txt  = document.getElementById('batch-submit-text');
+  wrap.style.display = 'block';
+  bar.style.width = Math.round((current / total) * 100) + '%';
+  txt.textContent = `${label} ${current} of ${total}...`;
+}
+function hideBatchProgress() {
+  document.getElementById('batch-submit-progress').style.display = 'none';
+}
+
 async function submitSelected() {
   if (!selected.size) return;
   const ids = Array.from(selected);
   const hours = parseFloat(document.getElementById('batch-ebay-hours').value) || 2;
   const ok = confirm(`Schedule ${ids.length} item(s) to go live on eBay in ${hours} hour(s)?\n\nSchedule is the only bulk action here — nothing publishes immediately. You can still adjust or cancel any item individually before it goes live.`);
   if (!ok) return;
-  toast(`Scheduling ${ids.length} item(s)...`);
   let success = 0, failed = 0;
-  for (const id of ids) {
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    showBatchProgress(i + 1, ids.length, 'Scheduling to eBay');
     try {
       const r = await api('POST', `/api/listings/${id}/ebay`, {mode: 'schedule', hours_from_now: hours});
       const l = listings.find(x => String(x.id) === id);
       if (l) { l.ebay_status = r.status; l.ebay_item_id = r.item_id; l.ebay_scheduled_at = r.scheduled_at; }
       success++;
     } catch(e) { failed++; }
+    renderTiles();
   }
-  renderTiles();
+  hideBatchProgress();
   toast(`Scheduled ${success} item(s)${failed ? ', ' + failed + ' failed' : ''} ✓`);
 }
 
@@ -1155,14 +1173,17 @@ async function submitSelectedToShopify() {
   const ids = Array.from(selected);
   const ok = confirm(`Publish ${ids.length} item(s) live to Shopify now?\n\nThis publishes immediately (active), separately from anything sent to eBay.`);
   if (!ok) return;
-  toast(`Publishing ${ids.length} item(s) to Shopify...`);
   let success = 0, failed = 0;
-  for (const id of ids) {
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    showBatchProgress(i + 1, ids.length, 'Publishing to Shopify');
     try {
       await api('POST', `/api/listings/${id}/shopify-publish`);
       success++;
     } catch(e) { failed++; }
+    renderTiles();
   }
+  hideBatchProgress();
   toast(`Published ${success} item(s) to Shopify${failed ? ', ' + failed + ' failed' : ''} ✓`);
 }
 
