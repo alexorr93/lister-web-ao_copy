@@ -36,11 +36,18 @@ async def auto_fill_worker():
     """Runs continuously in the background. Any listing missing a brand or eBay category
     gets one filled in automatically within seconds of the scan finishing — no manual click needed."""
     import asyncio
+
+    def needs_category(row: dict) -> bool:
+        cat = row.get("ebay_category_id")
+        # mantle-scanner writes "0" as a placeholder instead of leaving this NULL,
+        # so treat None / "" / "0" all as "not actually categorized yet".
+        return cat is None or str(cat).strip() in ("", "0")
+
     while True:
         try:
             res = supabase.table("listings").select("id,title,brand,ebay_category_id,business_id")\
-                .neq("status", "archived").is_("ebay_category_id", "null").limit(10).execute()
-            rows = res.data or []
+                .neq("status", "archived").limit(50).execute()
+            rows = [r for r in (res.data or []) if needs_category(r)]
             if rows:
                 print(f"auto_fill_worker: found {len(rows)} listing(s) needing a category")
             for row in rows:
