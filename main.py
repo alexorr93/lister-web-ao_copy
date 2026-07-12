@@ -2674,11 +2674,13 @@ async def ebay_oauth_callback(code: str = None, state: str = None, error: str = 
 
 # ── SHOPIFY ───────────────────────────────────────────────────── #
 
-def get_shopify_access_token(business_id: str) -> str:
+def get_shopify_access_token(business_id: str, force_refresh: bool = False) -> str:
     """Shopify's current auth model (post Jan 2026): Dev Dashboard apps use a
     client_credentials grant instead of a static copy-once token. Tokens last
     24h, so this caches per-business in app_settings and refreshes transparently,
-    the same pattern as get_ebay_access_token."""
+    the same pattern as get_ebay_access_token. force_refresh bypasses the cache —
+    needed after an uninstall/reinstall, which invalidates old tokens early
+    without our cache knowing."""
     import requests as _req, time
 
     settings = get_ebay_settings(business_id)
@@ -2691,7 +2693,7 @@ def get_shopify_access_token(business_id: str) -> str:
 
     cached_token = settings.get("SHOPIFY_ACCESS_TOKEN", "")
     expires_at = float(settings.get("SHOPIFY_TOKEN_EXPIRES_AT", "0") or 0)
-    if cached_token and time.time() < (expires_at - 60):
+    if not force_refresh and cached_token and time.time() < (expires_at - 60):
         return cached_token
 
     r = _req.post(
@@ -2750,6 +2752,11 @@ def push_listing_to_shopify(listing: dict) -> dict:
     }
     headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
     r = _req.post(f"{api_base}/products.json", headers=headers, json=body, timeout=20)
+    if r.status_code == 401:
+        # cached token was invalidated (e.g. app was uninstalled/reinstalled) — force a fresh one and retry once
+        token = get_shopify_access_token(biz_id, force_refresh=True)
+        headers["X-Shopify-Access-Token"] = token
+        r = _req.post(f"{api_base}/products.json", headers=headers, json=body, timeout=20)
     if r.status_code not in (200, 201):
         raise Exception(f"Shopify product create failed ({r.status_code}): {r.text[:400]}")
 
@@ -2765,7 +2772,7 @@ async def shopify_debug_scopes(request: Request):
     try:
         settings = get_ebay_settings(business_id)
         domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
-        token = get_shopify_access_token(business_id)
+        token = get_shopify_access_token(business_id, force_refresh=True)
         r = _req.post(
             f"https://{domain}/admin/api/2024-10/graphql.json",
             headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
