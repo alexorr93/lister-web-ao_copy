@@ -146,9 +146,9 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .proc-pill { font-size:10px; padding:2px 8px; border-radius:20px; }
 .proc-pill-done { background:rgba(22,163,74,0.15); color:#4ade80; }
 .proc-pill-scan { background:rgba(245,158,11,0.15); color:#f59e0b; }
-.tile-check { width: 18px; height: 18px; border-radius: 4px; border: 1.5px solid var(--border); cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.tile-check { width: 26px; height: 26px; border-radius: 6px; border: 1.5px solid var(--border); cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
 .tile-check.checked { background: var(--accent); border-color: var(--accent); }
-.tile-check.checked::after { content: '✓'; color: #fff; font-size: 11px; font-weight: 900; }
+.tile-check.checked::after { content: '✓'; color: #fff; font-size: 15px; font-weight: 900; }
 .qty-row { display: flex; align-items: center; background: #161925; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; flex: 1; }
 .qty-btn { width: 28px; height: 26px; background: none; border: none; cursor: pointer; font-size: 15px; font-weight: 900; display: flex; align-items: center; justify-content: center; }
 .qty-btn.minus { color: var(--red); }
@@ -731,7 +731,7 @@ function renderTiles() {
          <div class="photo-counter" id="photo-counter-${l.id}">1/${photoCount}</div>`
       : '';
 
-    return `<div class="tile${isSel?' selected':''}${ebayDraft?' ebay-draft':''}" id="tile-${l.id}" data-photos='${JSON.stringify(photos)}' data-photo-idx="0">
+    return `<div class="tile${isSel?' selected':''}${ebayDraft?' ebay-draft':''}" id="tile-${l.id}" data-photos='${JSON.stringify(photos)}' data-photo-idx="0" onclick="handleTileClick(event,'${l.id}')">
       <div class="tile-photo" onclick="openModal('${l.id}')">
         ${photoHtml}
         ${photoNavHtml}
@@ -761,7 +761,7 @@ function renderTiles() {
         <input class="tile-brand-input${fieldClassFor(l.id,'brand')}" type="text" value="${(dirtyBrands[l.id] ?? (l.brand||'')).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Brand">
       </div>
       <div class="tile-controls">
-        <div class="tile-check${isSel?' checked':''}" onclick="toggleSelect('${l.id}')"></div>
+        <div class="tile-check${isSel?' checked':''}" onclick="event.stopPropagation();toggleSelect('${l.id}')"></div>
         <div class="qty-row">
           <button class="qty-btn minus" onclick="changeQty('${l.id}',-1)">−</button>
           <div class="qty-num" id="qty-${l.id}">${qty}</div>
@@ -994,6 +994,13 @@ function cyclePhoto(id, dir) {
   if (img) img.src = photos[idx].thumb;
   const counter = document.getElementById('photo-counter-' + id);
   if (counter) counter.textContent = (idx + 1) + '/' + photos.length;
+}
+
+function handleTileClick(e, id) {
+  // Clicking the card background selects/deselects it. Clicking any interactive
+  // element (photo, buttons, inputs, textareas, the checkbox itself) does its own thing instead.
+  if (e.target.closest('button, input, textarea, .tile-photo, .photo-nav, .tile-check, .qty-row, .tile-search-btns')) return;
+  toggleSelect(id);
 }
 
 function toggleSelect(id) {
