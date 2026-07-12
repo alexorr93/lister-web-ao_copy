@@ -2855,6 +2855,47 @@ def publish_product_to_channels(domain: str, token: str, product_id, target_chan
         raise Exception(f"Channel publish errors: {errors}")
     return {"published_to": [m["name"] for m in matched]}
 
+@app.get("/api/ebay/debug-category-requirements/{item_id}")
+async def ebay_debug_category_requirements(item_id: str, request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import requests as _req
+    res = supabase.table("listings").select("*").eq("id", item_id).limit(1).execute()
+    if not res.data:
+        raise HTTPException(404, "Listing not found")
+    listing = res.data[0]
+    biz_id = listing.get("business_id")
+    settings = get_ebay_settings(biz_id)
+    category_id = listing.get("ebay_category_id") or settings.get("EBAY_DEFAULT_CATEGORY_ID", "")
+    try:
+        token = get_ebay_access_token(biz_id)
+        r = _req.get(
+            f"{EBAY_API_BASE}/commerce/taxonomy/v1/category_tree/0/get_item_aspects_for_category",
+            headers=ebay_headers(token, content_language=False),
+            params={"category_id": category_id},
+            timeout=20,
+        )
+        if r.status_code != 200:
+            return {"category_id": category_id, "status": r.status_code, "body": r.text[:1000]}
+        aspects = r.json().get("aspects", [])
+        relevant = [
+            {
+                "name": a.get("localizedAspectName"),
+                "required": a.get("aspectConstraint", {}).get("aspectRequired"),
+                "mode": a.get("aspectConstraint", {}).get("aspectMode"),
+                "dataType": a.get("aspectConstraint", {}).get("aspectDataType"),
+                "cardinality": a.get("aspectConstraint", {}).get("itemToAspectCardinality"),
+            }
+            for a in aspects
+            if a.get("aspectConstraint", {}).get("aspectRequired")
+            or "mpn" in (a.get("localizedAspectName","").lower())
+            or "brand" in (a.get("localizedAspectName","").lower())
+        ]
+        return {"category_id": category_id, "required_or_brand_mpn_aspects": relevant}
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
 @app.get("/api/ebay/debug-inventory-item/{item_id}")
 async def ebay_debug_inventory_item(item_id: str, request: Request):
     business_id = require_auth(request)
