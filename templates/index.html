@@ -112,7 +112,7 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .photo-nav-next { right: 5px; }
 .tile-photo-placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; color: #3d4663; }
 .tile-badge-tl { position: absolute; top: 7px; left: 7px; background: rgba(0,0,0,0.65); border-radius: 5px; padding: 2px 7px; font-size: 9px; font-weight: 700; }
-.tile-platform-badges { position: absolute; bottom: 34px; left: 7px; display: flex; gap: 4px; }
+.tile-platform-badges { position: absolute; top: 7px; left: 50%; transform: translateX(-50%); display: flex; gap: 4px; z-index: 4; }
 .tile-platform-badge { font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px; color: #fff; letter-spacing: 0.3px; }
 .tile-platform-badge.ebay { background: #0064d2; }
 .tile-platform-badge.shopify { background: #95bf47; }
