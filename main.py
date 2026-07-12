@@ -302,9 +302,30 @@ def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None,
     else:
         r = _req.post(f"{EBAY_API_BASE}/sell/inventory/v1/offer",
                        headers=ebay_headers(token), json=offer_body, timeout=20)
-        if r.status_code not in (200, 201):
+        if r.status_code == 400 and "already exists" in r.text.lower():
+            # A previous attempt for this SKU already created an offer on eBay's side
+            # (e.g. it died at the publish step afterward) but our DB never learned the
+            # offer_id. eBay's error body includes it — recover it and update instead of failing.
+            existing_offer_id = None
+            try:
+                for err in r.json().get("errors", []):
+                    for p in err.get("parameters", []):
+                        if p.get("name") == "offerId":
+                            existing_offer_id = p.get("value")
+            except Exception:
+                pass
+            if existing_offer_id:
+                offer_id = existing_offer_id
+                r2 = _req.put(f"{EBAY_API_BASE}/sell/inventory/v1/offer/{offer_id}",
+                               headers=ebay_headers(token), json=offer_body, timeout=20)
+                if r2.status_code not in (200, 204):
+                    raise Exception(f"updateOffer (recovered offerId) failed: {r2.status_code} {r2.text}")
+            else:
+                raise Exception(f"createOffer failed: {r.status_code} {r.text}")
+        elif r.status_code not in (200, 201):
             raise Exception(f"createOffer failed: {r.status_code} {r.text}")
-        offer_id = r.json().get("offerId")
+        else:
+            offer_id = r.json().get("offerId")
 
     result = {"offer_id": offer_id, "sku": sku, "item_id": None, "status": "draft", "scheduled_at": None, "brand": brand, "mpn": mpn, "mpn_is_fallback": mpn_is_fallback}
 
