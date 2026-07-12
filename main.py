@@ -2855,6 +2855,26 @@ def publish_product_to_channels(domain: str, token: str, product_id, target_chan
         raise Exception(f"Channel publish errors: {errors}")
     return {"published_to": [m["name"] for m in matched]}
 
+@app.get("/api/ebay/debug-inventory-item/{item_id}")
+async def ebay_debug_inventory_item(item_id: str, request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import requests as _req
+    res = supabase.table("listings").select("*").eq("id", item_id).limit(1).execute()
+    if not res.data:
+        raise HTTPException(404, "Listing not found")
+    listing = res.data[0]
+    sku = listing.get("ebay_sku") or f"lister-{listing['id']}"
+    biz_id = listing.get("business_id")
+    try:
+        token = get_ebay_access_token(biz_id)
+        r = _req.get(f"{EBAY_API_BASE}/sell/inventory/v1/inventory_item/{sku}",
+                      headers=ebay_headers(token, content_language=False), timeout=15)
+        return {"sku": sku, "status": r.status_code, "body": r.json() if r.headers.get("content-type","").startswith("application/json") else r.text[:1000]}
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
 @app.get("/api/shopify/debug-scopes")
 async def shopify_debug_scopes(request: Request):
     business_id = require_auth(request)
