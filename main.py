@@ -254,6 +254,7 @@ def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None,
         "description": desc,
         "imageUrls": images,
         "aspects": {"Brand": [brand], "MPN": [mpn]},
+        "brand": brand,
         "mpn": mpn,
     }
 
