@@ -470,8 +470,11 @@ select.field-input { background: #fff; color: #0f172a; }
       <div class="field-label">App ID</div><input type="text" class="field-input" id="set-ebay-app" style="margin-bottom:8px;"/>
       <div class="field-label">Dev ID</div><input type="text" class="field-input" id="set-ebay-dev" style="margin-bottom:8px;"/>
       <div class="field-label">Cert ID</div><input type="password" class="field-input" id="set-ebay-cert" style="margin-bottom:8px;"/>
-      <div class="field-label">User Token</div><input type="password" class="field-input" id="set-ebay-token" style="margin-bottom:10px;"/>
-      <button class="btn btn-primary" style="width:100%;" onclick="saveEbaySettings()">Save eBay Settings</button>
+      <div class="field-label">RuName (eBay redirect URL name)</div><input type="text" class="field-input" id="set-ebay-runame" style="margin-bottom:8px;"/>
+      <button class="btn btn-primary" style="width:100%; margin-bottom:10px;" onclick="saveEbaySettings()">Save eBay Settings</button>
+      <div class="settings-sub" id="ebay-connect-status" style="margin-bottom:6px;"></div>
+      <button class="btn btn-primary" style="width:100%; background:var(--green,#2e8b57);" onclick="connectEbayAccount()">🔗 Connect eBay Account</button>
+      <input type="hidden" id="set-ebay-token"/>
     </div>
     <div class="settings-section" style="border-left:4px solid var(--orange);">
       <div class="settings-title">📦 eBay Listing Setup</div>
@@ -1508,7 +1511,12 @@ async function loadSettings() {
     document.getElementById('set-ebay-app').value  = s.EBAY_APP_ID || '';
     document.getElementById('set-ebay-dev').value  = s.EBAY_DEV_ID || '';
     document.getElementById('set-ebay-cert').value = s.EBAY_CERT_ID || '';
+    document.getElementById('set-ebay-runame').value = s.EBAY_RUNAME || '';
     document.getElementById('set-ebay-token').value= s.EBAY_USER_TOKEN || '';
+    const connected = !!s.EBAY_REFRESH_TOKEN;
+    document.getElementById('ebay-connect-status').innerHTML = connected
+      ? '<span style="color:var(--green,#2e8b57);">✅ eBay account connected</span>'
+      : '<span style="color:var(--amber);">⚠️ Not connected — click below after saving App ID/Cert ID/RuName</span>';
     document.getElementById('set-ebay-payment-policy').value     = s.EBAY_PAYMENT_POLICY_ID || '';
     document.getElementById('set-ebay-return-policy').value      = s.EBAY_RETURN_POLICY_ID || '';
     document.getElementById('set-ebay-fulfillment-policy').value = s.EBAY_FULFILLMENT_POLICY_ID || '';
@@ -1529,13 +1537,17 @@ async function saveSetting(key, inputId) {
 async function saveEbaySettings() {
   const pairs = [
     ['EBAY_APP_ID', 'set-ebay-app'], ['EBAY_DEV_ID', 'set-ebay-dev'],
-    ['EBAY_CERT_ID', 'set-ebay-cert'], ['EBAY_USER_TOKEN', 'set-ebay-token'],
+    ['EBAY_CERT_ID', 'set-ebay-cert'], ['EBAY_RUNAME', 'set-ebay-runame'],
   ];
   for (const [k, id] of pairs) {
     const v = document.getElementById(id).value.trim();
     if (v) await api('POST', '/api/settings', {key:k, value:v});
   }
   toast('eBay settings saved ✓');
+}
+
+function connectEbayAccount() {
+  window.open('/api/ebay/oauth/start', '_blank');
 }
 
 async function saveEbayListingSettings() {

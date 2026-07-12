@@ -82,16 +82,69 @@ def photo_url(photo_id: str, thumb: bool = False) -> str:
 EBAY_API_BASE = "https://api.ebay.com"
 
 EBAY_ENV_KEYS = [
-    "EBAY_USER_TOKEN", "EBAY_APP_ID", "EBAY_DEV_ID", "EBAY_CERT_ID",
+    "EBAY_USER_TOKEN", "EBAY_APP_ID", "EBAY_DEV_ID", "EBAY_CERT_ID", "EBAY_RUNAME",
     "EBAY_PAYMENT_POLICY_ID", "EBAY_RETURN_POLICY_ID", "EBAY_FULFILLMENT_POLICY_ID",
     "EBAY_MERCHANT_LOCATION_KEY", "EBAY_LOCATION_ZIP", "EBAY_LOCATION_COUNTRY",
     "EBAY_DEFAULT_CATEGORY_ID",
 ]
 
+EBAY_OAUTH_SCOPES = "https://api.ebay.com/oauth/api_scope/sell.inventory"
+
 def get_ebay_settings(business_id: str) -> dict:
     res = supabase.table("app_settings").select("*").eq("business_id", business_id).execute()
     settings = {row["key"]: row["value"] for row in (res.data or [])}
     return settings
+
+def save_ebay_setting(business_id: str, key: str, value: str):
+    existing = supabase.table("app_settings").select("key").eq("business_id", business_id).eq("key", key).limit(1).execute()
+    if existing.data:
+        supabase.table("app_settings").update({"value": value}).eq("business_id", business_id).eq("key", key).execute()
+    else:
+        supabase.table("app_settings").insert({"business_id": business_id, "key": key, "value": value}).execute()
+
+def get_ebay_access_token(business_id: str) -> str:
+    """Returns a valid eBay access token, transparently refreshing it via the stored
+    18-month refresh token if the cached access token is missing or expired.
+    Raises a clear error if the account has never completed OAuth."""
+    import requests as _req, time, base64 as _b64
+
+    settings = get_ebay_settings(business_id)
+    refresh_token = settings.get("EBAY_REFRESH_TOKEN", "")
+    access_token = settings.get("EBAY_USER_TOKEN", "")
+    expires_at = float(settings.get("EBAY_TOKEN_EXPIRES_AT", "0") or 0)
+
+    if not refresh_token:
+        raise Exception("eBay account not connected — go to Settings and click 'Connect eBay Account'")
+
+    # 60s safety margin before expiry
+    if access_token and time.time() < (expires_at - 60):
+        return access_token
+
+    app_id = settings.get("EBAY_APP_ID", "")
+    cert_id = settings.get("EBAY_CERT_ID", "")
+    if not app_id or not cert_id:
+        raise Exception("Missing EBAY_APP_ID / EBAY_CERT_ID in Settings")
+
+    basic = _b64.b64encode(f"{app_id}:{cert_id}".encode()).decode()
+    r = _req.post(
+        "https://api.ebay.com/identity/v1/oauth2/token",
+        headers={"Authorization": f"Basic {basic}", "Content-Type": "application/x-www-form-urlencoded"},
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "scope": EBAY_OAUTH_SCOPES,
+        },
+        timeout=15,
+    )
+    if r.status_code != 200:
+        raise Exception(f"eBay token refresh failed ({r.status_code}): {r.text[:300]} — try reconnecting your eBay account in Settings")
+
+    data = r.json()
+    new_token = data["access_token"]
+    new_expires_at = time.time() + int(data.get("expires_in", 7200))
+    save_ebay_setting(business_id, "EBAY_USER_TOKEN", new_token)
+    save_ebay_setting(business_id, "EBAY_TOKEN_EXPIRES_AT", str(new_expires_at))
+    return new_token
 
 def ebay_headers(token: str, content_language: bool = True) -> dict:
     h = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
@@ -132,9 +185,7 @@ def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None,
     if not biz_id:
         raise Exception("Listing has no business_id — cannot look up eBay settings safely")
     settings = get_ebay_settings(biz_id)
-    token = settings.get("EBAY_USER_TOKEN", "")
-    if not token:
-        raise Exception("No eBay User Token saved in Settings")
+    token = get_ebay_access_token(biz_id)
 
     payment_policy    = settings.get("EBAY_PAYMENT_POLICY_ID", "")
     return_policy      = settings.get("EBAY_RETURN_POLICY_ID", "")
@@ -764,10 +815,10 @@ def suggest_ebay_category(title: str, business_id: str, restrict: bool = True, e
     restrict=True limits results to Business & Industrial / eBay Motors (your usual categories).
     exclude_id lets a repeat click skip the previous pick and try the next-best suggestion."""
     import requests as _req
-    settings = get_ebay_settings(business_id)
-    token = settings.get("EBAY_USER_TOKEN", "")
-    if not token:
-        print("suggest_ebay_category: NO TOKEN FOUND in settings for this business")
+    try:
+        token = get_ebay_access_token(business_id)
+    except Exception as e:
+        print(f"suggest_ebay_category: {e}")
         return {}
 
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
@@ -801,9 +852,10 @@ async def api_sync_categories(request: Request):
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     settings = get_ebay_settings(business_id)
-    token = settings.get("EBAY_USER_TOKEN", "")
-    if not token:
-        raise HTTPException(400, "No eBay User Token saved in Settings yet")
+    try:
+        token = get_ebay_access_token(business_id)
+    except Exception as e:
+        raise HTTPException(400, str(e))
     try:
         count = sync_ebay_categories(token)
         return {"ok": True, "count": count}
@@ -894,9 +946,10 @@ async def ebay_category_search(q: str, request: Request):
         raise HTTPException(401, "Unauthorized")
     import requests as _req
     settings = get_ebay_settings(business_id)
-    token = settings.get("EBAY_USER_TOKEN", "")
-    if not token:
-        raise HTTPException(400, "No eBay User Token saved in Settings yet")
+    try:
+        token = get_ebay_access_token(business_id)
+    except Exception as e:
+        raise HTTPException(400, str(e))
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     r = _req.get(
         "https://api.ebay.com/commerce/taxonomy/v1/category_tree/0/get_category_suggestions",
@@ -920,9 +973,10 @@ async def list_ebay_policies(request: Request):
         raise HTTPException(401, "Unauthorized")
     import requests as _req
     settings = get_ebay_settings(business_id)
-    token = settings.get("EBAY_USER_TOKEN", "")
-    if not token:
-        raise HTTPException(400, "No eBay User Token saved in Settings yet")
+    try:
+        token = get_ebay_access_token(business_id)
+    except Exception as e:
+        raise HTTPException(400, str(e))
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     base = "https://api.ebay.com/sell/account/v1"
     out = {}
@@ -2546,6 +2600,61 @@ If no text visible or no matches, still return the JSON with empty arrays."""
         "match_count": len(matches),
         "scanned":     len(results),
     }
+
+# ── EBAY OAUTH ────────────────────────────────────────────────── #
+
+@app.get("/api/ebay/oauth/start")
+async def ebay_oauth_start(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    settings = get_ebay_settings(business_id)
+    app_id = settings.get("EBAY_APP_ID", "")
+    runame = settings.get("EBAY_RUNAME", "")
+    if not app_id or not runame:
+        raise HTTPException(400, "Set EBAY_APP_ID and EBAY_RUNAME in Settings first")
+    import urllib.parse as _up
+    params = {
+        "client_id": app_id,
+        "redirect_uri": runame,
+        "response_type": "code",
+        "scope": EBAY_OAUTH_SCOPES,
+        "state": business_id,
+    }
+    url = "https://auth.ebay.com/oauth2/authorize?" + _up.urlencode(params)
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url)
+
+@app.get("/api/ebay/oauth/callback")
+async def ebay_oauth_callback(code: str = None, state: str = None, error: str = None):
+    if error:
+        return HTMLResponse(f"<h3>eBay authorization failed: {error}</h3><p>You can close this tab and try again.</p>")
+    if not code or not state:
+        raise HTTPException(400, "Missing code/state from eBay")
+    business_id = state
+    settings = get_ebay_settings(business_id)
+    app_id = settings.get("EBAY_APP_ID", "")
+    cert_id = settings.get("EBAY_CERT_ID", "")
+    runame = settings.get("EBAY_RUNAME", "")
+    if not app_id or not cert_id or not runame:
+        raise HTTPException(400, "Missing EBAY_APP_ID / EBAY_CERT_ID / EBAY_RUNAME in Settings")
+
+    import requests as _req, time, base64 as _b64
+    basic = _b64.b64encode(f"{app_id}:{cert_id}".encode()).decode()
+    r = _req.post(
+        "https://api.ebay.com/identity/v1/oauth2/token",
+        headers={"Authorization": f"Basic {basic}", "Content-Type": "application/x-www-form-urlencoded"},
+        data={"grant_type": "authorization_code", "code": code, "redirect_uri": runame},
+        timeout=15,
+    )
+    if r.status_code != 200:
+        return HTMLResponse(f"<h3>Token exchange failed ({r.status_code})</h3><pre>{r.text[:1000]}</pre>")
+
+    data = r.json()
+    save_ebay_setting(business_id, "EBAY_USER_TOKEN", data["access_token"])
+    save_ebay_setting(business_id, "EBAY_TOKEN_EXPIRES_AT", str(time.time() + int(data.get("expires_in", 7200))))
+    save_ebay_setting(business_id, "EBAY_REFRESH_TOKEN", data["refresh_token"])
+    return HTMLResponse("<h3>eBay account connected \u2705</h3><p>You can close this tab and go back to Lister AI.</p>")
 
 # ── SETTINGS ──────────────────────────────────────────────────── #
 
