@@ -269,7 +269,6 @@ select.field-input { background: #fff; color: #0f172a; }
     <div class="action-bar">
       <button class="btn" onclick="selectAll()">☑ Select All</button>
       <button class="btn" style="color:#dc2626;border-color:#dc2626;" onclick="selectFailed()">⚠️ Select Failed</button>
-      <button class="btn" onclick="archiveBothPublished()">🗄️ Archive Published (eBay+Shopify)</button>
       <button class="btn" onclick="deselectAll()">☐ Deselect</button>
       <div style="display:flex;align-items:center;gap:6px;" id="batch-hours-wrap" title="Hours from now for batch eBay scheduling">
         <input type="number" class="field-input" id="batch-ebay-hours" value="2" min="0.5" step="0.5" style="width:64px;padding:6px 8px;"/>
@@ -279,7 +278,8 @@ select.field-input { background: #fff; color: #0f172a; }
       <button class="btn btn-primary" id="submit-shopify-btn" style="display:none;background:#95bf47;border-color:#95bf47;" onclick="submitSelectedToShopify()">🛍️ Publish to Shopify</button>
       <button class="btn" id="archive-selected-btn" style="display:none;color:var(--red);border-color:#991b1b;" onclick="archiveSelected()">🗄️ Archive Selected</button>
       <div class="spacer"></div>
-      <button class="btn btn-danger" onclick="confirmClearBatch()">🗑️ Clear Batch</button>
+      <button class="btn" style="color:#dc2626;border-color:#dc2626;" onclick="archiveBothPublished()">🗄️ Archive Published (eBay+Shopify)</button>
+      <button class="btn btn-danger" onclick="confirmClearBatch()">🗄️ Archive Batch</button>
     </div>
     <div class="tile-grid" id="tile-grid"></div>
     <div class="empty" id="dash-empty" style="display:none">
