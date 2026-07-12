@@ -733,7 +733,8 @@ function renderTiles() {
     const refs = [l.price_used > 0 ? `U:$${l.price_used.toFixed(0)}` : '', l.price_new > 0 ? `N:$${l.price_new.toFixed(0)}` : ''].filter(Boolean).join('  ');
     const ebayDraft = l.ebay_status === 'draft' && l.ebay_item_id;
     const ebayFailed = l.ebay_status === 'failed';
-    const onEbay = l.ebay_status === 'published' && l.ebay_item_id;
+    const onEbay = (l.ebay_status === 'published' || l.ebay_status === 'scheduled') && l.ebay_item_id;
+    const onEbayLabel = l.ebay_status === 'scheduled' ? 'eBay (scheduled)' : 'eBay';
     const onShopify = l.shopify_status === 'active' && l.shopify_product_id;
     const fallback = (l.price_note === 'new' || l.price_note === 'used');
     const statusBadge = ebayDraft
@@ -758,7 +759,7 @@ function renderTiles() {
         <div class="tile-badge-tl" style="color:${condCol};">${isNew?'NEW':'USED'}</div>
         <div class="tile-badge-tr">${statusBadge}</div>
         ${l.ebay_mpn_is_fallback ? `<div class="tile-mpn-flag" title="eBay MPN set to &quot;Does Not Apply&quot; — click to fix" onclick="event.stopPropagation();openModal('${l.id}')"></div>` : ''}
-        ${(onEbay || onShopify) ? `<div class="tile-platform-badges">${onEbay ? '<div class="tile-platform-badge ebay">eBay</div>' : ''}${onShopify ? '<div class="tile-platform-badge shopify">Shopify</div>' : ''}</div>` : ''}
+        ${(onEbay || onShopify) ? `<div class="tile-platform-badges">${onEbay ? `<div class="tile-platform-badge ebay">${onEbayLabel}</div>` : ''}${onShopify ? '<div class="tile-platform-badge shopify">Shopify</div>' : ''}</div>` : ''}
         <div class="tile-price-overlay">
           <div class="tile-price-main">$${l.price.toFixed(2)}</div>
           ${refs ? `<div class="tile-price-ref">${refs}</div>` : ''}
@@ -1081,7 +1082,7 @@ async function archiveSelected() {
 
 async function archiveBothPublished() {
   const targets = listings.filter(l =>
-    l.ebay_status === 'published' && l.ebay_item_id &&
+    (l.ebay_status === 'published' || l.ebay_status === 'scheduled') && l.ebay_item_id &&
     l.shopify_status === 'active' && l.shopify_product_id
   );
   if (!targets.length) { toast('No items are live on both eBay and Shopify right now'); return; }
