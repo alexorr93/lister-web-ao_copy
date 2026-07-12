@@ -231,7 +231,10 @@ def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None,
         brand = first_word if first_word else "Unbranded"
 
     # Guess MPN: the longest alphanumeric (letters+digits) token in the title that isn't the brand —
-    # usually the true part number rather than a shorter model class label
+    # usually the true part number rather than a shorter model class label.
+    # eBay requires SOME MPN value in many categories — if we can't guess one, send their
+    # standard "Does Not Apply" placeholder rather than omitting the aspect entirely, since
+    # a missing BrandMPN aspect makes publishOffer fail outright in those categories.
     mpn = None
     alnum_tokens = [
         w.strip(",.;:-") for w in title.split()
@@ -240,16 +243,16 @@ def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None,
     ]
     if alnum_tokens:
         mpn = max(alnum_tokens, key=len)
+    if not mpn:
+        mpn = "Does Not Apply"
 
     product_data = {
         "title": title,
         "description": desc,
         "imageUrls": images,
-        "aspects": {"Brand": [brand]},
+        "aspects": {"Brand": [brand], "MPN": [mpn]},
+        "mpn": mpn,
     }
-    if mpn:
-        product_data["mpn"] = mpn
-        product_data["aspects"]["MPN"] = [mpn]
 
     inv_body = {
         "condition": ebay_condition(listing.get("condition")),
