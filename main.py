@@ -94,6 +94,24 @@ def photo_url(photo_id: str, thumb: bool = False) -> str:
         return f"{SUPABASE_URL}/storage/v1/render/image/public/part-photos/{photo_id}?width=500&height=500&resize=cover&quality=80"
     return f"{SUPABASE_URL}/storage/v1/object/public/part-photos/{photo_id}"
 
+def get_all_photo_ids(primary_photo_id: str) -> list:
+    """A listing only stores its primary photo_id, but scans capture multiple photos
+    per group (group_photos table). Marketplace listings should use ALL of them,
+    not just the primary — this looks up the rest via the shared group_id."""
+    pid = str(primary_photo_id or "")
+    if not pid:
+        return []
+    try:
+        group_row = supabase.table("group_photos").select("group_id").eq("photo_id", pid).limit(1).execute()
+        group_id = (group_row.data or [{}])[0].get("group_id", "")
+        if not group_id:
+            return [pid]
+        gp = supabase.table("group_photos").select("photo_id").eq("group_id", group_id).execute()
+        all_pids = [r["photo_id"] for r in (gp.data or []) if r.get("photo_id")]
+        return all_pids if all_pids else [pid]
+    except Exception:
+        return [pid]
+
 # ── EBAY INVENTORY API ───────────────────────────────────────── #
 EBAY_API_BASE = "https://api.ebay.com"
 
@@ -222,7 +240,7 @@ def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None,
     qty   = int(listing.get("quantity") or 1)
     price = float(listing.get("price") or 0)
     pid   = str(listing.get("photo_id") or "")
-    images = [photo_url(pid)] if pid else []
+    images = [photo_url(p) for p in get_all_photo_ids(pid) if photo_url(p)] if pid else []
 
     # 1. Create/replace inventory item
     brand = (brand_override or listing.get("brand") or "").strip()
@@ -2771,7 +2789,7 @@ def push_listing_to_shopify(listing: dict) -> dict:
     brand = (listing.get("brand") or "").strip() or "Unbranded"
     sku   = listing.get("ebay_sku") or f"lister-{listing['id']}"
     pid   = str(listing.get("photo_id") or "")
-    images = [{"src": photo_url(pid)}] if pid else []
+    images = [{"src": photo_url(p)} for p in get_all_photo_ids(pid) if photo_url(p)] if pid else []
 
     body = {
         "product": {
