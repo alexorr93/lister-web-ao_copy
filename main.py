@@ -40,10 +40,14 @@ async def auto_fill_worker():
         try:
             res = supabase.table("listings").select("id,title,brand,ebay_category_id,business_id")\
                 .neq("status", "archived").is_("ebay_category_id", "null").limit(10).execute()
-            for row in (res.data or []):
+            rows = res.data or []
+            if rows:
+                print(f"auto_fill_worker: found {len(rows)} listing(s) needing a category")
+            for row in rows:
                 title = row.get("title") or ""
                 biz_id = row.get("business_id")
                 if not title or title == "Scanning..." or not biz_id:
+                    print(f"auto_fill_worker: skipping {row['id']} (title={title!r}, biz_id={biz_id})")
                     continue
                 updates = {}
                 if not row.get("brand"):
@@ -52,10 +56,14 @@ async def auto_fill_worker():
                     suggestion = suggest_ebay_category(title, biz_id, restrict=True)
                     if suggestion:
                         updates["ebay_category_id"] = suggestion["category_id"]
+                        print(f"auto_fill_worker: {row['id']} -> category {suggestion['category_id']} ({suggestion.get('name')})")
                     else:
                         fallback = get_ebay_settings(biz_id).get("EBAY_DEFAULT_CATEGORY_ID", "")
                         if fallback:
                             updates["ebay_category_id"] = fallback
+                            print(f"auto_fill_worker: {row['id']} -> no B&I match, used fallback category {fallback}")
+                        else:
+                            print(f"auto_fill_worker: {row['id']} -> NO MATCH and no EBAY_DEFAULT_CATEGORY_ID set for business {biz_id}; will retry next cycle")
                 except Exception as e:
                     print(f"auto_fill_worker category error for {row['id']}: {e}")
                 if updates:
