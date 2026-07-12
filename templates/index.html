@@ -1196,7 +1196,7 @@ function openModal(id) {
   document.getElementById('modal-refs').textContent  = refs;
   document.getElementById('modal-title-input').value = l.title || '';
   document.getElementById('modal-brand-input').value = l.brand || guessBrand(l.title || '');
-  document.getElementById('modal-mpn-input').value = (l.ebay_mpn_is_fallback ? '' : (l.ebay_mpn || ''));
+  document.getElementById('modal-mpn-input').value = (l.ebay_mpn_is_fallback ? '' : (l.ebay_mpn || guessMpn(l.title || '', l.brand || guessBrand(l.title || ''))));
   document.getElementById('modal-mpn-warn').style.display = l.ebay_mpn_is_fallback ? 'block' : 'none';
   document.getElementById('modal-price-input').value = l.price.toFixed(2);
   document.getElementById('modal-cond-input').value  = l.condition || 'used';
@@ -1224,6 +1224,9 @@ async function saveModal() {
   const title = document.getElementById('modal-title-input').value.trim().slice(0, 80);
   const price = parseFloat(document.getElementById('modal-price-input').value) || 0;
   const cond  = document.getElementById('modal-cond-input').value;
+  const brand = document.getElementById('modal-brand-input').value.trim();
+  const mpn   = document.getElementById('modal-mpn-input').value.trim();
+  const l = listings.find(x => x.id === modalItemId);
   try {
     if (modalDirty) {
       await api('PATCH', `/api/listings/${modalItemId}`, {field:'title', value:title});
@@ -1231,12 +1234,21 @@ async function saveModal() {
       await api('PATCH', `/api/listings/${modalItemId}`, {field:'description', value:desc});
       await api('PATCH', `/api/listings/${modalItemId}`, {field:'price', value:price});
       await api('PATCH', `/api/listings/${modalItemId}`, {field:'condition', value:cond});
-      // Update local state
-      const l = listings.find(x => x.id === modalItemId);
       if (l) { l.title = title; l.price = price; l.condition = cond; }
-      renderTiles();
       toast('Saved ✓');
     }
+    if (brand && brand !== (l && l.brand)) {
+      await api('PATCH', `/api/listings/${modalItemId}`, {field:'brand', value:brand});
+      if (l) l.brand = brand;
+    }
+    if (mpn && mpn !== (l && l.ebay_mpn)) {
+      try {
+        await api('PATCH', `/api/listings/${modalItemId}`, {field:'ebay_mpn', value:mpn});
+        await api('PATCH', `/api/listings/${modalItemId}`, {field:'ebay_mpn_is_fallback', value:false});
+        if (l) { l.ebay_mpn = mpn; l.ebay_mpn_is_fallback = false; }
+      } catch(e) { /* ebay_mpn column may not exist yet on this Supabase project */ }
+    }
+    renderTiles();
   } catch(e) { toast('Save failed', 'error'); }
   document.getElementById('modal').classList.remove('open');
 }
@@ -1244,6 +1256,17 @@ async function saveModal() {
 function guessBrand(title) {
   const w = (title || '').trim().split(/\s+/)[0] || '';
   return w.replace(/[,.;:]+$/, '');
+}
+
+function guessMpn(title, brand) {
+  // Mirrors the server's guess: longest alphanumeric (letters+digits) token that isn't the brand.
+  const words = (title || '').trim().split(/\s+/);
+  const brandLower = (brand || '').toLowerCase();
+  const candidates = words
+    .map(w => w.replace(/[,.;:\-]+$/, '').replace(/^[,.;:\-]+/, ''))
+    .filter(w => w.toLowerCase() !== brandLower && /[0-9]/.test(w) && /[a-zA-Z]/.test(w));
+  if (!candidates.length) return '';
+  return candidates.reduce((a, b) => b.length > a.length ? b : a, '');
 }
 
 let lastCategoryTried = {}; // itemId -> category_id, so re-clicking Auto-pick tries the NEXT suggestion, not the same one
