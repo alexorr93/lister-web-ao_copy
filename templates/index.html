@@ -102,6 +102,7 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tile:hover { transform: translateY(-1px); }
 .tile.selected { border-color: var(--accent); }
 .tile.ebay-draft { border-left: 3px solid var(--accent); }
+.tile.ebay-failed { border: 2px solid #dc2626; box-shadow: 0 0 0 1px #dc2626 inset; }
 
 .tile-photo { position: relative; width: 100%; padding-top: 90%; background: #161925; overflow: hidden; }
 .tile-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; image-orientation: from-image; }
@@ -263,6 +264,7 @@ select.field-input { background: #fff; color: #0f172a; }
     </div>
     <div class="action-bar">
       <button class="btn" onclick="selectAll()">☑ Select All</button>
+      <button class="btn" style="color:#dc2626;border-color:#dc2626;" onclick="selectFailed()">⚠️ Select Failed</button>
       <button class="btn" onclick="deselectAll()">☐ Deselect</button>
       <div style="display:flex;align-items:center;gap:6px;" id="batch-hours-wrap" title="Hours from now for batch eBay scheduling">
         <input type="number" class="field-input" id="batch-ebay-hours" value="2" min="0.5" step="0.5" style="width:64px;padding:6px 8px;"/>
@@ -725,6 +727,7 @@ function renderTiles() {
     const condCol = isNew ? '#16a34a' : '#3b82f6';
     const refs = [l.price_used > 0 ? `U:$${l.price_used.toFixed(0)}` : '', l.price_new > 0 ? `N:$${l.price_new.toFixed(0)}` : ''].filter(Boolean).join('  ');
     const ebayDraft = l.ebay_status === 'draft' && l.ebay_item_id;
+    const ebayFailed = l.ebay_status === 'failed';
     const fallback = (l.price_note === 'new' || l.price_note === 'used');
     const statusBadge = ebayDraft
       ? `<a href="https://www.ebay.com/itm/${l.ebay_item_id}" target="_blank" style="background:rgba(37,99,235,0.8);color:#fff;border-radius:5px;font-size:9px;font-weight:700;padding:2px 6px;text-decoration:none;">eBay</a>`
@@ -741,7 +744,7 @@ function renderTiles() {
          <div class="photo-counter" id="photo-counter-${l.id}">1/${photoCount}</div>`
       : '';
 
-    return `<div class="tile${isSel?' selected':''}${ebayDraft?' ebay-draft':''}" id="tile-${l.id}" data-photos='${JSON.stringify(photos)}' data-photo-idx="0" onclick="handleTileClick(event,'${l.id}')">
+    return `<div class="tile${isSel?' selected':''}${ebayDraft?' ebay-draft':''}${ebayFailed?' ebay-failed':''}" id="tile-${l.id}" data-photos='${JSON.stringify(photos)}' data-photo-idx="0" onclick="handleTileClick(event,'${l.id}')">
       <div class="tile-photo" onclick="handlePhotoClick('${l.id}')">
         ${photoHtml}
         ${photoNavHtml}
@@ -1031,6 +1034,13 @@ function toggleSelect(id) {
   updateSubmitBtn();
 }
 function selectAll()   { listings.forEach(l => selected.add(String(l.id))); renderTiles(); }
+function selectFailed() {
+  selected.clear();
+  const failed = listings.filter(l => l.ebay_status === 'failed');
+  failed.forEach(l => selected.add(String(l.id)));
+  renderTiles();
+  toast(failed.length ? `Selected ${failed.length} failed item(s)` : 'No failed items right now ✓');
+}
 function deselectAll() { selected.clear(); renderTiles(); }
 function updateSubmitBtn() {
   const btn = document.getElementById('submit-ebay-btn');
