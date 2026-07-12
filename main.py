@@ -88,7 +88,7 @@ EBAY_ENV_KEYS = [
     "EBAY_DEFAULT_CATEGORY_ID",
 ]
 
-EBAY_OAUTH_SCOPES = "https://api.ebay.com/oauth/api_scope/sell.inventory"
+EBAY_OAUTH_SCOPES = "https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.inventory"
 
 def get_ebay_settings(business_id: str) -> dict:
     res = supabase.table("app_settings").select("*").eq("business_id", business_id).execute()
