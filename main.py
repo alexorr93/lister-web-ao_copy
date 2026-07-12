@@ -2756,6 +2756,26 @@ def push_listing_to_shopify(listing: dict) -> dict:
     data = r.json().get("product", {})
     return {"product_id": data.get("id"), "status": data.get("status"), "handle": data.get("handle")}
 
+@app.get("/api/shopify/debug-scopes")
+async def shopify_debug_scopes(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import requests as _req
+    try:
+        settings = get_ebay_settings(business_id)
+        domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+        token = get_shopify_access_token(business_id)
+        r = _req.post(
+            f"https://{domain}/admin/api/2024-10/graphql.json",
+            headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+            json={"query": "{ currentAppInstallation { accessScopes { handle } } }"},
+            timeout=15,
+        )
+        return {"status": r.status_code, "body": r.json() if r.headers.get("content-type","").startswith("application/json") else r.text[:500]}
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
 @app.post("/api/listings/{item_id}/shopify-publish")
 async def api_shopify_publish(item_id: str, request: Request):
     business_id = require_auth(request)
