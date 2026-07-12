@@ -2761,7 +2761,62 @@ def push_listing_to_shopify(listing: dict) -> dict:
         raise Exception(f"Shopify product create failed ({r.status_code}): {r.text[:400]}")
 
     data = r.json().get("product", {})
-    return {"product_id": data.get("id"), "status": data.get("status"), "handle": data.get("handle")}
+    product_id = data.get("id")
+
+    channel_result = {}
+    if product_id:
+        try:
+            channel_result = publish_product_to_channels(domain, token, product_id)
+        except Exception as e:
+            # product itself was created successfully — a channel-publish failure shouldn't fail the whole call
+            channel_result = {"error": str(e)}
+
+    return {"product_id": product_id, "status": data.get("status"), "handle": data.get("handle"), "channels": channel_result}
+
+def publish_product_to_channels(domain: str, token: str, product_id, target_channel_names=None) -> dict:
+    """Publishes an already-created product to additional sales channels (e.g. Google & YouTube),
+    since REST product creation only auto-publishes to the Online Store channel.
+    Requires the write_publications scope on top of write_products."""
+    import requests as _req
+
+    if target_channel_names is None:
+        target_channel_names = ["Google & YouTube", "Point of Sale"]
+
+    gql_url = f"https://{domain}/admin/api/2024-10/graphql.json"
+    headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
+
+    list_r = _req.post(gql_url, headers=headers, json={
+        "query": "{ publications(first: 20) { edges { node { id name } } } }"
+    }, timeout=15)
+    if list_r.status_code != 200:
+        raise Exception(f"Could not list Shopify sales channels ({list_r.status_code}): {list_r.text[:300]}")
+    pubs = list_r.json().get("data", {}).get("publications", {}).get("edges", [])
+
+    matched = [
+        {"publicationId": p["node"]["id"], "name": p["node"]["name"]}
+        for p in pubs
+        if any(target.lower() in p["node"]["name"].lower() for target in target_channel_names)
+    ]
+    if not matched:
+        return {"published_to": [], "note": "No matching sales channels found — is Google & YouTube installed as a channel on this store?"}
+
+    product_gid = f"gid://shopify/Product/{product_id}"
+    pub_r = _req.post(gql_url, headers=headers, json={
+        "query": """
+            mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
+              publishablePublish(id: $id, input: $input) {
+                userErrors { field message }
+              }
+            }
+        """,
+        "variables": {"id": product_gid, "input": [{"publicationId": m["publicationId"]} for m in matched]},
+    }, timeout=15)
+    if pub_r.status_code != 200:
+        raise Exception(f"Channel publish failed ({pub_r.status_code}): {pub_r.text[:300]}")
+    errors = pub_r.json().get("data", {}).get("publishablePublish", {}).get("userErrors", [])
+    if errors:
+        raise Exception(f"Channel publish errors: {errors}")
+    return {"published_to": [m["name"] for m in matched]}
 
 @app.get("/api/shopify/debug-scopes")
 async def shopify_debug_scopes(request: Request):

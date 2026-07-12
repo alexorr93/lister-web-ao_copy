@@ -1284,8 +1284,12 @@ async function publishToShopify() {
   document.getElementById('modal-shopify-status').textContent = 'Publishing...';
   try {
     const r = await api('POST', `/api/listings/${modalItemId}/shopify-publish`);
+    const ch = r.channels || {};
+    const chNote = ch.published_to && ch.published_to.length
+      ? ` + ${ch.published_to.join(', ')}`
+      : (ch.error ? ` (channel publish issue: ${ch.error})` : '');
     document.getElementById('modal-shopify-status').innerHTML =
-      `<span style="color:#95bf47;">✅ Live on Shopify (product ${r.product_id})</span>`;
+      `<span style="color:#95bf47;">✅ Live on Shopify (product ${r.product_id})${chNote}</span>`;
     toast('Published to Shopify ✓');
   } catch(e) {
     document.getElementById('modal-shopify-status').innerHTML = `<span style="color:var(--red,#c0392b);">❌ ${e.message}</span>`;
