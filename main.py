@@ -2674,9 +2674,43 @@ async def ebay_oauth_callback(code: str = None, state: str = None, error: str = 
 
 # ── SHOPIFY ───────────────────────────────────────────────────── #
 
+def get_shopify_access_token(business_id: str) -> str:
+    """Shopify's current auth model (post Jan 2026): Dev Dashboard apps use a
+    client_credentials grant instead of a static copy-once token. Tokens last
+    24h, so this caches per-business in app_settings and refreshes transparently,
+    the same pattern as get_ebay_access_token."""
+    import requests as _req, time
+
+    settings = get_ebay_settings(business_id)
+    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip()
+    client_id = (settings.get("SHOPIFY_CLIENT_ID", "") or "").strip()
+    client_secret = (settings.get("SHOPIFY_CLIENT_SECRET", "") or "").strip()
+    if not domain or not client_id or not client_secret:
+        raise Exception("Shopify not connected — set Store Domain, Client ID, and Client Secret in Settings")
+    domain = domain.replace("https://", "").replace("http://", "").strip("/")
+
+    cached_token = settings.get("SHOPIFY_ACCESS_TOKEN", "")
+    expires_at = float(settings.get("SHOPIFY_TOKEN_EXPIRES_AT", "0") or 0)
+    if cached_token and time.time() < (expires_at - 60):
+        return cached_token
+
+    r = _req.post(
+        f"https://{domain}/admin/oauth/access_token",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        data={"grant_type": "client_credentials", "client_id": client_id, "client_secret": client_secret},
+        timeout=15,
+    )
+    if r.status_code != 200:
+        raise Exception(f"Shopify token request failed ({r.status_code}): {r.text[:300]}")
+    data = r.json()
+    token = data["access_token"]
+    new_expires_at = time.time() + int(data.get("expires_in", 86399))
+    save_ebay_setting(business_id, "SHOPIFY_ACCESS_TOKEN", token)
+    save_ebay_setting(business_id, "SHOPIFY_TOKEN_EXPIRES_AT", str(new_expires_at))
+    return token
+
 def push_listing_to_shopify(listing: dict) -> dict:
-    """Creates an active product on Shopify via the Admin REST API using a
-    custom-app access token (no OAuth/expiry to manage, unlike eBay)."""
+    """Creates an active product on Shopify via the Admin REST API."""
     import requests as _req
 
     biz_id = listing.get("business_id")
@@ -2684,10 +2718,10 @@ def push_listing_to_shopify(listing: dict) -> dict:
         raise Exception("Listing has no business_id — cannot look up Shopify settings safely")
     settings = get_ebay_settings(biz_id)  # generic per-business key/value store, not eBay-specific
     domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip()
-    token = (settings.get("SHOPIFY_ACCESS_TOKEN", "") or "").strip()
-    if not domain or not token:
-        raise Exception("Shopify not connected — set Store Domain and Access Token in Settings")
+    if not domain:
+        raise Exception("Shopify not connected — set Store Domain in Settings")
     domain = domain.replace("https://", "").replace("http://", "").strip("/")
+    token = get_shopify_access_token(biz_id)
     api_base = f"https://{domain}/admin/api/2024-10"
 
     title = (listing.get("title") or "Untitled item")[:255]
@@ -2718,6 +2752,7 @@ def push_listing_to_shopify(listing: dict) -> dict:
     r = _req.post(f"{api_base}/products.json", headers=headers, json=body, timeout=20)
     if r.status_code not in (200, 201):
         raise Exception(f"Shopify product create failed ({r.status_code}): {r.text[:400]}")
+
     data = r.json().get("product", {})
     return {"product_id": data.get("id"), "status": data.get("status"), "handle": data.get("handle")}
 

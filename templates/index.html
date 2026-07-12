@@ -478,9 +478,10 @@ select.field-input { background: #fff; color: #0f172a; }
     </div>
     <div class="settings-section" style="border-left:4px solid #95bf47;">
       <div class="settings-title">🛍️ Shopify API Credentials</div>
-      <div class="settings-sub">Custom app Admin API access token. Create one under Settings → Apps and sales channels → Develop apps, on your Shopify store.</div>
+      <div class="settings-sub">Custom app via Shopify's Dev Dashboard (dev.shopify.com/dashboard) — the app must be in the same org as your store. Uses a client-credentials grant, refreshed automatically — no token to manually copy or renew.</div>
       <div class="field-label">Store Domain</div><input type="text" class="field-input" id="set-shopify-domain" placeholder="yourstore.myshopify.com" style="margin-bottom:8px;"/>
-      <div class="field-label">Admin API Access Token</div><input type="password" class="field-input" id="set-shopify-token" placeholder="shpat_..." style="margin-bottom:10px;"/>
+      <div class="field-label">Client ID</div><input type="text" class="field-input" id="set-shopify-client-id" style="margin-bottom:8px;"/>
+      <div class="field-label">Client Secret</div><input type="password" class="field-input" id="set-shopify-client-secret" style="margin-bottom:10px;"/>
       <button class="btn btn-primary" style="width:100%; background:#95bf47; border-color:#95bf47;" onclick="saveShopifySettings()">Save Shopify Settings</button>
     </div>
     <div class="settings-section" style="border-left:4px solid var(--orange);">
@@ -1539,7 +1540,8 @@ async function loadSettings() {
     document.getElementById('set-ebay-cert').value = s.EBAY_CERT_ID || '';
     document.getElementById('set-ebay-runame').value = s.EBAY_RUNAME || '';
     document.getElementById('set-shopify-domain').value = s.SHOPIFY_STORE_DOMAIN || '';
-    document.getElementById('set-shopify-token').value  = s.SHOPIFY_ACCESS_TOKEN || '';
+    document.getElementById('set-shopify-client-id').value = s.SHOPIFY_CLIENT_ID || '';
+    document.getElementById('set-shopify-client-secret').value = s.SHOPIFY_CLIENT_SECRET || '';
     document.getElementById('set-ebay-token').value= s.EBAY_USER_TOKEN || '';
     const connected = !!s.EBAY_REFRESH_TOKEN;
     document.getElementById('ebay-connect-status').innerHTML = connected
@@ -1581,7 +1583,8 @@ function connectEbayAccount() {
 async function saveShopifySettings() {
   const pairs = [
     ['SHOPIFY_STORE_DOMAIN', 'set-shopify-domain'],
-    ['SHOPIFY_ACCESS_TOKEN', 'set-shopify-token'],
+    ['SHOPIFY_CLIENT_ID', 'set-shopify-client-id'],
+    ['SHOPIFY_CLIENT_SECRET', 'set-shopify-client-secret'],
   ];
   for (const [k, id] of pairs) {
     const v = document.getElementById(id).value.trim();
