@@ -263,6 +263,10 @@ select.field-input { background: #fff; color: #0f172a; }
     <div class="action-bar">
       <button class="btn" onclick="selectAll()">☑ Select All</button>
       <button class="btn" onclick="deselectAll()">☐ Deselect</button>
+      <div style="display:flex;align-items:center;gap:6px;" id="batch-hours-wrap" title="Hours from now for batch eBay scheduling">
+        <input type="number" class="field-input" id="batch-ebay-hours" value="2" min="0.5" step="0.5" style="width:64px;padding:6px 8px;"/>
+        <span style="font-size:12px;color:var(--muted);">hrs</span>
+      </div>
       <button class="btn btn-primary" id="submit-ebay-btn" style="display:none" onclick="submitSelected()">⏰ Schedule to eBay</button>
       <button class="btn btn-primary" id="submit-shopify-btn" style="display:none;background:#95bf47;border-color:#95bf47;" onclick="submitSelectedToShopify()">🛍️ Publish to Shopify</button>
       <button class="btn" id="archive-selected-btn" style="display:none;color:var(--red);border-color:#991b1b;" onclick="archiveSelected()">🗄️ Archive Selected</button>
@@ -1076,13 +1080,14 @@ async function confirmClearBatch() {
 async function submitSelected() {
   if (!selected.size) return;
   const ids = Array.from(selected);
-  const ok = confirm(`Schedule ${ids.length} item(s) to go live on eBay in 24 hours?\n\nSchedule is the only bulk action here — nothing publishes immediately. You can still adjust or cancel any item individually before it goes live.`);
+  const hours = parseFloat(document.getElementById('batch-ebay-hours').value) || 2;
+  const ok = confirm(`Schedule ${ids.length} item(s) to go live on eBay in ${hours} hour(s)?\n\nSchedule is the only bulk action here — nothing publishes immediately. You can still adjust or cancel any item individually before it goes live.`);
   if (!ok) return;
   toast(`Scheduling ${ids.length} item(s)...`);
   let success = 0, failed = 0;
   for (const id of ids) {
     try {
-      const r = await api('POST', `/api/listings/${id}/ebay`, {mode: 'schedule', hours_from_now: 24});
+      const r = await api('POST', `/api/listings/${id}/ebay`, {mode: 'schedule', hours_from_now: hours});
       const l = listings.find(x => String(x.id) === id);
       if (l) { l.ebay_status = r.status; l.ebay_item_id = r.item_id; l.ebay_scheduled_at = r.scheduled_at; }
       success++;
