@@ -736,7 +736,7 @@ function renderTiles() {
       : '';
 
     return `<div class="tile${isSel?' selected':''}${ebayDraft?' ebay-draft':''}" id="tile-${l.id}" data-photos='${JSON.stringify(photos)}' data-photo-idx="0" onclick="handleTileClick(event,'${l.id}')">
-      <div class="tile-photo" onclick="openModal('${l.id}')">
+      <div class="tile-photo" onclick="handlePhotoClick('${l.id}')">
         ${photoHtml}
         ${photoNavHtml}
         <div class="tile-badge-tl" style="color:${condCol};">${isNew?'NEW':'USED'}</div>
@@ -998,6 +998,13 @@ function cyclePhoto(id, dir) {
   if (img) img.src = photos[idx].thumb;
   const counter = document.getElementById('photo-counter-' + id);
   if (counter) counter.textContent = (idx + 1) + '/' + photos.length;
+}
+
+function handlePhotoClick(id) {
+  // While actively selecting a batch, clicking a photo toggles it too instead of opening the modal.
+  // With nothing selected yet, photo click opens the modal as usual.
+  if (selected.size > 0) { toggleSelect(id); return; }
+  openModal(id);
 }
 
 function handleTileClick(e, id) {
