@@ -46,10 +46,11 @@ async def auto_fill_worker():
     while True:
         try:
             res = supabase.table("listings").select("id,title,brand,ebay_category_id,business_id")\
-                .neq("status", "archived").limit(50).execute()
+                .neq("status", "archived")\
+                .or_("ebay_category_id.is.null,ebay_category_id.eq.0,ebay_category_id.eq.")\
+                .limit(50).execute()
             rows = [r for r in (res.data or []) if needs_category(r)]
-            if rows:
-                print(f"auto_fill_worker: found {len(rows)} listing(s) needing a category")
+            print(f"auto_fill_worker: query returned {len(res.data or [])} row(s), {len(rows)} need a category")
             for row in rows:
                 title = row.get("title") or ""
                 biz_id = row.get("business_id")
