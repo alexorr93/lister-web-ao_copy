@@ -476,6 +476,13 @@ select.field-input { background: #fff; color: #0f172a; }
       <button class="btn btn-primary" style="width:100%; background:var(--green,#2e8b57);" onclick="connectEbayAccount()">🔗 Connect eBay Account</button>
       <input type="hidden" id="set-ebay-token"/>
     </div>
+    <div class="settings-section" style="border-left:4px solid #95bf47;">
+      <div class="settings-title">🛍️ Shopify API Credentials</div>
+      <div class="settings-sub">Custom app Admin API access token. Create one under Settings → Apps and sales channels → Develop apps, on your Shopify store.</div>
+      <div class="field-label">Store Domain</div><input type="text" class="field-input" id="set-shopify-domain" placeholder="yourstore.myshopify.com" style="margin-bottom:8px;"/>
+      <div class="field-label">Admin API Access Token</div><input type="password" class="field-input" id="set-shopify-token" placeholder="shpat_..." style="margin-bottom:10px;"/>
+      <button class="btn btn-primary" style="width:100%; background:#95bf47; border-color:#95bf47;" onclick="saveShopifySettings()">Save Shopify Settings</button>
+    </div>
     <div class="settings-section" style="border-left:4px solid var(--orange);">
       <div class="settings-title">📦 eBay Listing Setup</div>
       <div class="settings-sub">Required before any listing can publish or schedule. Find policy IDs under Account → Business Policies on eBay.</div>
@@ -556,6 +563,10 @@ select.field-input { background: #fff; color: #0f172a; }
           <button class="btn" style="font-size:11px;" onclick="submitToEbay('draft')">📝 Save as Draft</button>
           <button class="btn" style="font-size:11px;color:var(--amber);border-color:var(--amber);" onclick="confirmPublishNow()">🚀 Publish Now</button>
         </div>
+      </div>
+      <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:14px;">
+        <div id="modal-shopify-status" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></div>
+        <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px;background:#95bf47;border-color:#95bf47;" onclick="publishToShopify()">🛍️ Publish to Shopify</button>
       </div>
       <button class="modal-close" onclick="saveModal()">💾 Save & Close</button>
     </div>
@@ -1246,6 +1257,21 @@ async function submitToEbay(mode) {
   }
 }
 
+async function publishToShopify() {
+  if (!modalItemId) return;
+  toast('Publishing to Shopify...', 'success');
+  document.getElementById('modal-shopify-status').textContent = 'Publishing...';
+  try {
+    const r = await api('POST', `/api/listings/${modalItemId}/shopify-publish`);
+    document.getElementById('modal-shopify-status').innerHTML =
+      `<span style="color:#95bf47;">✅ Live on Shopify (product ${r.product_id})</span>`;
+    toast('Published to Shopify ✓');
+  } catch(e) {
+    document.getElementById('modal-shopify-status').innerHTML = `<span style="color:var(--red,#c0392b);">❌ ${e.message}</span>`;
+    toast('Shopify publish failed: ' + e.message, 'error');
+  }
+}
+
 function closeModal(e) {
   if (!e || e.target === document.getElementById('modal')) {
     if (modalDirty) saveModal(); else document.getElementById('modal').classList.remove('open');
@@ -1512,6 +1538,8 @@ async function loadSettings() {
     document.getElementById('set-ebay-dev').value  = s.EBAY_DEV_ID || '';
     document.getElementById('set-ebay-cert').value = s.EBAY_CERT_ID || '';
     document.getElementById('set-ebay-runame').value = s.EBAY_RUNAME || '';
+    document.getElementById('set-shopify-domain').value = s.SHOPIFY_STORE_DOMAIN || '';
+    document.getElementById('set-shopify-token').value  = s.SHOPIFY_ACCESS_TOKEN || '';
     document.getElementById('set-ebay-token').value= s.EBAY_USER_TOKEN || '';
     const connected = !!s.EBAY_REFRESH_TOKEN;
     document.getElementById('ebay-connect-status').innerHTML = connected
@@ -1548,6 +1576,18 @@ async function saveEbaySettings() {
 
 function connectEbayAccount() {
   window.open('/api/ebay/oauth/start', '_blank');
+}
+
+async function saveShopifySettings() {
+  const pairs = [
+    ['SHOPIFY_STORE_DOMAIN', 'set-shopify-domain'],
+    ['SHOPIFY_ACCESS_TOKEN', 'set-shopify-token'],
+  ];
+  for (const [k, id] of pairs) {
+    const v = document.getElementById(id).value.trim();
+    if (v) await api('POST', '/api/settings', {key:k, value:v});
+  }
+  toast('Shopify settings saved ✓');
 }
 
 async function saveEbayListingSettings() {

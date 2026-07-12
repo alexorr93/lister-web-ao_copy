@@ -2672,6 +2672,85 @@ async def ebay_oauth_callback(code: str = None, state: str = None, error: str = 
     save_ebay_setting(business_id, "EBAY_REFRESH_TOKEN", data["refresh_token"])
     return HTMLResponse("<h3>eBay account connected \u2705</h3><p>You can close this tab and go back to Lister AI.</p>")
 
+# ── SHOPIFY ───────────────────────────────────────────────────── #
+
+def push_listing_to_shopify(listing: dict) -> dict:
+    """Creates an active product on Shopify via the Admin REST API using a
+    custom-app access token (no OAuth/expiry to manage, unlike eBay)."""
+    import requests as _req
+
+    biz_id = listing.get("business_id")
+    if not biz_id:
+        raise Exception("Listing has no business_id — cannot look up Shopify settings safely")
+    settings = get_ebay_settings(biz_id)  # generic per-business key/value store, not eBay-specific
+    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip()
+    token = (settings.get("SHOPIFY_ACCESS_TOKEN", "") or "").strip()
+    if not domain or not token:
+        raise Exception("Shopify not connected — set Store Domain and Access Token in Settings")
+    domain = domain.replace("https://", "").replace("http://", "").strip("/")
+    api_base = f"https://{domain}/admin/api/2024-10"
+
+    title = (listing.get("title") or "Untitled item")[:255]
+    desc  = listing.get("description") or EBAY_DESCRIPTION
+    price = float(listing.get("price") or 0)
+    qty   = int(listing.get("quantity") or 1)
+    brand = (listing.get("brand") or "").strip() or "Unbranded"
+    sku   = listing.get("ebay_sku") or f"lister-{listing['id']}"
+    pid   = str(listing.get("photo_id") or "")
+    images = [{"src": photo_url(pid)}] if pid else []
+
+    body = {
+        "product": {
+            "title": title,
+            "body_html": desc,
+            "vendor": brand,
+            "status": "active",
+            "images": images,
+            "variants": [{
+                "price": f"{price:.2f}",
+                "sku": sku,
+                "inventory_management": "shopify",
+                "inventory_quantity": qty,
+            }],
+        }
+    }
+    headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
+    r = _req.post(f"{api_base}/products.json", headers=headers, json=body, timeout=20)
+    if r.status_code not in (200, 201):
+        raise Exception(f"Shopify product create failed ({r.status_code}): {r.text[:400]}")
+    data = r.json().get("product", {})
+    return {"product_id": data.get("id"), "status": data.get("status"), "handle": data.get("handle")}
+
+@app.post("/api/listings/{item_id}/shopify-publish")
+async def api_shopify_publish(item_id: str, request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    try:
+        res = supabase.table("listings").select("*").eq("id", item_id).limit(1).execute()
+        if not res.data:
+            raise HTTPException(404, "Listing not found")
+        listing = res.data[0]
+        result = push_listing_to_shopify(listing)
+        try:
+            supabase.table("listings").update({
+                "shopify_product_id": str(result.get("product_id") or ""),
+                "shopify_status": result.get("status") or "active",
+                "shopify_error": None,
+            }).eq("id", item_id).execute()
+        except Exception as col_err:
+            # shopify_* columns may not exist yet on this Supabase project
+            print(f"shopify-publish: product created ({result}) but failed to save status columns: {col_err}")
+        return {"ok": True, **result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            supabase.table("listings").update({"shopify_status": "failed", "shopify_error": str(e)}).eq("id", item_id).execute()
+        except Exception:
+            pass
+        raise HTTPException(500, str(e))
+
 # ── SETTINGS ──────────────────────────────────────────────────── #
 
 @app.get("/api/settings")
