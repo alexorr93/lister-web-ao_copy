@@ -112,6 +112,7 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tile-photo-placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; color: #3d4663; }
 .tile-badge-tl { position: absolute; top: 7px; left: 7px; background: rgba(0,0,0,0.65); border-radius: 5px; padding: 2px 7px; font-size: 9px; font-weight: 700; }
 .tile-badge-tr { position: absolute; top: 7px; right: 7px; }
+.tile-mpn-flag { position: absolute; top: 0; right: 0; width: 16px; height: 16px; background: #dc2626; border-radius: 0 12px 0 10px; z-index: 5; cursor: pointer; }
 .tile-price-overlay { position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(transparent, rgba(0,0,0,0.85)); padding: 28px 10px 8px; }
 .tile-price-main { color: #fff; font-size: 22px; font-weight: 900; letter-spacing: -0.5px; line-height: 1; }
 .tile-price-ref { color: #94a3b8; font-size: 10px; font-weight: 600; margin-top: 2px; }
@@ -555,6 +556,11 @@ select.field-input { background: #fff; color: #0f172a; }
           <div class="field-label">Brand (for eBay item specifics)</div>
           <input type="text" class="field-input" id="modal-brand-input" placeholder="e.g. SURSUM"/>
         </div>
+        <div style="margin-bottom:8px;">
+          <div class="field-label">MPN (for eBay item specifics)</div>
+          <input type="text" class="field-input" id="modal-mpn-input" placeholder="e.g. 2CDS271337R0217 — leave blank to auto-guess"/>
+          <div id="modal-mpn-warn" style="display:none;font-size:11px;color:var(--red,#dc2626);margin-top:4px;">⚠️ Last submitted as "Does Not Apply" — eBay may want a real MPN here</div>
+        </div>
         <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);margin-bottom:8px;cursor:pointer;">
           <input type="checkbox" id="modal-broad-category"> Search all categories (not just Business & Industrial / Motors)
         </label>
@@ -741,6 +747,7 @@ function renderTiles() {
         ${photoNavHtml}
         <div class="tile-badge-tl" style="color:${condCol};">${isNew?'NEW':'USED'}</div>
         <div class="tile-badge-tr">${statusBadge}</div>
+        ${l.ebay_mpn_is_fallback ? `<div class="tile-mpn-flag" title="eBay MPN set to &quot;Does Not Apply&quot; — click to fix" onclick="event.stopPropagation();openModal('${l.id}')"></div>` : ''}
         <div class="tile-price-overlay">
           <div class="tile-price-main">$${l.price.toFixed(2)}</div>
           ${refs ? `<div class="tile-price-ref">${refs}</div>` : ''}
@@ -1189,6 +1196,8 @@ function openModal(id) {
   document.getElementById('modal-refs').textContent  = refs;
   document.getElementById('modal-title-input').value = l.title || '';
   document.getElementById('modal-brand-input').value = l.brand || guessBrand(l.title || '');
+  document.getElementById('modal-mpn-input').value = (l.ebay_mpn_is_fallback ? '' : (l.ebay_mpn || ''));
+  document.getElementById('modal-mpn-warn').style.display = l.ebay_mpn_is_fallback ? 'block' : 'none';
   document.getElementById('modal-price-input').value = l.price.toFixed(2);
   document.getElementById('modal-cond-input').value  = l.condition || 'used';
   document.getElementById('modal-desc-input').value = l.description || window._defaultDesc || '';
@@ -1276,16 +1285,19 @@ async function submitToEbay(mode) {
   if (!modalItemId) return;
   const hours = mode === 'schedule' ? parseFloat(document.getElementById('modal-ebay-hours').value) || 24 : null;
   const brand = document.getElementById('modal-brand-input').value.trim() || null;
+  const mpn = document.getElementById('modal-mpn-input').value.trim() || null;
   const label = mode === 'draft' ? 'Saving draft' : mode === 'now' ? 'Publishing' : 'Scheduling';
   toast(label + '...', 'success');
   try {
-    const r = await api('POST', `/api/listings/${modalItemId}/ebay`, {mode, hours_from_now: hours, brand});
+    const r = await api('POST', `/api/listings/${modalItemId}/ebay`, {mode, hours_from_now: hours, brand, mpn});
     const l = listings.find(x => x.id === modalItemId);
     if (l) {
       l.ebay_status = r.status;
       l.ebay_item_id = r.item_id;
       l.ebay_scheduled_at = r.scheduled_at;
       l.brand = r.brand;
+      l.ebay_mpn = r.mpn;
+      l.ebay_mpn_is_fallback = r.mpn_is_fallback;
     }
     if (mode === 'draft') toast('Saved as eBay draft ✓');
     else if (mode === 'now') toast('Published to eBay ✓');

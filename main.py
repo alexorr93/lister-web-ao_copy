@@ -189,7 +189,7 @@ def ensure_ebay_location(token: str, location_key: str, zip_code: str, country: 
 def ebay_condition(cond: str) -> str:
     return "NEW" if (cond or "").lower() == "new" else "USED_GOOD"
 
-def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None, brand_override: str = None) -> dict:
+def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None, brand_override: str = None, mpn_override: str = None) -> dict:
     """
     mode: 'draft' | 'now' | 'schedule'
     Returns dict with offer_id, item_id (if published), status, scheduled_at
@@ -235,16 +235,19 @@ def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None,
     # eBay requires SOME MPN value in many categories — if we can't guess one, send their
     # standard "Does Not Apply" placeholder rather than omitting the aspect entirely, since
     # a missing BrandMPN aspect makes publishOffer fail outright in those categories.
-    mpn = None
-    alnum_tokens = [
-        w.strip(",.;:-") for w in title.split()
-        if w.lower().strip(",.;:-") != brand.lower()
-        and any(c.isdigit() for c in w) and any(c.isalpha() for c in w)
-    ]
-    if alnum_tokens:
-        mpn = max(alnum_tokens, key=len)
+    mpn = (mpn_override or "").strip() or None
+    mpn_is_fallback = False
+    if not mpn:
+        alnum_tokens = [
+            w.strip(",.;:-") for w in title.split()
+            if w.lower().strip(",.;:-") != brand.lower()
+            and any(c.isdigit() for c in w) and any(c.isalpha() for c in w)
+        ]
+        if alnum_tokens:
+            mpn = max(alnum_tokens, key=len)
     if not mpn:
         mpn = "Does Not Apply"
+        mpn_is_fallback = True
 
     product_data = {
         "title": title,
@@ -303,7 +306,7 @@ def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None,
             raise Exception(f"createOffer failed: {r.status_code} {r.text}")
         offer_id = r.json().get("offerId")
 
-    result = {"offer_id": offer_id, "sku": sku, "item_id": None, "status": "draft", "scheduled_at": None, "brand": brand}
+    result = {"offer_id": offer_id, "sku": sku, "item_id": None, "status": "draft", "scheduled_at": None, "brand": brand, "mpn": mpn, "mpn_is_fallback": mpn_is_fallback}
 
     if mode == "draft":
         return result
@@ -756,6 +759,7 @@ class EbaySubmit(BaseModel):
     mode: str  # 'draft' | 'now' | 'schedule'
     hours_from_now: Optional[float] = None
     brand: Optional[str] = None
+    mpn: Optional[str] = None
 
 @app.post("/api/listings/{item_id}/ebay")
 async def submit_to_ebay(item_id: str, body: EbaySubmit, request: Request):
@@ -767,7 +771,7 @@ async def submit_to_ebay(item_id: str, body: EbaySubmit, request: Request):
         if not res.data:
             raise HTTPException(404, "Listing not found")
         listing = res.data[0]
-        result = push_listing_to_ebay(listing, body.mode, body.hours_from_now, body.brand)
+        result = push_listing_to_ebay(listing, body.mode, body.hours_from_now, body.brand, body.mpn)
         update = {
             "ebay_offer_id": result["offer_id"],
             "ebay_sku": result["sku"],
@@ -779,7 +783,16 @@ async def submit_to_ebay(item_id: str, body: EbaySubmit, request: Request):
             update["ebay_item_id"] = result["item_id"]
         if result["scheduled_at"]:
             update["ebay_scheduled_at"] = result["scheduled_at"]
-        supabase.table("listings").update(update).eq("id", item_id).execute()
+        try:
+            update["ebay_mpn"] = result.get("mpn")
+            update["ebay_mpn_is_fallback"] = result.get("mpn_is_fallback", False)
+            supabase.table("listings").update(update).eq("id", item_id).execute()
+        except Exception:
+            # ebay_mpn / ebay_mpn_is_fallback columns may not exist on this Supabase project yet —
+            # retry without them so the actual eBay submission still gets saved
+            update.pop("ebay_mpn", None)
+            update.pop("ebay_mpn_is_fallback", None)
+            supabase.table("listings").update(update).eq("id", item_id).execute()
         return {"ok": True, **result}
     except HTTPException:
         raise
