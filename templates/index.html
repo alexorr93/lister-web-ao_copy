@@ -264,6 +264,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <button class="btn" onclick="selectAll()">☑ Select All</button>
       <button class="btn" onclick="deselectAll()">☐ Deselect</button>
       <button class="btn btn-primary" id="submit-ebay-btn" style="display:none" onclick="submitSelected()">⏰ Schedule to eBay</button>
+      <button class="btn btn-primary" id="submit-shopify-btn" style="display:none;background:#95bf47;border-color:#95bf47;" onclick="submitSelectedToShopify()">🛍️ Publish to Shopify</button>
       <button class="btn" id="archive-selected-btn" style="display:none;color:var(--red);border-color:#991b1b;" onclick="archiveSelected()">🗄️ Archive Selected</button>
       <div class="spacer"></div>
       <button class="btn btn-danger" onclick="confirmClearBatch()">🗑️ Clear Batch</button>
@@ -1010,6 +1011,9 @@ function updateSubmitBtn() {
   const btn = document.getElementById('submit-ebay-btn');
   btn.style.display = selected.size > 0 ? 'inline-block' : 'none';
   btn.textContent = `⏰ Schedule ${selected.size} to eBay`;
+  const shopBtn = document.getElementById('submit-shopify-btn');
+  shopBtn.style.display = selected.size > 0 ? 'inline-block' : 'none';
+  shopBtn.textContent = `🛍️ Publish ${selected.size} to Shopify`;
   const archBtn = document.getElementById('archive-selected-btn');
   archBtn.style.display = selected.size > 0 ? 'inline-block' : 'none';
   archBtn.textContent = `🗄️ Archive ${selected.size} Selected`;
@@ -1079,6 +1083,22 @@ async function submitSelected() {
   }
   renderTiles();
   toast(`Scheduled ${success} item(s)${failed ? ', ' + failed + ' failed' : ''} ✓`);
+}
+
+async function submitSelectedToShopify() {
+  if (!selected.size) return;
+  const ids = Array.from(selected);
+  const ok = confirm(`Publish ${ids.length} item(s) live to Shopify now?\n\nThis publishes immediately (active), separately from anything sent to eBay.`);
+  if (!ok) return;
+  toast(`Publishing ${ids.length} item(s) to Shopify...`);
+  let success = 0, failed = 0;
+  for (const id of ids) {
+    try {
+      await api('POST', `/api/listings/${id}/shopify-publish`);
+      success++;
+    } catch(e) { failed++; }
+  }
+  toast(`Published ${success} item(s) to Shopify${failed ? ', ' + failed + ' failed' : ''} ✓`);
 }
 
 async function deleteItem(id) {
