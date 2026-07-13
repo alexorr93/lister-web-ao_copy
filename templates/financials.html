@@ -77,6 +77,8 @@ tr:last-child td { border-bottom: none; }
       <button class="btn" onclick="setRange(7)">Last 7d</button>
       <button class="btn" onclick="setRange(30)">Last 30d</button>
       <button class="btn" onclick="setRange(90)">Last 90d</button>
+      <button class="btn" onclick="setThisMonth()">This Month</button>
+      <button class="btn" onclick="setLastMonth()">Last Month</button>
     </div>
     <div>
       <div class="field-label">Lot</div>
@@ -84,6 +86,13 @@ tr:last-child td { border-bottom: none; }
         <option value="">All Lots</option>
       </select>
     </div>
+    <div>
+      <div class="field-label">Search SKU</div>
+      <input type="text" class="field-input" id="sku-search" placeholder="e.g. RJ, M64" oninput="renderTable()"/>
+    </div>
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;cursor:pointer;padding-bottom:8px;">
+      <input type="checkbox" id="net-toggle" checked onchange="renderTable()"/> Net (All Fees)
+    </label>
   </div>
 
   <div id="error-area"></div>
@@ -91,7 +100,7 @@ tr:last-child td { border-bottom: none; }
   <div class="summary-row" id="summary-row" style="display:none;">
     <div class="summary-card"><div class="num" id="sum-orders">0</div><div class="label">Order Lines</div></div>
     <div class="summary-card"><div class="num" id="sum-qty">0</div><div class="label">Units Sold</div></div>
-    <div class="summary-card"><div class="num" id="sum-revenue">$0</div><div class="label">Total Revenue</div></div>
+    <div class="summary-card"><div class="num" id="sum-revenue">$0</div><div class="label" id="sum-revenue-label">Total Net</div></div>
   </div>
 
   <div id="table-area"><div class="empty">Pick a date range and click Apply.</div></div>
@@ -107,7 +116,24 @@ function setRange(days) {
   loadFinancials();
 }
 
-let sortKey = 'total_revenue', sortDir = -1;
+function setThisMonth() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  document.getElementById('start-date').value = start.toISOString().slice(0,10);
+  document.getElementById('end-date').value = now.toISOString().slice(0,10);
+  loadFinancials();
+}
+
+function setLastMonth() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const end = new Date(now.getFullYear(), now.getMonth(), 0); // last day of previous month
+  document.getElementById('start-date').value = start.toISOString().slice(0,10);
+  document.getElementById('end-date').value = end.toISOString().slice(0,10);
+  loadFinancials();
+}
+
+let sortKey = 'total_amount', sortDir = -1;
 let currentData = [];
 
 function lotOf(sku) {
@@ -132,17 +158,24 @@ function populateLotFilter() {
 
 function renderTable() {
   const lotFilter = document.getElementById('lot-filter').value;
-  const filtered = lotFilter ? currentData.filter(r => lotOf(r.sku) === lotFilter) : currentData;
+  const searchTerm = document.getElementById('sku-search').value.trim().toLowerCase();
+  const netMode = document.getElementById('net-toggle').checked;
+  const suffix = netMode ? 'net' : 'revenue';
+  document.getElementById('sum-revenue-label').textContent = netMode ? 'Total Net' : 'Total Revenue';
+
+  let filtered = lotFilter ? currentData.filter(r => lotOf(r.sku) === lotFilter) : currentData;
+  if (searchTerm) filtered = filtered.filter(r => r.sku.toLowerCase().includes(searchTerm));
 
   const orderLines = filtered.reduce((n, r) => n + (r.orders ? r.orders.length : 0), 0);
   const qty = filtered.reduce((n, r) => n + r.total_qty, 0);
-  const revenue = filtered.reduce((n, r) => n + r.total_revenue, 0);
+  const amount = filtered.reduce((n, r) => n + r[`total_${suffix}`], 0);
   document.getElementById('sum-orders').textContent = fmtNum(orderLines);
   document.getElementById('sum-qty').textContent = fmtNum(qty);
-  document.getElementById('sum-revenue').textContent = fmtMoney(revenue);
+  document.getElementById('sum-revenue').textContent = fmtMoney(amount);
 
+  const activeSortKey = sortKey === 'total_amount' ? `total_${suffix}` : sortKey;
   const rows = [...filtered].sort((a,b) => {
-    const v = (a[sortKey] > b[sortKey]) ? 1 : (a[sortKey] < b[sortKey] ? -1 : 0);
+    const v = (a[activeSortKey] > b[activeSortKey]) ? 1 : (a[activeSortKey] < b[activeSortKey] ? -1 : 0);
     return v * sortDir;
   });
   if (!rows.length) {
@@ -150,20 +183,21 @@ function renderTable() {
     return;
   }
   const th = (key, label) => `<th onclick="setSort('${key}')">${label}${sortKey===key ? (sortDir===1?' ▲':' ▼') : ''}</th>`;
+  const amtLabel = netMode ? 'Net $' : 'Gross $';
   let html = `<table><thead><tr>
-    ${th('sku','SKU')}${th('title','Title')}${th('ebay_qty','eBay Qty')}${th('ebay_revenue','eBay $')}
-    ${th('shopify_qty','Shopify Qty')}${th('shopify_revenue','Shopify $')}${th('total_qty','Total Qty')}${th('total_revenue','Total $')}
+    ${th('sku','SKU')}${th('title','Title')}${th('ebay_qty','eBay Qty')}${th(`ebay_${suffix}`,'eBay '+amtLabel)}
+    ${th('shopify_qty','Shopify Qty')}${th(`shopify_${suffix}`,'Shopify '+amtLabel)}${th('total_qty','Total Qty')}${th('total_amount','Total '+amtLabel)}
   </tr></thead><tbody>`;
   for (const r of rows) {
     html += `<tr>
       <td class="sku">${escapeHtml(r.sku)}</td>
       <td class="muted">${escapeHtml(r.title || '')}</td>
       <td>${r.ebay_qty ? `<span class="platform-tag ebay">eBay</span>${fmtNum(r.ebay_qty)}` : '—'}</td>
-      <td>${r.ebay_revenue ? fmtMoney(r.ebay_revenue) : '—'}</td>
+      <td>${r.ebay_qty ? fmtMoney(r[`ebay_${suffix}`]) : '—'}</td>
       <td>${r.shopify_qty ? `<span class="platform-tag shopify">Shopify</span>${fmtNum(r.shopify_qty)}` : '—'}</td>
-      <td>${r.shopify_revenue ? fmtMoney(r.shopify_revenue) : '—'}</td>
+      <td>${r.shopify_qty ? fmtMoney(r[`shopify_${suffix}`]) : '—'}</td>
       <td><b>${fmtNum(r.total_qty)}</b></td>
-      <td><b>${fmtMoney(r.total_revenue)}</b></td>
+      <td><b>${fmtMoney(r[`total_${suffix}`])}</b></td>
     </tr>`;
   }
   html += '</tbody></table>';
@@ -200,7 +234,7 @@ async function loadFinancials() {
     document.getElementById('summary-row').style.display = 'grid';
     document.getElementById('sum-orders').textContent = fmtNum(data.totals.orders);
     document.getElementById('sum-qty').textContent = fmtNum(data.totals.quantity);
-    document.getElementById('sum-revenue').textContent = fmtMoney(data.totals.revenue);
+    document.getElementById('sum-revenue').textContent = fmtMoney(data.totals.net);
 
     currentData = data.by_sku;
     populateLotFilter();

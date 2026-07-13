@@ -125,7 +125,8 @@ EBAY_ENV_KEYS = [
 EBAY_OAUTH_SCOPES = (
     "https://api.ebay.com/oauth/api_scope "
     "https://api.ebay.com/oauth/api_scope/sell.inventory "
-    "https://api.ebay.com/oauth/api_scope/sell.fulfillment"
+    "https://api.ebay.com/oauth/api_scope/sell.fulfillment "
+    "https://api.ebay.com/oauth/api_scope/sell.finances"
 )
 
 def get_ebay_settings(business_id: str) -> dict:
@@ -1144,6 +1145,7 @@ def fetch_ebay_orders(business_id: str, start_iso: str, end_iso: str) -> list:
                     "revenue": float((li.get("lineItemCost") or {}).get("value", 0) or 0),
                     "order_date": created[:10] if created else "",
                     "order_id": order.get("orderId", ""),
+                    "line_item_id": li.get("lineItemId", ""),
                 })
         total = data.get("total", 0)
         offset += 200
@@ -1151,8 +1153,50 @@ def fetch_ebay_orders(business_id: str, start_iso: str, end_iso: str) -> list:
             break
     return rows
 
+def fetch_ebay_fees_by_line_item(business_id: str, start_iso: str, end_iso: str) -> dict:
+    """Returns {(order_id, line_item_id): net_fee_amount} using eBay's Finance API —
+    the Fulfillment API (fetch_ebay_orders) only has the gross sale price, not what
+    eBay actually deducted. Sums marketplace fees (negative) across SALE and REFUND
+    transactions so callers can compute true net = gross_revenue + fees_by_line_item."""
+    import requests as _req
+    token = get_ebay_access_token(business_id)
+    fees = {}
+    offset = 0
+    while True:
+        r = _req.get(
+            f"{EBAY_API_BASE}/sell/finances/v1/transaction",
+            headers=ebay_headers(token, content_language=False),
+            params={
+                "filter": f"transactionDate:[{start_iso}..{end_iso}]",
+                "limit": 200,
+                "offset": offset,
+            },
+            timeout=20,
+        )
+        if r.status_code != 200:
+            raise Exception(f"eBay Finance transactions failed ({r.status_code}): {r.text[:300]}")
+        data = r.json()
+        for txn in data.get("transactions", []):
+            order_id = txn.get("orderId", "")
+            for li in txn.get("orderLineItems", []) or []:
+                line_item_id = li.get("lineItemId", "")
+                if not order_id or not line_item_id:
+                    continue
+                key = (order_id, line_item_id)
+                fee_total = 0.0
+                for fee in li.get("marketplaceFees", []) or []:
+                    fee_total += float((fee.get("amount") or {}).get("value", 0) or 0)
+                fees[key] = fees.get(key, 0.0) + fee_total
+        total = data.get("total", 0)
+        offset += 200
+        if offset >= total or not data.get("transactions"):
+            break
+    return fees
+
 def fetch_shopify_orders(business_id: str, start_iso: str, end_iso: str) -> list:
-    """Returns normalized order-line rows from Shopify's Admin API for the given date range."""
+    """Returns normalized order-line rows from Shopify's Admin API for the given date range,
+    with refunds subtracted and payment-processing fees prorated across line items
+    (Shopify only reports fees at the order/transaction level, not per line item)."""
     import requests as _req
     settings = get_ebay_settings(business_id)
     domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
@@ -1174,13 +1218,47 @@ def fetch_shopify_orders(business_id: str, start_iso: str, end_iso: str) -> list
         data = r.json()
         for order in data.get("orders", []):
             created = order.get("created_at", "")
-            for li in order.get("line_items", []):
+            order_id = order.get("id")
+
+            # Refunds are embedded in the order payload already — no extra call needed.
+            refunded_by_line = {}
+            for refund in order.get("refunds", []) or []:
+                for rli in refund.get("refund_line_items", []) or []:
+                    lid = rli.get("line_item_id")
+                    amt = float(rli.get("subtotal", 0) or 0) + float(rli.get("total_tax", 0) or 0)
+                    refunded_by_line[lid] = refunded_by_line.get(lid, 0.0) + amt
+
+            # Payment-processing fee: only available per-order (not per-line), via the
+            # transactions sub-resource. Fetch once per order, prorate across line items.
+            order_fee_total = 0.0
+            try:
+                tx_r = _req.get(f"https://{domain}/admin/api/2024-10/orders/{order_id}/transactions.json",
+                                 headers=headers, timeout=15)
+                if tx_r.status_code == 200:
+                    for tx in tx_r.json().get("transactions", []):
+                        if tx.get("kind") in ("sale", "capture") and tx.get("status") == "success":
+                            fee_str = tx.get("fee")
+                            if fee_str:
+                                order_fee_total += float(fee_str)
+            except Exception:
+                pass  # fee proration is best-effort; missing fee data shouldn't break the whole report
+
+            line_items = order.get("line_items", [])
+            order_subtotal = sum(float(li.get("price", 0) or 0) * int(li.get("quantity", 1)) for li in line_items)
+
+            for li in line_items:
+                gross = float(li.get("price", 0) or 0) * int(li.get("quantity", 1))
+                refund_amt = refunded_by_line.get(li.get("id"), 0.0)
+                fee_share = (order_fee_total * (gross / order_subtotal)) if order_subtotal > 0 else 0.0
                 rows.append({
                     "platform": "Shopify",
                     "sku": li.get("sku") or "(no SKU)",
                     "title": li.get("title", ""),
                     "quantity": int(li.get("quantity", 1)),
-                    "revenue": float(li.get("price", 0) or 0) * int(li.get("quantity", 1)),
+                    "revenue": gross,
+                    "refund": refund_amt,
+                    "fee": fee_share,
+                    "net": gross - refund_amt - fee_share,
                     "order_date": created[:10] if created else "",
                     "order_id": order.get("name", ""),
                 })
@@ -1213,8 +1291,19 @@ async def api_financials(request: Request, start: str = None, end: str = None):
 
     all_rows = []
     errors = {}
+    ebay_fees_by_line = {}
     try:
-        all_rows.extend(fetch_ebay_orders(business_id, start_iso, end_iso))
+        ebay_rows = fetch_ebay_orders(business_id, start_iso, end_iso)
+        try:
+            ebay_fees_by_line = fetch_ebay_fees_by_line_item(business_id, start_iso, end_iso)
+        except Exception as e:
+            errors["ebay_fees"] = str(e)  # fall back to gross-only for eBay if Finance API call fails
+        for row in ebay_rows:
+            fee = ebay_fees_by_line.get((row["order_id"], row["line_item_id"]), 0.0)
+            row["net"] = row["revenue"] - fee
+            row["fee"] = fee
+            row["refund"] = 0.0  # refunds show up as their own negative-amount transactions in fees above
+        all_rows.extend(ebay_rows)
     except Exception as e:
         errors["ebay"] = str(e)
     try:
@@ -1226,15 +1315,18 @@ async def api_financials(request: Request, start: str = None, end: str = None):
     for row in all_rows:
         key = row["sku"]
         if key not in by_sku:
-            by_sku[key] = {"sku": key, "title": row["title"], "ebay_qty": 0, "ebay_revenue": 0.0,
-                           "shopify_qty": 0, "shopify_revenue": 0.0, "orders": []}
+            by_sku[key] = {"sku": key, "title": row["title"], "ebay_qty": 0, "ebay_revenue": 0.0, "ebay_net": 0.0,
+                           "shopify_qty": 0, "shopify_revenue": 0.0, "shopify_net": 0.0, "orders": []}
         entry = by_sku[key]
+        net_val = row.get("net", row["revenue"])
         if row["platform"] == "eBay":
             entry["ebay_qty"] += row["quantity"]
             entry["ebay_revenue"] += row["revenue"]
+            entry["ebay_net"] += net_val
         else:
             entry["shopify_qty"] += row["quantity"]
             entry["shopify_revenue"] += row["revenue"]
+            entry["shopify_net"] += net_val
         entry["orders"].append(row)
         if not entry["title"] and row["title"]:
             entry["title"] = row["title"]
@@ -1243,9 +1335,12 @@ async def api_financials(request: Request, start: str = None, end: str = None):
     for r in results:
         r["total_qty"] = r["ebay_qty"] + r["shopify_qty"]
         r["total_revenue"] = round(r["ebay_revenue"] + r["shopify_revenue"], 2)
+        r["total_net"] = round(r["ebay_net"] + r["shopify_net"], 2)
         r["ebay_revenue"] = round(r["ebay_revenue"], 2)
         r["shopify_revenue"] = round(r["shopify_revenue"], 2)
-    results.sort(key=lambda r: r["total_revenue"], reverse=True)
+        r["ebay_net"] = round(r["ebay_net"], 2)
+        r["shopify_net"] = round(r["shopify_net"], 2)
+    results.sort(key=lambda r: r["total_net"], reverse=True)
 
     return {
         "start": start_dt.strftime("%Y-%m-%d"),
@@ -1255,6 +1350,7 @@ async def api_financials(request: Request, start: str = None, end: str = None):
             "orders": len(all_rows),
             "quantity": sum(r["quantity"] for r in all_rows),
             "revenue": round(sum(r["revenue"] for r in all_rows), 2),
+            "net": round(sum(r.get("net", r["revenue"]) for r in all_rows), 2),
         },
         "errors": errors,
     }
