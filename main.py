@@ -1200,10 +1200,16 @@ async def api_financials(request: Request, start: str = None, end: str = None):
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     import datetime as _dt
-    end_dt = _dt.datetime.fromisoformat(end) if end else _dt.datetime.utcnow()
+    now = _dt.datetime.utcnow()
+    end_dt = _dt.datetime.fromisoformat(end) if end else now
     start_dt = _dt.datetime.fromisoformat(start) if start else (end_dt - _dt.timedelta(days=30))
     start_iso = start_dt.strftime("%Y-%m-%dT00:00:00.000Z")
-    end_iso = end_dt.strftime("%Y-%m-%dT23:59:59.999Z")
+    # Requesting end-of-day on "today" is technically a future timestamp by the time eBay
+    # processes it — clamp to the actual current moment (minus a small safety margin) instead.
+    end_of_day = end_dt.replace(hour=23, minute=59, second=59, microsecond=999000)
+    safe_now = now - _dt.timedelta(seconds=30)
+    end_capped = min(end_of_day, safe_now)
+    end_iso = end_capped.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
     all_rows = []
     errors = {}
