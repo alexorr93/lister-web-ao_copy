@@ -78,6 +78,12 @@ tr:last-child td { border-bottom: none; }
       <button class="btn" onclick="setRange(30)">Last 30d</button>
       <button class="btn" onclick="setRange(90)">Last 90d</button>
     </div>
+    <div>
+      <div class="field-label">Lot</div>
+      <select class="field-input" id="lot-filter" onchange="renderTable()">
+        <option value="">All Lots</option>
+      </select>
+    </div>
   </div>
 
   <div id="error-area"></div>
@@ -104,13 +110,43 @@ function setRange(days) {
 let sortKey = 'total_revenue', sortDir = -1;
 let currentData = [];
 
+function lotOf(sku) {
+  const idx = String(sku || '').indexOf('-');
+  return idx > 0 ? sku.slice(0, idx) : '';
+}
+
+function fmtMoney(n) {
+  return '$' + Number(n || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+function fmtNum(n) {
+  return Number(n || 0).toLocaleString('en-US');
+}
+
+function populateLotFilter() {
+  const sel = document.getElementById('lot-filter');
+  const current = sel.value;
+  const lots = Array.from(new Set(currentData.map(r => lotOf(r.sku)).filter(Boolean))).sort();
+  sel.innerHTML = '<option value="">All Lots</option>' + lots.map(l => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join('');
+  if (lots.includes(current)) sel.value = current;
+}
+
 function renderTable() {
-  const rows = [...currentData].sort((a,b) => {
+  const lotFilter = document.getElementById('lot-filter').value;
+  const filtered = lotFilter ? currentData.filter(r => lotOf(r.sku) === lotFilter) : currentData;
+
+  const orderLines = filtered.reduce((n, r) => n + (r.orders ? r.orders.length : 0), 0);
+  const qty = filtered.reduce((n, r) => n + r.total_qty, 0);
+  const revenue = filtered.reduce((n, r) => n + r.total_revenue, 0);
+  document.getElementById('sum-orders').textContent = fmtNum(orderLines);
+  document.getElementById('sum-qty').textContent = fmtNum(qty);
+  document.getElementById('sum-revenue').textContent = fmtMoney(revenue);
+
+  const rows = [...filtered].sort((a,b) => {
     const v = (a[sortKey] > b[sortKey]) ? 1 : (a[sortKey] < b[sortKey] ? -1 : 0);
     return v * sortDir;
   });
   if (!rows.length) {
-    document.getElementById('table-area').innerHTML = '<div class="empty">No orders in this date range.</div>';
+    document.getElementById('table-area').innerHTML = '<div class="empty">No orders match this filter.</div>';
     return;
   }
   const th = (key, label) => `<th onclick="setSort('${key}')">${label}${sortKey===key ? (sortDir===1?' ▲':' ▼') : ''}</th>`;
@@ -122,12 +158,12 @@ function renderTable() {
     html += `<tr>
       <td class="sku">${escapeHtml(r.sku)}</td>
       <td class="muted">${escapeHtml(r.title || '')}</td>
-      <td>${r.ebay_qty ? `<span class="platform-tag ebay">eBay</span>${r.ebay_qty}` : '—'}</td>
-      <td>${r.ebay_revenue ? '$'+r.ebay_revenue.toFixed(2) : '—'}</td>
-      <td>${r.shopify_qty ? `<span class="platform-tag shopify">Shopify</span>${r.shopify_qty}` : '—'}</td>
-      <td>${r.shopify_revenue ? '$'+r.shopify_revenue.toFixed(2) : '—'}</td>
-      <td><b>${r.total_qty}</b></td>
-      <td><b>$${r.total_revenue.toFixed(2)}</b></td>
+      <td>${r.ebay_qty ? `<span class="platform-tag ebay">eBay</span>${fmtNum(r.ebay_qty)}` : '—'}</td>
+      <td>${r.ebay_revenue ? fmtMoney(r.ebay_revenue) : '—'}</td>
+      <td>${r.shopify_qty ? `<span class="platform-tag shopify">Shopify</span>${fmtNum(r.shopify_qty)}` : '—'}</td>
+      <td>${r.shopify_revenue ? fmtMoney(r.shopify_revenue) : '—'}</td>
+      <td><b>${fmtNum(r.total_qty)}</b></td>
+      <td><b>${fmtMoney(r.total_revenue)}</b></td>
     </tr>`;
   }
   html += '</tbody></table>';
@@ -162,11 +198,12 @@ async function loadFinancials() {
     }
 
     document.getElementById('summary-row').style.display = 'grid';
-    document.getElementById('sum-orders').textContent = data.totals.orders;
-    document.getElementById('sum-qty').textContent = data.totals.quantity;
-    document.getElementById('sum-revenue').textContent = '$' + data.totals.revenue.toFixed(2);
+    document.getElementById('sum-orders').textContent = fmtNum(data.totals.orders);
+    document.getElementById('sum-qty').textContent = fmtNum(data.totals.quantity);
+    document.getElementById('sum-revenue').textContent = fmtMoney(data.totals.revenue);
 
     currentData = data.by_sku;
+    populateLotFilter();
     renderTable();
   } catch(e) {
     document.getElementById('table-area').innerHTML = `<div class="empty">Error: ${escapeHtml(e.message)}</div>`;
