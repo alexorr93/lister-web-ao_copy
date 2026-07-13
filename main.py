@@ -1101,6 +1101,154 @@ async def restore_listings(request: Request, body: RestoreItems):
     except Exception as e:
         raise HTTPException(500, str(e))
 
+@app.get("/financials", response_class=HTMLResponse)
+async def financials_page(request: Request):
+    business_id, is_admin = get_business_info(request)
+    if not business_id:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("financials.html", {"request": request, "is_admin": is_admin})
+
+def fetch_ebay_orders(business_id: str, start_iso: str, end_iso: str) -> list:
+    """Returns normalized order-line rows from eBay's Fulfillment API for the given date range."""
+    import requests as _req
+    token = get_ebay_access_token(business_id)
+    rows = []
+    offset = 0
+    while True:
+        r = _req.get(
+            f"{EBAY_API_BASE}/sell/fulfillment/v1/order",
+            headers=ebay_headers(token, content_language=False),
+            params={
+                "filter": f"creationdate:[{start_iso}..{end_iso}]",
+                "limit": 200,
+                "offset": offset,
+            },
+            timeout=20,
+        )
+        if r.status_code != 200:
+            raise Exception(f"eBay getOrders failed ({r.status_code}): {r.text[:300]}")
+        data = r.json()
+        for order in data.get("orders", []):
+            created = order.get("creationDate", "")
+            for li in order.get("lineItems", []):
+                rows.append({
+                    "platform": "eBay",
+                    "sku": li.get("sku") or "(no SKU)",
+                    "title": li.get("title", ""),
+                    "quantity": int(li.get("quantity", 1)),
+                    "revenue": float((li.get("lineItemCost") or {}).get("value", 0) or 0),
+                    "order_date": created[:10] if created else "",
+                    "order_id": order.get("orderId", ""),
+                })
+        total = data.get("total", 0)
+        offset += 200
+        if offset >= total or not data.get("orders"):
+            break
+    return rows
+
+def fetch_shopify_orders(business_id: str, start_iso: str, end_iso: str) -> list:
+    """Returns normalized order-line rows from Shopify's Admin API for the given date range."""
+    import requests as _req
+    settings = get_ebay_settings(business_id)
+    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+    if not domain:
+        return []
+    token = get_shopify_access_token(business_id)
+    rows = []
+    url = f"https://{domain}/admin/api/2024-10/orders.json"
+    params = {"status": "any", "created_at_min": start_iso, "created_at_max": end_iso, "limit": 250}
+    headers = {"X-Shopify-Access-Token": token}
+    while url:
+        r = _req.get(url, headers=headers, params=params, timeout=20)
+        if r.status_code == 401:
+            token = get_shopify_access_token(business_id, force_refresh=True)
+            headers["X-Shopify-Access-Token"] = token
+            r = _req.get(url, headers=headers, params=params, timeout=20)
+        if r.status_code != 200:
+            raise Exception(f"Shopify orders fetch failed ({r.status_code}): {r.text[:300]}")
+        data = r.json()
+        for order in data.get("orders", []):
+            created = order.get("created_at", "")
+            for li in order.get("line_items", []):
+                rows.append({
+                    "platform": "Shopify",
+                    "sku": li.get("sku") or "(no SKU)",
+                    "title": li.get("title", ""),
+                    "quantity": int(li.get("quantity", 1)),
+                    "revenue": float(li.get("price", 0) or 0) * int(li.get("quantity", 1)),
+                    "order_date": created[:10] if created else "",
+                    "order_id": order.get("name", ""),
+                })
+        # Shopify cursor pagination via Link header
+        link = r.headers.get("Link", "")
+        next_url = None
+        for part in link.split(","):
+            if 'rel="next"' in part:
+                next_url = part.split(";")[0].strip().strip("<>")
+        url = next_url
+        params = None  # next_url already has query params baked in
+    return rows
+
+@app.get("/api/financials")
+async def api_financials(request: Request, start: str = None, end: str = None):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import datetime as _dt
+    end_dt = _dt.datetime.fromisoformat(end) if end else _dt.datetime.utcnow()
+    start_dt = _dt.datetime.fromisoformat(start) if start else (end_dt - _dt.timedelta(days=30))
+    start_iso = start_dt.strftime("%Y-%m-%dT00:00:00.000Z")
+    end_iso = end_dt.strftime("%Y-%m-%dT23:59:59.999Z")
+
+    all_rows = []
+    errors = {}
+    try:
+        all_rows.extend(fetch_ebay_orders(business_id, start_iso, end_iso))
+    except Exception as e:
+        errors["ebay"] = str(e)
+    try:
+        all_rows.extend(fetch_shopify_orders(business_id, start_iso, end_iso))
+    except Exception as e:
+        errors["shopify"] = str(e)
+
+    by_sku = {}
+    for row in all_rows:
+        key = row["sku"]
+        if key not in by_sku:
+            by_sku[key] = {"sku": key, "title": row["title"], "ebay_qty": 0, "ebay_revenue": 0.0,
+                           "shopify_qty": 0, "shopify_revenue": 0.0, "orders": []}
+        entry = by_sku[key]
+        if row["platform"] == "eBay":
+            entry["ebay_qty"] += row["quantity"]
+            entry["ebay_revenue"] += row["revenue"]
+        else:
+            entry["shopify_qty"] += row["quantity"]
+            entry["shopify_revenue"] += row["revenue"]
+        entry["orders"].append(row)
+        if not entry["title"] and row["title"]:
+            entry["title"] = row["title"]
+
+    results = list(by_sku.values())
+    for r in results:
+        r["total_qty"] = r["ebay_qty"] + r["shopify_qty"]
+        r["total_revenue"] = round(r["ebay_revenue"] + r["shopify_revenue"], 2)
+        r["ebay_revenue"] = round(r["ebay_revenue"], 2)
+        r["shopify_revenue"] = round(r["shopify_revenue"], 2)
+    results.sort(key=lambda r: r["total_revenue"], reverse=True)
+
+    return {
+        "start": start_dt.strftime("%Y-%m-%d"),
+        "end": end_dt.strftime("%Y-%m-%d"),
+        "by_sku": results,
+        "totals": {
+            "orders": len(all_rows),
+            "quantity": sum(r["quantity"] for r in all_rows),
+            "revenue": round(sum(r["revenue"] for r in all_rows), 2),
+        },
+        "errors": errors,
+    }
+
 @app.get("/archive", response_class=HTMLResponse)
 async def archive_page(request: Request):
     business_id, is_admin = get_business_info(request)

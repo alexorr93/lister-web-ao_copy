@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Financials — Lister AI</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<style>
+:root {
+  --bg: #1a0611; --card: #1e2535; --border: #2d3348; --text: #f1f5f9; --muted: #64748b; --accent: #2563eb; --green: #16a34a; --red: #dc2626;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.nav { background: var(--card); border-bottom: 1px solid var(--border); padding: 0 16px; display: flex; align-items: center; gap: 6px; overflow-x: auto; height: 52px; position: sticky; top: 0; z-index: 100; }
+.nav-logo { font-weight: 800; font-size: 15px; color: var(--text); margin-right: 8px; white-space: nowrap; }
+.nav-btn { padding: 6px 14px; border-radius: 8px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; background: transparent; color: var(--muted); transition: all 0.15s; text-decoration: none; display: inline-block; }
+.nav-btn:hover { background: #1e2535; color: var(--text); }
+.nav-btn.active { color: #fff; background: var(--accent); }
+.nav-spacer { flex: 1; }
+.nav-download { padding: 6px 12px; background: #1e2535; border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; }
+.main { max-width: 1300px; margin: 0 auto; padding: 20px 16px; }
+h1 { font-size: 20px; margin-bottom: 4px; }
+.sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+.filter-bar { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin-bottom: 18px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.field-label { font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; margin-bottom: 4px; }
+.field-input { background: #fff; color: #111; border: none; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.btn { padding: 9px 16px; border-radius: 8px; border: 1px solid var(--border); background: #1e2535; color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; }
+.btn:hover { background: var(--border); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.quick-range { display: flex; gap: 6px; }
+.quick-range button { padding: 8px 10px; font-size: 12px; }
+.summary-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; }
+.summary-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+.summary-card .num { font-size: 22px; font-weight: 800; }
+.summary-card .label { font-size: 12px; color: var(--muted); margin-top: 2px; }
+table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+th { text-align: left; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; padding: 10px 12px; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }
+th:hover { color: var(--text); }
+td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid var(--border); }
+tr:last-child td { border-bottom: none; }
+.sku { font-weight: 700; font-family: monospace; }
+.platform-tag { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; margin-right: 4px; }
+.platform-tag.ebay { background: #0064d2; color: #fff; }
+.platform-tag.shopify { background: #95bf47; color: #fff; }
+.muted { color: var(--muted); }
+.error-banner { background: rgba(220,38,38,0.15); border: 1px solid var(--red); color: #fca5a5; border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; }
+.empty { text-align: center; padding: 40px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-logo">📦 Lister AI</div>
+  <a class="nav-btn" href="/">📊 Dashboard</a>
+  <a class="nav-btn" href="/categories">📂 Categories</a>
+  <a class="nav-btn" href="/archive">🗄️ Archive</a>
+  <a class="nav-btn active" href="/financials">💰 Financials</a>
+  <div class="nav-spacer"></div>
+  <a class="nav-download" href="/logout" style="color:#ef4444;border-color:#7f1d1d;">⏻ Logout</a>
+</nav>
+
+<div class="main">
+  <h1>Financials</h1>
+  <div class="sub">Orders by SKU across eBay and Shopify, for the selected date range.</div>
+
+  <div class="filter-bar">
+    <div>
+      <div class="field-label">Start Date</div>
+      <input type="date" class="field-input" id="start-date"/>
+    </div>
+    <div>
+      <div class="field-label">End Date</div>
+      <input type="date" class="field-input" id="end-date"/>
+    </div>
+    <button class="btn btn-primary" onclick="loadFinancials()">Apply</button>
+    <div class="quick-range">
+      <button class="btn" onclick="setRange(7)">Last 7d</button>
+      <button class="btn" onclick="setRange(30)">Last 30d</button>
+      <button class="btn" onclick="setRange(90)">Last 90d</button>
+    </div>
+  </div>
+
+  <div id="error-area"></div>
+
+  <div class="summary-row" id="summary-row" style="display:none;">
+    <div class="summary-card"><div class="num" id="sum-orders">0</div><div class="label">Order Lines</div></div>
+    <div class="summary-card"><div class="num" id="sum-qty">0</div><div class="label">Units Sold</div></div>
+    <div class="summary-card"><div class="num" id="sum-revenue">$0</div><div class="label">Total Revenue</div></div>
+  </div>
+
+  <div id="table-area"><div class="empty">Pick a date range and click Apply.</div></div>
+</div>
+
+<script>
+function setRange(days) {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - days);
+  document.getElementById('end-date').value = end.toISOString().slice(0,10);
+  document.getElementById('start-date').value = start.toISOString().slice(0,10);
+  loadFinancials();
+}
+
+let sortKey = 'total_revenue', sortDir = -1;
+let currentData = [];
+
+function renderTable() {
+  const rows = [...currentData].sort((a,b) => {
+    const v = (a[sortKey] > b[sortKey]) ? 1 : (a[sortKey] < b[sortKey] ? -1 : 0);
+    return v * sortDir;
+  });
+  if (!rows.length) {
+    document.getElementById('table-area').innerHTML = '<div class="empty">No orders in this date range.</div>';
+    return;
+  }
+  const th = (key, label) => `<th onclick="setSort('${key}')">${label}${sortKey===key ? (sortDir===1?' ▲':' ▼') : ''}</th>`;
+  let html = `<table><thead><tr>
+    ${th('sku','SKU')}${th('title','Title')}${th('ebay_qty','eBay Qty')}${th('ebay_revenue','eBay $')}
+    ${th('shopify_qty','Shopify Qty')}${th('shopify_revenue','Shopify $')}${th('total_qty','Total Qty')}${th('total_revenue','Total $')}
+  </tr></thead><tbody>`;
+  for (const r of rows) {
+    html += `<tr>
+      <td class="sku">${escapeHtml(r.sku)}</td>
+      <td class="muted">${escapeHtml(r.title || '')}</td>
+      <td>${r.ebay_qty ? `<span class="platform-tag ebay">eBay</span>${r.ebay_qty}` : '—'}</td>
+      <td>${r.ebay_revenue ? '$'+r.ebay_revenue.toFixed(2) : '—'}</td>
+      <td>${r.shopify_qty ? `<span class="platform-tag shopify">Shopify</span>${r.shopify_qty}` : '—'}</td>
+      <td>${r.shopify_revenue ? '$'+r.shopify_revenue.toFixed(2) : '—'}</td>
+      <td><b>${r.total_qty}</b></td>
+      <td><b>$${r.total_revenue.toFixed(2)}</b></td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('table-area').innerHTML = html;
+}
+
+function setSort(key) {
+  if (sortKey === key) sortDir *= -1; else { sortKey = key; sortDir = -1; }
+  renderTable();
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function loadFinancials() {
+  const start = document.getElementById('start-date').value;
+  const end = document.getElementById('end-date').value;
+  document.getElementById('table-area').innerHTML = '<div class="empty">Loading orders from eBay + Shopify...</div>';
+  document.getElementById('error-area').innerHTML = '';
+  try {
+    const params = new URLSearchParams();
+    if (start) params.set('start', start);
+    if (end) params.set('end', end);
+    const res = await fetch('/api/financials?' + params.toString());
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Failed to load');
+
+    if (data.errors && Object.keys(data.errors).length) {
+      const msgs = Object.entries(data.errors).map(([k,v]) => `<b>${k}</b>: ${escapeHtml(v)}`).join('<br>');
+      document.getElementById('error-area').innerHTML = `<div class="error-banner">Some data may be incomplete —<br>${msgs}</div>`;
+    }
+
+    document.getElementById('summary-row').style.display = 'grid';
+    document.getElementById('sum-orders').textContent = data.totals.orders;
+    document.getElementById('sum-qty').textContent = data.totals.quantity;
+    document.getElementById('sum-revenue').textContent = '$' + data.totals.revenue.toFixed(2);
+
+    currentData = data.by_sku;
+    renderTable();
+  } catch(e) {
+    document.getElementById('table-area').innerHTML = `<div class="empty">Error: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+// Default to last 30 days on load
+setRange(30);
+</script>
+</body>
+</html>
