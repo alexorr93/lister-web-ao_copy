@@ -1120,7 +1120,8 @@ def fetch_ebay_orders(business_id: str, start_iso: str, end_iso: str) -> list:
     token = get_ebay_access_token(business_id)
     rows = []
     offset = 0
-    while True:
+    max_pages = 25  # 25 * 200 = 5,000 orders safety cap
+    for _ in range(max_pages):
         r = _req.get(
             f"{EBAY_API_BASE}/sell/fulfillment/v1/order",
             headers=ebay_headers(token, content_language=False),
@@ -1162,7 +1163,8 @@ def fetch_ebay_fees_by_line_item(business_id: str, start_iso: str, end_iso: str)
     token = get_ebay_access_token(business_id)
     fees = {}
     offset = 0
-    while True:
+    max_pages = 25  # 25 * 200 = 5,000 transactions safety cap so this can't run away on a huge range
+    for _ in range(max_pages):
         r = _req.get(
             "https://apiz.ebay.com/sell/finances/v1/transaction",
             headers=ebay_headers(token, content_language=False),
@@ -1195,8 +1197,11 @@ def fetch_ebay_fees_by_line_item(business_id: str, start_iso: str, end_iso: str)
 
 def fetch_shopify_orders(business_id: str, start_iso: str, end_iso: str) -> list:
     """Returns normalized order-line rows from Shopify's Admin API for the given date range,
-    with refunds subtracted and payment-processing fees prorated across line items
-    (Shopify only reports fees at the order/transaction level, not per line item)."""
+    with refunds subtracted (from the embedded order payload) and an ESTIMATED payment-processing
+    fee (Shopify's standard 2.9%+$0.30 rate, applied only when payment_gateway_names shows
+    Shopify Payments/Shop Pay was used) prorated across line items. This is an estimate, not
+    the exact fee — getting the real figure requires one extra API call per order, which made
+    this page unusably slow on any real order volume."""
     import requests as _req
     settings = get_ebay_settings(business_id)
     domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
@@ -1228,20 +1233,15 @@ def fetch_shopify_orders(business_id: str, start_iso: str, end_iso: str) -> list
                     amt = float(rli.get("subtotal", 0) or 0) + float(rli.get("total_tax", 0) or 0)
                     refunded_by_line[lid] = refunded_by_line.get(lid, 0.0) + amt
 
-            # Payment-processing fee: only available per-order (not per-line), via the
-            # transactions sub-resource. Fetch once per order, prorate across line items.
-            order_fee_total = 0.0
-            try:
-                tx_r = _req.get(f"https://{domain}/admin/api/2024-10/orders/{order_id}/transactions.json",
-                                 headers=headers, timeout=15)
-                if tx_r.status_code == 200:
-                    for tx in tx_r.json().get("transactions", []):
-                        if tx.get("kind") in ("sale", "capture") and tx.get("status") == "success":
-                            fee_str = tx.get("fee")
-                            if fee_str:
-                                order_fee_total += float(fee_str)
-            except Exception:
-                pass  # fee proration is best-effort; missing fee data shouldn't break the whole report
+            # Payment-processing fee: getting the EXACT fee requires one extra API call per
+            # order (the transactions sub-resource), which was making this page painfully slow
+            # on any real order volume. Instead, estimate using Shopify's standard online rate
+            # (2.9% + $0.30) when the order actually went through Shopify Payments — no extra
+            # call needed, since payment_gateway_names is already in the order payload.
+            gateways = order.get("payment_gateway_names", []) or []
+            used_shopify_payments = any("shopify_payments" in g.lower() or "shop_pay" in g.lower() for g in gateways)
+            order_total = float(order.get("total_price", 0) or 0)
+            order_fee_total = (order_total * 0.029 + 0.30) if (used_shopify_payments and order_total > 0) else 0.0
 
             line_items = order.get("line_items", [])
             order_subtotal = sum(float(li.get("price", 0) or 0) * int(li.get("quantity", 1)) for li in line_items)
@@ -1273,7 +1273,7 @@ def fetch_shopify_orders(business_id: str, start_iso: str, end_iso: str) -> list
     return rows
 
 @app.get("/api/financials")
-async def api_financials(request: Request, start: str = None, end: str = None):
+async def api_financials(request: Request, start: str = None, end: str = None, include_shopify: bool = True):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
@@ -1306,10 +1306,11 @@ async def api_financials(request: Request, start: str = None, end: str = None):
         all_rows.extend(ebay_rows)
     except Exception as e:
         errors["ebay"] = str(e)
-    try:
-        all_rows.extend(fetch_shopify_orders(business_id, start_iso, end_iso))
-    except Exception as e:
-        errors["shopify"] = str(e)
+    if include_shopify:
+        try:
+            all_rows.extend(fetch_shopify_orders(business_id, start_iso, end_iso))
+        except Exception as e:
+            errors["shopify"] = str(e)
 
     by_sku = {}
     for row in all_rows:

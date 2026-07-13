@@ -93,6 +93,9 @@ tr:last-child td { border-bottom: none; }
     <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;cursor:pointer;padding-bottom:8px;">
       <input type="checkbox" id="net-toggle" checked onchange="renderTable()"/> Net (All Fees)
     </label>
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;cursor:pointer;padding-bottom:8px;">
+      <input type="checkbox" id="shopify-toggle" checked onchange="loadFinancials()"/> Include Shopify
+    </label>
   </div>
 
   <div id="error-area"></div>
@@ -216,12 +219,14 @@ function escapeHtml(s) {
 async function loadFinancials() {
   const start = document.getElementById('start-date').value;
   const end = document.getElementById('end-date').value;
-  document.getElementById('table-area').innerHTML = '<div class="empty">Loading orders from eBay + Shopify...</div>';
+  const includeShopify = document.getElementById('shopify-toggle').checked;
+  document.getElementById('table-area').innerHTML = `<div class="empty">Loading orders from eBay${includeShopify ? ' + Shopify' : ''}...</div>`;
   document.getElementById('error-area').innerHTML = '';
   try {
     const params = new URLSearchParams();
     if (start) params.set('start', start);
     if (end) params.set('end', end);
+    params.set('include_shopify', includeShopify ? 'true' : 'false');
     const res = await fetch('/api/financials?' + params.toString());
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Failed to load');
