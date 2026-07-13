@@ -1164,7 +1164,7 @@ def fetch_ebay_fees_by_line_item(business_id: str, start_iso: str, end_iso: str)
     offset = 0
     while True:
         r = _req.get(
-            f"{EBAY_API_BASE}/sell/finances/v1/transaction",
+            "https://apiz.ebay.com/sell/finances/v1/transaction",
             headers=ebay_headers(token, content_language=False),
             params={
                 "filter": f"transactionDate:[{start_iso}..{end_iso}]",
