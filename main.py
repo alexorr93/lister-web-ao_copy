@@ -1320,12 +1320,14 @@ def fetch_ebay_orders(business_id: str, start_iso: str, end_iso: str) -> list:
         for order in data.get("orders", []):
             created = order.get("creationDate", "")
             for li in order.get("lineItems", []):
+                item_price = float((li.get("lineItemCost") or {}).get("value", 0) or 0)
+                buyer_shipping = float((li.get("deliveryCost") or {}).get("shippingCost", {}).get("value", 0) or 0)
                 rows.append({
                     "platform": "eBay",
                     "sku": li.get("sku") or "(no SKU)",
                     "title": li.get("title", ""),
                     "quantity": int(li.get("quantity", 1)),
-                    "revenue": float((li.get("lineItemCost") or {}).get("value", 0) or 0),
+                    "revenue": item_price + buyer_shipping,
                     "order_date": created[:10] if created else "",
                     "order_id": order.get("orderId", ""),
                     "line_item_id": li.get("lineItemId", ""),
