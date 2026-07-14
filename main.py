@@ -250,7 +250,7 @@ def ensure_ebay_location(token: str, location_key: str, zip_code: str, country: 
         raise Exception(f"Failed to create eBay inventory location: {r.status_code} {r.text}")
 
 def ebay_condition(cond: str) -> str:
-    return "NEW" if (cond or "").lower() == "new" else "USED_GOOD"
+    return "NEW" if (cond or "").lower() == "new" else "USED"
 
 def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None, brand_override: str = None, mpn_override: str = None) -> dict:
     """
