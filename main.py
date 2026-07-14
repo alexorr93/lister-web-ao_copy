@@ -7,7 +7,7 @@ import csv
 import io
 from datetime import datetime
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, HTTPException, UploadFile, File
+from fastapi import FastAPI, Request, HTTPException, UploadFile, File, Body
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -1271,6 +1271,108 @@ def fetch_shopify_orders(business_id: str, start_iso: str, end_iso: str) -> list
         url = next_url
         params = None  # next_url already has query params baked in
     return rows
+
+@app.post("/api/shipping-labels/upload")
+async def upload_shipping_labels(request: Request, file: UploadFile = File(...)):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import io, csv as _csv
+
+    content = await file.read()
+    rows = []
+    filename = (file.filename or "").lower()
+
+    if filename.endswith(".csv"):
+        text = content.decode("utf-8-sig", errors="replace")
+        reader = _csv.DictReader(io.StringIO(text))
+        rows = list(reader)
+    else:
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+        ws = wb.active
+        raw_rows = list(ws.iter_rows(values_only=True))
+        if not raw_rows:
+            raise HTTPException(400, "File appears empty")
+        headers = [str(h).strip() if h else "" for h in raw_rows[0]]
+        for r in raw_rows[1:]:
+            if not any(r):
+                continue
+            rows.append({headers[i]: r[i] for i in range(len(headers)) if i < len(r)})
+
+    inserted = 0
+    skipped = 0
+    for row in rows:
+        tracking = str(row.get("Tracking Number") or "").strip()
+        if not tracking:
+            skipped += 1
+            continue
+        cost = row.get("Cost")
+        try:
+            cost = float(cost) if cost not in (None, "") else None
+        except (ValueError, TypeError):
+            cost = None
+        try:
+            supabase.table("shipping_labels").upsert({
+                "tracking_number": tracking,
+                "business_id": business_id,
+                "recipient": str(row.get("Recipient") or ""),
+                "cost": cost,
+                "created_date": str(row.get("Created Date") or ""),
+                "ship_from": str(row.get("Ship From") or ""),
+                "source": str(row.get("Source") or ""),
+            }).execute()
+            inserted += 1
+        except Exception:
+            skipped += 1
+
+    return {"ok": True, "inserted": inserted, "skipped": skipped, "total_rows": len(rows)}
+
+@app.post("/api/financials/match-shipping")
+async def match_shipping_costs(request: Request, body: dict = Body(...)):
+    """Given a list of eBay order IDs (from the currently loaded Financials view),
+    fetches each order's tracking number from eBay and matches it against uploaded
+    Pirate Ship data by tracking number. Deliberately opt-in (not automatic) since
+    it's one extra API call per order."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import requests as _req
+    order_ids = list(set(body.get("order_ids", [])))[:300]  # sane cap per click
+    token = get_ebay_access_token(business_id)
+
+    tracking_by_order = {}
+    for oid in order_ids:
+        try:
+            r = _req.get(
+                f"{EBAY_API_BASE}/sell/fulfillment/v1/order/{oid}/shipping_fulfillment",
+                headers=ebay_headers(token, content_language=False),
+                timeout=15,
+            )
+            if r.status_code == 200:
+                fulfillments = r.json().get("fulfillments", [])
+                for f in fulfillments:
+                    for tn in f.get("shipmentTrackingNumber", []) or []:
+                        tracking_by_order.setdefault(oid, []).append(tn)
+                    if f.get("shipmentTrackingNumber") is None and f.get("trackingNumber"):
+                        tracking_by_order.setdefault(oid, []).append(f.get("trackingNumber"))
+        except Exception:
+            continue
+
+    all_trackings = [tn for lst in tracking_by_order.values() for tn in lst]
+    cost_by_tracking = {}
+    if all_trackings:
+        res = supabase.table("shipping_labels").select("tracking_number,cost")\
+            .eq("business_id", business_id).in_("tracking_number", all_trackings).execute()
+        for row in (res.data or []):
+            cost_by_tracking[row["tracking_number"]] = row.get("cost")
+
+    result = {}
+    for oid, trackings in tracking_by_order.items():
+        cost = sum(cost_by_tracking.get(tn, 0) or 0 for tn in trackings)
+        result[oid] = {"tracking_numbers": trackings, "shipping_cost": round(cost, 2)}
+
+    return {"by_order": result, "matched": len(result), "requested": len(order_ids)}
 
 @app.get("/api/financials")
 async def api_financials(request: Request, start: str = None, end: str = None, include_shopify: bool = True):

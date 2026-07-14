@@ -96,7 +96,13 @@ tr:last-child td { border-bottom: none; }
     <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;cursor:pointer;padding-bottom:8px;">
       <input type="checkbox" id="shopify-toggle" checked onchange="loadFinancials()"/> Include Shopify
     </label>
+    <div>
+      <div class="field-label">Pirate Ship Export</div>
+      <input type="file" id="shipping-file-input" accept=".csv,.xlsx" style="font-size:12px;" onchange="uploadShippingFile()"/>
+    </div>
+    <button class="btn" onclick="matchShippingCosts()" title="Fetches tracking numbers from eBay for the orders currently shown, then subtracts matching Pirate Ship label costs from Net">📦 Match Shipping Costs</button>
   </div>
+  <div id="shipping-status" style="font-size:12px;color:var(--muted);margin-bottom:10px;"></div>
 
   <div id="error-area"></div>
 
@@ -138,6 +144,49 @@ function setLastMonth() {
 
 let sortKey = 'total_amount', sortDir = -1;
 let currentData = [];
+let shippingCostByOrder = {}; // order_id -> {shipping_cost}
+
+async function uploadShippingFile() {
+  const input = document.getElementById('shipping-file-input');
+  if (!input.files.length) return;
+  const fd = new FormData();
+  fd.append('file', input.files[0]);
+  document.getElementById('shipping-status').textContent = 'Uploading...';
+  try {
+    const r = await fetch('/api/shipping-labels/upload', {method: 'POST', body: fd});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Upload failed');
+    document.getElementById('shipping-status').textContent =
+      `✅ Imported ${data.inserted} label(s) from ${data.total_rows} row(s)${data.skipped ? ', ' + data.skipped + ' skipped' : ''}.`;
+  } catch(e) {
+    document.getElementById('shipping-status').textContent = `❌ ${e.message}`;
+  }
+  input.value = '';
+}
+
+async function matchShippingCosts() {
+  const ebayOrderIds = Array.from(new Set(currentData.filter(r => r.platform === 'eBay').map(r => r.order_id)));
+  if (!ebayOrderIds.length) {
+    document.getElementById('shipping-status').textContent = 'No eBay orders currently loaded to match.';
+    return;
+  }
+  document.getElementById('shipping-status').textContent = `Fetching tracking for ${ebayOrderIds.length} order(s)...`;
+  try {
+    const r = await fetch('/api/financials/match-shipping', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({order_ids: ebayOrderIds}),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Match failed');
+    shippingCostByOrder = data.by_order || {};
+    document.getElementById('shipping-status').textContent =
+      `✅ Matched shipping cost for ${data.matched} of ${data.requested} order(s).`;
+    renderTable();
+  } catch(e) {
+    document.getElementById('shipping-status').textContent = `❌ ${e.message}`;
+  }
+}
+
 
 function lotOf(sku) {
   const idx = String(sku || '').indexOf('-');
@@ -169,16 +218,20 @@ function renderTable() {
   let filtered = lotFilter ? currentData.filter(r => lotOf(r.sku) === lotFilter) : currentData;
   if (searchTerm) filtered = filtered.filter(r => r.sku.toLowerCase().includes(searchTerm));
 
+  const shipCost = (r) => (shippingCostByOrder[r.order_id] || {}).shipping_cost || 0;
+  const finalAmt = (r) => netMode ? (r[amtKey] - shipCost(r)) : r[amtKey];
+
   const orderLines = filtered.length;
   const qty = filtered.reduce((n, r) => n + r.quantity, 0);
-  const amount = filtered.reduce((n, r) => n + r[amtKey], 0);
+  const amount = filtered.reduce((n, r) => n + finalAmt(r), 0);
   document.getElementById('sum-orders').textContent = fmtNum(orderLines);
   document.getElementById('sum-qty').textContent = fmtNum(qty);
   document.getElementById('sum-revenue').textContent = fmtMoney(amount);
 
-  const activeSortKey = sortKey === 'total_amount' ? amtKey : sortKey;
   const rows = [...filtered].sort((a,b) => {
-    const v = (a[activeSortKey] > b[activeSortKey]) ? 1 : (a[activeSortKey] < b[activeSortKey] ? -1 : 0);
+    const av = sortKey === 'total_amount' ? finalAmt(a) : a[sortKey];
+    const bv = sortKey === 'total_amount' ? finalAmt(b) : b[sortKey];
+    const v = (av > bv) ? 1 : (av < bv ? -1 : 0);
     return v * sortDir;
   });
   if (!rows.length) {
@@ -188,17 +241,19 @@ function renderTable() {
   const th = (key, label) => `<th onclick="setSort('${key}')">${label}${sortKey===key ? (sortDir===1?' ▲':' ▼') : ''}</th>`;
   const amtLabel = netMode ? 'Net $' : 'Gross $';
   let html = `<table><thead><tr>
-    ${th('sku','SKU')}${th('order_id','Order #')}${th('order_date','Date')}${th('platform','Platform')}${th('quantity','Qty')}${th('total_amount',amtLabel)}${th('title','Item')}
+    ${th('sku','SKU')}${th('order_id','Order #')}${th('order_date','Date')}${th('platform','Platform')}${th('quantity','Qty')}${th('shipping','Shipping $')}${th('total_amount',amtLabel)}${th('title','Item')}
   </tr></thead><tbody>`;
   for (const r of rows) {
     const tag = r.platform === 'eBay' ? '<span class="platform-tag ebay">eBay</span>' : '<span class="platform-tag shopify">Shopify</span>';
+    const ship = shipCost(r);
     html += `<tr>
       <td class="sku">${escapeHtml(r.sku)}</td>
       <td class="muted">${escapeHtml(r.order_id)}</td>
       <td class="muted">${escapeHtml(r.order_date)}</td>
       <td>${tag}</td>
       <td>${fmtNum(r.quantity)}</td>
-      <td><b>${fmtMoney(r[amtKey])}</b></td>
+      <td class="muted">${ship ? fmtMoney(ship) : '—'}</td>
+      <td><b>${fmtMoney(finalAmt(r))}</b></td>
       <td class="muted">${escapeHtml(r.title || '')}</td>
     </tr>`;
   }
@@ -241,6 +296,8 @@ async function loadFinancials() {
     document.getElementById('sum-revenue').textContent = fmtMoney(data.totals.net);
 
     currentData = data.order_lines;
+    shippingCostByOrder = {};
+    document.getElementById('shipping-status').textContent = '';
     populateLotFilter();
     renderTable();
   } catch(e) {
