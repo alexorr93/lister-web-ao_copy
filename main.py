@@ -1563,10 +1563,9 @@ async def match_shipping_costs(request: Request, body: dict = Body(...)):
             if r.status_code == 200:
                 fulfillments = r.json().get("fulfillments", [])
                 for f in fulfillments:
-                    for tn in f.get("shipmentTrackingNumber", []) or []:
+                    tn = f.get("shipmentTrackingNumber")
+                    if tn:
                         tracking_by_order.setdefault(oid, []).append(tn)
-                    if f.get("shipmentTrackingNumber") is None and f.get("trackingNumber"):
-                        tracking_by_order.setdefault(oid, []).append(f.get("trackingNumber"))
         except Exception:
             continue
 
@@ -1615,7 +1614,8 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
                 )
                 if r.status_code == 200:
                     for f in r.json().get("fulfillments", []):
-                        for tn in f.get("shipmentTrackingNumber", []) or []:
+                        tn = f.get("shipmentTrackingNumber")
+                        if tn:
                             tracking_by_order.setdefault(oid, []).append(tn)
             except Exception:
                 continue
