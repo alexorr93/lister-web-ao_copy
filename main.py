@@ -1319,6 +1319,11 @@ def fetch_ebay_orders(business_id: str, start_iso: str, end_iso: str) -> list:
         data = r.json()
         for order in data.get("orders", []):
             created = order.get("creationDate", "")
+            order_delivery_cost = float((order.get("pricingSummary") or {}).get("deliveryCost", {}).get("value", 0) or 0)
+            tax_addr = ((order.get("buyer") or {}).get("taxAddress") or {})
+            buyer_state = tax_addr.get("stateOrProvince", "")
+            buyer_zip = tax_addr.get("postalCode", "")
+            buyer_country = tax_addr.get("countryCode", "")
             for li in order.get("lineItems", []):
                 item_price = float((li.get("lineItemCost") or {}).get("value", 0) or 0)
                 buyer_shipping = float((li.get("deliveryCost") or {}).get("shippingCost", {}).get("value", 0) or 0)
@@ -1329,6 +1334,8 @@ def fetch_ebay_orders(business_id: str, start_iso: str, end_iso: str) -> list:
                     "quantity": int(li.get("quantity", 1)),
                     "revenue": item_price + buyer_shipping,
                     "buyer_shipping": buyer_shipping,
+                    "order_delivery_cost": order_delivery_cost,
+                    "buyer_state": buyer_state, "buyer_zip": buyer_zip, "buyer_country": buyer_country,
                     "order_date": created[:10] if created else "",
                     "order_id": order.get("orderId", ""),
                     "line_item_id": li.get("lineItemId", ""),
@@ -1740,6 +1747,8 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
                 "sku": row["sku"], "title": row["title"], "quantity": row["quantity"],
                 "order_date": row["order_date"], "gross_revenue": revenue,
                 "buyer_shipping": _safe(row.get("buyer_shipping", 0)),
+                "order_delivery_cost": _safe(row.get("order_delivery_cost", 0)),
+                "buyer_state": row.get("buyer_state", ""), "buyer_zip": row.get("buyer_zip", ""), "buyer_country": row.get("buyer_country", ""),
                 "fee": fee, "net": net,
                 "tracking_number": ",".join(trackings) if trackings else None,
                 "shipping_cost": shipping_cost,
