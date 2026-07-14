@@ -101,7 +101,7 @@ async def order_sync_worker():
                 try:
                     settings = get_ebay_settings(biz_id)
                     backfilled = settings.get("ORDERS_BACKFILLED", "") == "true"
-                    days_back = 14 if backfilled else 1050  # ~34.5 months, safely under eBay's 36-month max query span
+                    days_back = 14 if backfilled else 1815  # ~5 years (eBay's max retention) — fee fetch auto-chunks under the hood
                     result = sync_orders_for_business(biz_id, days_back=days_back)
                     if not backfilled:
                         save_ebay_setting(biz_id, "ORDERS_BACKFILLED", "true")
@@ -1188,42 +1188,59 @@ def fetch_ebay_orders(business_id: str, start_iso: str, end_iso: str) -> list:
 def fetch_ebay_fees_by_line_item(business_id: str, start_iso: str, end_iso: str) -> dict:
     """Returns {(order_id, line_item_id): net_fee_amount} using eBay's Finance API —
     the Fulfillment API (fetch_ebay_orders) only has the gross sale price, not what
-    eBay actually deducted. Sums marketplace fees (negative) across SALE and REFUND
-    transactions so callers can compute true net = gross_revenue + fees_by_line_item."""
-    import requests as _req
-    token = get_ebay_access_token(business_id)
+    eBay actually deducted. eBay hard-caps each query's date span at 36 months and
+    total retention at 5 years, so a wide range (e.g. a full historical backfill)
+    gets auto-split into ~30-month chunks here rather than failing outright."""
+    import datetime as _dt
+
+    def _fetch_window(window_start_iso: str, window_end_iso: str) -> dict:
+        import requests as _req
+        token = get_ebay_access_token(business_id)
+        window_fees = {}
+        offset = 0
+        max_pages = 25  # 25 * 200 = 5,000 transactions safety cap per window
+        for _ in range(max_pages):
+            r = _req.get(
+                "https://apiz.ebay.com/sell/finances/v1/transaction",
+                headers=ebay_headers(token, content_language=False),
+                params={
+                    "filter": f"transactionDate:[{window_start_iso}..{window_end_iso}]",
+                    "limit": 200,
+                    "offset": offset,
+                },
+                timeout=20,
+            )
+            if r.status_code != 200:
+                raise Exception(f"eBay Finance transactions failed ({r.status_code}): {r.text[:300]}")
+            data = r.json()
+            for txn in data.get("transactions", []):
+                order_id = txn.get("orderId", "")
+                for li in txn.get("orderLineItems", []) or []:
+                    line_item_id = li.get("lineItemId", "")
+                    if not order_id or not line_item_id:
+                        continue
+                    key = (order_id, line_item_id)
+                    fee_total = 0.0
+                    for fee in li.get("marketplaceFees", []) or []:
+                        fee_total += float((fee.get("amount") or {}).get("value", 0) or 0)
+                    window_fees[key] = window_fees.get(key, 0.0) + fee_total
+            total = data.get("total", 0)
+            offset += 200
+            if offset >= total or not data.get("transactions"):
+                break
+        return window_fees
+
+    start_dt = _dt.datetime.strptime(start_iso, "%Y-%m-%dT%H:%M:%S.%fZ")
+    end_dt = _dt.datetime.strptime(end_iso, "%Y-%m-%dT%H:%M:%S.%fZ")
     fees = {}
-    offset = 0
-    max_pages = 25  # 25 * 200 = 5,000 transactions safety cap so this can't run away on a huge range
-    for _ in range(max_pages):
-        r = _req.get(
-            "https://apiz.ebay.com/sell/finances/v1/transaction",
-            headers=ebay_headers(token, content_language=False),
-            params={
-                "filter": f"transactionDate:[{start_iso}..{end_iso}]",
-                "limit": 200,
-                "offset": offset,
-            },
-            timeout=20,
-        )
-        if r.status_code != 200:
-            raise Exception(f"eBay Finance transactions failed ({r.status_code}): {r.text[:300]}")
-        data = r.json()
-        for txn in data.get("transactions", []):
-            order_id = txn.get("orderId", "")
-            for li in txn.get("orderLineItems", []) or []:
-                line_item_id = li.get("lineItemId", "")
-                if not order_id or not line_item_id:
-                    continue
-                key = (order_id, line_item_id)
-                fee_total = 0.0
-                for fee in li.get("marketplaceFees", []) or []:
-                    fee_total += float((fee.get("amount") or {}).get("value", 0) or 0)
-                fees[key] = fees.get(key, 0.0) + fee_total
-        total = data.get("total", 0)
-        offset += 200
-        if offset >= total or not data.get("transactions"):
-            break
+    window_start = start_dt
+    while window_start < end_dt:
+        window_end = min(window_start + _dt.timedelta(days=900), end_dt)  # ~30 months per chunk
+        fees.update(_fetch_window(
+            window_start.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+            window_end.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+        ))
+        window_start = window_end
     return fees
 
 def fetch_shopify_orders(business_id: str, start_iso: str, end_iso: str) -> list:
