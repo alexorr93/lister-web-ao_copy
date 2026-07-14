@@ -1154,11 +1154,12 @@ async def acquisitions_page(request: Request):
     return templates.TemplateResponse("acquisitions.html", {"request": request, "is_admin": is_admin})
 
 class AcquisitionCreate(BaseModel):
-    lot_name: str
-    purchase_date: Optional[str] = None
-    price: Optional[float] = None
+    sku: str
+    name: Optional[str] = None
     payment_method: Optional[str] = None
-    seller_name: Optional[str] = None
+    date: Optional[str] = None
+    cost: Optional[float] = None
+    cash: Optional[float] = None
     notes: Optional[str] = None
 
 @app.get("/api/acquisitions")
@@ -1167,27 +1168,34 @@ async def list_acquisitions(request: Request):
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     res = supabase.table("acquisitions").select("*").eq("business_id", business_id)\
-        .order("purchase_date", desc=True).execute()
+        .order("date", desc=True).execute()
     acquisitions = res.data or []
 
-    # Match each acquisition's profit by pulling every synced order whose SKU starts
-    # with "<lot_name>-" (same lot-prefix convention Financials already uses).
-    lot_names = list(set(a["lot_name"] for a in acquisitions if a.get("lot_name")))
-    profit_by_lot = {}
-    if lot_names:
+    # eBay is computed live: sum of net proceeds from every synced order whose SKU
+    # starts with "<sku>-" (same lot-prefix convention Financials already uses).
+    # Total_Payouts and Profit are then just the formulas your spreadsheet already used.
+    skus = list(set(a["sku"] for a in acquisitions if a.get("sku")))
+    ebay_by_lot = {}
+    if skus:
         orders_res = supabase.table("orders").select("sku,final_net").eq("business_id", business_id).execute()
         for row in (orders_res.data or []):
-            sku = row.get("sku") or ""
-            if "-" not in sku:
+            order_sku = row.get("sku") or ""
+            if "-" not in order_sku:
                 continue
-            prefix = sku.split("-", 1)[0]
-            if prefix in lot_names:
-                profit_by_lot[prefix] = profit_by_lot.get(prefix, 0.0) + (row.get("final_net") or 0)
+            prefix = order_sku.split("-", 1)[0]
+            if prefix in skus:
+                ebay_by_lot[prefix] = ebay_by_lot.get(prefix, 0.0) + (row.get("final_net") or 0)
 
     for a in acquisitions:
-        net = round(profit_by_lot.get(a["lot_name"], 0.0), 2)
-        a["net_profit"] = net
-        a["roi_pct"] = round((net - a["price"]) / a["price"] * 100, 1) if a.get("price") else None
+        ebay = round(ebay_by_lot.get(a["sku"], 0.0), 2)
+        cash = a.get("cash") or 0
+        cost = a.get("cost") or 0
+        total_payouts = round(cash + ebay, 2)
+        profit = round(total_payouts - cost, 2)
+        a["ebay"] = ebay
+        a["total_payouts"] = total_payouts
+        a["profit"] = profit
+        a["roi_pct"] = round(profit / cost * 100, 1) if cost else None
 
     return {"acquisitions": acquisitions}
 
@@ -1243,6 +1251,9 @@ def _parse_acq_date(val) -> Optional[str]:
 
 @app.post("/api/acquisitions/upload-csv")
 async def upload_acquisitions_csv(request: Request, file: UploadFile = File(...)):
+    """Only imports the true manual-input columns (SKU, Name, Payment_Method, Date, Cost,
+    Cash) — eBay, Total_Payouts, and Profit from the old spreadsheet are NOT imported,
+    since those are now computed live instead of stored as a static snapshot."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
@@ -1255,21 +1266,18 @@ async def upload_acquisitions_csv(request: Request, file: UploadFile = File(...)
     inserted = 0
     skipped = 0
     for row in reader:
-        lot_name = str(row.get("SKU") or "").strip()
-        if not lot_name:
+        sku = str(row.get("SKU") or "").strip()
+        if not sku:
             skipped += 1
             continue
         record = {
             "business_id": business_id,
-            "lot_name": lot_name,
-            "seller_name": str(row.get("Name") or "").strip() or None,
+            "sku": sku,
+            "name": str(row.get("Name") or "").strip() or None,
             "payment_method": str(row.get("Payment_Method") or "").strip() or None,
-            "purchase_date": _parse_acq_date(row.get("Date")),
-            "price": _parse_money(row.get("Cost")),
-            "historical_cash": _parse_money(row.get("Cash")),
-            "historical_ebay": _parse_money(row.get("eBay")),
-            "historical_total_payouts": _parse_money(row.get("Total_Payouts")),
-            "historical_profit": _parse_money(row.get("Profit")),
+            "date": _parse_acq_date(row.get("Date")),
+            "cost": _parse_money(row.get("Cost")),
+            "cash": _parse_money(row.get("Cash")),
         }
         try:
             supabase.table("acquisitions").insert(record).execute()

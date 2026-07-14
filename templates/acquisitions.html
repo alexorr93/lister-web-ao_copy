@@ -34,7 +34,7 @@ table { width: 100%; border-collapse: collapse; background: var(--card); border:
 th { text-align: left; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
 td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid var(--border); }
 tr:last-child td { border-bottom: none; }
-.lot { font-weight: 700; font-family: monospace; }
+.sku { font-weight: 700; font-family: monospace; }
 .muted { color: var(--muted); }
 .pos { color: var(--green); font-weight: 700; }
 .neg { color: var(--red); font-weight: 700; }
@@ -57,30 +57,36 @@ tr:last-child td { border-bottom: none; }
 
 <div class="main">
   <h1>Acquisitions</h1>
-  <div class="sub">What you bought, matched against live profit per lot (from synced eBay/Shopify orders).</div>
+  <div class="sub">SKU, Name, Payment_Method, Date, Cost, Cash are what you enter — eBay, Total_Payouts, and Profit are computed live from synced orders.</div>
 
   <div class="card">
     <div class="form-grid">
       <div>
-        <div class="field-label">Lot Name</div>
-        <input type="text" class="field-input" id="new-lot" placeholder="e.g. RJ"/>
+        <div class="field-label">SKU</div>
+        <input type="text" class="field-input" id="new-sku" placeholder="e.g. RJ"/>
+      </div>
+      <div>
+        <div class="field-label">Name</div>
+        <input type="text" class="field-input" id="new-name" placeholder="who / where"/>
+      </div>
+      <div>
+        <div class="field-label">Payment_Method</div>
+        <input type="text" class="field-input" id="new-payment" placeholder="cash, venmo..."/>
       </div>
       <div>
         <div class="field-label">Date</div>
         <input type="date" class="field-input" id="new-date"/>
       </div>
       <div>
-        <div class="field-label">Price</div>
-        <input type="number" step="0.01" class="field-input" id="new-price" placeholder="0.00"/>
+        <div class="field-label">Cost</div>
+        <input type="number" step="0.01" class="field-input" id="new-cost" placeholder="0.00"/>
       </div>
       <div>
-        <div class="field-label">Payment Method</div>
-        <input type="text" class="field-input" id="new-payment" placeholder="cash, venmo..."/>
+        <div class="field-label">Cash</div>
+        <input type="number" step="0.01" class="field-input" id="new-cash" placeholder="0.00"/>
       </div>
-      <div>
-        <div class="field-label">Name / Source</div>
-        <input type="text" class="field-input" id="new-name" placeholder="who / where"/>
-      </div>
+    </div>
+    <div style="margin-top:10px;">
       <button class="btn btn-primary" onclick="addAcquisition()">+ Add Row</button>
     </div>
     <div style="margin-top:12px;display:flex;align-items:center;gap:10px;">
@@ -119,21 +125,23 @@ function renderTable() {
     return;
   }
   let html = `<table><thead><tr>
-    <th>Lot</th><th>Date</th><th>Cost</th><th>Payment</th><th>Name/Source</th>
-    <th>Live Net Profit</th><th>ROI</th><th>Historical Profit (ref)</th><th></th>
+    <th>SKU</th><th>Name</th><th>Payment_Method</th><th>Date</th><th>Cost</th><th>Cash</th>
+    <th>eBay</th><th>Total_Payouts</th><th>Profit</th><th>ROI</th><th></th>
   </tr></thead><tbody>`;
   for (const a of acquisitions) {
     const roiClass = a.roi_pct == null ? '' : (a.roi_pct >= 0 ? 'pos' : 'neg');
-    const profitClass = a.net_profit >= 0 ? 'pos' : 'neg';
+    const profitClass = a.profit >= 0 ? 'pos' : 'neg';
     html += `<tr>
-      <td class="lot">${escapeHtml(a.lot_name)}</td>
-      <td class="muted">${escapeHtml(a.purchase_date || '')}</td>
-      <td>${fmtMoney(a.price)}</td>
+      <td class="sku">${escapeHtml(a.sku)}</td>
+      <td class="muted">${escapeHtml(a.name || '')}</td>
       <td class="muted">${escapeHtml(a.payment_method || '')}</td>
-      <td class="muted">${escapeHtml(a.seller_name || '')}</td>
-      <td class="${profitClass}">${fmtMoney(a.net_profit)}</td>
+      <td class="muted">${escapeHtml(a.date || '')}</td>
+      <td>${fmtMoney(a.cost)}</td>
+      <td>${fmtMoney(a.cash)}</td>
+      <td>${fmtMoney(a.ebay)}</td>
+      <td>${fmtMoney(a.total_payouts)}</td>
+      <td class="${profitClass}">${fmtMoney(a.profit)}</td>
       <td class="${roiClass}">${a.roi_pct == null ? '—' : a.roi_pct + '%'}</td>
-      <td class="muted">${fmtMoney(a.historical_profit)}</td>
       <td><button class="btn btn-danger" style="padding:4px 10px;font-size:11px;" onclick="deleteAcquisition('${a.id}')">Delete</button></td>
     </tr>`;
   }
@@ -142,24 +150,26 @@ function renderTable() {
 }
 
 async function addAcquisition() {
-  const lot = document.getElementById('new-lot').value.trim();
-  if (!lot) { alert('Lot name is required'); return; }
+  const sku = document.getElementById('new-sku').value.trim();
+  if (!sku) { alert('SKU is required'); return; }
   const body = {
-    lot_name: lot,
-    purchase_date: document.getElementById('new-date').value || null,
-    price: parseFloat(document.getElementById('new-price').value) || null,
+    sku: sku,
+    name: document.getElementById('new-name').value.trim() || null,
     payment_method: document.getElementById('new-payment').value.trim() || null,
-    seller_name: document.getElementById('new-name').value.trim() || null,
+    date: document.getElementById('new-date').value || null,
+    cost: parseFloat(document.getElementById('new-cost').value) || null,
+    cash: parseFloat(document.getElementById('new-cash').value) || null,
   };
   const r = await fetch('/api/acquisitions', {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
   });
   if (!r.ok) { alert('Failed to add'); return; }
-  document.getElementById('new-lot').value = '';
-  document.getElementById('new-date').value = '';
-  document.getElementById('new-price').value = '';
-  document.getElementById('new-payment').value = '';
+  document.getElementById('new-sku').value = '';
   document.getElementById('new-name').value = '';
+  document.getElementById('new-payment').value = '';
+  document.getElementById('new-date').value = '';
+  document.getElementById('new-cost').value = '';
+  document.getElementById('new-cash').value = '';
   loadAcquisitions();
 }
 
