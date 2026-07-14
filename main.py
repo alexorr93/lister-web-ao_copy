@@ -3782,6 +3782,20 @@ async def ebay_debug_category_requirements(item_id: str, request: Request):
     except Exception as e:
         raise HTTPException(400, str(e))
 
+@app.get("/api/ebay/debug-raw-order/{order_id}")
+async def ebay_debug_raw_order(order_id: str, request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import requests as _req
+    token = get_ebay_access_token(business_id)
+    r = _req.get(
+        f"{EBAY_API_BASE}/sell/fulfillment/v1/order/{order_id}",
+        headers=ebay_headers(token, content_language=False),
+        timeout=15,
+    )
+    return {"status": r.status_code, "body": r.json() if r.headers.get("content-type","").startswith("application/json") else r.text[:2000]}
+
 @app.get("/api/ebay/debug-inventory-item/{item_id}")
 async def ebay_debug_inventory_item(item_id: str, request: Request):
     business_id = require_auth(request)
