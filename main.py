@@ -1145,6 +1145,140 @@ async def financials_page(request: Request):
         return RedirectResponse("/login", status_code=302)
     return templates.TemplateResponse("financials.html", {"request": request, "is_admin": is_admin})
 
+@app.get("/acquisitions", response_class=HTMLResponse)
+async def acquisitions_page(request: Request):
+    business_id, is_admin = get_business_info(request)
+    if not business_id:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("acquisitions.html", {"request": request, "is_admin": is_admin})
+
+class AcquisitionCreate(BaseModel):
+    lot_name: str
+    purchase_date: Optional[str] = None
+    price: Optional[float] = None
+    payment_method: Optional[str] = None
+    seller_name: Optional[str] = None
+    notes: Optional[str] = None
+
+@app.get("/api/acquisitions")
+async def list_acquisitions(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    res = supabase.table("acquisitions").select("*").eq("business_id", business_id)\
+        .order("purchase_date", desc=True).execute()
+    acquisitions = res.data or []
+
+    # Match each acquisition's profit by pulling every synced order whose SKU starts
+    # with "<lot_name>-" (same lot-prefix convention Financials already uses).
+    lot_names = list(set(a["lot_name"] for a in acquisitions if a.get("lot_name")))
+    profit_by_lot = {}
+    if lot_names:
+        orders_res = supabase.table("orders").select("sku,final_net").eq("business_id", business_id).execute()
+        for row in (orders_res.data or []):
+            sku = row.get("sku") or ""
+            if "-" not in sku:
+                continue
+            prefix = sku.split("-", 1)[0]
+            if prefix in lot_names:
+                profit_by_lot[prefix] = profit_by_lot.get(prefix, 0.0) + (row.get("final_net") or 0)
+
+    for a in acquisitions:
+        net = round(profit_by_lot.get(a["lot_name"], 0.0), 2)
+        a["net_profit"] = net
+        a["roi_pct"] = round((net - a["price"]) / a["price"] * 100, 1) if a.get("price") else None
+
+    return {"acquisitions": acquisitions}
+
+@app.post("/api/acquisitions")
+async def create_acquisition(request: Request, body: AcquisitionCreate):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    try:
+        record = body.dict()
+        record["business_id"] = business_id
+        res = supabase.table("acquisitions").insert(record).execute()
+        return {"ok": True, "acquisition": (res.data or [{}])[0]}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.delete("/api/acquisitions/{acquisition_id}")
+async def delete_acquisition(acquisition_id: str, request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    try:
+        supabase.table("acquisitions").delete().eq("id", acquisition_id).eq("business_id", business_id).execute()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+def _parse_money(val) -> Optional[float]:
+    """Handles '$1,550 ', '$0 ', '', None -> float or None"""
+    if val is None:
+        return None
+    s = str(val).strip().replace("$", "").replace(",", "").strip()
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+def _parse_acq_date(val) -> Optional[str]:
+    """Handles the mixed formats seen in the existing spreadsheet:
+    'May-23' (Mon-YY), '4/10/2024' (M/D/YYYY), '1/1/9999' (placeholder/unknown -> None)."""
+    import datetime as _dt
+    s = str(val).strip()
+    if not s or s.startswith("1/1/9999"):
+        return None
+    for fmt in ("%b-%y", "%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d"):
+        try:
+            return _dt.datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return None
+
+@app.post("/api/acquisitions/upload-csv")
+async def upload_acquisitions_csv(request: Request, file: UploadFile = File(...)):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import io, csv as _csv
+
+    content = await file.read()
+    text = content.decode("utf-8-sig", errors="replace")
+    reader = _csv.DictReader(io.StringIO(text))
+
+    inserted = 0
+    skipped = 0
+    for row in reader:
+        lot_name = str(row.get("SKU") or "").strip()
+        if not lot_name:
+            skipped += 1
+            continue
+        record = {
+            "business_id": business_id,
+            "lot_name": lot_name,
+            "seller_name": str(row.get("Name") or "").strip() or None,
+            "payment_method": str(row.get("Payment_Method") or "").strip() or None,
+            "purchase_date": _parse_acq_date(row.get("Date")),
+            "price": _parse_money(row.get("Cost")),
+            "historical_cash": _parse_money(row.get("Cash")),
+            "historical_ebay": _parse_money(row.get("eBay")),
+            "historical_total_payouts": _parse_money(row.get("Total_Payouts")),
+            "historical_profit": _parse_money(row.get("Profit")),
+        }
+        try:
+            supabase.table("acquisitions").insert(record).execute()
+            inserted += 1
+        except Exception:
+            skipped += 1
+
+    return {"ok": True, "inserted": inserted, "skipped": skipped}
+
 def fetch_ebay_orders(business_id: str, start_iso: str, end_iso: str) -> list:
     """Returns normalized order-line rows from eBay's Fulfillment API for the given date range."""
     import requests as _req
