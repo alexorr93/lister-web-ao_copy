@@ -1616,48 +1616,85 @@ def sync_orders_for_business(business_id: str, days_back: int = 90) -> dict:
 
         all_trackings = [tn for lst in tracking_by_order.values() for tn in lst]
         cost_by_tracking = {}
-        if all_trackings:
-            res = supabase.table("shipping_labels").select("tracking_number,cost")\
-                .eq("business_id", business_id).in_("tracking_number", all_trackings).execute()
-            for row in (res.data or []):
-                cost_by_tracking[row["tracking_number"]] = row.get("cost") or 0
+        # Chunk the .in_() lookup — a huge tracking-number list in one query can produce
+        # an oversized request that Supabase rejects outright.
+        for i in range(0, len(all_trackings), 200):
+            chunk = all_trackings[i:i+200]
+            try:
+                res = supabase.table("shipping_labels").select("tracking_number,cost")\
+                    .eq("business_id", business_id).in_("tracking_number", chunk).execute()
+                for row in (res.data or []):
+                    cost_by_tracking[row["tracking_number"]] = row.get("cost") or 0
+            except Exception as e:
+                errors["shipping_match"] = str(e)
 
+        def _safe(n):
+            """NaN/Infinity are valid Python floats but not valid JSON — a single bad
+            fee value here would otherwise silently corrupt the whole upsert payload."""
+            try:
+                n = float(n)
+                return round(n, 2) if (n == n and abs(n) != float("inf")) else 0.0  # n==n is False only for NaN
+            except (TypeError, ValueError):
+                return 0.0
+
+        skipped_rows = 0
         for row in ebay_rows:
-            fee = fees_by_line.get((row["order_id"], row["line_item_id"]), 0.0)
-            net = row["revenue"] - fee
+            fee = _safe(fees_by_line.get((row["order_id"], row["line_item_id"]), 0.0))
+            revenue = _safe(row["revenue"])
+            net = _safe(revenue - fee)
             trackings = tracking_by_order.get(row["order_id"], [])
-            shipping_cost = sum(cost_by_tracking.get(tn, 0) or 0 for tn in trackings)
+            shipping_cost = _safe(sum(cost_by_tracking.get(tn, 0) or 0 for tn in trackings))
             record = {
                 "id": f"ebay:{row['order_id']}:{row['line_item_id']}",
                 "business_id": business_id, "platform": "eBay", "order_id": row["order_id"],
                 "sku": row["sku"], "title": row["title"], "quantity": row["quantity"],
-                "order_date": row["order_date"], "gross_revenue": round(row["revenue"], 2),
-                "fee": round(fee, 2), "net": round(net, 2),
+                "order_date": row["order_date"], "gross_revenue": revenue,
+                "fee": fee, "net": net,
                 "tracking_number": ",".join(trackings) if trackings else None,
-                "shipping_cost": round(shipping_cost, 2),
-                "final_net": round(net - shipping_cost, 2),
+                "shipping_cost": shipping_cost,
+                "final_net": _safe(net - shipping_cost),
             }
-            supabase.table("orders").upsert(record).execute()
-            upserted += 1
+            try:
+                supabase.table("orders").upsert(record).execute()
+                upserted += 1
+            except Exception as e:
+                skipped_rows += 1
+                print(f"sync_orders_for_business: skipped bad row {record.get('id')}: {e}")
+        if skipped_rows:
+            errors["ebay_skipped_rows"] = f"{skipped_rows} row(s) failed to upsert — see logs for details"
     except Exception as e:
         errors["ebay"] = str(e)
 
     # --- Shopify: orders + estimated fee + embedded refunds ---
     try:
+        def _safe2(n):
+            try:
+                n = float(n)
+                return round(n, 2) if (n == n and abs(n) != float("inf")) else 0.0
+            except (TypeError, ValueError):
+                return 0.0
+
         shopify_rows = fetch_shopify_orders(business_id, start_iso, end_iso)
+        shopify_skipped = 0
         for i, row in enumerate(shopify_rows):
-            net = row.get("net", row["revenue"])
+            net = _safe2(row.get("net", row["revenue"]))
             record = {
                 "id": f"shopify:{row['order_id']}:{row['sku']}:{i}",
                 "business_id": business_id, "platform": "Shopify", "order_id": row["order_id"],
                 "sku": row["sku"], "title": row["title"], "quantity": row["quantity"],
-                "order_date": row["order_date"], "gross_revenue": round(row["revenue"], 2),
-                "fee": round(row.get("fee", 0), 2), "net": round(net, 2),
+                "order_date": row["order_date"], "gross_revenue": _safe2(row["revenue"]),
+                "fee": _safe2(row.get("fee", 0)), "net": net,
                 "tracking_number": None, "shipping_cost": 0,
-                "final_net": round(net, 2),
+                "final_net": net,
             }
-            supabase.table("orders").upsert(record).execute()
-            upserted += 1
+            try:
+                supabase.table("orders").upsert(record).execute()
+                upserted += 1
+            except Exception as e:
+                shopify_skipped += 1
+                print(f"sync_orders_for_business: skipped bad Shopify row {record.get('id')}: {e}")
+        if shopify_skipped:
+            errors["shopify_skipped_rows"] = f"{shopify_skipped} row(s) failed to upsert — see logs for details"
     except Exception as e:
         errors["shopify"] = str(e)
 
