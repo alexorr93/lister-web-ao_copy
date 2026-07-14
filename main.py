@@ -1509,7 +1509,7 @@ def apply_shipping_matches(business_id: str) -> dict:
             start += page_size
         return all_rows
 
-    orders = _fetch_all("orders", "id,net,tracking_number", lambda q: q.not_.is_("tracking_number", "null"))
+    orders = _fetch_all("orders", "*", lambda q: q.not_.is_("tracking_number", "null"))
     labels = _fetch_all("shipping_labels", "tracking_number,cost")
     if not orders:
         return {"updated": 0, "debug_orders_fetched": 0, "debug_labels_fetched": len(labels)}
@@ -1523,7 +1523,13 @@ def apply_shipping_matches(business_id: str) -> dict:
         if shipping_cost <= 0:
             continue  # nothing to update — leave existing stored values alone
         base_net = order.get("net") or 0
-        updates.append({"id": order["id"], "shipping_cost": shipping_cost, "final_net": round(base_net - shipping_cost, 2)})
+        # Copy the FULL existing row and just overwrite the two fields that changed —
+        # a partial payload fails Postgres's NOT NULL check on the insert-half of the
+        # upsert statement even when the row already exists and would only be updated.
+        record = dict(order)
+        record["shipping_cost"] = shipping_cost
+        record["final_net"] = round(base_net - shipping_cost, 2)
+        updates.append(record)
 
     updated = 0
     for i in range(0, len(updates), 500):
