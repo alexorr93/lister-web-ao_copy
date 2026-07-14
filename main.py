@@ -101,7 +101,7 @@ async def order_sync_worker():
                 try:
                     settings = get_ebay_settings(biz_id)
                     backfilled = settings.get("ORDERS_BACKFILLED", "") == "true"
-                    days_back = 14 if backfilled else 1815  # ~5 years (eBay's max retention) — fee fetch auto-chunks under the hood
+                    days_back = 14 if backfilled else 720  # ~2 years — eBay's getOrders hard-caps creationdate at 2 years, stricter than Finance API's 5-year limit
                     result = await asyncio.to_thread(sync_orders_for_business, biz_id, days_back)
                     ebay_failed = bool(result.get("errors", {}).get("ebay"))
                     if not backfilled:

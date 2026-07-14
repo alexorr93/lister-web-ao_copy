@@ -168,7 +168,7 @@ async function uploadShippingFile() {
 async function syncNow() {
   document.getElementById('shipping-status').textContent = 'Syncing orders, fees, and shipping matches — this can take a bit...';
   try {
-    const r = await fetch('/api/financials/sync-now?days_back=1815', {method: 'POST'});
+    const r = await fetch('/api/financials/sync-now?days_back=720', {method: 'POST'});
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Sync failed');
     const errMsg = data.errors && Object.keys(data.errors).length
