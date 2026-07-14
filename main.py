@@ -1510,10 +1510,10 @@ def apply_shipping_matches(business_id: str) -> dict:
         return all_rows
 
     orders = _fetch_all("orders", "id,net,tracking_number", lambda q: q.not_.is_("tracking_number", "null"))
-    if not orders:
-        return {"updated": 0}
-
     labels = _fetch_all("shipping_labels", "tracking_number,cost")
+    if not orders:
+        return {"updated": 0, "debug_orders_fetched": 0, "debug_labels_fetched": len(labels)}
+
     cost_by_tracking = {row["tracking_number"]: (row.get("cost") or 0) for row in labels}
 
     updates = []
@@ -1534,7 +1534,7 @@ def apply_shipping_matches(business_id: str) -> dict:
         except Exception as e:
             print(f"apply_shipping_matches: batch {i}-{i+len(chunk)} failed: {e}")
 
-    return {"updated": updated, "orders_with_tracking": len(orders)}
+    return {"updated": updated, "orders_with_tracking": len(orders), "debug_labels_fetched": len(labels), "debug_matches_found": len(updates)}
 
 @app.post("/api/financials/apply-shipping-matches")
 async def apply_shipping_matches_now(request: Request):

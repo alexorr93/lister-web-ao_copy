@@ -174,7 +174,7 @@ async function applyShippingMatches() {
     const r = await fetch('/api/financials/apply-shipping-matches', {method: 'POST'});
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed');
-    document.getElementById('shipping-status').textContent = `✅ Matched shipping cost into ${data.updated} order(s).`;
+    document.getElementById('shipping-status').textContent = `✅ Matched ${data.updated} order(s). [debug: ${data.orders_with_tracking} orders w/ tracking, ${data.debug_labels_fetched} labels fetched, ${data.debug_matches_found} matches found]`;
     loadFinancials();
   } catch(e) {
     document.getElementById('shipping-status').textContent = `❌ ${e.message}`;
