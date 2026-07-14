@@ -1573,17 +1573,11 @@ async def match_shipping_costs(request: Request, body: dict = Body(...)):
 
     return {"by_order": result, "matched": len(result), "requested": len(order_ids)}
 
-def sync_orders_for_business(business_id: str, days_back: int = 90) -> dict:
-    """Pulls orders (with real fees, refunds, and shipping cost) from eBay + Shopify and
-    upserts them into the local `orders` table. This is the ONLY place that hits the live
-    APIs for financial data — Financials itself just queries this local table, so filtering
-    by any date range is instant and shipping/fee matching applies to ALL history, not just
-    whatever happens to be on screen."""
+def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
+    """Does the actual API pulling + upserting for ONE date window. Called repeatedly,
+    once per month, by sync_orders_for_business below — never call this directly with
+    a huge range, since each call blocks for as long as that window takes."""
     import requests as _req, datetime as _dt
-
-    now = _dt.datetime.utcnow()
-    start_iso = (now - _dt.timedelta(days=days_back)).strftime("%Y-%m-%dT00:00:00.000Z")
-    end_iso = (now - _dt.timedelta(seconds=30)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
     upserted = 0
     errors = {}
@@ -1700,18 +1694,81 @@ def sync_orders_for_business(business_id: str, days_back: int = 90) -> dict:
 
     return {"upserted": upserted, "errors": errors}
 
+def sync_orders_for_business(business_id: str, days_back: int = 90) -> dict:
+    """Pulls orders (with real fees, refunds, and shipping cost) from eBay + Shopify and
+    upserts them into the local `orders` table — one MONTH at a time, not the whole
+    range in one shot. Each month is its own independent call: if one month fails or
+    times out, the others still land, and the next run just continues from wherever
+    it left off (upserts are idempotent, so re-running already-synced months is harmless).
+    This is the ONLY place that hits the live APIs for financial data — Financials
+    itself just queries the local table, so filtering by date range is instant."""
+    import datetime as _dt
+
+    now = _dt.datetime.utcnow()
+    range_start = now - _dt.timedelta(days=days_back)
+    total_upserted = 0
+    all_errors = {}
+
+    month_start = range_start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    while month_start < now:
+        next_month = (month_start.replace(day=28) + _dt.timedelta(days=4)).replace(day=1)
+        window_end = min(next_month, now) - _dt.timedelta(seconds=1)
+        window_start_iso = max(month_start, range_start).strftime("%Y-%m-%dT00:00:00.000Z")
+        window_end_iso = window_end.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+        label = month_start.strftime("%Y-%m")
+        try:
+            result = _sync_orders_window(business_id, window_start_iso, window_end_iso)
+            total_upserted += result["upserted"]
+            if result.get("errors"):
+                all_errors[label] = result["errors"]
+            print(f"sync_orders_for_business: month {label} -> {result['upserted']} row(s)"
+                  + (f", errors: {result['errors']}" if result.get("errors") else ""))
+        except Exception as e:
+            all_errors[label] = str(e)
+            print(f"sync_orders_for_business: month {label} FAILED entirely: {e}")
+
+        month_start = next_month
+
+    return {"upserted": total_upserted, "errors": all_errors}
+
+
+_sync_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
+
+async def _run_sync_background(business_id: str, days_back: int):
+    import asyncio, datetime as _dt
+    try:
+        result = await asyncio.to_thread(sync_orders_for_business, business_id, days_back)
+        _sync_status[business_id] = {
+            "running": False, "result": result,
+            "started_at": _sync_status.get(business_id, {}).get("started_at"),
+            "finished_at": _dt.datetime.utcnow().isoformat(),
+        }
+    except Exception as e:
+        _sync_status[business_id] = {
+            "running": False, "result": {"upserted": 0, "errors": {"fatal": str(e)}},
+            "started_at": _sync_status.get(business_id, {}).get("started_at"),
+            "finished_at": _dt.datetime.utcnow().isoformat(),
+        }
 
 @app.post("/api/financials/sync-now")
 async def sync_now(request: Request, days_back: int = 90):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
-    try:
-        import asyncio
-        result = await asyncio.to_thread(sync_orders_for_business, business_id, days_back)
-        return {"ok": True, **result}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+    import asyncio, datetime as _dt
+    if _sync_status.get(business_id, {}).get("running"):
+        return {"ok": True, "already_running": True}
+    _sync_status[business_id] = {"running": True, "result": None, "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None}
+    asyncio.create_task(_run_sync_background(business_id, days_back))
+    return {"ok": True, "started": True}
+
+@app.get("/api/financials/sync-status")
+async def sync_status(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    return _sync_status.get(business_id, {"running": False, "result": None, "started_at": None, "finished_at": None})
 
 @app.get("/api/financials")
 async def api_financials(request: Request, start: str = None, end: str = None, include_shopify: bool = True):

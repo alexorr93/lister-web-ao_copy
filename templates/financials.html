@@ -166,19 +166,46 @@ async function uploadShippingFile() {
 }
 
 async function syncNow() {
-  document.getElementById('shipping-status').textContent = 'Syncing orders, fees, and shipping matches — this can take a bit...';
+  document.getElementById('shipping-status').textContent = 'Starting sync (this runs in the background — safe to leave this page open, or come back later)...';
   try {
     const r = await fetch('/api/financials/sync-now?days_back=720', {method: 'POST'});
     const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || 'Sync failed');
-    const errMsg = data.errors && Object.keys(data.errors).length
-      ? ' (' + Object.entries(data.errors).map(([k,v]) => `${k}: ${v}`).join('; ') + ')' : '';
-    document.getElementById('shipping-status').textContent = `✅ Synced ${data.upserted} order line(s).${errMsg}`;
-    loadFinancials();
+    if (!r.ok) throw new Error(data.detail || 'Sync failed to start');
+    pollSyncStatus();
   } catch(e) {
     document.getElementById('shipping-status').textContent = `❌ ${e.message}`;
   }
 }
+
+async function pollSyncStatus() {
+  try {
+    const r = await fetch('/api/financials/sync-status');
+    const data = await r.json();
+    if (data.running) {
+      document.getElementById('shipping-status').textContent = 'Syncing (month by month) — this can take a few minutes, safe to leave open...';
+      setTimeout(pollSyncStatus, 5000);
+      return;
+    }
+    if (data.result) {
+      const errMsg = data.result.errors && Object.keys(data.result.errors).length
+        ? ' — some months had issues: ' + Object.entries(data.result.errors).map(([k,v]) => `${k}: ${JSON.stringify(v)}`).join('; ')
+        : '';
+      document.getElementById('shipping-status').textContent = `✅ Synced ${data.result.upserted} order line(s) this run.${errMsg}`;
+      loadFinancials();
+    }
+  } catch(e) {
+    document.getElementById('shipping-status').textContent = `❌ ${e.message}`;
+  }
+}
+
+// If a sync is already running when the page loads, resume polling instead of losing track of it.
+(async function checkSyncOnLoad() {
+  try {
+    const r = await fetch('/api/financials/sync-status');
+    const data = await r.json();
+    if (data.running) pollSyncStatus();
+  } catch(e) {}
+})();
 
 
 function lotOf(sku) {
