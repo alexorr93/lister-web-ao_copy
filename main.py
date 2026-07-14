@@ -88,8 +88,10 @@ async def start_background_jobs():
 
 async def order_sync_worker():
     """Keeps the local `orders` table fresh automatically, so Financials never has to
-    hit eBay/Shopify live. Runs every 20 minutes, syncing the last 14 days (a rolling
-    window catches late-arriving fee/refund/tracking data, not just brand-new orders)."""
+    hit eBay/Shopify live. The FIRST time a business is seen, does a full historical
+    backfill (365 days) so the table starts complete, not just from whenever this
+    feature was turned on. After that, syncs a rolling 14-day window every 20 minutes
+    (catches late-arriving fee/refund/tracking data, not just brand-new orders)."""
     import asyncio
     while True:
         try:
@@ -97,9 +99,17 @@ async def order_sync_worker():
             business_ids = list(set(r["business_id"] for r in (res.data or [])))
             for biz_id in business_ids:
                 try:
-                    result = sync_orders_for_business(biz_id, days_back=14)
-                    print(f"order_sync_worker: business {biz_id} synced {result['upserted']} order line(s)"
-                          + (f", errors: {result['errors']}" if result.get("errors") else ""))
+                    settings = get_ebay_settings(biz_id)
+                    backfilled = settings.get("ORDERS_BACKFILLED", "") == "true"
+                    days_back = 14 if backfilled else 365
+                    result = sync_orders_for_business(biz_id, days_back=days_back)
+                    if not backfilled:
+                        save_ebay_setting(biz_id, "ORDERS_BACKFILLED", "true")
+                        print(f"order_sync_worker: business {biz_id} completed initial 365-day backfill "
+                              f"({result['upserted']} order line(s))")
+                    else:
+                        print(f"order_sync_worker: business {biz_id} synced {result['upserted']} order line(s)"
+                              + (f", errors: {result['errors']}" if result.get("errors") else ""))
                 except Exception as e:
                     print(f"order_sync_worker: business {biz_id} failed: {e}")
         except Exception as e:
