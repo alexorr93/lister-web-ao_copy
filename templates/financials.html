@@ -102,6 +102,7 @@ tr:last-child td { border-bottom: none; }
       <input type="file" id="shipping-file-input" accept=".csv,.xlsx" style="font-size:12px;" onchange="uploadShippingFile()"/>
     </div>
     <button class="btn btn-primary" onclick="syncNow()" title="Pulls fresh orders, fees, and shipping matches into the local database — this is what keeps Financials accurate">🔄 Sync Now</button>
+    <button class="btn" onclick="backfillTracking()" title="Fast: only re-fetches missing tracking numbers, skips re-pulling orders/fees entirely">🏷️ Fix Tracking Numbers</button>
     <span id="last-synced" style="font-size:11px;color:var(--muted);align-self:center;"></span>
   </div>
   <div id="shipping-status" style="font-size:12px;color:var(--muted);margin-bottom:10px;"></div>
@@ -166,6 +167,18 @@ async function uploadShippingFile() {
   input.value = '';
 }
 
+async function backfillTracking() {
+  document.getElementById('shipping-status').textContent = 'Fixing tracking numbers (fast — skips order/fee refetch)...';
+  try {
+    const r = await fetch('/api/financials/backfill-tracking', {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed to start');
+    pollSyncStatus();
+  } catch(e) {
+    document.getElementById('shipping-status').textContent = `❌ ${e.message}`;
+  }
+}
+
 async function syncNow() {
   document.getElementById('shipping-status').textContent = 'Starting sync (this runs in the background — safe to leave this page open, or come back later)...';
   try {
@@ -188,10 +201,16 @@ async function pollSyncStatus() {
       return;
     }
     if (data.result) {
-      const errMsg = data.result.errors && Object.keys(data.result.errors).length
-        ? ' — some months had issues: ' + Object.entries(data.result.errors).map(([k,v]) => `${k}: ${JSON.stringify(v)}`).join('; ')
-        : '';
-      document.getElementById('shipping-status').textContent = `✅ Synced ${data.result.upserted} order line(s) this run.${errMsg}`;
+      if (data.result.upserted !== undefined) {
+        const errMsg = data.result.errors && Object.keys(data.result.errors).length
+          ? ' — some months had issues: ' + Object.entries(data.result.errors).map(([k,v]) => `${k}: ${JSON.stringify(v)}`).join('; ')
+          : '';
+        document.getElementById('shipping-status').textContent = `✅ Synced ${data.result.upserted} order line(s) this run.${errMsg}`;
+      } else if (data.result.updated !== undefined) {
+        document.getElementById('shipping-status').textContent = `✅ Fixed tracking on ${data.result.updated} of ${data.result.rows_missing} order(s) that were missing it.`;
+      } else if (data.result.error) {
+        document.getElementById('shipping-status').textContent = `❌ ${data.result.error}`;
+      }
       loadFinancials();
     }
   } catch(e) {

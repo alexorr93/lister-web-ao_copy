@@ -1763,6 +1763,65 @@ async def _run_sync_background(business_id: str, days_back: int):
             "finished_at": _dt.datetime.utcnow().isoformat(),
         }
 
+def backfill_tracking_numbers(business_id: str) -> dict:
+    """Fills in tracking_number for orders that don't have one, WITHOUT re-fetching
+    orders or fee data at all — just the per-order shipping_fulfillment lookup, which
+    is the only piece that was ever wrong. Much faster than a full sync_orders_for_business
+    pass since it skips getOrders and the Finance API entirely."""
+    import requests as _req
+
+    res = supabase.table("orders").select("id,order_id").eq("business_id", business_id)\
+        .eq("platform", "eBay").is_("tracking_number", "null").execute()
+    rows = res.data or []
+    order_ids = list(set(r["order_id"] for r in rows if r.get("order_id")))
+
+    token = get_ebay_access_token(business_id)
+    tracking_by_order = {}
+    for oid in order_ids:
+        try:
+            r = _req.get(
+                f"{EBAY_API_BASE}/sell/fulfillment/v1/order/{oid}/shipping_fulfillment",
+                headers=ebay_headers(token, content_language=False), timeout=15,
+            )
+            if r.status_code == 200:
+                for f in r.json().get("fulfillments", []):
+                    tn = f.get("shipmentTrackingNumber")
+                    if tn:
+                        tracking_by_order.setdefault(oid, []).append(tn)
+        except Exception:
+            continue
+
+    updated = 0
+    for row in rows:
+        trackings = tracking_by_order.get(row["order_id"])
+        if trackings:
+            try:
+                supabase.table("orders").update({"tracking_number": ",".join(trackings)}).eq("id", row["id"]).execute()
+                updated += 1
+            except Exception:
+                pass
+
+    return {"updated": updated, "orders_checked": len(order_ids), "rows_missing": len(rows)}
+
+@app.post("/api/financials/backfill-tracking")
+async def backfill_tracking_now(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio
+    if _sync_status.get(business_id, {}).get("running"):
+        return {"ok": True, "already_running": True}
+    _sync_status[business_id] = {"running": True, "result": None, "started_at": __import__("datetime").datetime.utcnow().isoformat(), "finished_at": None}
+    async def _run():
+        import datetime as _dt
+        try:
+            result = await asyncio.to_thread(backfill_tracking_numbers, business_id)
+            _sync_status[business_id] = {"running": False, "result": result, "started_at": _sync_status.get(business_id, {}).get("started_at"), "finished_at": _dt.datetime.utcnow().isoformat()}
+        except Exception as e:
+            _sync_status[business_id] = {"running": False, "result": {"error": str(e)}, "started_at": _sync_status.get(business_id, {}).get("started_at"), "finished_at": _dt.datetime.utcnow().isoformat()}
+    asyncio.create_task(_run())
+    return {"ok": True, "started": True}
+
 @app.post("/api/financials/sync-now")
 async def sync_now(request: Request, days_back: int = 90):
     business_id = require_auth(request)
