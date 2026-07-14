@@ -1489,15 +1489,31 @@ def apply_shipping_matches(business_id: str) -> dict:
     """Matches every order's tracking_number against shipping_labels and writes the
     result directly into orders.shipping_cost / orders.final_net — a stored, one-time
     computation, not something recalculated on every page read. Pure local DB work,
-    no eBay/Shopify API calls, batched so it's fast even across thousands of orders."""
-    orders_res = supabase.table("orders").select("id,net,tracking_number").eq("business_id", business_id)\
-        .not_.is_("tracking_number", "null").execute()
-    orders = orders_res.data or []
+    no eBay/Shopify API calls, batched so it's fast even across thousands of orders.
+    Both fetches are paginated — Supabase silently caps a single query at ~1000 rows,
+    and with thousands of orders/labels that was causing real matches to be missed."""
+    def _fetch_all(table, select_cols, extra_filter=None):
+        all_rows = []
+        page_size = 1000
+        start = 0
+        while True:
+            q = supabase.table(table).select(select_cols).eq("business_id", business_id)
+            if extra_filter:
+                q = extra_filter(q)
+            res = q.range(start, start + page_size - 1).execute()
+            page = res.data or []
+            all_rows.extend(page)
+            if len(page) < page_size:
+                break
+            start += page_size
+        return all_rows
+
+    orders = _fetch_all("orders", "id,net,tracking_number", lambda q: q.not_.is_("tracking_number", "null"))
     if not orders:
         return {"updated": 0}
 
-    labels_res = supabase.table("shipping_labels").select("tracking_number,cost").eq("business_id", business_id).execute()
-    cost_by_tracking = {row["tracking_number"]: (row.get("cost") or 0) for row in (labels_res.data or [])}
+    labels = _fetch_all("shipping_labels", "tracking_number,cost")
+    cost_by_tracking = {row["tracking_number"]: (row.get("cost") or 0) for row in labels}
 
     updates = []
     for order in orders:
