@@ -101,7 +101,7 @@ async def order_sync_worker():
                 try:
                     settings = get_ebay_settings(biz_id)
                     backfilled = settings.get("ORDERS_BACKFILLED", "") == "true"
-                    days_back = 14 if backfilled else 365
+                    days_back = 14 if backfilled else 1050  # ~34.5 months, safely under eBay's 36-month max query span
                     result = sync_orders_for_business(biz_id, days_back=days_back)
                     if not backfilled:
                         save_ebay_setting(biz_id, "ORDERS_BACKFILLED", "true")
