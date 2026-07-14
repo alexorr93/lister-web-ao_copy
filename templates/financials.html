@@ -102,6 +102,9 @@ tr:last-child td { border-bottom: none; }
       <input type="file" id="shipping-file-input" accept=".csv,.xlsx" style="font-size:12px;" onchange="uploadShippingFile()"/>
     </div>
     <button class="btn btn-primary" onclick="syncNow()" title="Pulls fresh orders, fees, and shipping matches into the local database — this is what keeps Financials accurate">🔄 Sync Now</button>
+    <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer;padding-bottom:8px;" title="Normally resumes from where the last run left off. Check this to ignore that and re-walk everything from the start (needed after a code change that affects already-completed months).">
+      <input type="checkbox" id="force-restart-toggle"/> Force full restart
+    </label>
     <button class="btn" onclick="backfillTracking()" title="Fast: only re-fetches missing tracking numbers, skips re-pulling orders/fees entirely">🏷️ Fix Tracking Numbers</button>
     <button class="btn" onclick="applyShippingMatches()" title="Local-only, instant: re-matches tracking numbers against shipping_labels and writes the result into orders. No API calls.">📦 Apply Shipping Matches</button>
     <span id="last-synced" style="font-size:11px;color:var(--muted);align-self:center;"></span>
@@ -218,7 +221,8 @@ async function backfillTracking() {
 async function syncNow() {
   document.getElementById('shipping-status').textContent = 'Starting sync (this runs in the background — safe to leave this page open, or come back later)...';
   try {
-    const r = await fetch('/api/financials/sync-now?days_back=720', {method: 'POST'});
+    const forceRestart = document.getElementById('force-restart-toggle').checked;
+    const r = await fetch(`/api/financials/sync-now?days_back=720&resume=${!forceRestart}`, {method: 'POST'});
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Sync failed to start');
     pollSyncStatus();

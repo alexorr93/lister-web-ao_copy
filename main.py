@@ -1800,12 +1800,17 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
 
     return {"upserted": upserted, "errors": errors}
 
-def sync_orders_for_business(business_id: str, days_back: int = 90) -> dict:
+def sync_orders_for_business(business_id: str, days_back: int = 90, resume: bool = True) -> dict:
     """Pulls orders (with real fees, refunds, and shipping cost) from eBay + Shopify and
     upserts them into the local `orders` table — one MONTH at a time, not the whole
     range in one shot. Each month is its own independent call: if one month fails or
     times out, the others still land, and the next run just continues from wherever
     it left off (upserts are idempotent, so re-running already-synced months is harmless).
+    Also checkpoints progress in app_settings (ORDERS_SYNC_CHECKPOINT) so an interruption
+    — a deploy restart, a dropped connection, anything — resumes from the last completed
+    month instead of re-walking from the start every time. Pass resume=False to force a
+    full re-walk regardless of checkpoint (needed after a code change that affects fields
+    on months already marked complete).
     This is the ONLY place that hits the live APIs for financial data — Financials
     itself just queries the local table, so filtering by date range is instant."""
     import datetime as _dt
@@ -1816,6 +1821,23 @@ def sync_orders_for_business(business_id: str, days_back: int = 90) -> dict:
     all_errors = {}
 
     month_start = range_start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    checkpoint_str = None
+    if resume:
+        settings = get_ebay_settings(business_id)
+        checkpoint_str = settings.get("ORDERS_SYNC_CHECKPOINT", "") or None
+    if checkpoint_str:
+        try:
+            checkpoint_dt = _dt.datetime.strptime(checkpoint_str, "%Y-%m-%d")
+            if checkpoint_dt >= month_start:
+                # Resume from the month AFTER the last one that fully completed
+                resumed_month = (checkpoint_dt.replace(day=28) + _dt.timedelta(days=4)).replace(day=1)
+                if resumed_month > month_start:
+                    month_start = resumed_month
+                    print(f"sync_orders_for_business: resuming from checkpoint, starting at {month_start.strftime('%Y-%m')}")
+        except ValueError:
+            pass
+
     while month_start < now:
         next_month = (month_start.replace(day=28) + _dt.timedelta(days=4)).replace(day=1)
         window_end = min(next_month, now) - _dt.timedelta(seconds=1)
@@ -1830,21 +1852,34 @@ def sync_orders_for_business(business_id: str, days_back: int = 90) -> dict:
                 all_errors[label] = result["errors"]
             print(f"sync_orders_for_business: month {label} -> {result['upserted']} row(s)"
                   + (f", errors: {result['errors']}" if result.get("errors") else ""))
+            # Checkpoint AFTER each month succeeds, so an interruption mid-next-month
+            # still resumes correctly rather than re-doing this completed one.
+            try:
+                save_ebay_setting(business_id, "ORDERS_SYNC_CHECKPOINT", month_start.strftime("%Y-%m-%d"))
+            except Exception:
+                pass
         except Exception as e:
             all_errors[label] = str(e)
             print(f"sync_orders_for_business: month {label} FAILED entirely: {e}")
 
         month_start = next_month
 
+    # Reached the end of the range successfully — clear the checkpoint so a future
+    # full re-walk (e.g. after a code change) starts fresh instead of resuming past everything.
+    try:
+        save_ebay_setting(business_id, "ORDERS_SYNC_CHECKPOINT", "")
+    except Exception:
+        pass
+
     return {"upserted": total_upserted, "errors": all_errors}
 
 
 _sync_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
 
-async def _run_sync_background(business_id: str, days_back: int):
+async def _run_sync_background(business_id: str, days_back: int, resume: bool = True):
     import asyncio, datetime as _dt
     try:
-        result = await asyncio.to_thread(sync_orders_for_business, business_id, days_back)
+        result = await asyncio.to_thread(sync_orders_for_business, business_id, days_back, resume)
         _sync_status[business_id] = {
             "running": False, "result": result,
             "started_at": _sync_status.get(business_id, {}).get("started_at"),
@@ -1917,7 +1952,7 @@ async def backfill_tracking_now(request: Request):
     return {"ok": True, "started": True}
 
 @app.post("/api/financials/sync-now")
-async def sync_now(request: Request, days_back: int = 90):
+async def sync_now(request: Request, days_back: int = 90, resume: bool = True):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
@@ -1925,7 +1960,7 @@ async def sync_now(request: Request, days_back: int = 90):
     if _sync_status.get(business_id, {}).get("running"):
         return {"ok": True, "already_running": True}
     _sync_status[business_id] = {"running": True, "result": None, "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None}
-    asyncio.create_task(_run_sync_background(business_id, days_back))
+    asyncio.create_task(_run_sync_background(business_id, days_back, resume))
     return {"ok": True, "started": True}
 
 @app.get("/api/financials/sync-status")
