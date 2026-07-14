@@ -158,7 +158,8 @@ async function uploadShippingFile() {
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Upload failed');
     document.getElementById('shipping-status').textContent =
-      `✅ Imported ${data.inserted} label(s) from ${data.total_rows} row(s)${data.skipped ? ', ' + data.skipped + ' skipped' : ''}. Click Sync Now to apply them.`;
+      `✅ Imported ${data.inserted} label(s) from ${data.total_rows} row(s)${data.skipped ? ', ' + data.skipped + ' skipped' : ''}.`;
+    loadFinancials();
   } catch(e) {
     document.getElementById('shipping-status').textContent = `❌ ${e.message}`;
   }
