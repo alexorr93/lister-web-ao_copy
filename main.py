@@ -1344,10 +1344,23 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
         r["shopify_net"] = round(r["shopify_net"], 2)
     results.sort(key=lambda r: r["total_net"], reverse=True)
 
+    order_lines = [{
+        "sku": r["sku"],
+        "title": r["title"],
+        "platform": r["platform"],
+        "order_id": r["order_id"],
+        "quantity": r["quantity"],
+        "revenue": round(r["revenue"], 2),
+        "net": round(r.get("net", r["revenue"]), 2),
+        "order_date": r.get("order_date", ""),
+    } for r in all_rows]
+    order_lines.sort(key=lambda r: r["order_date"], reverse=True)
+
     return {
         "start": start_dt.strftime("%Y-%m-%d"),
         "end": end_dt.strftime("%Y-%m-%d"),
         "by_sku": results,
+        "order_lines": order_lines,
         "totals": {
             "orders": len(all_rows),
             "quantity": sum(r["quantity"] for r in all_rows),
