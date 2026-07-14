@@ -102,11 +102,20 @@ async def order_sync_worker():
                     settings = get_ebay_settings(biz_id)
                     backfilled = settings.get("ORDERS_BACKFILLED", "") == "true"
                     days_back = 14 if backfilled else 1815  # ~5 years (eBay's max retention) — fee fetch auto-chunks under the hood
-                    result = sync_orders_for_business(biz_id, days_back=days_back)
+                    result = await asyncio.to_thread(sync_orders_for_business, biz_id, days_back)
+                    ebay_failed = bool(result.get("errors", {}).get("ebay"))
                     if not backfilled:
-                        save_ebay_setting(biz_id, "ORDERS_BACKFILLED", "true")
-                        print(f"order_sync_worker: business {biz_id} completed initial 365-day backfill "
-                              f"({result['upserted']} order line(s))")
+                        if ebay_failed:
+                            # Don't mark complete — the eBay pull itself failed, so we got
+                            # little/nothing. Retry the full backfill again next cycle instead
+                            # of silently settling for an incomplete result.
+                            print(f"order_sync_worker: business {biz_id} initial backfill FAILED "
+                                  f"(will retry next cycle) — errors: {result['errors']}")
+                        else:
+                            save_ebay_setting(biz_id, "ORDERS_BACKFILLED", "true")
+                            print(f"order_sync_worker: business {biz_id} completed initial backfill "
+                                  f"({result['upserted']} order line(s))"
+                                  + (f", errors: {result['errors']}" if result.get("errors") else ""))
                     else:
                         print(f"order_sync_worker: business {biz_id} synced {result['upserted']} order line(s)"
                               + (f", errors: {result['errors']}" if result.get("errors") else ""))
@@ -1661,7 +1670,8 @@ async def sync_now(request: Request, days_back: int = 90):
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     try:
-        result = sync_orders_for_business(business_id, days_back=days_back)
+        import asyncio
+        result = await asyncio.to_thread(sync_orders_for_business, business_id, days_back)
         return {"ok": True, **result}
     except Exception as e:
         raise HTTPException(500, str(e))
