@@ -1337,17 +1337,22 @@ def fetch_ebay_orders(business_id: str, start_iso: str, end_iso: str) -> list:
     return rows
 
 def fetch_ebay_fees_by_line_item(business_id: str, start_iso: str, end_iso: str) -> dict:
-    """Returns {(order_id, line_item_id): net_fee_amount} using eBay's Finance API —
-    the Fulfillment API (fetch_ebay_orders) only has the gross sale price, not what
-    eBay actually deducted. eBay hard-caps each query's date span at 36 months and
-    total retention at 5 years, so a wide range (e.g. a full historical backfill)
-    gets auto-split into ~30-month chunks here rather than failing outright."""
+    """Returns {(order_id, line_item_id): net_fee_amount} for marketplace fees, AND
+    {order_id: label_cost} for eBay-purchased shipping labels (SHIPPING_LABEL transaction
+    type) — both captured from the SAME Finance API pass, no extra API calls needed.
+    Note: eBay only associates a SHIPPING_LABEL transaction with a specific orderId when
+    the label was purchased individually — bulk/batch label purchases only report one
+    lump amount with no per-order breakdown, so those can't be attributed here.
+    eBay hard-caps each query's date span at 36 months and total retention at 5 years,
+    so a wide range (e.g. a full historical backfill) gets auto-split into ~30-month
+    chunks here rather than failing outright."""
     import datetime as _dt
 
-    def _fetch_window(window_start_iso: str, window_end_iso: str) -> dict:
+    def _fetch_window(window_start_iso: str, window_end_iso: str) -> tuple:
         import requests as _req
         token = get_ebay_access_token(business_id)
         window_fees = {}
+        window_labels = {}
         offset = 0
         max_pages = 25  # 25 * 200 = 5,000 transactions safety cap per window
         for _ in range(max_pages):
@@ -1366,6 +1371,10 @@ def fetch_ebay_fees_by_line_item(business_id: str, start_iso: str, end_iso: str)
             data = r.json()
             for txn in data.get("transactions", []):
                 order_id = txn.get("orderId", "")
+                if txn.get("transactionType") == "SHIPPING_LABEL" and order_id:
+                    amt = float((txn.get("amount") or {}).get("value", 0) or 0)
+                    window_labels[order_id] = window_labels.get(order_id, 0.0) + amt
+                    continue
                 for li in txn.get("orderLineItems", []) or []:
                     line_item_id = li.get("lineItemId", "")
                     if not order_id or not line_item_id:
@@ -1379,20 +1388,23 @@ def fetch_ebay_fees_by_line_item(business_id: str, start_iso: str, end_iso: str)
             offset += 200
             if offset >= total or not data.get("transactions"):
                 break
-        return window_fees
+        return window_fees, window_labels
 
     start_dt = _dt.datetime.strptime(start_iso, "%Y-%m-%dT%H:%M:%S.%fZ")
     end_dt = _dt.datetime.strptime(end_iso, "%Y-%m-%dT%H:%M:%S.%fZ")
     fees = {}
+    ebay_labels_by_order = {}
     window_start = start_dt
     while window_start < end_dt:
         window_end = min(window_start + _dt.timedelta(days=900), end_dt)  # ~30 months per chunk
-        fees.update(_fetch_window(
+        window_fees, window_labels = _fetch_window(
             window_start.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
             window_end.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
-        ))
+        )
+        fees.update(window_fees)
+        ebay_labels_by_order.update(window_labels)
         window_start = window_end
-    return fees
+    return {"fees_by_line": fees, "ebay_labels_by_order": ebay_labels_by_order}
 
 def fetch_shopify_orders(business_id: str, start_iso: str, end_iso: str) -> list:
     """Returns normalized order-line rows from Shopify's Admin API for the given date range,
@@ -1638,9 +1650,12 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
     try:
         ebay_rows = fetch_ebay_orders(business_id, start_iso, end_iso)
         try:
-            fees_by_line = fetch_ebay_fees_by_line_item(business_id, start_iso, end_iso)
+            fee_data = fetch_ebay_fees_by_line_item(business_id, start_iso, end_iso)
+            fees_by_line = fee_data["fees_by_line"]
+            ebay_labels_by_order = fee_data["ebay_labels_by_order"]
         except Exception as e:
             fees_by_line = {}
+            ebay_labels_by_order = {}
             errors["ebay_fees"] = str(e)
 
         # Tracking numbers, one call per unique order (needed for shipping cost matching)
@@ -1690,7 +1705,10 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
             revenue = _safe(row["revenue"])
             net = _safe(revenue - fee)
             trackings = tracking_by_order.get(row["order_id"], [])
-            shipping_cost = _safe(sum(cost_by_tracking.get(tn, 0) or 0 for tn in trackings))
+            pirate_ship_cost = sum(cost_by_tracking.get(tn, 0) or 0 for tn in trackings)
+            # Pirate Ship match takes priority (it's the common case); eBay-purchased
+            # label cost fills in only when there's no Pirate Ship match for this order.
+            shipping_cost = _safe(pirate_ship_cost if pirate_ship_cost > 0 else ebay_labels_by_order.get(row["order_id"], 0))
             record = {
                 "id": f"ebay:{row['order_id']}:{row['line_item_id']}",
                 "business_id": business_id, "platform": "eBay", "order_id": row["order_id"],
