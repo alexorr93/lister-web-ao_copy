@@ -188,13 +188,14 @@ function renderTable() {
   const th = (key, label) => `<th onclick="setSort('${key}')">${label}${sortKey===key ? (sortDir===1?' ▲':' ▼') : ''}</th>`;
   const amtLabel = netMode ? 'Net $' : 'Gross $';
   let html = `<table><thead><tr>
-    ${th('sku','SKU')}${th('title','Title')}${th('ebay_qty','eBay Qty')}${th(`ebay_${suffix}`,'eBay '+amtLabel)}
+    ${th('sku','SKU')}${th('title','Title')}${th('order_count','# Orders')}${th('ebay_qty','eBay Qty')}${th(`ebay_${suffix}`,'eBay '+amtLabel)}
     ${th('shopify_qty','Shopify Qty')}${th(`shopify_${suffix}`,'Shopify '+amtLabel)}${th('total_qty','Total Qty')}${th('total_amount','Total '+amtLabel)}
   </tr></thead><tbody>`;
   for (const r of rows) {
     html += `<tr>
       <td class="sku">${escapeHtml(r.sku)}</td>
       <td class="muted">${escapeHtml(r.title || '')}</td>
+      <td>${fmtNum(r.order_count)}</td>
       <td>${r.ebay_qty ? `<span class="platform-tag ebay">eBay</span>${fmtNum(r.ebay_qty)}` : '—'}</td>
       <td>${r.ebay_qty ? fmtMoney(r[`ebay_${suffix}`]) : '—'}</td>
       <td>${r.shopify_qty ? `<span class="platform-tag shopify">Shopify</span>${fmtNum(r.shopify_qty)}` : '—'}</td>

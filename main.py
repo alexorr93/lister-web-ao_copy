@@ -1334,6 +1334,7 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
 
     results = list(by_sku.values())
     for r in results:
+        r["order_count"] = len(r["orders"])
         r["total_qty"] = r["ebay_qty"] + r["shopify_qty"]
         r["total_revenue"] = round(r["ebay_revenue"] + r["shopify_revenue"], 2)
         r["total_net"] = round(r["ebay_net"] + r["shopify_net"], 2)
