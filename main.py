@@ -84,6 +84,27 @@ async def auto_fill_worker():
 async def start_background_jobs():
     import asyncio
     asyncio.create_task(auto_fill_worker())
+    asyncio.create_task(order_sync_worker())
+
+async def order_sync_worker():
+    """Keeps the local `orders` table fresh automatically, so Financials never has to
+    hit eBay/Shopify live. Runs every 20 minutes, syncing the last 14 days (a rolling
+    window catches late-arriving fee/refund/tracking data, not just brand-new orders)."""
+    import asyncio
+    while True:
+        try:
+            res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
+            business_ids = list(set(r["business_id"] for r in (res.data or [])))
+            for biz_id in business_ids:
+                try:
+                    result = sync_orders_for_business(biz_id, days_back=14)
+                    print(f"order_sync_worker: business {biz_id} synced {result['upserted']} order line(s)"
+                          + (f", errors: {result['errors']}" if result.get("errors") else ""))
+                except Exception as e:
+                    print(f"order_sync_worker: business {biz_id} failed: {e}")
+        except Exception as e:
+            print(f"order_sync_worker error: {e}")
+        await asyncio.sleep(1200)  # 20 minutes
 
 EBAY_DESCRIPTION = "Shipped primarily with UPS and sometimes USPS. If you have special packing or shipping needs, please send a message. This item is sold in as-is condition. The seller assumes no liability for the use, operation, or installation of this product. Due to the technical nature of this equipment, the buyer is responsible for having the item professionally inspected and installed by a certified technician prior to use."
 
@@ -1374,6 +1395,108 @@ async def match_shipping_costs(request: Request, body: dict = Body(...)):
 
     return {"by_order": result, "matched": len(result), "requested": len(order_ids)}
 
+def sync_orders_for_business(business_id: str, days_back: int = 90) -> dict:
+    """Pulls orders (with real fees, refunds, and shipping cost) from eBay + Shopify and
+    upserts them into the local `orders` table. This is the ONLY place that hits the live
+    APIs for financial data — Financials itself just queries this local table, so filtering
+    by any date range is instant and shipping/fee matching applies to ALL history, not just
+    whatever happens to be on screen."""
+    import requests as _req, datetime as _dt
+
+    now = _dt.datetime.utcnow()
+    start_iso = (now - _dt.timedelta(days=days_back)).strftime("%Y-%m-%dT00:00:00.000Z")
+    end_iso = (now - _dt.timedelta(seconds=30)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+    upserted = 0
+    errors = {}
+
+    # --- eBay: orders + real fees + tracking numbers ---
+    try:
+        ebay_rows = fetch_ebay_orders(business_id, start_iso, end_iso)
+        try:
+            fees_by_line = fetch_ebay_fees_by_line_item(business_id, start_iso, end_iso)
+        except Exception as e:
+            fees_by_line = {}
+            errors["ebay_fees"] = str(e)
+
+        # Tracking numbers, one call per unique order (needed for shipping cost matching)
+        token = get_ebay_access_token(business_id)
+        order_ids = list(set(r["order_id"] for r in ebay_rows if r.get("order_id")))
+        tracking_by_order = {}
+        for oid in order_ids[:500]:  # safety cap per sync cycle
+            try:
+                r = _req.get(
+                    f"{EBAY_API_BASE}/sell/fulfillment/v1/order/{oid}/shipping_fulfillment",
+                    headers=ebay_headers(token, content_language=False), timeout=15,
+                )
+                if r.status_code == 200:
+                    for f in r.json().get("fulfillments", []):
+                        for tn in f.get("shipmentTrackingNumber", []) or []:
+                            tracking_by_order.setdefault(oid, []).append(tn)
+            except Exception:
+                continue
+
+        all_trackings = [tn for lst in tracking_by_order.values() for tn in lst]
+        cost_by_tracking = {}
+        if all_trackings:
+            res = supabase.table("shipping_labels").select("tracking_number,cost")\
+                .eq("business_id", business_id).in_("tracking_number", all_trackings).execute()
+            for row in (res.data or []):
+                cost_by_tracking[row["tracking_number"]] = row.get("cost") or 0
+
+        for row in ebay_rows:
+            fee = fees_by_line.get((row["order_id"], row["line_item_id"]), 0.0)
+            net = row["revenue"] - fee
+            trackings = tracking_by_order.get(row["order_id"], [])
+            shipping_cost = sum(cost_by_tracking.get(tn, 0) or 0 for tn in trackings)
+            record = {
+                "id": f"ebay:{row['order_id']}:{row['line_item_id']}",
+                "business_id": business_id, "platform": "eBay", "order_id": row["order_id"],
+                "sku": row["sku"], "title": row["title"], "quantity": row["quantity"],
+                "order_date": row["order_date"], "gross_revenue": round(row["revenue"], 2),
+                "fee": round(fee, 2), "net": round(net, 2),
+                "tracking_number": ",".join(trackings) if trackings else None,
+                "shipping_cost": round(shipping_cost, 2),
+                "final_net": round(net - shipping_cost, 2),
+            }
+            supabase.table("orders").upsert(record).execute()
+            upserted += 1
+    except Exception as e:
+        errors["ebay"] = str(e)
+
+    # --- Shopify: orders + estimated fee + embedded refunds ---
+    try:
+        shopify_rows = fetch_shopify_orders(business_id, start_iso, end_iso)
+        for i, row in enumerate(shopify_rows):
+            net = row.get("net", row["revenue"])
+            record = {
+                "id": f"shopify:{row['order_id']}:{row['sku']}:{i}",
+                "business_id": business_id, "platform": "Shopify", "order_id": row["order_id"],
+                "sku": row["sku"], "title": row["title"], "quantity": row["quantity"],
+                "order_date": row["order_date"], "gross_revenue": round(row["revenue"], 2),
+                "fee": round(row.get("fee", 0), 2), "net": round(net, 2),
+                "tracking_number": None, "shipping_cost": 0,
+                "final_net": round(net, 2),
+            }
+            supabase.table("orders").upsert(record).execute()
+            upserted += 1
+    except Exception as e:
+        errors["shopify"] = str(e)
+
+    return {"upserted": upserted, "errors": errors}
+
+
+@app.post("/api/financials/sync-now")
+async def sync_now(request: Request, days_back: int = 90):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    try:
+        result = sync_orders_for_business(business_id, days_back=days_back)
+        return {"ok": True, **result}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 @app.get("/api/financials")
 async def api_financials(request: Request, start: str = None, end: str = None, include_shopify: bool = True):
     business_id = require_auth(request)
@@ -1383,93 +1506,42 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
     now = _dt.datetime.utcnow()
     end_dt = _dt.datetime.fromisoformat(end) if end else now
     start_dt = _dt.datetime.fromisoformat(start) if start else (end_dt - _dt.timedelta(days=30))
-    start_iso = start_dt.strftime("%Y-%m-%dT00:00:00.000Z")
-    # Requesting end-of-day on "today" is technically a future timestamp by the time eBay
-    # processes it — clamp to the actual current moment (minus a small safety margin) instead.
-    end_of_day = end_dt.replace(hour=23, minute=59, second=59, microsecond=999000)
-    safe_now = now - _dt.timedelta(seconds=30)
-    end_capped = min(end_of_day, safe_now)
-    end_iso = end_capped.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    start_date_str = start_dt.strftime("%Y-%m-%d")
+    end_date_str = end_dt.strftime("%Y-%m-%d")
 
-    all_rows = []
-    errors = {}
-    ebay_fees_by_line = {}
-    try:
-        ebay_rows = fetch_ebay_orders(business_id, start_iso, end_iso)
-        try:
-            ebay_fees_by_line = fetch_ebay_fees_by_line_item(business_id, start_iso, end_iso)
-        except Exception as e:
-            errors["ebay_fees"] = str(e)  # fall back to gross-only for eBay if Finance API call fails
-        for row in ebay_rows:
-            fee = ebay_fees_by_line.get((row["order_id"], row["line_item_id"]), 0.0)
-            row["net"] = row["revenue"] - fee
-            row["fee"] = fee
-            row["refund"] = 0.0  # refunds show up as their own negative-amount transactions in fees above
-        all_rows.extend(ebay_rows)
-    except Exception as e:
-        errors["ebay"] = str(e)
-    if include_shopify:
-        try:
-            all_rows.extend(fetch_shopify_orders(business_id, start_iso, end_iso))
-        except Exception as e:
-            errors["shopify"] = str(e)
-
-    by_sku = {}
-    for row in all_rows:
-        key = row["sku"]
-        if key not in by_sku:
-            by_sku[key] = {"sku": key, "title": row["title"], "ebay_qty": 0, "ebay_revenue": 0.0, "ebay_net": 0.0,
-                           "shopify_qty": 0, "shopify_revenue": 0.0, "shopify_net": 0.0, "orders": []}
-        entry = by_sku[key]
-        net_val = row.get("net", row["revenue"])
-        if row["platform"] == "eBay":
-            entry["ebay_qty"] += row["quantity"]
-            entry["ebay_revenue"] += row["revenue"]
-            entry["ebay_net"] += net_val
-        else:
-            entry["shopify_qty"] += row["quantity"]
-            entry["shopify_revenue"] += row["revenue"]
-            entry["shopify_net"] += net_val
-        entry["orders"].append(row)
-        if not entry["title"] and row["title"]:
-            entry["title"] = row["title"]
-
-    results = list(by_sku.values())
-    for r in results:
-        r["order_count"] = len(r["orders"])
-        r["total_qty"] = r["ebay_qty"] + r["shopify_qty"]
-        r["total_revenue"] = round(r["ebay_revenue"] + r["shopify_revenue"], 2)
-        r["total_net"] = round(r["ebay_net"] + r["shopify_net"], 2)
-        r["ebay_revenue"] = round(r["ebay_revenue"], 2)
-        r["shopify_revenue"] = round(r["shopify_revenue"], 2)
-        r["ebay_net"] = round(r["ebay_net"], 2)
-        r["shopify_net"] = round(r["shopify_net"], 2)
-    results.sort(key=lambda r: r["total_net"], reverse=True)
+    # Financials now reads from the local `orders` table (kept fresh by a background sync
+    # job + the Sync Now button) instead of calling eBay/Shopify live on every load — that's
+    # what makes any date range instant and shipping/fee matching apply to ALL history.
+    query = supabase.table("orders").select("*").eq("business_id", business_id)\
+        .gte("order_date", start_date_str).lte("order_date", end_date_str)
+    if not include_shopify:
+        query = query.eq("platform", "eBay")
+    res = query.execute()
+    rows = res.data or []
+    rows.sort(key=lambda r: r.get("order_date", ""), reverse=True)
 
     order_lines = [{
-        "sku": r["sku"],
-        "title": r["title"],
-        "platform": r["platform"],
-        "order_id": r["order_id"],
-        "quantity": r["quantity"],
-        "revenue": round(r["revenue"], 2),
-        "net": round(r.get("net", r["revenue"]), 2),
-        "order_date": r.get("order_date", ""),
-    } for r in all_rows]
-    order_lines.sort(key=lambda r: r["order_date"], reverse=True)
+        "sku": r["sku"], "title": r["title"], "platform": r["platform"], "order_id": r["order_id"],
+        "quantity": r["quantity"], "revenue": r["gross_revenue"], "net": r["final_net"],
+        "shipping_cost": r.get("shipping_cost") or 0, "order_date": r.get("order_date", ""),
+    } for r in rows]
+
+    last_sync_res = supabase.table("orders").select("synced_at").eq("business_id", business_id)\
+        .order("synced_at", desc=True).limit(1).execute()
+    last_synced_at = (last_sync_res.data or [{}])[0].get("synced_at")
 
     return {
-        "start": start_dt.strftime("%Y-%m-%d"),
-        "end": end_dt.strftime("%Y-%m-%d"),
-        "by_sku": results,
+        "start": start_date_str,
+        "end": end_date_str,
         "order_lines": order_lines,
+        "last_synced_at": last_synced_at,
         "totals": {
-            "orders": len(all_rows),
-            "quantity": sum(r["quantity"] for r in all_rows),
-            "revenue": round(sum(r["revenue"] for r in all_rows), 2),
-            "net": round(sum(r.get("net", r["revenue"]) for r in all_rows), 2),
+            "orders": len(rows),
+            "quantity": sum(r["quantity"] for r in rows),
+            "revenue": round(sum(r["gross_revenue"] for r in rows), 2),
+            "net": round(sum(r["final_net"] for r in rows), 2),
         },
-        "errors": errors,
+        "errors": {},
     }
 
 @app.get("/archive", response_class=HTMLResponse)
