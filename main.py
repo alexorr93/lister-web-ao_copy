@@ -1505,7 +1505,7 @@ async def upload_shipping_labels(request: Request, file: UploadFile = File(...))
                 continue
             rows.append({headers[i]: r[i] for i in range(len(headers)) if i < len(r)})
 
-    inserted = 0
+    records = []
     skipped = 0
     for row in rows:
         tracking = str(row.get("Tracking Number") or "").strip()
@@ -1517,19 +1517,25 @@ async def upload_shipping_labels(request: Request, file: UploadFile = File(...))
             cost = float(cost) if cost not in (None, "") else None
         except (ValueError, TypeError):
             cost = None
+        records.append({
+            "tracking_number": tracking,
+            "business_id": business_id,
+            "recipient": str(row.get("Recipient") or ""),
+            "cost": cost,
+            "created_date": str(row.get("Created Date") or ""),
+            "ship_from": str(row.get("Ship From") or ""),
+            "source": str(row.get("Source") or ""),
+        })
+
+    inserted = 0
+    for i in range(0, len(records), 500):
+        chunk = records[i:i+500]
         try:
-            supabase.table("shipping_labels").upsert({
-                "tracking_number": tracking,
-                "business_id": business_id,
-                "recipient": str(row.get("Recipient") or ""),
-                "cost": cost,
-                "created_date": str(row.get("Created Date") or ""),
-                "ship_from": str(row.get("Ship From") or ""),
-                "source": str(row.get("Source") or ""),
-            }).execute()
-            inserted += 1
-        except Exception:
-            skipped += 1
+            supabase.table("shipping_labels").upsert(chunk).execute()
+            inserted += len(chunk)
+        except Exception as e:
+            print(f"upload_shipping_labels: batch {i}-{i+len(chunk)} failed: {e}")
+            skipped += len(chunk)
 
     return {"ok": True, "inserted": inserted, "skipped": skipped, "total_rows": len(rows)}
 
