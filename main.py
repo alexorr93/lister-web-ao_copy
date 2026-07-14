@@ -3797,6 +3797,88 @@ async def ebay_debug_category_requirements(item_id: str, request: Request):
     except Exception as e:
         raise HTTPException(400, str(e))
 
+@app.post("/api/financials/resync-one-order/{order_id}")
+async def resync_one_order(order_id: str, request: Request):
+    """Re-pulls and re-upserts just ONE order — a handful of API calls, seconds not
+    minutes. Useful for verifying/fixing a specific order without re-walking the
+    entire multi-month sync range."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import requests as _req, datetime as _dt
+
+    token = get_ebay_access_token(business_id)
+    r = _req.get(f"{EBAY_API_BASE}/sell/fulfillment/v1/order/{order_id}",
+                 headers=ebay_headers(token, content_language=False), timeout=15)
+    if r.status_code != 200:
+        raise HTTPException(400, f"Could not fetch order: {r.status_code} {r.text[:300]}")
+    order = r.json()
+
+    created = order.get("creationDate", "")
+    order_delivery_cost = float((order.get("pricingSummary") or {}).get("deliveryCost", {}).get("value", 0) or 0)
+    tax_addr = ((order.get("buyer") or {}).get("taxAddress") or {})
+    buyer_state, buyer_zip, buyer_country = tax_addr.get("stateOrProvince", ""), tax_addr.get("postalCode", ""), tax_addr.get("countryCode", "")
+
+    # Narrow fee-fetch window around just this order's date — a few days is plenty,
+    # avoids re-scanning months of transactions for one order.
+    order_date = _dt.datetime.strptime(created[:10], "%Y-%m-%d") if created else _dt.datetime.utcnow()
+    fee_start = (order_date - _dt.timedelta(days=1)).strftime("%Y-%m-%dT00:00:00.000Z")
+    fee_end = (order_date + _dt.timedelta(days=2)).strftime("%Y-%m-%dT00:00:00.000Z")
+    try:
+        fee_data = fetch_ebay_fees_by_line_item(business_id, fee_start, fee_end)
+        fees_by_line = fee_data["fees_by_line"]
+        ebay_labels_by_order = fee_data["ebay_labels_by_order"]
+    except Exception as e:
+        fees_by_line, ebay_labels_by_order = {}, {}
+
+    # Tracking number for this order
+    trackings = []
+    try:
+        rf = _req.get(f"{EBAY_API_BASE}/sell/fulfillment/v1/order/{order_id}/shipping_fulfillment",
+                      headers=ebay_headers(token, content_language=False), timeout=15)
+        if rf.status_code == 200:
+            for f in rf.json().get("fulfillments", []):
+                tn = f.get("shipmentTrackingNumber")
+                if tn:
+                    trackings.append(tn)
+    except Exception:
+        pass
+
+    cost_by_tracking = {}
+    if trackings:
+        labels_res = supabase.table("shipping_labels").select("tracking_number,cost")\
+            .eq("business_id", business_id).in_("tracking_number", trackings).execute()
+        for row in (labels_res.data or []):
+            cost_by_tracking[row["tracking_number"]] = row.get("cost") or 0
+    pirate_ship_cost = sum(cost_by_tracking.get(tn, 0) or 0 for tn in trackings)
+    shipping_cost = pirate_ship_cost if pirate_ship_cost > 0 else ebay_labels_by_order.get(order_id, 0)
+
+    upserted = []
+    for li in order.get("lineItems", []):
+        item_price = float((li.get("lineItemCost") or {}).get("value", 0) or 0)
+        buyer_shipping = float((li.get("deliveryCost") or {}).get("shippingCost", {}).get("value", 0) or 0)
+        revenue = item_price + buyer_shipping
+        line_item_id = li.get("lineItemId", "")
+        fee = fees_by_line.get((order_id, line_item_id), 0.0)
+        net = revenue - fee
+        record = {
+            "id": f"ebay:{order_id}:{line_item_id}",
+            "business_id": business_id, "platform": "eBay", "order_id": order_id,
+            "sku": li.get("sku") or "(no SKU)", "title": li.get("title", ""), "quantity": int(li.get("quantity", 1)),
+            "order_date": created[:10] if created else "",
+            "gross_revenue": round(revenue, 2), "buyer_shipping": round(buyer_shipping, 2),
+            "order_delivery_cost": round(order_delivery_cost, 2),
+            "buyer_state": buyer_state, "buyer_zip": buyer_zip, "buyer_country": buyer_country,
+            "fee": round(fee, 2), "net": round(net, 2),
+            "tracking_number": ",".join(trackings) if trackings else None,
+            "shipping_cost": round(shipping_cost, 2),
+            "final_net": round(net - shipping_cost, 2),
+        }
+        supabase.table("orders").upsert(record).execute()
+        upserted.append(record)
+
+    return {"ok": True, "order_id": order_id, "line_items_updated": len(upserted), "records": upserted}
+
 @app.get("/api/ebay/debug-raw-order/{order_id}")
 async def ebay_debug_raw_order(order_id: str, request: Request):
     business_id = require_auth(request)
