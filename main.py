@@ -1180,26 +1180,20 @@ async def list_acquisitions(request: Request):
         .order("date", desc=True).execute()
     acquisitions = res.data or []
 
-    # eBay is computed live: sum of net proceeds (minus live-matched shipping cost) from
-    # every synced order whose SKU starts with "<sku>-" (same lot-prefix convention
-    # Financials uses, and the same live-shipping-join so a fresh Pirate Ship CSV
-    # upload reflects immediately here too, no re-sync needed).
+    # eBay is the sum of stored final_net (already includes shipping — see apply_shipping_matches)
+    # from every synced order whose SKU starts with "<sku>-" (same lot-prefix convention
+    # Financials uses).
     skus = list(set(a["sku"] for a in acquisitions if a.get("sku")))
     ebay_by_lot = {}
     if skus:
-        labels_res = supabase.table("shipping_labels").select("tracking_number,cost").eq("business_id", business_id).execute()
-        cost_by_tracking = {row["tracking_number"]: (row.get("cost") or 0) for row in (labels_res.data or [])}
-        orders_res = supabase.table("orders").select("sku,net,final_net,tracking_number").eq("business_id", business_id).execute()
+        orders_res = supabase.table("orders").select("sku,final_net").eq("business_id", business_id).execute()
         for row in (orders_res.data or []):
             order_sku = row.get("sku") or ""
             if "-" not in order_sku:
                 continue
             prefix = order_sku.split("-", 1)[0]
             if prefix in skus:
-                trackings = (row.get("tracking_number") or "").split(",") if row.get("tracking_number") else []
-                shipping_cost = sum(cost_by_tracking.get(tn, 0) or 0 for tn in trackings)
-                base_net = row.get("net", row.get("final_net") or 0)
-                ebay_by_lot[prefix] = ebay_by_lot.get(prefix, 0.0) + (base_net - shipping_cost)
+                ebay_by_lot[prefix] = ebay_by_lot.get(prefix, 0.0) + (row.get("final_net") or 0)
 
     for a in acquisitions:
         ebay = round(ebay_by_lot.get(a["sku"], 0.0), 2)
@@ -1477,6 +1471,51 @@ def fetch_shopify_orders(business_id: str, start_iso: str, end_iso: str) -> list
         params = None  # next_url already has query params baked in
     return rows
 
+def apply_shipping_matches(business_id: str) -> dict:
+    """Matches every order's tracking_number against shipping_labels and writes the
+    result directly into orders.shipping_cost / orders.final_net — a stored, one-time
+    computation, not something recalculated on every page read. Pure local DB work,
+    no eBay/Shopify API calls, batched so it's fast even across thousands of orders."""
+    orders_res = supabase.table("orders").select("id,net,tracking_number").eq("business_id", business_id)\
+        .not_.is_("tracking_number", "null").execute()
+    orders = orders_res.data or []
+    if not orders:
+        return {"updated": 0}
+
+    labels_res = supabase.table("shipping_labels").select("tracking_number,cost").eq("business_id", business_id).execute()
+    cost_by_tracking = {row["tracking_number"]: (row.get("cost") or 0) for row in (labels_res.data or [])}
+
+    updates = []
+    for order in orders:
+        trackings = (order.get("tracking_number") or "").split(",")
+        shipping_cost = round(sum(cost_by_tracking.get(tn, 0) or 0 for tn in trackings if tn), 2)
+        if shipping_cost <= 0:
+            continue  # nothing to update — leave existing stored values alone
+        base_net = order.get("net") or 0
+        updates.append({"id": order["id"], "shipping_cost": shipping_cost, "final_net": round(base_net - shipping_cost, 2)})
+
+    updated = 0
+    for i in range(0, len(updates), 500):
+        chunk = updates[i:i+500]
+        try:
+            supabase.table("orders").upsert(chunk).execute()
+            updated += len(chunk)
+        except Exception as e:
+            print(f"apply_shipping_matches: batch {i}-{i+len(chunk)} failed: {e}")
+
+    return {"updated": updated, "orders_with_tracking": len(orders)}
+
+@app.post("/api/financials/apply-shipping-matches")
+async def apply_shipping_matches_now(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    try:
+        result = apply_shipping_matches(business_id)
+        return {"ok": True, **result}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 @app.post("/api/shipping-labels/upload")
 async def upload_shipping_labels(request: Request, file: UploadFile = File(...)):
     business_id = require_auth(request)
@@ -1537,7 +1576,9 @@ async def upload_shipping_labels(request: Request, file: UploadFile = File(...))
             print(f"upload_shipping_labels: batch {i}-{i+len(chunk)} failed: {e}")
             skipped += len(chunk)
 
-    return {"ok": True, "inserted": inserted, "skipped": skipped, "total_rows": len(rows)}
+    match_result = apply_shipping_matches(business_id)
+
+    return {"ok": True, "inserted": inserted, "skipped": skipped, "total_rows": len(rows), "matched": match_result.get("updated", 0)}
 
 @app.post("/api/financials/match-shipping")
 async def match_shipping_costs(request: Request, body: dict = Body(...)):
@@ -1853,9 +1894,9 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
     start_date_str = start_dt.strftime("%Y-%m-%d")
     end_date_str = end_dt.strftime("%Y-%m-%d")
 
-    # Financials now reads from the local `orders` table (kept fresh by a background sync
-    # job + the Sync Now button) instead of calling eBay/Shopify live on every load — that's
-    # what makes any date range instant and shipping/fee matching apply to ALL history.
+    # Financials reads straight from the local `orders` table — shipping_cost and final_net
+    # are already-computed, stored columns (written by apply_shipping_matches whenever a
+    # Pirate Ship CSV is uploaded, and by the sync jobs). No computation happens here.
     query = supabase.table("orders").select("*").eq("business_id", business_id)\
         .gte("order_date", start_date_str).lte("order_date", end_date_str)
     if not include_shopify:
@@ -1864,26 +1905,11 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
     rows = res.data or []
     rows.sort(key=lambda r: r.get("order_date", ""), reverse=True)
 
-    # Shipping cost is computed LIVE here, not stored during sync — tracking_number is
-    # already saved on every order, so matching against shipping_labels is a pure local
-    # join. This means uploading a new Pirate Ship CSV takes effect on the very next
-    # page load, with zero need to re-sync from eBay/Shopify at all.
-    labels_res = supabase.table("shipping_labels").select("tracking_number,cost").eq("business_id", business_id).execute()
-    cost_by_tracking = {row["tracking_number"]: (row.get("cost") or 0) for row in (labels_res.data or [])}
-
-    order_lines = []
-    for r in rows:
-        trackings = (r.get("tracking_number") or "").split(",") if r.get("tracking_number") else []
-        shipping_cost = round(sum(cost_by_tracking.get(tn, 0) or 0 for tn in trackings), 2)
-        # Recompute live from the pre-shipping net (stored at sync time) minus whatever
-        # currently matches in shipping_labels — so a fresh CSV upload reflects immediately.
-        base_net = r.get("net", r["final_net"])
-        live_final_net = round(base_net - shipping_cost, 2)
-        order_lines.append({
-            "sku": r["sku"], "title": r["title"], "platform": r["platform"], "order_id": r["order_id"],
-            "quantity": r["quantity"], "revenue": r["gross_revenue"], "net": live_final_net,
-            "shipping_cost": shipping_cost, "order_date": r.get("order_date", ""),
-        })
+    order_lines = [{
+        "sku": r["sku"], "title": r["title"], "platform": r["platform"], "order_id": r["order_id"],
+        "quantity": r["quantity"], "revenue": r["gross_revenue"], "net": r["final_net"],
+        "shipping_cost": r.get("shipping_cost") or 0, "order_date": r.get("order_date", ""),
+    } for r in rows]
 
     last_sync_res = supabase.table("orders").select("synced_at").eq("business_id", business_id)\
         .order("synced_at", desc=True).limit(1).execute()
@@ -1898,7 +1924,7 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
             "orders": len(rows),
             "quantity": sum(r["quantity"] for r in rows),
             "revenue": round(sum(r["gross_revenue"] for r in rows), 2),
-            "net": round(sum(ol["net"] for ol in order_lines), 2),
+            "net": round(sum(r["final_net"] for r in rows), 2),
         },
         "errors": {},
     }
