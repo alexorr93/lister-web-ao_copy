@@ -1328,6 +1328,7 @@ def fetch_ebay_orders(business_id: str, start_iso: str, end_iso: str) -> list:
                     "title": li.get("title", ""),
                     "quantity": int(li.get("quantity", 1)),
                     "revenue": item_price + buyer_shipping,
+                    "buyer_shipping": buyer_shipping,
                     "order_date": created[:10] if created else "",
                     "order_id": order.get("orderId", ""),
                     "line_item_id": li.get("lineItemId", ""),
@@ -1732,6 +1733,7 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
                 "business_id": business_id, "platform": "eBay", "order_id": row["order_id"],
                 "sku": row["sku"], "title": row["title"], "quantity": row["quantity"],
                 "order_date": row["order_date"], "gross_revenue": revenue,
+                "buyer_shipping": _safe(row.get("buyer_shipping", 0)),
                 "fee": fee, "net": net,
                 "tracking_number": ",".join(trackings) if trackings else None,
                 "shipping_cost": shipping_cost,
@@ -1944,6 +1946,7 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
     order_lines = [{
         "sku": r["sku"], "title": r["title"], "platform": r["platform"], "order_id": r["order_id"],
         "quantity": r["quantity"], "revenue": r["gross_revenue"], "net": r["final_net"],
+        "buyer_shipping": r.get("buyer_shipping") or 0,
         "shipping_cost": r.get("shipping_cost") or 0, "order_date": r.get("order_date", ""),
     } for r in rows]
 

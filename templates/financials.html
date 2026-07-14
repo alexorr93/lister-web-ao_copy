@@ -291,7 +291,7 @@ function renderTable() {
   const th = (key, label) => `<th onclick="setSort('${key}')">${label}${sortKey===key ? (sortDir===1?' ▲':' ▼') : ''}</th>`;
   const amtLabel = netMode ? 'Net $' : 'Gross $';
   let html = `<table><thead><tr>
-    ${th('sku','SKU')}${th('order_id','Order #')}${th('order_date','Date')}${th('platform','Platform')}${th('quantity','Qty')}${th('shipping_cost','Shipping $')}${th('total_amount',amtLabel)}${th('title','Item')}
+    ${th('sku','SKU')}${th('order_id','Order #')}${th('order_date','Date')}${th('platform','Platform')}${th('quantity','Qty')}${th('buyer_shipping','Buyer Paid Ship $')}${th('shipping_cost','Label Cost $')}${th('total_amount',amtLabel)}${th('title','Item')}
   </tr></thead><tbody>`;
   for (const r of rows) {
     const tag = r.platform === 'eBay' ? '<span class="platform-tag ebay">eBay</span>' : '<span class="platform-tag shopify">Shopify</span>';
@@ -301,6 +301,7 @@ function renderTable() {
       <td class="muted">${escapeHtml(r.order_date)}</td>
       <td>${tag}</td>
       <td>${fmtNum(r.quantity)}</td>
+      <td class="muted">${r.buyer_shipping ? fmtMoney(r.buyer_shipping) : '—'}</td>
       <td class="muted">${r.shipping_cost ? fmtMoney(r.shipping_cost) : '—'}</td>
       <td><b>${fmtMoney(r[amtKey])}</b></td>
       <td class="muted">${escapeHtml(r.title || '')}</td>
