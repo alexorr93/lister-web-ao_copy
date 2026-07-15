@@ -1323,6 +1323,97 @@ def _parse_acq_date(val) -> Optional[str]:
             continue
     return None
 
+@app.post("/api/orders/backfill-sku")
+async def backfill_order_skus(request: Request, file: UploadFile = File(...)):
+    """ONE-TIME historical backfill: matches orders that never got a real SKU
+    (blank, '(no SKU)', or the 'lister-{id}' fallback) against a CSV export of
+    (Listing title, Lot Name, Net sales) — using the listing title as the join key,
+    since this export has no order ID. The Lot Name gets resolved against Acquisitions'
+    sku field first, then its name field, to find the real SKU code. Best-effort:
+    if multiple orders share the exact same title, they're paired off in order,
+    which is as precise as this data allows."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import io, csv as _csv
+
+    content = await file.read()
+    text = content.decode("utf-8-sig", errors="replace")
+    reader = _csv.DictReader(io.StringIO(text))
+    csv_rows = list(reader)
+
+    # Build lot-name -> real sku lookup from Acquisitions (sku match takes priority over name match)
+    def _fetch_all(table, select_cols):
+        all_rows = []
+        page_size = 1000
+        start = 0
+        while True:
+            res = supabase.table(table).select(select_cols).eq("business_id", business_id)\
+                .range(start, start + page_size - 1).execute()
+            page = res.data or []
+            all_rows.extend(page)
+            if len(page) < page_size:
+                break
+            start += page_size
+        return all_rows
+
+    acquisitions = _fetch_all("acquisitions", "sku,name")
+    sku_by_lower_sku = {a["sku"].strip().lower(): a["sku"] for a in acquisitions if a.get("sku")}
+    sku_by_lower_name = {}
+    for a in acquisitions:
+        if a.get("name") and a.get("sku"):
+            key = a["name"].strip().lower()
+            sku_by_lower_name.setdefault(key, a["sku"])  # first match wins if ambiguous
+
+    def resolve_sku(lot_name: str):
+        key = (lot_name or "").strip().lower()
+        if not key:
+            return None
+        return sku_by_lower_sku.get(key) or sku_by_lower_name.get(key)
+
+    # Fetch every order still missing a real SKU
+    blank_orders = _fetch_all("orders", "id,title,sku")
+    blank_orders = [o for o in blank_orders if not o.get("sku") or o["sku"] in ("", "(no SKU)") or o["sku"].lower().startswith("lister-")]
+
+    by_title = {}
+    for o in blank_orders:
+        key = (o.get("title") or "").strip().lower()
+        by_title.setdefault(key, []).append(o)
+
+    updates = []
+    matched, no_lot_match, no_order_match, ambiguous_lots = 0, 0, 0, 0
+    for row in csv_rows:
+        title = (row.get("Listing title") or "").strip()
+        lot_name = (row.get("Lot Name") or "").strip()
+        if not title or not lot_name:
+            continue
+        real_sku = resolve_sku(lot_name)
+        if not real_sku:
+            no_lot_match += 1
+            continue
+        candidates = by_title.get(title.lower())
+        if not candidates:
+            no_order_match += 1
+            continue
+        order = candidates.pop(0)  # consume one match so the next identical title gets a different order
+        updates.append({"id": order["id"], "sku": f"{real_sku}-BF"})  # -BF marks it as backfilled, not a real location code
+        matched += 1
+
+    updated = 0
+    for i in range(0, len(updates), 500):
+        chunk = updates[i:i+500]
+        try:
+            supabase.table("orders").upsert(chunk).execute()
+            updated += len(chunk)
+        except Exception as e:
+            print(f"backfill_order_skus: batch {i}-{i+len(chunk)} failed: {e}")
+
+    return {
+        "ok": True, "csv_rows": len(csv_rows), "blank_orders_before": len(blank_orders),
+        "matched": matched, "updated": updated,
+        "no_lot_match": no_lot_match, "no_order_match": no_order_match,
+    }
+
 @app.post("/api/acquisitions/upload-csv")
 async def upload_acquisitions_csv(request: Request, file: UploadFile = File(...)):
     """Only imports the true manual-input columns (SKU, Name, Payment_Method, Date, Cost,

@@ -97,6 +97,13 @@ tr:last-child td { border-bottom: none; }
       </div>
       <span id="upload-status" class="status-msg"></span>
     </div>
+    <div style="margin-top:12px;display:flex;align-items:center;gap:10px;">
+      <div>
+        <div class="field-label">One-Time: Backfill Blank Order SKUs (Listing title / Lot Name export)</div>
+        <input type="file" id="sku-backfill-input" accept=".csv" style="font-size:12px;" onchange="uploadSkuBackfill()"/>
+      </div>
+      <span id="backfill-status" class="status-msg"></span>
+    </div>
   </div>
 
   <div id="table-area"><div class="empty">Loading...</div></div>
@@ -111,6 +118,24 @@ function fmtMoney(n) {
 }
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function uploadSkuBackfill() {
+  const input = document.getElementById('sku-backfill-input');
+  if (!input.files.length) return;
+  const fd = new FormData();
+  fd.append('file', input.files[0]);
+  const statusEl = document.getElementById('backfill-status');
+  statusEl.textContent = 'Backfilling — this can take a minute for a large file...';
+  try {
+    const r = await fetch('/api/orders/backfill-sku', {method: 'POST', body: fd});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    statusEl.textContent = `✅ Matched ${data.matched} of ${data.csv_rows} row(s), updated ${data.updated} order(s). (${data.no_lot_match} lot not found, ${data.no_order_match} no matching order)`;
+  } catch(e) {
+    statusEl.textContent = `❌ ${e.message}`;
+  }
+  input.value = '';
 }
 
 async function recalculate() {
