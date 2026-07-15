@@ -1190,6 +1190,79 @@ class AcquisitionCreate(BaseModel):
     cash: Optional[float] = None
     notes: Optional[str] = None
 
+def apply_acquisition_profits(business_id: str) -> dict:
+    """Computes eBay/Total_Payouts/Profit/ROI for every acquisition and writes them
+    directly into the acquisitions table — stored, not recalculated on every page
+    read. Both fetches are paginated (Supabase caps a single query at ~1000 rows,
+    which silently undercounted matches on any lot with real order volume)."""
+    def _fetch_all(table, select_cols, extra_filter=None):
+        all_rows = []
+        page_size = 1000
+        start = 0
+        while True:
+            q = supabase.table(table).select(select_cols).eq("business_id", business_id)
+            if extra_filter:
+                q = extra_filter(q)
+            res = q.range(start, start + page_size - 1).execute()
+            page = res.data or []
+            all_rows.extend(page)
+            if len(page) < page_size:
+                break
+            start += page_size
+        return all_rows
+
+    acquisitions = _fetch_all("acquisitions", "*")
+    if not acquisitions:
+        return {"updated": 0}
+
+    skus = list(set(a["sku"] for a in acquisitions if a.get("sku")))
+    orders = _fetch_all("orders", "sku,final_net")
+
+    ebay_by_lot = {}
+    for row in orders:
+        order_sku = row.get("sku") or ""
+        if "-" not in order_sku:
+            continue
+        prefix = order_sku.split("-", 1)[0]
+        if prefix in skus:
+            ebay_by_lot[prefix] = ebay_by_lot.get(prefix, 0.0) + (row.get("final_net") or 0)
+
+    updates = []
+    for a in acquisitions:
+        ebay = round(ebay_by_lot.get(a["sku"], 0.0), 2)
+        cash = a.get("cash") or 0
+        cost = a.get("cost") or 0
+        total_payouts = round(cash + ebay, 2)
+        profit = round(total_payouts - cost, 2)
+        record = dict(a)
+        record["ebay"] = ebay
+        record["total_payouts"] = total_payouts
+        record["profit"] = profit
+        record["roi_pct"] = round(profit / cost * 100, 1) if cost else None
+        updates.append(record)
+
+    updated = 0
+    for i in range(0, len(updates), 500):
+        chunk = updates[i:i+500]
+        try:
+            supabase.table("acquisitions").upsert(chunk).execute()
+            updated += len(chunk)
+        except Exception as e:
+            print(f"apply_acquisition_profits: batch {i}-{i+len(chunk)} failed: {e}")
+
+    return {"updated": updated, "orders_scanned": len(orders)}
+
+@app.post("/api/acquisitions/recalculate")
+async def recalculate_acquisitions(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    try:
+        result = apply_acquisition_profits(business_id)
+        return {"ok": True, **result}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 @app.get("/api/acquisitions")
 async def list_acquisitions(request: Request):
     business_id = require_auth(request)
@@ -1197,35 +1270,7 @@ async def list_acquisitions(request: Request):
         raise HTTPException(401, "Unauthorized")
     res = supabase.table("acquisitions").select("*").eq("business_id", business_id)\
         .order("date", desc=True).execute()
-    acquisitions = res.data or []
-
-    # eBay is the sum of stored final_net (already includes shipping — see apply_shipping_matches)
-    # from every synced order whose SKU starts with "<sku>-" (same lot-prefix convention
-    # Financials uses).
-    skus = list(set(a["sku"] for a in acquisitions if a.get("sku")))
-    ebay_by_lot = {}
-    if skus:
-        orders_res = supabase.table("orders").select("sku,final_net").eq("business_id", business_id).execute()
-        for row in (orders_res.data or []):
-            order_sku = row.get("sku") or ""
-            if "-" not in order_sku:
-                continue
-            prefix = order_sku.split("-", 1)[0]
-            if prefix in skus:
-                ebay_by_lot[prefix] = ebay_by_lot.get(prefix, 0.0) + (row.get("final_net") or 0)
-
-    for a in acquisitions:
-        ebay = round(ebay_by_lot.get(a["sku"], 0.0), 2)
-        cash = a.get("cash") or 0
-        cost = a.get("cost") or 0
-        total_payouts = round(cash + ebay, 2)
-        profit = round(total_payouts - cost, 2)
-        a["ebay"] = ebay
-        a["total_payouts"] = total_payouts
-        a["profit"] = profit
-        a["roi_pct"] = round(profit / cost * 100, 1) if cost else None
-
-    return {"acquisitions": acquisitions}
+    return {"acquisitions": res.data or []}
 
 @app.post("/api/acquisitions")
 async def create_acquisition(request: Request, body: AcquisitionCreate):
@@ -1236,6 +1281,7 @@ async def create_acquisition(request: Request, body: AcquisitionCreate):
         record = body.dict()
         record["business_id"] = business_id
         res = supabase.table("acquisitions").insert(record).execute()
+        apply_acquisition_profits(business_id)
         return {"ok": True, "acquisition": (res.data or [{}])[0]}
     except Exception as e:
         raise HTTPException(500, str(e))
@@ -1313,7 +1359,12 @@ async def upload_acquisitions_csv(request: Request, file: UploadFile = File(...)
         except Exception:
             skipped += 1
 
-    return {"ok": True, "inserted": inserted, "skipped": skipped}
+    try:
+        match_result = apply_acquisition_profits(business_id)
+    except Exception as e:
+        match_result = {"updated": 0, "error": str(e)}
+
+    return {"ok": True, "inserted": inserted, "skipped": skipped, "recalculated": match_result.get("updated", 0)}
 
 def fetch_ebay_orders(business_id: str, start_iso: str, end_iso: str) -> list:
     """Returns normalized order-line rows from eBay's Fulfillment API for the given date range."""
