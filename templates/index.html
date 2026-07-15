@@ -581,6 +581,11 @@ select.field-input { background: #fff; color: #0f172a; }
             <option value="">Default (account setting)</option>
           </select>
         </div>
+        <div style="margin-bottom:8px;">
+          <div class="field-label">Add More Photos (detail shots — not sent to AI scan)</div>
+          <input type="file" id="modal-extra-photos-input" accept="image/*" multiple style="font-size:12px;width:100%;" onchange="uploadExtraPhotos()"/>
+          <div id="modal-extra-photos-status" style="font-size:11px;color:var(--muted);margin-top:4px;"></div>
+        </div>
         <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);margin-bottom:8px;cursor:pointer;">
           <input type="checkbox" id="modal-broad-category"> Search all categories (not just Business & Industrial / Motors)
         </label>
@@ -1264,6 +1269,26 @@ function extractPhotoId(url) {
   const parts = url.split('/part-photos/');
   if (parts.length < 2) return '';
   return decodeURIComponent(parts[1].split('?')[0]);
+}
+
+async function uploadExtraPhotos() {
+  const input = document.getElementById('modal-extra-photos-input');
+  if (!input.files.length || !modalItemId) return;
+  const statusEl = document.getElementById('modal-extra-photos-status');
+  statusEl.textContent = `Uploading ${input.files.length} photo(s)...`;
+  const fd = new FormData();
+  for (const f of input.files) fd.append('files', f);
+  try {
+    const r = await fetch(`/api/listings/${modalItemId}/add-photos`, {method: 'POST', body: fd});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Upload failed');
+    statusEl.textContent = `✅ Added ${data.uploaded.length} photo(s). Refreshing...`;
+    await loadListings();
+    openModal(modalItemId);
+  } catch(e) {
+    statusEl.textContent = `❌ ${e.message}`;
+  }
+  input.value = '';
 }
 
 function openModal(id) {

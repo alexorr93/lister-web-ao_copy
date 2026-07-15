@@ -2138,6 +2138,53 @@ async def submit_group(body: SubmitGroup, request: Request):
     except Exception as e:
         raise HTTPException(500, str(e))
 
+@app.post("/api/listings/{item_id}/add-photos")
+async def add_photos_to_listing(item_id: str, request: Request):
+    """Adds extra photos to an already-scanned listing's photo group — for detail
+    shots taken after the fact, not meant to go through mantle-scanner's AI pipeline.
+    Safe to do post-scan: mantle-scanner only re-scans groups with status='pending'
+    and explicitly skips any photo already linked in group_photos, so this can never
+    trigger a re-scan. New photos just get pulled in automatically the next time this
+    listing publishes to eBay/Shopify, since publishing already uses every photo in
+    the group, not just the primary one."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    try:
+        res = supabase.table("listings").select("photo_id").eq("id", item_id).limit(1).execute()
+        if not res.data:
+            raise HTTPException(404, "Listing not found")
+        primary_pid = str(res.data[0].get("photo_id") or "")
+        if not primary_pid:
+            raise HTTPException(400, "Listing has no primary photo to attach a group to")
+
+        group_row = supabase.table("group_photos").select("group_id").eq("photo_id", primary_pid).limit(1).execute()
+        group_id = (group_row.data or [{}])[0].get("group_id", "")
+        if not group_id:
+            raise HTTPException(400, "Could not find this listing's photo group")
+
+        form = await request.form()
+        files = form.getlist("files")
+        if not files:
+            raise HTTPException(400, "No files provided")
+
+        uploaded = []
+        for idx, file in enumerate(files):
+            contents = await file.read()
+            dt = datetime.now()
+            fn = f"{dt.strftime('%d%m%y')}_{dt.strftime('%H%M%S')}_{idx}_extra.jpg"
+            supabase.storage.from_("part-photos").upload(
+                path=fn, file=contents, file_options={"content-type": "image/jpeg", "upsert": "true"}
+            )
+            supabase.table("group_photos").insert({"group_id": group_id, "photo_id": fn}).execute()
+            uploaded.append({"photo_id": fn, "url": photo_url(fn, thumb=True)})
+
+        return {"ok": True, "uploaded": uploaded}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 @app.post("/api/photos/upload")
 async def upload_photo(request: Request):
     try:
