@@ -1,0 +1,21 @@
+{
+  "name": "Lister AI",
+  "short_name": "Lister AI",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a0611",
+  "theme_color": "#1a0611",
+  "icons": [
+    {
+      "src": "/static/favicon.png",
+      "sizes": "219x223",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/favicon.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
