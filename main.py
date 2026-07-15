@@ -155,6 +155,14 @@ def get_all_photo_ids(primary_photo_id: str) -> list:
 # ── EBAY INVENTORY API ───────────────────────────────────────── #
 EBAY_API_BASE = "https://api.ebay.com"
 
+# Alternate shipping policies a listing can be assigned instead of the account default.
+EBAY_SHIPPING_POLICY_OPTIONS = [
+    {"id": "251441449020", "label": "$18 Shipping"},
+    {"id": "251094371020", "label": "$69 Shipping"},
+    {"id": "251042655020", "label": "Free Shipping"},
+    {"id": "251094542020", "label": "$195 Shipping"},
+]
+
 EBAY_ENV_KEYS = [
     "EBAY_USER_TOKEN", "EBAY_APP_ID", "EBAY_DEV_ID", "EBAY_CERT_ID", "EBAY_RUNAME",
     "EBAY_PAYMENT_POLICY_ID", "EBAY_RETURN_POLICY_ID", "EBAY_FULFILLMENT_POLICY_ID",
@@ -268,7 +276,7 @@ def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None,
 
     payment_policy    = settings.get("EBAY_PAYMENT_POLICY_ID", "")
     return_policy      = settings.get("EBAY_RETURN_POLICY_ID", "")
-    fulfillment_policy = settings.get("EBAY_FULFILLMENT_POLICY_ID", "")
+    fulfillment_policy = listing.get("ebay_fulfillment_policy_id") or settings.get("EBAY_FULFILLMENT_POLICY_ID", "")
     location_key       = settings.get("EBAY_MERCHANT_LOCATION_KEY", "")
     location_zip       = settings.get("EBAY_LOCATION_ZIP", "")
     location_country   = settings.get("EBAY_LOCATION_COUNTRY", "US")
@@ -559,6 +567,17 @@ async def dashboard(request: Request):
     return templates.TemplateResponse("index.html", {"request": request, "is_admin": is_admin, "account_label": account_label})
 
 # ── API: LISTINGS ─────────────────────────────────────────────── #
+
+@app.get("/api/ebay/shipping-policy-options")
+async def get_shipping_policy_options(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    settings = get_ebay_settings(business_id)
+    return {
+        "default_policy_id": settings.get("EBAY_FULFILLMENT_POLICY_ID", ""),
+        "options": EBAY_SHIPPING_POLICY_OPTIONS,
+    }
 
 @app.get("/api/listings")
 async def get_listings(request: Request, archived: bool = False):

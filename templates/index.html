@@ -574,6 +574,12 @@ select.field-input { background: #fff; color: #0f172a; }
           <input type="text" class="field-input" id="modal-mpn-input" placeholder="e.g. 2CDS271337R0217 — leave blank to auto-guess"/>
           <div id="modal-mpn-warn" style="display:none;font-size:11px;color:var(--red,#dc2626);margin-top:4px;">⚠️ Last submitted as "Does Not Apply" — eBay may want a real MPN here</div>
         </div>
+        <div style="margin-bottom:8px;">
+          <div class="field-label">Shipping Policy</div>
+          <select class="field-input" id="modal-shipping-policy-select">
+            <option value="">Default (account setting)</option>
+          </select>
+        </div>
         <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);margin-bottom:8px;cursor:pointer;">
           <input type="checkbox" id="modal-broad-category"> Search all categories (not just Business & Industrial / Motors)
         </label>
@@ -1260,6 +1266,7 @@ function openModal(id) {
   document.getElementById('modal-brand-input').value = l.brand || guessBrand(l.title || '');
   document.getElementById('modal-mpn-input').value = (l.ebay_mpn_is_fallback ? '' : (l.ebay_mpn || guessMpn(l.title || '', l.brand || guessBrand(l.title || ''))));
   document.getElementById('modal-mpn-warn').style.display = l.ebay_mpn_is_fallback ? 'block' : 'none';
+  document.getElementById('modal-shipping-policy-select').value = l.ebay_fulfillment_policy_id || '';
   document.getElementById('modal-price-input').value = l.price.toFixed(2);
   document.getElementById('modal-cond-input').value  = l.condition || 'used';
   document.getElementById('modal-desc-input').value = l.description || window._defaultDesc || '';
@@ -2092,9 +2099,36 @@ async function compressForUpload(file) {
   });
 }
 
+async function loadShippingPolicyOptions() {
+  try {
+    const r = await fetch('/api/ebay/shipping-policy-options');
+    const data = await r.json();
+    const sel = document.getElementById('modal-shipping-policy-select');
+    for (const opt of (data.options || [])) {
+      const o = document.createElement('option');
+      o.value = opt.id;
+      o.textContent = opt.label;
+      sel.appendChild(o);
+    }
+    sel.onchange = async () => {
+      if (!modalItemId) return;
+      const val = sel.value || null;
+      try {
+        await api('PATCH', `/api/listings/${modalItemId}`, {field: 'ebay_fulfillment_policy_id', value: val});
+        const l = listings.find(x => x.id === modalItemId);
+        if (l) l.ebay_fulfillment_policy_id = val;
+        toast('Shipping policy updated ✓');
+      } catch(e) {
+        toast('Failed to save shipping policy', 'error');
+      }
+    };
+  } catch(e) { /* non-critical, dropdown just stays at Default */ }
+}
+
 // ── INIT ───────────────────────────────────────────────────────
 loadListings();
 initTileListeners();
+loadShippingPolicyOptions();
 
 // Allow linking directly to a tab from other pages, e.g. /?tab=upload
 (function() {
