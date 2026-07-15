@@ -277,6 +277,7 @@ select.field-input { background: #fff; color: #0f172a; }
         <span style="font-size:12px;color:var(--muted);">hrs</span>
       </div>
       <button class="btn btn-primary" id="submit-ebay-btn" style="display:none" onclick="submitSelected()">⏰ Schedule to eBay</button>
+      <button class="btn btn-primary" id="publish-now-btn" style="display:none;background:#ea580c;border-color:#ea580c;" onclick="submitSelectedNow()">⚡ Publish Immediately</button>
       <button class="btn btn-primary" id="submit-shopify-btn" style="display:none;background:#95bf47;border-color:#95bf47;" onclick="submitSelectedToShopify()">🛍️ Publish to Shopify</button>
       <button class="btn" id="archive-selected-btn" style="display:none;color:var(--red);border-color:#991b1b;" onclick="archiveSelected()">🗄️ Archive Selected</button>
       <div class="spacer"></div>
@@ -1067,6 +1068,9 @@ function updateSubmitBtn() {
   const btn = document.getElementById('submit-ebay-btn');
   btn.style.display = selected.size > 0 ? 'inline-block' : 'none';
   btn.textContent = `⏰ Schedule ${selected.size} to eBay`;
+  const nowBtn = document.getElementById('publish-now-btn');
+  nowBtn.style.display = selected.size > 0 ? 'inline-block' : 'none';
+  nowBtn.textContent = `⚡ Publish ${selected.size} Immediately`;
   const shopBtn = document.getElementById('submit-shopify-btn');
   shopBtn.style.display = selected.size > 0 ? 'inline-block' : 'none';
   shopBtn.textContent = `🛍️ Publish ${selected.size} to Shopify`;
@@ -1174,6 +1178,27 @@ async function submitSelected() {
   }
   hideBatchProgress();
   toast(`Scheduled ${success} item(s)${failed ? ', ' + failed + ' failed' : ''} ✓`);
+}
+
+async function submitSelectedNow() {
+  if (!selected.size) return;
+  const ids = Array.from(selected);
+  const ok = confirm(`Publish ${ids.length} item(s) LIVE to eBay immediately?\n\nThis goes live right away, not scheduled — different from Schedule to eBay.`);
+  if (!ok) return;
+  let success = 0, failed = 0;
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    showBatchProgress(i + 1, ids.length, 'Publishing to eBay');
+    try {
+      const r = await api('POST', `/api/listings/${id}/ebay`, {mode: 'now'});
+      const l = listings.find(x => String(x.id) === id);
+      if (l) { l.ebay_status = r.status; l.ebay_item_id = r.item_id; }
+      success++;
+    } catch(e) { failed++; }
+    renderTiles();
+  }
+  hideBatchProgress();
+  toast(`Published ${success} item(s) immediately${failed ? ', ' + failed + ' failed' : ''} ✓`);
 }
 
 async function submitSelectedToShopify() {
