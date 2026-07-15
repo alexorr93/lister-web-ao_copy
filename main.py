@@ -157,9 +157,9 @@ EBAY_API_BASE = "https://api.ebay.com"
 
 # Alternate shipping policies a listing can be assigned instead of the account default.
 EBAY_SHIPPING_POLICY_OPTIONS = [
+    {"id": "251042655020", "label": "Free Shipping"},
     {"id": "251441449020", "label": "$18 Shipping"},
     {"id": "251094371020", "label": "$69 Shipping"},
-    {"id": "251042655020", "label": "Free Shipping"},
     {"id": "251094542020", "label": "$195 Shipping"},
 ]
 
