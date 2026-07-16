@@ -2164,15 +2164,18 @@ def backfill_tracking_numbers(business_id: str) -> dict:
     return {"updated": updated, "orders_checked": len(order_ids), "rows_missing": len(rows)}
 
 def backfill_legacy_item_ids(business_id: str) -> dict:
-    """Fills in legacy_item_id for orders that don't have one yet — one GET per unique
-    order (not per line item, not fees, not tracking), much faster than a full sync."""
+    """Fills in legacy_item_id for orders that need it — specifically only orders that
+    ALSO still have a blank SKU, since that's the only reason this field matters. Scoping
+    to just those (~600-900 orders, not all 11,000+) is what actually makes this finishable —
+    trying to backfill every historical order took hours and kept getting killed by
+    routine deploys before finishing."""
     import requests as _req
 
     rows = []
     page_size = 1000
     start = 0
     while True:
-        res = supabase.table("orders").select("id,order_id").eq("business_id", business_id)\
+        res = supabase.table("orders").select("id,order_id,sku").eq("business_id", business_id)\
             .eq("platform", "eBay").is_("legacy_item_id", "null")\
             .range(start, start + page_size - 1).execute()
         page = res.data or []
@@ -2180,6 +2183,12 @@ def backfill_legacy_item_ids(business_id: str) -> dict:
         if len(page) < page_size:
             break
         start += page_size
+
+    def _is_blank_sku(s):
+        s = (s or "").strip().lower()
+        return s in ("", "(no sku)") or s.startswith("lister-")
+    rows = [r for r in rows if _is_blank_sku(r.get("sku"))]
+
     order_ids = list(set(r["order_id"] for r in rows if r.get("order_id")))
 
     token = get_ebay_access_token(business_id)
