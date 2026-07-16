@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Acquisitions — Lister AI</title>
+<title>Lots — Lister AI</title>
 <link rel="icon" type="image/png" href="/static/favicon.png">
 <style>
 :root {
@@ -50,13 +50,13 @@ tr:last-child td { border-bottom: none; }
   <a class="nav-btn" href="/categories">📂 Categories</a>
   <a class="nav-btn" href="/archive">🗄️ Archive</a>
   <a class="nav-btn" href="/financials">💰 Financials</a>
-  <a class="nav-btn active" href="/acquisitions">🛒 Acquisitions</a>
+  <a class="nav-btn active" href="/acquisitions">🛒 Lots</a>
   <div class="nav-spacer"></div>
   <a class="nav-download" href="/logout" style="color:#ef4444;border-color:#7f1d1d;">⏻ Logout</a>
 </nav>
 
 <div class="main">
-  <h1>Acquisitions</h1>
+  <h1>Lots</h1>
   <div class="sub">SKU, Name, Payment_Method, Date, Cost, Cash are what you enter — eBay, Total_Payouts, and Profit are computed live from synced orders.</div>
 
   <div class="card">
@@ -226,6 +226,20 @@ function renderTable() {
       <td><button class="btn btn-danger" style="padding:4px 10px;font-size:11px;" onclick="deleteAcquisition('${a.id}')">Delete</button></td>
     </tr>`;
   }
+  const totalCost = sorted.reduce((n, a) => n + (a.cost || 0), 0);
+  const totalCash = sorted.reduce((n, a) => n + (a.cash || 0), 0);
+  const totalEbay = sorted.reduce((n, a) => n + (a.ebay || 0), 0);
+  const totalPayouts = sorted.reduce((n, a) => n + (a.total_payouts || 0), 0);
+  const totalProfit = sorted.reduce((n, a) => n + (a.profit || 0), 0);
+  html += `<tr style="font-weight:800;border-top:2px solid var(--border);background:rgba(255,255,255,0.03);">
+    <td colspan="4">TOTAL (${sorted.length} lot${sorted.length===1?'':'s'})</td>
+    <td>${fmtMoney(totalCost)}</td>
+    <td>${fmtMoney(totalCash)}</td>
+    <td>${fmtMoney(totalEbay)}</td>
+    <td>${fmtMoney(totalPayouts)}</td>
+    <td class="${totalProfit >= 0 ? 'pos' : 'neg'}">${fmtMoney(totalProfit)}</td>
+    <td></td><td></td>
+  </tr>`;
   html += '</tbody></table>';
   document.getElementById('table-area').innerHTML = html;
 }
