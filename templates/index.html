@@ -114,6 +114,8 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .photo-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.5); border: none; color: #fff; width: 24px; height: 24px; border-radius: 50%; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; }
 .photo-nav-prev { left: 5px; }
 .photo-nav-next { right: 5px; }
+.make-main-btn { position: absolute; bottom: 34px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.75); color: #fbbf24; border: 1px solid #fbbf24; border-radius: 8px; padding: 4px 10px; font-size: 11px; font-weight: 700; cursor: pointer; white-space: nowrap; z-index: 6; }
+.make-main-btn:hover { background: #fbbf24; color: #1a0611; }
 .tile-photo-placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; color: #3d4663; }
 .tile-badge-tl { position: absolute; top: 7px; left: 7px; background: rgba(0,0,0,0.65); border-radius: 5px; padding: 2px 7px; font-size: 9px; font-weight: 700; }
 .tile-platform-badges { position: absolute; top: 7px; left: 50%; transform: translateX(-50%); display: flex; gap: 4px; z-index: 4; }
@@ -776,7 +778,8 @@ function renderTiles() {
     const photoNavHtml = photoCount > 1
       ? `<button class="photo-nav photo-nav-prev" onclick="event.stopPropagation();cyclePhoto('${l.id}',-1)">‹</button>
          <button class="photo-nav photo-nav-next" onclick="event.stopPropagation();cyclePhoto('${l.id}',1)">›</button>
-         <div class="photo-counter" id="photo-counter-${l.id}">1/${photoCount}</div>`
+         <div class="photo-counter" id="photo-counter-${l.id}">1/${photoCount}</div>
+         <button class="make-main-btn" id="make-main-${l.id}" style="display:none;" onclick="event.stopPropagation();makeMainPhoto('${l.id}')">⭐ Make Main Photo</button>`
       : '';
 
     return `<div class="tile${isSel?' selected':''}${ebayDraft?' ebay-draft':''}${ebayFailed?' ebay-failed':''}" id="tile-${l.id}" data-photos='${JSON.stringify(photos)}' data-photo-idx="0" onclick="handleTileClick(event,'${l.id}')">
@@ -1044,6 +1047,31 @@ function cyclePhoto(id, dir) {
   if (img) img.src = photos[idx].thumb;
   const counter = document.getElementById('photo-counter-' + id);
   if (counter) counter.textContent = (idx + 1) + '/' + photos.length;
+  const makeMainBtn = document.getElementById('make-main-' + id);
+  if (makeMainBtn) makeMainBtn.style.display = idx === 0 ? 'none' : 'block';
+}
+
+async function makeMainPhoto(id) {
+  const tile = document.getElementById('tile-' + id);
+  if (!tile) return;
+  const photos = JSON.parse(tile.dataset.photos || '[]');
+  const idx = parseInt(tile.dataset.photoIdx || '0');
+  const chosen = photos[idx];
+  if (!chosen || !chosen.id) return;
+  try {
+    await api('PATCH', `/api/listings/${id}`, {field: 'photo_id', value: chosen.id});
+    const l = listings.find(x => String(x.id) === id);
+    if (l) {
+      l.photo_id = chosen.id;
+      // Reorder so the new main photo is first, keeping the rest in order
+      const reordered = [chosen, ...photos.filter((p, i) => i !== idx)];
+      l.all_photos = reordered;
+    }
+    toast('Main photo updated ✓');
+    renderTiles();
+  } catch(e) {
+    toast('Failed to update main photo', 'error');
+  }
 }
 
 function handlePhotoClick(id) {

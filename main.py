@@ -629,7 +629,7 @@ async def get_listings(request: Request, archived: bool = False):
             all_photos = group_photo_map.get(pid, [pid] if pid else [])
             l["thumb_url"]  = photo_url(pid, thumb=True)
             l["full_url"]   = photo_url(pid)
-            l["all_photos"] = [{"thumb": photo_url(p, thumb=True), "full": photo_url(p)} for p in all_photos if p]
+            l["all_photos"] = [{"id": p, "thumb": photo_url(p, thumb=True), "full": photo_url(p)} for p in all_photos if p]
             l["ebay_category_path"] = cat_path_map.get(str(l.get("ebay_category_id") or ""), "")
             l["ebay_category_is_default"] = bool(default_cat_id) and str(l.get("ebay_category_id") or "") == default_cat_id
             # Coerce types
