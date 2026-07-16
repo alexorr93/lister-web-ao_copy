@@ -799,6 +799,7 @@ function renderTiles() {
         <textarea class="tile-title-input${fieldClassFor(l.id,'title')}" rows="1" data-id="${l.id}" placeholder="Title">${(dirtyTitles[l.id] ?? (l.title||'')).replace(/</g,'&lt;')}</textarea>
         <div class="tile-search-btns">
           <button class="tile-search-btn" onclick="window.open('https://www.google.com/search?q='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value),'popupwin','noopener,width=1200,height=800')">Google</button>
+          <button class="tile-search-btn" onclick="window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value)+'&LH_Sold=0&LH_Complete=0','popupwin','noopener,width=1200,height=800')">eBay Active</button>
           <button class="tile-search-btn" onclick="window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value)+'&LH_Sold=1&LH_Complete=1','popupwin','noopener,width=1200,height=800')">eBay Sold</button>
         </div>
         <div class="tile-price-cond-row">
