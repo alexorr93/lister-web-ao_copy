@@ -1192,6 +1192,8 @@ async function submitSelected() {
   }
   hideBatchProgress();
   toast(`Scheduled ${success} item(s)${failed ? ', ' + failed + ' failed' : ''} ✓`);
+  selected.clear();
+  renderTiles();
 }
 
 async function submitSelectedNow() {
@@ -1213,6 +1215,8 @@ async function submitSelectedNow() {
   }
   hideBatchProgress();
   toast(`Published ${success} item(s) immediately${failed ? ', ' + failed + ' failed' : ''} ✓`);
+  selected.clear();
+  renderTiles();
 }
 
 async function submitSelectedToShopify() {
@@ -1232,6 +1236,8 @@ async function submitSelectedToShopify() {
   }
   hideBatchProgress();
   toast(`Published ${success} item(s) to Shopify${failed ? ', ' + failed + ' failed' : ''} ✓`);
+  selected.clear();
+  renderTiles();
 }
 
 async function deleteItem(id) {
