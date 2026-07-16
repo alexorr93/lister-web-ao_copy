@@ -1939,6 +1939,24 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
             except (TypeError, ValueError):
                 return 0.0
 
+        # Preserve any real SKU already stored (manually backfilled, or otherwise better
+        # than what eBay's API returns) — a routine re-sync should never downgrade a
+        # good SKU back to blank/"(no SKU)"/the lister-{id} fallback.
+        def _is_blank_sku(s):
+            s = (s or "").strip().lower()
+            return s in ("", "(no sku)") or s.startswith("lister-")
+
+        candidate_ids = [f"ebay:{row['order_id']}:{row['line_item_id']}" for row in ebay_rows]
+        existing_sku_by_id = {}
+        for i in range(0, len(candidate_ids), 200):
+            chunk = candidate_ids[i:i+200]
+            try:
+                res = supabase.table("orders").select("id,sku").in_("id", chunk).execute()
+                for r in (res.data or []):
+                    existing_sku_by_id[r["id"]] = r.get("sku")
+            except Exception:
+                pass
+
         skipped_rows = 0
         for row in ebay_rows:
             fee = _safe(fees_by_line.get((row["order_id"], row["line_item_id"]), 0.0))
@@ -1949,10 +1967,13 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
             # Pirate Ship match takes priority (it's the common case); eBay-purchased
             # label cost fills in only when there's no Pirate Ship match for this order.
             shipping_cost = _safe(pirate_ship_cost if pirate_ship_cost > 0 else ebay_labels_by_order.get(row["order_id"], 0))
+            record_id = f"ebay:{row['order_id']}:{row['line_item_id']}"
+            existing_sku = existing_sku_by_id.get(record_id)
+            final_sku = existing_sku if (existing_sku and not _is_blank_sku(existing_sku) and _is_blank_sku(row["sku"])) else row["sku"]
             record = {
-                "id": f"ebay:{row['order_id']}:{row['line_item_id']}",
+                "id": record_id,
                 "business_id": business_id, "platform": "eBay", "order_id": row["order_id"],
-                "sku": row["sku"], "title": row["title"], "quantity": row["quantity"],
+                "sku": final_sku, "title": row["title"], "quantity": row["quantity"],
                 "order_date": row["order_date"], "gross_revenue": revenue,
                 "buyer_shipping": _safe(row.get("buyer_shipping", 0)),
                 "order_delivery_cost": _safe(row.get("order_delivery_cost", 0)),
