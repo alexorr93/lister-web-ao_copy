@@ -1252,6 +1252,53 @@ def apply_acquisition_profits(business_id: str) -> dict:
 
     return {"updated": updated, "orders_scanned": len(orders)}
 
+@app.get("/api/acquisitions/debug-sku/{sku}")
+async def debug_acquisition_sku(sku: str, request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+
+    def _fetch_all(table, select_cols):
+        all_rows = []
+        page_size = 1000
+        start = 0
+        while True:
+            res = supabase.table(table).select(select_cols).eq("business_id", business_id)\
+                .range(start, start + page_size - 1).execute()
+            page = res.data or []
+            all_rows.extend(page)
+            if len(page) < page_size:
+                break
+            start += page_size
+        return all_rows
+
+    acquisitions = _fetch_all("acquisitions", "*")
+    matching_acq_rows = [a for a in acquisitions if a.get("sku") == sku]
+
+    skus = list(set(a["sku"] for a in acquisitions if a.get("sku")))
+    orders = _fetch_all("orders", "sku,final_net")
+
+    matched_orders = []
+    for row in orders:
+        order_sku = row.get("sku") or ""
+        if "-" not in order_sku:
+            continue
+        prefix = order_sku.split("-", 1)[0]
+        if prefix == sku:
+            matched_orders.append(row)
+
+    computed_total = sum((r.get("final_net") or 0) for r in matched_orders)
+
+    return {
+        "sku_in_acquisitions_skus_set": sku in skus,
+        "total_acquisitions_fetched": len(acquisitions),
+        "total_orders_fetched": len(orders),
+        "matching_acquisition_rows": matching_acq_rows,
+        "matched_order_count": len(matched_orders),
+        "computed_total": round(computed_total, 2),
+        "sample_matched_orders": matched_orders[:5],
+    }
+
 @app.post("/api/acquisitions/recalculate")
 async def recalculate_acquisitions(request: Request):
     business_id = require_auth(request)
