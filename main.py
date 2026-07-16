@@ -1191,66 +1191,14 @@ class AcquisitionCreate(BaseModel):
     notes: Optional[str] = None
 
 def apply_acquisition_profits(business_id: str) -> dict:
-    """Computes eBay/Total_Payouts/Profit/ROI for every acquisition and writes them
-    directly into the acquisitions table — stored, not recalculated on every page
-    read. Both fetches are paginated (Supabase caps a single query at ~1000 rows,
-    which silently undercounted matches on any lot with real order volume)."""
-    def _fetch_all(table, select_cols, extra_filter=None):
-        all_rows = []
-        page_size = 1000
-        start = 0
-        while True:
-            q = supabase.table(table).select(select_cols).eq("business_id", business_id)
-            if extra_filter:
-                q = extra_filter(q)
-            res = q.range(start, start + page_size - 1).execute()
-            page = res.data or []
-            all_rows.extend(page)
-            if len(page) < page_size:
-                break
-            start += page_size
-        return all_rows
-
-    acquisitions = _fetch_all("acquisitions", "*")
-    if not acquisitions:
-        return {"updated": 0}
-
-    skus = list(set(a["sku"] for a in acquisitions if a.get("sku")))
-    orders = _fetch_all("orders", "sku,final_net")
-
-    ebay_by_lot = {}
-    for row in orders:
-        order_sku = row.get("sku") or ""
-        if "-" not in order_sku:
-            continue
-        prefix = order_sku.split("-", 1)[0]
-        if prefix in skus:
-            ebay_by_lot[prefix] = ebay_by_lot.get(prefix, 0.0) + (row.get("final_net") or 0)
-
-    updates = []
-    for a in acquisitions:
-        ebay = round(ebay_by_lot.get(a["sku"], 0.0), 2)
-        cash = a.get("cash") or 0
-        cost = a.get("cost") or 0
-        total_payouts = round(cash + ebay, 2)
-        profit = round(total_payouts - cost, 2)
-        record = dict(a)
-        record["ebay"] = ebay
-        record["total_payouts"] = total_payouts
-        record["profit"] = profit
-        record["roi_pct"] = round(profit / cost * 100, 1) if cost else None
-        updates.append(record)
-
-    updated = 0
-    for i in range(0, len(updates), 500):
-        chunk = updates[i:i+500]
-        try:
-            supabase.table("acquisitions").upsert(chunk).execute()
-            updated += len(chunk)
-        except Exception as e:
-            print(f"apply_acquisition_profits: batch {i}-{i+len(chunk)} failed: {e}")
-
-    return {"updated": updated, "orders_scanned": len(orders)}
+    """Computes eBay/Total_Payouts/Profit/ROI for every acquisition — done ENTIRELY
+    inside Postgres via the recalculate_acquisition_profits() function (see
+    create_recalculate_function.sql), not fetched into Python and looped over.
+    This is what 'calculated in the database' should have meant from the start —
+    one atomic SQL statement, no pagination limits, no partial-upsert failures."""
+    res = supabase.rpc("recalculate_acquisition_profits", {"biz_id": business_id}).execute()
+    updated = res.data if isinstance(res.data, int) else 0
+    return {"updated": updated}
 
 @app.get("/api/acquisitions/debug-sku/{sku}")
 async def debug_acquisition_sku(sku: str, request: Request):
