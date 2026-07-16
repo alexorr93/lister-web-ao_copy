@@ -66,7 +66,7 @@ tr:last-child td { border-bottom: none; }
         <input type="text" class="field-input" id="new-sku" placeholder="e.g. RJ"/>
       </div>
       <div>
-        <div class="field-label">Name</div>
+        <div class="field-label">Lots</div>
         <input type="text" class="field-input" id="new-name" placeholder="who / where"/>
       </div>
       <div>
@@ -206,7 +206,7 @@ function renderTable() {
     return b.date.localeCompare(a.date);
   });
   let html = `<table><thead><tr>
-    <th>SKU</th><th>Name</th><th>Payment_Method</th><th>Date</th><th>Cost</th><th>Cash</th>
+    <th>SKU</th><th>Lots</th><th>Payment_Method</th><th>Date</th><th>Cost</th><th>Cash</th>
     <th>eBay</th><th>Total_Payouts</th><th>Profit</th><th>ROI</th><th></th>
   </tr></thead><tbody>`;
   for (const a of sorted) {
