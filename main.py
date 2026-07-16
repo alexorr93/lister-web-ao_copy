@@ -2168,9 +2168,18 @@ def backfill_legacy_item_ids(business_id: str) -> dict:
     order (not per line item, not fees, not tracking), much faster than a full sync."""
     import requests as _req
 
-    res = supabase.table("orders").select("id,order_id").eq("business_id", business_id)\
-        .eq("platform", "eBay").is_("legacy_item_id", "null").execute()
-    rows = res.data or []
+    rows = []
+    page_size = 1000
+    start = 0
+    while True:
+        res = supabase.table("orders").select("id,order_id").eq("business_id", business_id)\
+            .eq("platform", "eBay").is_("legacy_item_id", "null")\
+            .range(start, start + page_size - 1).execute()
+        page = res.data or []
+        rows.extend(page)
+        if len(page) < page_size:
+            break
+        start += page_size
     order_ids = list(set(r["order_id"] for r in rows if r.get("order_id")))
 
     token = get_ebay_access_token(business_id)
