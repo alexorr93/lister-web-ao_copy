@@ -98,8 +98,9 @@ tr:last-child td { border-bottom: none; }
       <span id="upload-status" class="status-msg"></span>
     </div>
     <div style="margin-top:12px;display:flex;align-items:center;gap:10px;">
+      <button class="btn" onclick="backfillLegacyIds()" title="One-time prep step: pulls eBay's legacy item ID for every order so the SKU backfill below can match reliably">1️⃣ Backfill Item IDs</button>
       <div>
-        <div class="field-label">One-Time: Backfill Blank Order SKUs (Listing title / Lot Name export)</div>
+        <div class="field-label">2️⃣ Backfill Blank SKUs (Lot Name / ITEM_ID export — reliable, exact match)</div>
         <input type="file" id="sku-backfill-input" accept=".csv" style="font-size:12px;" onchange="uploadSkuBackfill()"/>
       </div>
       <span id="backfill-status" class="status-msg"></span>
@@ -120,18 +121,53 @@ function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+async function backfillLegacyIds() {
+  const statusEl = document.getElementById('backfill-status');
+  statusEl.textContent = 'Starting item ID backfill (background, can take a while)...';
+  try {
+    const r = await fetch('/api/financials/backfill-legacy-item-ids', {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed to start');
+    pollBackfillStatus();
+  } catch(e) {
+    statusEl.textContent = `❌ ${e.message}`;
+  }
+}
+
+async function pollBackfillStatus() {
+  const statusEl = document.getElementById('backfill-status');
+  try {
+    const r = await fetch('/api/financials/sync-status');
+    const data = await r.json();
+    if (data.running) {
+      statusEl.textContent = 'Backfilling item IDs — safe to leave open...';
+      setTimeout(pollBackfillStatus, 5000);
+      return;
+    }
+    if (data.result) {
+      if (data.result.error) {
+        statusEl.textContent = `❌ ${data.result.error}`;
+      } else {
+        statusEl.textContent = `✅ Item IDs: ${data.result.updated} of ${data.result.rows_missing} order(s) backfilled. Now upload your Lot Name/ITEM_ID CSV below.`;
+      }
+    }
+  } catch(e) {
+    statusEl.textContent = `❌ ${e.message}`;
+  }
+}
+
 async function uploadSkuBackfill() {
   const input = document.getElementById('sku-backfill-input');
   if (!input.files.length) return;
   const fd = new FormData();
   fd.append('file', input.files[0]);
   const statusEl = document.getElementById('backfill-status');
-  statusEl.textContent = 'Backfilling — this can take a minute for a large file...';
+  statusEl.textContent = 'Matching by item ID — this can take a minute for a large file...';
   try {
-    const r = await fetch('/api/orders/backfill-sku', {method: 'POST', body: fd});
+    const r = await fetch('/api/orders/backfill-sku-by-item-id', {method: 'POST', body: fd});
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed');
-    statusEl.textContent = `✅ Matched ${data.matched} of ${data.csv_rows} row(s), updated ${data.updated} order(s). (${data.no_lot_match} lot not found, ${data.no_order_match} no matching order)`;
+    statusEl.textContent = `✅ Matched ${data.matched} of ${data.csv_rows} row(s), updated ${data.updated} order(s). (${data.no_lot_match} lot not found, ${data.no_order_match} no matching order, ${data.already_tagged} already tagged)`;
   } catch(e) {
     statusEl.textContent = `❌ ${e.message}`;
   }

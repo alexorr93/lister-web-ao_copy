@@ -1547,6 +1547,7 @@ def fetch_ebay_orders(business_id: str, start_iso: str, end_iso: str) -> list:
                     "order_date": created[:10] if created else "",
                     "order_id": order.get("orderId", ""),
                     "line_item_id": li.get("lineItemId", ""),
+                    "legacy_item_id": li.get("legacyItemId", ""),
                 })
         total = data.get("total", 0)
         offset += 200
@@ -1974,6 +1975,7 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
                 "id": record_id,
                 "business_id": business_id, "platform": "eBay", "order_id": row["order_id"],
                 "sku": final_sku, "title": row["title"], "quantity": row["quantity"],
+                "legacy_item_id": row.get("legacy_item_id", ""),
                 "order_date": row["order_date"], "gross_revenue": revenue,
                 "buyer_shipping": _safe(row.get("buyer_shipping", 0)),
                 "order_delivery_cost": _safe(row.get("order_delivery_cost", 0)),
@@ -2160,6 +2162,139 @@ def backfill_tracking_numbers(business_id: str) -> dict:
                 pass
 
     return {"updated": updated, "orders_checked": len(order_ids), "rows_missing": len(rows)}
+
+def backfill_legacy_item_ids(business_id: str) -> dict:
+    """Fills in legacy_item_id for orders that don't have one yet — one GET per unique
+    order (not per line item, not fees, not tracking), much faster than a full sync."""
+    import requests as _req
+
+    res = supabase.table("orders").select("id,order_id").eq("business_id", business_id)\
+        .eq("platform", "eBay").is_("legacy_item_id", "null").execute()
+    rows = res.data or []
+    order_ids = list(set(r["order_id"] for r in rows if r.get("order_id")))
+
+    token = get_ebay_access_token(business_id)
+    legacy_by_id = {}  # our composite id -> legacyItemId
+    for oid in order_ids:
+        try:
+            r = _req.get(f"{EBAY_API_BASE}/sell/fulfillment/v1/order/{oid}",
+                         headers=ebay_headers(token, content_language=False), timeout=15)
+            if r.status_code == 200:
+                order = r.json()
+                for li in order.get("lineItems", []):
+                    record_id = f"ebay:{oid}:{li.get('lineItemId', '')}"
+                    legacy_by_id[record_id] = li.get("legacyItemId", "")
+        except Exception:
+            continue
+
+    updated = 0
+    for row in rows:
+        legacy_id = legacy_by_id.get(row["id"])
+        if legacy_id:
+            try:
+                supabase.table("orders").update({"legacy_item_id": legacy_id}).eq("id", row["id"]).execute()
+                updated += 1
+            except Exception:
+                pass
+
+    return {"updated": updated, "orders_checked": len(order_ids), "rows_missing": len(rows)}
+
+@app.post("/api/financials/backfill-legacy-item-ids")
+async def backfill_legacy_item_ids_now(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio
+    if _sync_status.get(business_id, {}).get("running"):
+        return {"ok": True, "already_running": True}
+    _sync_status[business_id] = {"running": True, "result": None, "started_at": __import__("datetime").datetime.utcnow().isoformat(), "finished_at": None}
+    async def _run():
+        import datetime as _dt
+        try:
+            result = await asyncio.to_thread(backfill_legacy_item_ids, business_id)
+            _sync_status[business_id] = {"running": False, "result": result, "started_at": _sync_status.get(business_id, {}).get("started_at"), "finished_at": _dt.datetime.utcnow().isoformat()}
+        except Exception as e:
+            _sync_status[business_id] = {"running": False, "result": {"error": str(e)}, "started_at": _sync_status.get(business_id, {}).get("started_at"), "finished_at": _dt.datetime.utcnow().isoformat()}
+    asyncio.create_task(_run())
+    return {"ok": True, "started": True}
+
+@app.post("/api/orders/backfill-sku-by-item-id")
+async def backfill_sku_by_item_id(request: Request, file: UploadFile = File(...)):
+    """The RELIABLE version of the SKU backfill — matches on exact legacy_item_id
+    instead of fuzzy title text. Expects a CSV with 'Lot Name' and 'ITEM_ID' columns."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import io, csv as _csv
+
+    content = await file.read()
+    text = content.decode("utf-8-sig", errors="replace")
+    reader = _csv.DictReader(io.StringIO(text))
+    csv_rows = list(reader)
+
+    def _fetch_all(table, select_cols):
+        all_rows = []
+        page_size = 1000
+        start = 0
+        while True:
+            res = supabase.table(table).select(select_cols).eq("business_id", business_id)\
+                .range(start, start + page_size - 1).execute()
+            page = res.data or []
+            all_rows.extend(page)
+            if len(page) < page_size:
+                break
+            start += page_size
+        return all_rows
+
+    acquisitions = _fetch_all("acquisitions", "sku,name")
+    sku_by_lower_sku = {a["sku"].strip().lower(): a["sku"] for a in acquisitions if a.get("sku")}
+    sku_by_lower_name = {}
+    for a in acquisitions:
+        if a.get("name") and a.get("sku"):
+            sku_by_lower_name.setdefault(a["name"].strip().lower(), a["sku"])
+
+    def resolve_sku(lot_name):
+        key = (lot_name or "").strip().lower()
+        return (sku_by_lower_sku.get(key) or sku_by_lower_name.get(key)) if key else None
+
+    orders = _fetch_all("orders", "id,legacy_item_id,sku")
+    order_by_legacy_id = {o["legacy_item_id"]: o for o in orders if o.get("legacy_item_id")}
+
+    updates = []
+    matched, no_lot_match, no_order_match, already_tagged = 0, 0, 0, 0
+    for row in csv_rows:
+        item_id = (row.get("ITEM_ID") or "").strip()
+        lot_name = (row.get("Lot Name") or "").strip()
+        if not item_id or not lot_name:
+            continue
+        order = order_by_legacy_id.get(item_id)
+        if not order:
+            no_order_match += 1
+            continue
+        existing = (order.get("sku") or "").strip().lower()
+        if existing and existing not in ("", "(no sku)") and not existing.startswith("lister-"):
+            already_tagged += 1
+            continue
+        real_sku = resolve_sku(lot_name)
+        if not real_sku:
+            no_lot_match += 1
+            continue
+        updates.append({"id": order["id"], "sku": f"{real_sku}-BF"})
+        matched += 1
+
+    updated = 0
+    for i in range(0, len(updates), 500):
+        chunk = updates[i:i+500]
+        try:
+            supabase.table("orders").upsert(chunk).execute()
+            updated += len(chunk)
+        except Exception as e:
+            print(f"backfill_sku_by_item_id: batch {i}-{i+len(chunk)} failed: {e}")
+
+    return {
+        "ok": True, "csv_rows": len(csv_rows), "matched": matched, "updated": updated,
+        "no_lot_match": no_lot_match, "no_order_match": no_order_match, "already_tagged": already_tagged,
+    }
 
 @app.post("/api/financials/backfill-tracking")
 async def backfill_tracking_now(request: Request):
