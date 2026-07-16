@@ -707,15 +707,20 @@ async function loadListings() {
 }
 
 function updateStats() {
-  let totalVal = 0, totalUnits = 0;
+  let totalVal = 0, totalUnits = 0, itemCount = 0;
+  const inSelectMode = selected.size > 0;
   listings.forEach(l => {
+    if (inSelectMode && !selected.has(String(l.id))) return;
     const qty = quantities[l.id] ?? l.quantity ?? 1;
     totalVal += l.price * qty;
     totalUnits += qty;
+    itemCount++;
   });
-  document.getElementById('stat-items').textContent = listings.length;
+  document.getElementById('stat-items').textContent = itemCount;
   document.getElementById('stat-value').textContent = '$' + Math.round(totalVal).toLocaleString('en-US');
   document.getElementById('stat-units').textContent = totalUnits;
+  const lbl = document.querySelector('#stat-value').nextElementSibling;
+  if (lbl) lbl.textContent = inSelectMode ? 'Selected Value' : 'Batch Value';
 }
 
 function renderTiles() {
