@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from supabase import create_client
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 load_dotenv()
 
@@ -1246,6 +1246,103 @@ async def debug_acquisition_sku(sku: str, request: Request):
         "computed_total": round(computed_total, 2),
         "sample_matched_orders": matched_orders[:5],
     }
+
+class AcquisitionEdit(BaseModel):
+    id: str
+    sku: str
+    name: Optional[str] = None
+    payment_method: Optional[str] = None
+    date: Optional[str] = None
+    cost: Optional[float] = None
+    cash: Optional[float] = None
+
+@app.post("/api/acquisitions/edit-batch")
+async def edit_acquisitions_batch(request: Request, edits: List[AcquisitionEdit] = Body(...)):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    if not edits:
+        return {"ok": True, "updated": 0}
+    import uuid as _uuid
+
+    ids = [e.id for e in edits]
+    res = supabase.table("acquisitions").select("*").eq("business_id", business_id).in_("id", ids).execute()
+    current_by_id = {r["id"]: r for r in (res.data or [])}
+
+    batch_id = str(_uuid.uuid4())
+    history_rows = []
+    for e in edits:
+        cur = current_by_id.get(e.id)
+        if not cur:
+            continue
+        history_rows.append({
+            "business_id": business_id, "acquisition_id": e.id, "batch_id": batch_id,
+            "sku": cur.get("sku"), "name": cur.get("name"), "payment_method": cur.get("payment_method"),
+            "date": cur.get("date"), "cost": cur.get("cost"), "cash": cur.get("cash"),
+        })
+    if history_rows:
+        try:
+            supabase.table("acquisitions_history").insert(history_rows).execute()
+        except Exception as e:
+            raise HTTPException(500, f"Could not save undo history, aborting to be safe: {e}")
+
+    updated = 0
+    for e in edits:
+        cur = current_by_id.get(e.id)
+        if not cur:
+            continue
+        record = dict(cur)
+        record["sku"] = e.sku
+        record["name"] = e.name
+        record["payment_method"] = e.payment_method
+        record["date"] = e.date
+        record["cost"] = e.cost
+        record["cash"] = e.cash
+        try:
+            supabase.table("acquisitions").upsert(record).execute()
+            updated += 1
+        except Exception as ex:
+            print(f"edit_acquisitions_batch: failed to update {e.id}: {ex}")
+
+    try:
+        apply_acquisition_profits(business_id)
+    except Exception:
+        pass
+
+    return {"ok": True, "updated": updated, "batch_id": batch_id}
+
+@app.post("/api/acquisitions/undo")
+async def undo_acquisitions_edit(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    latest = supabase.table("acquisitions_history").select("batch_id").eq("business_id", business_id)\
+        .order("created_at", desc=True).limit(1).execute()
+    if not latest.data:
+        return {"ok": True, "restored": 0, "message": "No edits to undo"}
+    batch_id = latest.data[0]["batch_id"]
+
+    history_rows = supabase.table("acquisitions_history").select("*").eq("business_id", business_id)\
+        .eq("batch_id", batch_id).execute()
+    restored = 0
+    for h in (history_rows.data or []):
+        try:
+            supabase.table("acquisitions").update({
+                "sku": h.get("sku"), "name": h.get("name"), "payment_method": h.get("payment_method"),
+                "date": h.get("date"), "cost": h.get("cost"), "cash": h.get("cash"),
+            }).eq("id", h["acquisition_id"]).execute()
+            restored += 1
+        except Exception as e:
+            print(f"undo_acquisitions_edit: failed to restore {h['acquisition_id']}: {e}")
+
+    supabase.table("acquisitions_history").delete().eq("business_id", business_id).eq("batch_id", batch_id).execute()
+
+    try:
+        apply_acquisition_profits(business_id)
+    except Exception:
+        pass
+
+    return {"ok": True, "restored": restored}
 
 @app.post("/api/acquisitions/recalculate")
 async def recalculate_acquisitions(request: Request):

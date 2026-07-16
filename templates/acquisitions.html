@@ -89,6 +89,9 @@ tr:last-child td { border-bottom: none; }
     <div style="margin-top:10px;display:flex;gap:8px;">
       <button class="btn btn-primary" onclick="addAcquisition()">+ Add Row</button>
       <button class="btn" onclick="recalculate()" title="Refreshes eBay/Total_Payouts/Profit for every row using the latest synced orders">🔄 Recalculate</button>
+      <button class="btn" id="edit-mode-btn" onclick="toggleEditMode()">✏️ Edit</button>
+      <button class="btn btn-primary" id="publish-edits-btn" style="display:none;" onclick="publishEdits()">📤 Publish Changes</button>
+      <button class="btn btn-danger" onclick="undoLastEdit()" title="Restores the values from right before your last Publish">↩️ Undo Last Edit</button>
     </div>
     <div style="margin-top:12px;display:flex;align-items:center;gap:10px;">
       <div>
@@ -112,6 +115,7 @@ tr:last-child td { border-bottom: none; }
 
 <script>
 let acquisitions = [];
+let editMode = false;
 
 function fmtMoney(n) {
   if (n === null || n === undefined) return '—';
@@ -174,6 +178,72 @@ async function uploadSkuBackfill() {
   input.value = '';
 }
 
+function toggleEditMode() {
+  if (!editMode) {
+    if (!confirm('Enter edit mode? You\'ll be able to change SKU, Lots, Payment_Method, Date, Cost, and Cash for every row, then Publish to save all changes at once.')) return;
+    editMode = true;
+    document.getElementById('edit-mode-btn').textContent = '✖️ Cancel Edit';
+    document.getElementById('publish-edits-btn').style.display = 'inline-block';
+  } else {
+    editMode = false;
+    document.getElementById('edit-mode-btn').textContent = '✏️ Edit';
+    document.getElementById('publish-edits-btn').style.display = 'none';
+  }
+  renderTable();
+}
+
+async function publishEdits() {
+  const rows = document.querySelectorAll('tr[data-acq-id]');
+  const edits = [];
+  rows.forEach(row => {
+    const id = row.dataset.acqId;
+    const get = (field) => row.querySelector(`[data-field="${field}"]`).value.trim();
+    edits.push({
+      id,
+      sku: get('sku'),
+      name: get('name') || null,
+      payment_method: get('payment_method') || null,
+      date: get('date') || null,
+      cost: parseFloat(get('cost')) || null,
+      cash: parseFloat(get('cash')) || null,
+    });
+  });
+  if (!edits.length) return;
+  if (!confirm(`Publish changes to ${edits.length} row(s)? This overwrites the database — use Undo Last Edit if you need to revert.`)) return;
+
+  document.getElementById('upload-status').textContent = 'Publishing changes...';
+  try {
+    const r = await fetch('/api/acquisitions/edit-batch', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(edits),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    document.getElementById('upload-status').textContent = `✅ Published ${data.updated} row(s).`;
+    editMode = false;
+    document.getElementById('edit-mode-btn').textContent = '✏️ Edit';
+    document.getElementById('publish-edits-btn').style.display = 'none';
+    loadAcquisitions();
+  } catch(e) {
+    document.getElementById('upload-status').textContent = `❌ ${e.message}`;
+  }
+}
+
+async function undoLastEdit() {
+  if (!confirm('Undo your last Publish? This restores every field to what it was right before that edit.')) return;
+  document.getElementById('upload-status').textContent = 'Undoing last edit...';
+  try {
+    const r = await fetch('/api/acquisitions/undo', {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    document.getElementById('upload-status').textContent = data.restored
+      ? `✅ Restored ${data.restored} row(s) to their previous values.`
+      : 'Nothing to undo.';
+    loadAcquisitions();
+  } catch(e) {
+    document.getElementById('upload-status').textContent = `❌ ${e.message}`;
+  }
+}
+
 async function recalculate() {
   document.getElementById('upload-status').textContent = 'Recalculating from latest synced orders...';
   try {
@@ -212,6 +282,22 @@ function renderTable() {
   for (const a of sorted) {
     const roiClass = a.roi_pct == null ? '' : (a.roi_pct >= 0 ? 'pos' : 'neg');
     const profitClass = a.profit >= 0 ? 'pos' : 'neg';
+    if (editMode) {
+      html += `<tr data-acq-id="${a.id}">
+        <td><input class="field-input edit-input" data-field="sku" value="${escapeHtml(a.sku)}" style="width:80px;"/></td>
+        <td><input class="field-input edit-input" data-field="name" value="${escapeHtml(a.name || '')}" style="width:100px;"/></td>
+        <td><input class="field-input edit-input" data-field="payment_method" value="${escapeHtml(a.payment_method || '')}" style="width:90px;"/></td>
+        <td><input type="date" class="field-input edit-input" data-field="date" value="${escapeHtml(a.date || '')}" style="width:130px;"/></td>
+        <td><input type="number" step="0.01" class="field-input edit-input" data-field="cost" value="${a.cost ?? ''}" style="width:90px;"/></td>
+        <td><input type="number" step="0.01" class="field-input edit-input" data-field="cash" value="${a.cash ?? ''}" style="width:90px;"/></td>
+        <td>${fmtMoney(a.ebay)}</td>
+        <td>${fmtMoney(a.total_payouts)}</td>
+        <td class="${profitClass}">${fmtMoney(a.profit)}</td>
+        <td class="${roiClass}">${a.roi_pct == null ? '—' : a.roi_pct + '%'}</td>
+        <td></td>
+      </tr>`;
+      continue;
+    }
     html += `<tr>
       <td class="sku">${escapeHtml(a.sku)}</td>
       <td class="muted">${escapeHtml(a.name || '')}</td>
