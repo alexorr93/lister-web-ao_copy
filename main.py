@@ -4439,11 +4439,27 @@ async def resync_one_order(order_id: str, request: Request):
     pirate_ship_cost = sum(cost_by_tracking.get(tn, 0) or 0 for tn in trackings)
     shipping_cost = pirate_ship_cost if pirate_ship_cost > 0 else ebay_labels_by_order.get(order_id, 0)
 
+    order_refund_total = sum(
+        float((r.get("amount") or {}).get("value", 0) or 0)
+        for r in (order.get("paymentSummary") or {}).get("refunds", []) or []
+    )
+    all_line_items = order.get("lineItems", [])
+    has_line_level_refunds = any(li.get("refunds") for li in all_line_items)
+    order_subtotal_for_proration = sum(
+        float((li.get("lineItemCost") or {}).get("value", 0) or 0) for li in all_line_items
+    ) if order_refund_total and not has_line_level_refunds else 0
+
     upserted = []
-    for li in order.get("lineItems", []):
+    for li in all_line_items:
         item_price = float((li.get("lineItemCost") or {}).get("value", 0) or 0)
         buyer_shipping = float((li.get("deliveryCost") or {}).get("shippingCost", {}).get("value", 0) or 0)
-        revenue = item_price + buyer_shipping
+        if has_line_level_refunds:
+            refund = sum(float((r.get("amount") or {}).get("value", 0) or 0) for r in (li.get("refunds") or []))
+        elif order_refund_total and order_subtotal_for_proration > 0:
+            refund = order_refund_total * (item_price / order_subtotal_for_proration)
+        else:
+            refund = 0.0
+        revenue = item_price + buyer_shipping - refund
         line_item_id = li.get("lineItemId", "")
         fee = fees_by_line.get((order_id, line_item_id), 0.0)
         net = revenue - fee
@@ -4453,6 +4469,7 @@ async def resync_one_order(order_id: str, request: Request):
             "sku": li.get("sku") or "(no SKU)", "title": li.get("title", ""), "quantity": int(li.get("quantity", 1)),
             "order_date": created[:10] if created else "",
             "gross_revenue": round(revenue, 2), "buyer_shipping": round(buyer_shipping, 2),
+            "refund": round(refund, 2),
             "order_delivery_cost": round(order_delivery_cost, 2),
             "buyer_state": buyer_state, "buyer_zip": buyer_zip, "buyer_country": buyer_country,
             "fee": round(fee, 2), "net": round(net, 2),
