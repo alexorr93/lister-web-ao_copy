@@ -1631,15 +1631,37 @@ def fetch_ebay_orders(business_id: str, start_iso: str, end_iso: str) -> list:
             buyer_state = tax_addr.get("stateOrProvince", "")
             buyer_zip = tax_addr.get("postalCode", "")
             buyer_country = tax_addr.get("countryCode", "")
-            for li in order.get("lineItems", []):
+
+            # Refunds live directly on the order object — paymentSummary.refunds[] is always
+            # present (empty if nothing refunded). Line-item-level refunds[] is more precise
+            # for multi-item orders; fall back to prorating the order-level refund by revenue
+            # share when only that's available.
+            order_refund_total = sum(
+                float((r.get("amount") or {}).get("value", 0) or 0)
+                for r in (order.get("paymentSummary") or {}).get("refunds", []) or []
+            )
+            line_items = order.get("lineItems", [])
+            has_line_level_refunds = any(li.get("refunds") for li in line_items)
+            order_subtotal_for_proration = sum(
+                float((li.get("lineItemCost") or {}).get("value", 0) or 0) for li in line_items
+            ) if order_refund_total and not has_line_level_refunds else 0
+
+            for li in line_items:
                 item_price = float((li.get("lineItemCost") or {}).get("value", 0) or 0)
                 buyer_shipping = float((li.get("deliveryCost") or {}).get("shippingCost", {}).get("value", 0) or 0)
+                if has_line_level_refunds:
+                    refund = sum(float((r.get("amount") or {}).get("value", 0) or 0) for r in (li.get("refunds") or []))
+                elif order_refund_total and order_subtotal_for_proration > 0:
+                    refund = order_refund_total * (item_price / order_subtotal_for_proration)
+                else:
+                    refund = 0.0
                 rows.append({
                     "platform": "eBay",
                     "sku": li.get("sku") or "(no SKU)",
                     "title": li.get("title", ""),
                     "quantity": int(li.get("quantity", 1)),
-                    "revenue": item_price + buyer_shipping,
+                    "revenue": item_price + buyer_shipping - refund,
+                    "refund": refund,
                     "buyer_shipping": buyer_shipping,
                     "order_delivery_cost": order_delivery_cost,
                     "buyer_state": buyer_state, "buyer_zip": buyer_zip, "buyer_country": buyer_country,
@@ -2077,6 +2099,7 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
                 "legacy_item_id": row.get("legacy_item_id", ""),
                 "order_date": row["order_date"], "gross_revenue": revenue,
                 "buyer_shipping": _safe(row.get("buyer_shipping", 0)),
+                "refund": _safe(row.get("refund", 0)),
                 "order_delivery_cost": _safe(row.get("order_delivery_cost", 0)),
                 "buyer_state": row.get("buyer_state", ""), "buyer_zip": row.get("buyer_zip", ""), "buyer_country": row.get("buyer_country", ""),
                 "fee": fee, "net": net,
