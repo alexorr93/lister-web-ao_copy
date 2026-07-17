@@ -4507,6 +4507,55 @@ async def resync_one_order(order_id: str, request: Request):
 
     return {"ok": True, "order_id": order_id, "line_items_updated": len(upserted), "records": upserted}
 
+@app.get("/api/shopify/debug-product-metadata")
+async def debug_shopify_product_metadata(request: Request, limit: int = 5):
+    """Pulls a handful of real Shopify products with EVERY piece of metadata that
+    could plausibly link back to an original eBay listing: SKU, handle, tags,
+    and — most importantly — metafields, which is where migration tools most
+    commonly stash a source-platform ID."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import requests as _req
+
+    settings = get_ebay_settings(business_id)
+    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+    if not domain:
+        raise HTTPException(400, "Shopify not connected")
+    token = get_shopify_access_token(business_id)
+    headers = {"X-Shopify-Access-Token": token}
+
+    r = _req.get(f"https://{domain}/admin/api/2024-10/products.json",
+                 headers=headers, params={"limit": limit}, timeout=20)
+    if r.status_code == 401:
+        token = get_shopify_access_token(business_id, force_refresh=True)
+        headers["X-Shopify-Access-Token"] = token
+        r = _req.get(f"https://{domain}/admin/api/2024-10/products.json",
+                     headers=headers, params={"limit": limit}, timeout=20)
+    if r.status_code != 200:
+        raise HTTPException(400, f"Shopify products fetch failed ({r.status_code}): {r.text[:300]}")
+
+    products = r.json().get("products", [])
+    results = []
+    for p in products:
+        pid = p["id"]
+        # Metafields aren't included in the basic product payload — fetch separately
+        mf_r = _req.get(f"https://{domain}/admin/api/2024-10/products/{pid}/metafields.json",
+                        headers=headers, timeout=15)
+        metafields = mf_r.json().get("metafields", []) if mf_r.status_code == 200 else []
+        results.append({
+            "id": pid,
+            "title": p.get("title"),
+            "handle": p.get("handle"),
+            "tags": p.get("tags"),
+            "vendor": p.get("vendor"),
+            "product_type": p.get("product_type"),
+            "variants_sku_barcode": [{"sku": v.get("sku"), "barcode": v.get("barcode")} for v in p.get("variants", [])],
+            "metafields": [{"namespace": m.get("namespace"), "key": m.get("key"), "value": m.get("value")} for m in metafields],
+        })
+
+    return {"products_checked": len(results), "products": results}
+
 @app.get("/api/ebay/debug-raw-order/{order_id}")
 async def ebay_debug_raw_order(order_id: str, request: Request):
     business_id = require_auth(request)
