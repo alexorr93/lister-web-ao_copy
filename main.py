@@ -66,12 +66,9 @@ async def auto_fill_worker():
                         updates["ebay_category_id"] = suggestion["category_id"]
                         print(f"auto_fill_worker: {row['id']} -> category {suggestion['category_id']} ({suggestion.get('name')})")
                     else:
-                        fallback = get_ebay_settings(biz_id).get("EBAY_DEFAULT_CATEGORY_ID", "")
-                        if fallback:
-                            updates["ebay_category_id"] = fallback
-                            print(f"auto_fill_worker: {row['id']} -> no B&I match, used fallback category {fallback}")
-                        else:
-                            print(f"auto_fill_worker: {row['id']} -> NO MATCH and no EBAY_DEFAULT_CATEGORY_ID set for business {biz_id}; will retry next cycle")
+                        fallback = get_ebay_settings(biz_id).get("EBAY_DEFAULT_CATEGORY_ID", "") or "26261"  # Other Business & Industrial — hard floor, no exceptions
+                        updates["ebay_category_id"] = fallback
+                        print(f"auto_fill_worker: {row['id']} -> no B&I/Motors match, locked to {fallback}")
                 except Exception as e:
                     print(f"auto_fill_worker category error for {row['id']}: {e}")
                 if updates:
@@ -1008,9 +1005,12 @@ async def api_auto_category(item_id: str, request: Request, broad: bool = False,
         if not res.data:
             raise HTTPException(404, "Listing not found")
         title = query if query else res.data[0].get("title", "")
-        suggestion = suggest_ebay_category(title, business_id, restrict=not broad, exclude_id=exclude)
+        # restrict is always True now — this business only ever sells in Business &
+        # Industrial / eBay Motors, full stop, no "search all categories" escape hatch.
+        suggestion = suggest_ebay_category(title, business_id, restrict=True, exclude_id=exclude)
         if not suggestion:
-            raise HTTPException(404, "No matching category found — try 'Search all categories' or check your eBay token")
+            fallback = get_ebay_settings(business_id).get("EBAY_DEFAULT_CATEGORY_ID", "") or "26261"
+            suggestion = {"category_id": fallback, "name": "Other Business & Industrial", "path": ""}
         supabase.table("listings").update({"ebay_category_id": suggestion["category_id"]}).eq("id", item_id).execute()
         return {"ok": True, **suggestion}
     except HTTPException:

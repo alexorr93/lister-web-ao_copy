@@ -594,9 +594,6 @@ select.field-input { background: #fff; color: #0f172a; }
           <input type="file" id="modal-extra-photos-input" accept="image/*" multiple style="font-size:12px;width:100%;" onchange="uploadExtraPhotos()"/>
           <div id="modal-extra-photos-status" style="font-size:11px;color:var(--muted);margin-top:4px;"></div>
         </div>
-        <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);margin-bottom:8px;cursor:pointer;">
-          <input type="checkbox" id="modal-broad-category"> Search all categories (not just Business & Industrial / Motors)
-        </label>
         <button class="btn" style="width:100%;margin-bottom:8px;" onclick="autoCategoryModal()">🎯 Auto-pick eBay Category</button>
         <div id="modal-category-status" style="font-size:11px;color:var(--muted);margin-bottom:8px;"></div>
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
@@ -1440,11 +1437,10 @@ let lastCategoryTried = {}; // itemId -> category_id, so re-clicking Auto-pick t
 async function autoCategoryModal() {
   if (!modalItemId) return;
   const statusEl = document.getElementById('modal-category-status');
-  const broad = document.getElementById('modal-broad-category').checked;
   statusEl.textContent = 'Matching category...';
   try {
     const excludeParam = lastCategoryTried[modalItemId] ? `&exclude=${lastCategoryTried[modalItemId]}` : '';
-    const r = await api('POST', `/api/listings/${modalItemId}/auto-category?broad=${broad}${excludeParam}`);
+    const r = await api('POST', `/api/listings/${modalItemId}/auto-category?broad=false${excludeParam}`);
     statusEl.textContent = `✅ Matched: ${r.path} (ID ${r.category_id})`;
     lastCategoryTried[modalItemId] = r.category_id;
     const l = listings.find(x => x.id === modalItemId);
