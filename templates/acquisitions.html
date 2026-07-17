@@ -90,8 +90,7 @@ tr:last-child td { border-bottom: none; }
       <button class="btn btn-primary" onclick="addAcquisition()">+ Add Row</button>
       <button class="btn" onclick="recalculate()" title="Refreshes eBay/Total_Payouts/Profit for every row using the latest synced orders">🔄 Recalculate</button>
       <button class="btn" id="edit-mode-btn" onclick="toggleEditMode()">✏️ Edit</button>
-      <button class="btn btn-primary" id="publish-edits-btn" style="display:none;" onclick="publishEdits()">📤 Publish Changes</button>
-      <button class="btn btn-danger" onclick="undoLastEdit()" title="Restores the values from right before your last Publish">↩️ Undo Last Edit</button>
+      <button class="btn btn-danger" onclick="undoLastEdit()" title="Restores the values from right before your last edit">↩️ Undo Last Edit</button>
     </div>
     <div style="margin-top:12px;display:flex;align-items:center;gap:10px;">
       <div>
@@ -180,52 +179,56 @@ async function uploadSkuBackfill() {
 
 function toggleEditMode() {
   if (!editMode) {
-    if (!confirm('Enter edit mode? You\'ll be able to change SKU, Lots, Payment_Method, Date, Cost, and Cash for every row, then Publish to save all changes at once.')) return;
+    if (!confirm('Enter edit mode? While active, clicking any SKU/Lots/Payment_Method/Date/Cost/Cash cell lets you edit just that one field.')) return;
     editMode = true;
-    document.getElementById('edit-mode-btn').textContent = '✖️ Cancel Edit';
-    document.getElementById('publish-edits-btn').style.display = 'inline-block';
+    document.getElementById('edit-mode-btn').textContent = '✖️ Exit Edit Mode';
   } else {
     editMode = false;
     document.getElementById('edit-mode-btn').textContent = '✏️ Edit';
-    document.getElementById('publish-edits-btn').style.display = 'none';
   }
   renderTable();
 }
 
-async function publishEdits() {
-  const rows = document.querySelectorAll('tr[data-acq-id]');
-  const edits = [];
-  rows.forEach(row => {
-    const id = row.dataset.acqId;
-    const get = (field) => row.querySelector(`[data-field="${field}"]`).value.trim();
-    edits.push({
-      id,
-      sku: get('sku'),
-      name: get('name') || null,
-      payment_method: get('payment_method') || null,
-      date: get('date') || null,
-      cost: parseFloat(get('cost')) || null,
-      cash: parseFloat(get('cash')) || null,
-    });
-  });
-  if (!edits.length) return;
-  if (!confirm(`Publish changes to ${edits.length} row(s)? This overwrites the database — use Undo Last Edit if you need to revert.`)) return;
+async function editCell(td, id, field, currentValue, inputType) {
+  if (!editMode || td.querySelector('input')) return;
+  const orig = td.textContent;
+  const input = document.createElement('input');
+  input.className = 'field-input';
+  input.type = inputType || 'text';
+  if (inputType === 'number') input.step = '0.01';
+  input.value = currentValue ?? '';
+  input.style.width = '100%';
+  td.textContent = '';
+  td.appendChild(input);
+  input.focus();
+  input.select();
 
-  document.getElementById('upload-status').textContent = 'Publishing changes...';
-  try {
-    const r = await fetch('/api/acquisitions/edit-batch', {
-      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(edits),
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || 'Failed');
-    document.getElementById('upload-status').textContent = `✅ Published ${data.updated} row(s).`;
-    editMode = false;
-    document.getElementById('edit-mode-btn').textContent = '✏️ Edit';
-    document.getElementById('publish-edits-btn').style.display = 'none';
-    loadAcquisitions();
-  } catch(e) {
-    document.getElementById('upload-status').textContent = `❌ ${e.message}`;
-  }
+  const save = async () => {
+    const newValue = input.value.trim();
+    if (newValue === String(currentValue ?? '')) { td.textContent = orig; return; }
+    if (!confirm(`Update ${field} for this row to "${newValue}"? This overwrites the database — use Undo Last Edit if you need to revert.`)) {
+      td.textContent = orig;
+      return;
+    }
+    td.textContent = 'Saving...';
+    try {
+      const r = await fetch('/api/acquisitions/edit-single', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id, field, value: newValue}),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || 'Failed');
+      document.getElementById('upload-status').textContent = data.recalc_error
+        ? `⚠️ Saved, but recalc failed: ${data.recalc_error}`
+        : '✅ Field updated and recalculated.';
+      loadAcquisitions();
+    } catch(e) {
+      td.textContent = orig;
+      document.getElementById('upload-status').textContent = `❌ ${e.message}`;
+    }
+  };
+  input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') input.blur(); if (ev.key === 'Escape') { td.textContent = orig; } });
+  input.addEventListener('blur', save, {once: true});
 }
 
 async function undoLastEdit() {
@@ -282,29 +285,17 @@ function renderTable() {
   for (const a of sorted) {
     const roiClass = a.roi_pct == null ? '' : (a.roi_pct >= 0 ? 'pos' : 'neg');
     const profitClass = a.profit >= 0 ? 'pos' : 'neg';
-    if (editMode) {
-      html += `<tr data-acq-id="${a.id}">
-        <td><input class="field-input edit-input" data-field="sku" value="${escapeHtml(a.sku)}" style="width:80px;"/></td>
-        <td><input class="field-input edit-input" data-field="name" value="${escapeHtml(a.name || '')}" style="width:100px;"/></td>
-        <td><input class="field-input edit-input" data-field="payment_method" value="${escapeHtml(a.payment_method || '')}" style="width:90px;"/></td>
-        <td><input type="date" class="field-input edit-input" data-field="date" value="${escapeHtml(a.date || '')}" style="width:130px;"/></td>
-        <td><input type="number" step="0.01" class="field-input edit-input" data-field="cost" value="${a.cost ?? ''}" style="width:90px;"/></td>
-        <td><input type="number" step="0.01" class="field-input edit-input" data-field="cash" value="${a.cash ?? ''}" style="width:90px;"/></td>
-        <td>${fmtMoney(a.ebay)}</td>
-        <td>${fmtMoney(a.total_payouts)}</td>
-        <td class="${profitClass}">${fmtMoney(a.profit)}</td>
-        <td class="${roiClass}">${a.roi_pct == null ? '—' : a.roi_pct + '%'}</td>
-        <td></td>
-      </tr>`;
-      continue;
-    }
+    const editCls = editMode ? ' style="cursor:text;outline:1px dashed rgba(255,255,255,0.15);"' : '';
+    const ed = (field, value, type) => editMode
+      ? `onclick="editCell(this,'${a.id}','${field}',${JSON.stringify(value ?? '')},'${type||'text'}')"`
+      : '';
     html += `<tr>
-      <td class="sku">${escapeHtml(a.sku)}</td>
-      <td class="muted">${escapeHtml(a.name || '')}</td>
-      <td class="muted">${escapeHtml(a.payment_method || '')}</td>
-      <td class="muted">${escapeHtml(a.date || '')}</td>
-      <td>${fmtMoney(a.cost)}</td>
-      <td>${fmtMoney(a.cash)}</td>
+      <td class="sku"${editCls} ${ed('sku', a.sku)}>${escapeHtml(a.sku)}</td>
+      <td class="muted"${editCls} ${ed('name', a.name)}>${escapeHtml(a.name || '')}</td>
+      <td class="muted"${editCls} ${ed('payment_method', a.payment_method)}>${escapeHtml(a.payment_method || '')}</td>
+      <td class="muted"${editCls} ${ed('date', a.date, 'date')}>${escapeHtml(a.date || '')}</td>
+      <td${editCls} ${ed('cost', a.cost, 'number')}>${fmtMoney(a.cost)}</td>
+      <td${editCls} ${ed('cash', a.cash, 'number')}>${fmtMoney(a.cash)}</td>
       <td>${fmtMoney(a.ebay)}</td>
       <td>${fmtMoney(a.total_payouts)}</td>
       <td class="${profitClass}">${fmtMoney(a.profit)}</td>

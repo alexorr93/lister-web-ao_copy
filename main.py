@@ -1256,6 +1256,59 @@ class AcquisitionEdit(BaseModel):
     cost: Optional[float] = None
     cash: Optional[float] = None
 
+ALLOWED_ACQ_EDIT_FIELDS = {"sku", "name", "payment_method", "date", "cost", "cash"}
+
+class AcquisitionSingleEdit(BaseModel):
+    id: str
+    field: str
+    value: Optional[str] = None
+
+@app.post("/api/acquisitions/edit-single")
+async def edit_acquisition_single(request: Request, body: AcquisitionSingleEdit):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    if body.field not in ALLOWED_ACQ_EDIT_FIELDS:
+        raise HTTPException(400, f"Field '{body.field}' is not editable")
+    import uuid as _uuid
+
+    res = supabase.table("acquisitions").select("*").eq("business_id", business_id).eq("id", body.id).limit(1).execute()
+    if not res.data:
+        raise HTTPException(404, "Row not found")
+    cur = res.data[0]
+
+    batch_id = str(_uuid.uuid4())
+    try:
+        supabase.table("acquisitions_history").insert({
+            "business_id": business_id, "acquisition_id": body.id, "batch_id": batch_id,
+            "sku": cur.get("sku"), "name": cur.get("name"), "payment_method": cur.get("payment_method"),
+            "date": cur.get("date"), "cost": cur.get("cost"), "cash": cur.get("cash"),
+        }).execute()
+    except Exception as e:
+        raise HTTPException(500, f"Could not save undo history, aborting to be safe: {e}")
+
+    value = body.value
+    if body.field in ("cost", "cash"):
+        try:
+            value = float(value) if value not in (None, "") else None
+        except (TypeError, ValueError):
+            value = None
+    elif value == "":
+        value = None
+
+    try:
+        supabase.table("acquisitions").update({body.field: value}).eq("id", body.id).execute()
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+    recalc_error = None
+    try:
+        apply_acquisition_profits(business_id)
+    except Exception as e:
+        recalc_error = str(e)
+
+    return {"ok": True, "field": body.field, "value": value, "recalc_error": recalc_error}
+
 @app.post("/api/acquisitions/edit-batch")
 async def edit_acquisitions_batch(request: Request, edits: List[AcquisitionEdit] = Body(...)):
     business_id = require_auth(request)
@@ -1304,12 +1357,13 @@ async def edit_acquisitions_batch(request: Request, edits: List[AcquisitionEdit]
         except Exception as ex:
             print(f"edit_acquisitions_batch: failed to update {e.id}: {ex}")
 
+    recalc_error = None
     try:
         apply_acquisition_profits(business_id)
-    except Exception:
-        pass
+    except Exception as e:
+        recalc_error = str(e)
 
-    return {"ok": True, "updated": updated, "batch_id": batch_id}
+    return {"ok": True, "updated": updated, "batch_id": batch_id, "recalc_error": recalc_error}
 
 @app.post("/api/acquisitions/undo")
 async def undo_acquisitions_edit(request: Request):
