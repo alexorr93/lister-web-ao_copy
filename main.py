@@ -1660,7 +1660,7 @@ def fetch_ebay_orders(business_id: str, start_iso: str, end_iso: str) -> list:
                     "sku": li.get("sku") or "(no SKU)",
                     "title": li.get("title", ""),
                     "quantity": int(li.get("quantity", 1)),
-                    "revenue": item_price + buyer_shipping - refund,
+                    "revenue": item_price + buyer_shipping,
                     "refund": refund,
                     "buyer_shipping": buyer_shipping,
                     "order_delivery_cost": order_delivery_cost,
@@ -2083,7 +2083,8 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
         for row in ebay_rows:
             fee = _safe(fees_by_line.get((row["order_id"], row["line_item_id"]), 0.0))
             revenue = _safe(row["revenue"])
-            net = _safe(revenue - fee)
+            refund_amt = _safe(row.get("refund", 0))
+            net = _safe(revenue - refund_amt - fee)
             trackings = tracking_by_order.get(row["order_id"], [])
             pirate_ship_cost = sum(cost_by_tracking.get(tn, 0) or 0 for tn in trackings)
             # Pirate Ship match takes priority (it's the common case); eBay-purchased
@@ -4459,10 +4460,10 @@ async def resync_one_order(order_id: str, request: Request):
             refund = order_refund_total * (item_price / order_subtotal_for_proration)
         else:
             refund = 0.0
-        revenue = item_price + buyer_shipping - refund
+        revenue = item_price + buyer_shipping
         line_item_id = li.get("lineItemId", "")
         fee = fees_by_line.get((order_id, line_item_id), 0.0)
-        net = revenue - fee
+        net = revenue - refund - fee
         record = {
             "id": f"ebay:{order_id}:{line_item_id}",
             "business_id": business_id, "platform": "eBay", "order_id": order_id,
