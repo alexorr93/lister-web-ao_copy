@@ -1632,17 +1632,25 @@ def fetch_ebay_orders(business_id: str, start_iso: str, end_iso: str) -> list:
             buyer_zip = tax_addr.get("postalCode", "")
             buyer_country = tax_addr.get("countryCode", "")
 
-            # Refunds live directly on the order object — paymentSummary.refunds[] is always
-            # present (empty if nothing refunded). Line-item-level refunds[] is more precise
-            # for multi-item orders; fall back to prorating the order-level refund by revenue
-            # share when only that's available.
+            # totalDueSeller is eBay's own authoritative "what you actually get after fees
+            # AND refunds" figure — more reliable than reconstructing net from fee/refund
+            # pieces separately, which can drift (eBay adjusts fees on partial refunds in
+            # ways that don't always show up cleanly in the separate fee/refund fields).
+            # It's order-level, so for multi-item orders it's prorated by gross revenue share.
+            order_total_due_seller = float((order.get("paymentSummary") or {}).get("totalDueSeller", {}).get("value", 0) or 0)
+
             order_refund_total = sum(
                 float((r.get("amount") or {}).get("value", 0) or 0)
                 for r in (order.get("paymentSummary") or {}).get("refunds", []) or []
             )
             line_items = order.get("lineItems", [])
             has_line_level_refunds = any(li.get("refunds") for li in line_items)
-            order_subtotal_for_proration = sum(
+            order_gross_subtotal = sum(
+                float((li.get("lineItemCost") or {}).get("value", 0) or 0)
+                + float((li.get("deliveryCost") or {}).get("shippingCost", {}).get("value", 0) or 0)
+                for li in line_items
+            )
+            order_subtotal_for_refund_proration = sum(
                 float((li.get("lineItemCost") or {}).get("value", 0) or 0) for li in line_items
             ) if order_refund_total and not has_line_level_refunds else 0
 
@@ -1651,17 +1659,21 @@ def fetch_ebay_orders(business_id: str, start_iso: str, end_iso: str) -> list:
                 buyer_shipping = float((li.get("deliveryCost") or {}).get("shippingCost", {}).get("value", 0) or 0)
                 if has_line_level_refunds:
                     refund = sum(float((r.get("amount") or {}).get("value", 0) or 0) for r in (li.get("refunds") or []))
-                elif order_refund_total and order_subtotal_for_proration > 0:
-                    refund = order_refund_total * (item_price / order_subtotal_for_proration)
+                elif order_refund_total and order_subtotal_for_refund_proration > 0:
+                    refund = order_refund_total * (item_price / order_subtotal_for_refund_proration)
                 else:
                     refund = 0.0
+                line_gross = item_price + buyer_shipping
+                net_from_ebay = (order_total_due_seller * (line_gross / order_gross_subtotal)
+                                  if order_gross_subtotal > 0 else order_total_due_seller)
                 rows.append({
                     "platform": "eBay",
                     "sku": li.get("sku") or "(no SKU)",
                     "title": li.get("title", ""),
                     "quantity": int(li.get("quantity", 1)),
-                    "revenue": item_price + buyer_shipping,
+                    "revenue": line_gross,
                     "refund": refund,
+                    "net_from_ebay": net_from_ebay,
                     "buyer_shipping": buyer_shipping,
                     "order_delivery_cost": order_delivery_cost,
                     "buyer_state": buyer_state, "buyer_zip": buyer_zip, "buyer_country": buyer_country,
@@ -2084,7 +2096,12 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
             fee = _safe(fees_by_line.get((row["order_id"], row["line_item_id"]), 0.0))
             revenue = _safe(row["revenue"])
             refund_amt = _safe(row.get("refund", 0))
-            net = _safe(revenue - refund_amt - fee)
+            # net_from_ebay (derived from paymentSummary.totalDueSeller) is authoritative —
+            # it already correctly reflects fees AND refunds exactly as eBay computed them,
+            # including edge cases (like fee adjustments on partial refunds) that a manual
+            # revenue-refund-fee reconstruction can drift from. Fall back to reconstruction
+            # only if that field is missing for some reason.
+            net = _safe(row["net_from_ebay"]) if "net_from_ebay" in row else _safe(revenue - refund_amt - fee)
             trackings = tracking_by_order.get(row["order_id"], [])
             pirate_ship_cost = sum(cost_by_tracking.get(tn, 0) or 0 for tn in trackings)
             # Pirate Ship match takes priority (it's the common case); eBay-purchased
@@ -4450,6 +4467,13 @@ async def resync_one_order(order_id: str, request: Request):
         float((li.get("lineItemCost") or {}).get("value", 0) or 0) for li in all_line_items
     ) if order_refund_total and not has_line_level_refunds else 0
 
+    order_total_due_seller = float((order.get("paymentSummary") or {}).get("totalDueSeller", {}).get("value", 0) or 0)
+    order_gross_subtotal = sum(
+        float((li.get("lineItemCost") or {}).get("value", 0) or 0)
+        + float((li.get("deliveryCost") or {}).get("shippingCost", {}).get("value", 0) or 0)
+        for li in all_line_items
+    )
+
     upserted = []
     for li in all_line_items:
         item_price = float((li.get("lineItemCost") or {}).get("value", 0) or 0)
@@ -4463,7 +4487,7 @@ async def resync_one_order(order_id: str, request: Request):
         revenue = item_price + buyer_shipping
         line_item_id = li.get("lineItemId", "")
         fee = fees_by_line.get((order_id, line_item_id), 0.0)
-        net = revenue - refund - fee
+        net = (order_total_due_seller * (revenue / order_gross_subtotal)) if order_gross_subtotal > 0 else order_total_due_seller
         record = {
             "id": f"ebay:{order_id}:{line_item_id}",
             "business_id": business_id, "platform": "eBay", "order_id": order_id,
