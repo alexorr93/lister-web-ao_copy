@@ -4799,13 +4799,14 @@ async def shopify_sync_today(request: Request):
         shopify_found = False
         shopify_live_qty = None
         shopify_title = None
+        shopify_inventory_item_id = None
         if domain and shopify_token:
             try:
                 safe_title = entry["title"].replace('"', '').replace("'", "")[:80]
                 gql = _req.post(
                     f"https://{domain}/admin/api/2024-10/graphql.json",
                     headers={"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"},
-                    json={"query": '{ products(first: 5, query: "title:\'' + safe_title + '\'") { edges { node { title variants(first: 1) { edges { node { inventoryQuantity } } } } } } }'},
+                    json={"query": '{ products(first: 5, query: "title:\'' + safe_title + '\'") { edges { node { title variants(first: 1) { edges { node { inventoryQuantity inventoryItem { id } } } } } } } }'},
                     timeout=15,
                 )
                 if gql.status_code == 200:
@@ -4821,17 +4822,101 @@ async def shopify_sync_today(request: Request):
                             variant_edges = (node.get("variants") or {}).get("edges", [])
                             if variant_edges:
                                 shopify_live_qty = variant_edges[0]["node"].get("inventoryQuantity")
+                                shopify_inventory_item_id = (variant_edges[0]["node"].get("inventoryItem") or {}).get("id")
                             break
             except Exception:
                 pass
 
         items.append({
             "sku": sku, "title": entry["title"], "qty_sold_today": entry["qty_sold_today"],
+            "order_ids": entry["order_ids"],
             "ebay_live_qty": ebay_live_qty,
             "shopify_found": shopify_found, "shopify_live_qty": shopify_live_qty, "shopify_title": shopify_title,
+            "shopify_inventory_item_id": shopify_inventory_item_id,
         })
 
     return {"date": today, "items": items}
+
+def _get_shopify_primary_location_id(domain: str, headers: dict) -> str:
+    import requests as _req
+    r = _req.post(f"https://{domain}/admin/api/2024-10/graphql.json", headers=headers,
+                   json={"query": "{ locations(first: 1) { edges { node { id } } } }"}, timeout=15)
+    edges = (r.json().get("data", {}) or {}).get("locations", {}).get("edges", []) if r.status_code == 200 else []
+    return edges[0]["node"]["id"] if edges else None
+
+@app.post("/api/shopify-sync/push")
+async def shopify_sync_push(request: Request, items: List[dict] = Body(...)):
+    """Step 2: takes the exact rows the user selected from Step 1 (already carrying
+    the Shopify inventoryItem id from that live check) and decreases Shopify's
+    quantity by whatever sold on eBay today. Logs every attempt for audit/undo."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import requests as _req
+
+    settings = get_ebay_settings(business_id)
+    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+    if not domain:
+        raise HTTPException(400, "Shopify not connected")
+    token = get_shopify_access_token(business_id)
+    headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
+    location_id = _get_shopify_primary_location_id(domain, headers)
+    if not location_id:
+        raise HTTPException(400, "Could not determine Shopify location")
+
+    results = []
+    for it in items:
+        inv_item_id = it.get("shopify_inventory_item_id")
+        qty = it.get("qty_sold_today", 0)
+        sku = it.get("sku", "")
+        order_ids = it.get("order_ids", [])
+        log_row = {
+            "business_id": business_id, "order_id": ",".join(order_ids) if order_ids else "",
+            "sku": sku, "quantity_deducted": qty, "shopify_inventory_item_id": inv_item_id,
+        }
+        if not inv_item_id or not qty:
+            log_row["status"] = "no_shopify_match"
+            results.append({"title": it.get("title"), "status": "no_shopify_match"})
+        else:
+            try:
+                mutation = {
+                    "query": """mutation adjust($input: InventoryAdjustQuantitiesInput!) {
+                        inventoryAdjustQuantities(input: $input) {
+                            inventoryAdjustmentGroup { changes { name delta quantityAfterChange } }
+                            userErrors { field message }
+                        }
+                    }""",
+                    "variables": {"input": {
+                        "reason": "correction",
+                        "name": "available",
+                        "changes": [{"inventoryItemId": inv_item_id, "locationId": location_id, "delta": -abs(int(qty))}],
+                    }},
+                }
+                r = _req.post(f"https://{domain}/admin/api/2024-10/graphql.json", headers=headers, json=mutation, timeout=20)
+                resp = r.json() if r.status_code == 200 else {}
+                errors = (resp.get("data", {}) or {}).get("inventoryAdjustQuantities", {}).get("userErrors", [])
+                if r.status_code == 200 and not errors:
+                    changes = (resp.get("data", {}) or {}).get("inventoryAdjustQuantities", {}).get("inventoryAdjustmentGroup", {}).get("changes", [])
+                    new_qty = changes[0]["quantityAfterChange"] if changes else None
+                    log_row["status"] = "success"
+                    log_row["new_quantity"] = new_qty
+                    results.append({"title": it.get("title"), "status": "success", "new_quantity": new_qty})
+                else:
+                    err_msg = "; ".join(e.get("message", "") for e in errors) or f"HTTP {r.status_code}"
+                    log_row["status"] = "error"
+                    log_row["error_message"] = err_msg
+                    results.append({"title": it.get("title"), "status": "error", "error": err_msg})
+            except Exception as e:
+                log_row["status"] = "error"
+                log_row["error_message"] = str(e)
+                results.append({"title": it.get("title"), "status": "error", "error": str(e)})
+
+        try:
+            supabase.table("shopify_qty_sync_log").insert(log_row).execute()
+        except Exception:
+            pass
+
+    return {"ok": True, "results": results}
 
 @app.get("/api/inventory")
 async def list_inventory(request: Request):

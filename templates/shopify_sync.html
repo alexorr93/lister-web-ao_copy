@@ -61,6 +61,8 @@ function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+let currentItems = [];
+
 async function loadToday() {
   document.getElementById('status').textContent = 'Checking live quantities on both platforms...';
   document.getElementById('table-area').innerHTML = '';
@@ -69,9 +71,32 @@ async function loadToday() {
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed');
     document.getElementById('status').textContent = `Date: ${data.date} — ${data.items.length} distinct SKU(s) sold on eBay today.`;
-    renderTable(data.items);
+    currentItems = data.items;
+    renderTable(currentItems);
   } catch(e) {
     document.getElementById('status').textContent = `❌ ${e.message}`;
+  }
+}
+
+async function pushOne(idx) {
+  const it = currentItems[idx];
+  if (!confirm(`Decrease Shopify quantity for "${it.title}" by ${it.qty_sold_today}? This changes your live Shopify listing.`)) return;
+  const cell = document.getElementById('push-cell-' + idx);
+  cell.textContent = 'Pushing...';
+  try {
+    const r = await fetch('/api/shopify-sync/push', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify([it]),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    const res = data.results[0];
+    if (res.status === 'success') {
+      cell.innerHTML = `<span class="yes">✔ Pushed — now ${res.new_quantity}</span>`;
+    } else {
+      cell.innerHTML = `<span class="no">✘ ${res.error || res.status}</span>`;
+    }
+  } catch(e) {
+    cell.innerHTML = `<span class="no">✘ ${e.message}</span>`;
   }
 }
 
@@ -81,9 +106,9 @@ function renderTable(items) {
     return;
   }
   let html = `<table><thead><tr>
-    <th>SKU</th><th>eBay Item</th><th>Qty Sold Today (eBay)</th><th>eBay Live Qty</th><th>Found in Shopify?</th><th>Shopify Live Qty</th><th>Shopify Title</th>
+    <th>SKU</th><th>eBay Item</th><th>Qty Sold Today (eBay)</th><th>eBay Live Qty</th><th>Found in Shopify?</th><th>Shopify Live Qty</th><th>Shopify Title</th><th>Push</th>
   </tr></thead><tbody>`;
-  for (const it of items) {
+  items.forEach((it, idx) => {
     html += `<tr>
       <td class="muted">${escapeHtml(it.sku)}</td>
       <td>${escapeHtml(it.title || '')}</td>
@@ -92,8 +117,9 @@ function renderTable(items) {
       <td class="${it.shopify_found ? 'yes' : 'no'}">${it.shopify_found ? '✔ Yes' : '✘ No'}</td>
       <td>${it.shopify_live_qty ?? '—'}</td>
       <td class="muted">${escapeHtml(it.shopify_title || '')}</td>
+      <td id="push-cell-${idx}">${it.shopify_found ? `<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOne(${idx})">Push -${it.qty_sold_today}</button>` : '—'}</td>
     </tr>`;
-  }
+  });
   html += '</tbody></table>';
   document.getElementById('table-area').innerHTML = html;
 }
