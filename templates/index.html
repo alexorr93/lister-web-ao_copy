@@ -1099,6 +1099,7 @@ function toggleSelect(id) {
   tile.classList.toggle('selected', selected.has(id));
   chk.classList.toggle('checked', selected.has(id));
   updateSubmitBtn();
+  updateStats();
 }
 function selectAll()   { listings.forEach(l => selected.add(String(l.id))); renderTiles(); }
 function selectFailed() {
