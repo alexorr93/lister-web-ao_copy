@@ -1181,6 +1181,14 @@ async def acquisitions_page(request: Request):
         return RedirectResponse("/login", status_code=302)
     return templates.TemplateResponse("acquisitions.html", {"request": request, "is_admin": is_admin})
 
+@app.get("/inventory", response_class=HTMLResponse)
+async def inventory_page(request: Request):
+    business_id, is_admin = get_business_info(request)
+    if not business_id:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("inventory.html", {"request": request, "is_admin": is_admin})
+
 class AcquisitionCreate(BaseModel):
     sku: str
     name: Optional[str] = None
@@ -4555,6 +4563,212 @@ async def debug_shopify_product_metadata(request: Request, limit: int = 5):
         })
 
     return {"products_checked": len(results), "products": results}
+
+def fetch_ebay_inventory_items(business_id: str) -> list:
+    """Lists every eBay inventory item (SKU/title/qty/condition). Price/offer-status
+    live on a separate Offer object that needs one call PER sku to fetch — deliberately
+    left out of v1 to avoid the same N+1 trap other parts of this app hit before."""
+    import requests as _req
+    token = get_ebay_access_token(business_id)
+    items = []
+    offset = 0
+    max_pages = 100  # 100 * 100 = 10,000 items safety cap
+    for _ in range(max_pages):
+        r = _req.get(f"{EBAY_API_BASE}/sell/inventory/v1/inventory_item",
+                      headers=ebay_headers(token, content_language=False),
+                      params={"limit": 100, "offset": offset}, timeout=20)
+        if r.status_code != 200:
+            raise Exception(f"eBay inventory_item list failed ({r.status_code}): {r.text[:300]}")
+        data = r.json()
+        for it in data.get("inventoryItems", []):
+            product = it.get("product", {}) or {}
+            items.append({
+                "sku": it.get("sku", ""),
+                "title": product.get("title", ""),
+                "quantity": (it.get("availability", {}) or {}).get("shipToLocationAvailability", {}).get("quantity", 0),
+                "condition": it.get("condition", ""),
+            })
+        total = data.get("total", 0)
+        offset += 100
+        if offset >= total or not data.get("inventoryItems"):
+            break
+    return items
+
+def fetch_shopify_inventory_items(business_id: str) -> list:
+    """Lists every Shopify product/variant with price and quantity — all in the
+    normal product payload, no extra calls needed."""
+    import requests as _req
+    settings = get_ebay_settings(business_id)
+    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+    if not domain:
+        return []
+    token = get_shopify_access_token(business_id)
+    headers = {"X-Shopify-Access-Token": token}
+    items = []
+    url = f"https://{domain}/admin/api/2024-10/products.json"
+    params = {"limit": 250}
+    while url:
+        r = _req.get(url, headers=headers, params=params, timeout=20)
+        if r.status_code == 401:
+            token = get_shopify_access_token(business_id, force_refresh=True)
+            headers["X-Shopify-Access-Token"] = token
+            r = _req.get(url, headers=headers, params=params, timeout=20)
+        if r.status_code != 200:
+            raise Exception(f"Shopify products fetch failed ({r.status_code}): {r.text[:300]}")
+        data = r.json()
+        for p in data.get("products", []):
+            for v in p.get("variants", []):
+                items.append({
+                    "variant_id": str(v.get("id", "")),
+                    "product_id": str(p.get("id", "")),
+                    "sku": v.get("sku", ""),
+                    "title": p.get("title", ""),
+                    "price": float(v.get("price", 0) or 0),
+                    "quantity": v.get("inventory_quantity", 0),
+                    "status": p.get("status", ""),
+                    "handle": p.get("handle", ""),
+                })
+        link = r.headers.get("Link", "")
+        next_url = None
+        for part in link.split(","):
+            if 'rel="next"' in part:
+                next_url = part.split(";")[0].strip().strip("<>")
+        url = next_url
+        params = None
+    return items
+
+def _normalize_title(t: str) -> str:
+    return " ".join((t or "").strip().lower().split())
+
+def sync_inventory(business_id: str) -> dict:
+    """Pulls fresh eBay + Shopify inventory, stores each raw, then matches them by
+    normalized exact title into the `inventory` table with a brand new key we create
+    ourselves — not either platform's ID. Non-matches just sit as eBay-only or
+    Shopify-only rows for you to track down manually."""
+    errors = {}
+    ebay_items, shopify_items = [], []
+    try:
+        ebay_items = fetch_ebay_inventory_items(business_id)
+    except Exception as e:
+        errors["ebay"] = str(e)
+    try:
+        shopify_items = fetch_shopify_inventory_items(business_id)
+    except Exception as e:
+        errors["shopify"] = str(e)
+
+    ebay_records = [{
+        "id": it["sku"], "business_id": business_id, "sku": it["sku"], "title": it["title"],
+        "quantity": it["quantity"], "condition": it["condition"], "price": None,
+        "category_id": None, "offer_id": None, "listing_status": None, "item_id": None,
+    } for it in ebay_items if it.get("sku")]
+    shopify_records = [{
+        "id": it["variant_id"], "business_id": business_id, "product_id": it["product_id"],
+        "sku": it["sku"], "title": it["title"], "price": it["price"], "quantity": it["quantity"],
+        "status": it["status"], "handle": it["handle"],
+    } for it in shopify_items if it.get("variant_id")]
+
+    for i in range(0, len(ebay_records), 500):
+        try:
+            supabase.table("ebay_inventory").upsert(ebay_records[i:i+500]).execute()
+        except Exception as e:
+            errors["ebay_write"] = str(e)
+    for i in range(0, len(shopify_records), 500):
+        try:
+            supabase.table("shopify_inventory").upsert(shopify_records[i:i+500]).execute()
+        except Exception as e:
+            errors["shopify_write"] = str(e)
+
+    # Match by normalized title. One eBay SKU and one Shopify variant can each only
+    # be used once — first-come-first-matched, same principle as the order backfill.
+    ebay_by_title = {}
+    for r in ebay_records:
+        ebay_by_title.setdefault(_normalize_title(r["title"]), []).append(r["id"])
+    shopify_by_title = {}
+    for r in shopify_records:
+        shopify_by_title.setdefault(_normalize_title(r["title"]), []).append(r["id"])
+
+    all_titles = set(ebay_by_title) | set(shopify_by_title)
+    inventory_rows = []
+    for norm_title in all_titles:
+        ebay_ids = ebay_by_title.get(norm_title, [])
+        shopify_ids = shopify_by_title.get(norm_title, [])
+        pair_count = max(len(ebay_ids), len(shopify_ids), 1)
+        for i in range(pair_count):
+            inventory_rows.append({
+                "business_id": business_id,
+                "title": ebay_ids and norm_title or norm_title,
+                "ebay_id": ebay_ids[i] if i < len(ebay_ids) else None,
+                "shopify_id": shopify_ids[i] if i < len(shopify_ids) else None,
+                "matched_by": "title_exact" if (i < len(ebay_ids) and i < len(shopify_ids)) else None,
+            })
+
+    try:
+        supabase.table("inventory").delete().eq("business_id", business_id).execute()
+        for i in range(0, len(inventory_rows), 500):
+            supabase.table("inventory").insert(inventory_rows[i:i+500]).execute()
+    except Exception as e:
+        errors["inventory_write"] = str(e)
+
+    return {
+        "ebay_synced": len(ebay_records), "shopify_synced": len(shopify_records),
+        "matched": sum(1 for r in inventory_rows if r["matched_by"]),
+        "ebay_only": sum(1 for r in inventory_rows if r["ebay_id"] and not r["shopify_id"]),
+        "shopify_only": sum(1 for r in inventory_rows if r["shopify_id"] and not r["ebay_id"]),
+        "errors": errors,
+    }
+
+@app.post("/api/inventory/sync")
+async def sync_inventory_now(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio
+    if _sync_status.get(business_id, {}).get("running"):
+        return {"ok": True, "already_running": True}
+    _sync_status[business_id] = {"running": True, "result": None, "started_at": __import__("datetime").datetime.utcnow().isoformat(), "finished_at": None}
+    async def _run():
+        import datetime as _dt
+        try:
+            result = await asyncio.to_thread(sync_inventory, business_id)
+            _sync_status[business_id] = {"running": False, "result": result, "started_at": _sync_status.get(business_id, {}).get("started_at"), "finished_at": _dt.datetime.utcnow().isoformat()}
+        except Exception as e:
+            _sync_status[business_id] = {"running": False, "result": {"error": str(e)}, "started_at": _sync_status.get(business_id, {}).get("started_at"), "finished_at": _dt.datetime.utcnow().isoformat()}
+    asyncio.create_task(_run())
+    return {"ok": True, "started": True}
+
+@app.get("/api/inventory")
+async def list_inventory(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+
+    def _fetch_all(table, select_cols):
+        all_rows, start, page_size = [], 0, 1000
+        while True:
+            res = supabase.table(table).select(select_cols).eq("business_id", business_id)\
+                .range(start, start + page_size - 1).execute()
+            page = res.data or []
+            all_rows.extend(page)
+            if len(page) < page_size:
+                break
+            start += page_size
+        return all_rows
+
+    inv_rows = _fetch_all("inventory", "*")
+    ebay_by_id = {r["id"]: r for r in _fetch_all("ebay_inventory", "*")}
+    shopify_by_id = {r["id"]: r for r in _fetch_all("shopify_inventory", "*")}
+
+    results = []
+    for row in inv_rows:
+        e = ebay_by_id.get(row.get("ebay_id")) or {}
+        s = shopify_by_id.get(row.get("shopify_id")) or {}
+        results.append({
+            "id": row["id"], "title": row["title"], "matched_by": row.get("matched_by"),
+            "ebay_sku": e.get("sku"), "ebay_qty": e.get("quantity"), "ebay_condition": e.get("condition"),
+            "shopify_sku": s.get("sku"), "shopify_qty": s.get("quantity"), "shopify_price": s.get("price"), "shopify_status": s.get("status"),
+            "qty_variance": (e.get("quantity") is not None and s.get("quantity") is not None and e.get("quantity") != s.get("quantity")),
+        })
+    return {"inventory": results}
 
 @app.get("/api/ebay/debug-raw-order/{order_id}")
 async def ebay_debug_raw_order(order_id: str, request: Request):

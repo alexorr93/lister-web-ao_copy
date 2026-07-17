@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Inventory — Lister AI</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<style>
+:root { --bg: #1a0611; --card: #1e2535; --border: #2d3348; --text: #f1f5f9; --muted: #64748b; --accent: #2563eb; --green: #16a34a; --red: #dc2626; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.nav { background: var(--card); border-bottom: 1px solid var(--border); padding: 0 16px; display: flex; align-items: center; gap: 6px; overflow-x: auto; height: 52px; position: sticky; top: 0; z-index: 100; }
+.nav-logo { font-weight: 800; font-size: 15px; color: var(--text); margin-right: 8px; white-space: nowrap; }
+.nav-btn { padding: 6px 14px; border-radius: 8px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; background: transparent; color: var(--muted); transition: all 0.15s; text-decoration: none; display: inline-block; }
+.nav-btn:hover { background: #1e2535; color: var(--text); }
+.nav-btn.active { color: #fff; background: var(--accent); }
+.nav-spacer { flex: 1; }
+.nav-download { padding: 6px 12px; background: #1e2535; border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; }
+.main { max-width: 1400px; margin: 0 auto; padding: 20px 16px; }
+h1 { font-size: 20px; margin-bottom: 4px; }
+.sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+.filter-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.btn { padding: 9px 16px; border-radius: 8px; border: 1px solid var(--border); background: #1e2535; color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; }
+.btn:hover { background: var(--border); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.field-input { background: #fff; color: #111; border: none; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.summary-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+.summary-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+.summary-card .num { font-size: 22px; font-weight: 800; }
+.summary-card .label { font-size: 12px; color: var(--muted); margin-top: 2px; }
+table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+th { text-align: left; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid var(--border); }
+tr:last-child td { border-bottom: none; }
+.muted { color: var(--muted); }
+.warn { color: #fbbf24; font-weight: 700; }
+.missing { color: var(--red); }
+.status-msg { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+.empty { text-align: center; padding: 40px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-logo">📦 Lister AI</div>
+  <a class="nav-btn" href="/">📊 Dashboard</a>
+  <a class="nav-btn" href="/categories">📂 Categories</a>
+  <a class="nav-btn" href="/archive">🗄️ Archive</a>
+  <a class="nav-btn" href="/financials">💰 Financials</a>
+  <a class="nav-btn" href="/acquisitions">🛒 Lots</a>
+  <a class="nav-btn active" href="/inventory">📦 Inventory</a>
+  <div class="nav-spacer"></div>
+  <a class="nav-download" href="/logout" style="color:#ef4444;border-color:#7f1d1d;">⏻ Logout</a>
+</nav>
+
+<div class="main">
+  <h1>Inventory</h1>
+  <div class="sub">eBay + Shopify inventory, matched by title. Non-matches show up as one-sided rows for manual review.</div>
+
+  <div class="filter-bar">
+    <button class="btn btn-primary" onclick="syncInventory()">🔄 Sync Inventory</button>
+    <input type="text" class="field-input" id="search-input" placeholder="Search title/SKU..." oninput="renderTable()" style="width:260px;"/>
+    <select class="field-input" id="filter-select" onchange="renderTable()">
+      <option value="">All</option>
+      <option value="matched">Matched (both platforms)</option>
+      <option value="ebay_only">eBay Only</option>
+      <option value="shopify_only">Shopify Only</option>
+      <option value="qty_variance">Quantity Mismatch</option>
+    </select>
+  </div>
+  <div id="sync-status" class="status-msg"></div>
+
+  <div class="summary-row" id="summary-row" style="display:none;">
+    <div class="summary-card"><div class="num" id="stat-total">0</div><div class="label">Total Rows</div></div>
+    <div class="summary-card"><div class="num" id="stat-matched">0</div><div class="label">Matched</div></div>
+    <div class="summary-card"><div class="num" id="stat-ebay-only">0</div><div class="label">eBay Only</div></div>
+    <div class="summary-card"><div class="num" id="stat-shopify-only">0</div><div class="label">Shopify Only</div></div>
+  </div>
+
+  <div id="table-area"><div class="empty">Click Sync Inventory to pull your current eBay and Shopify listings.</div></div>
+</div>
+
+<script>
+let inventory = [];
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function loadInventory() {
+  const r = await fetch('/api/inventory');
+  const data = await r.json();
+  inventory = data.inventory || [];
+  renderTable();
+}
+
+async function syncInventory() {
+  document.getElementById('sync-status').textContent = 'Starting sync (background, can take a bit for large catalogs)...';
+  try {
+    const r = await fetch('/api/inventory/sync', {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed to start');
+    pollSync();
+  } catch(e) {
+    document.getElementById('sync-status').textContent = `❌ ${e.message}`;
+  }
+}
+
+async function pollSync() {
+  try {
+    const r = await fetch('/api/financials/sync-status');
+    const data = await r.json();
+    if (data.running) {
+      document.getElementById('sync-status').textContent = 'Syncing inventory — safe to leave open...';
+      setTimeout(pollSync, 4000);
+      return;
+    }
+    if (data.result) {
+      if (data.result.error) {
+        document.getElementById('sync-status').textContent = `❌ ${data.result.error}`;
+      } else {
+        const errMsg = data.result.errors && Object.keys(data.result.errors).length
+          ? ' — issues: ' + JSON.stringify(data.result.errors) : '';
+        document.getElementById('sync-status').textContent =
+          `✅ eBay: ${data.result.ebay_synced}, Shopify: ${data.result.shopify_synced}, Matched: ${data.result.matched}, eBay-only: ${data.result.ebay_only}, Shopify-only: ${data.result.shopify_only}${errMsg}`;
+      }
+      loadInventory();
+    }
+  } catch(e) {
+    document.getElementById('sync-status').textContent = `❌ ${e.message}`;
+  }
+}
+
+function renderTable() {
+  if (!inventory.length) {
+    document.getElementById('table-area').innerHTML = '<div class="empty">No inventory synced yet — click Sync Inventory above.</div>';
+    document.getElementById('summary-row').style.display = 'none';
+    return;
+  }
+  const search = document.getElementById('search-input').value.trim().toLowerCase();
+  const filter = document.getElementById('filter-select').value;
+  let filtered = inventory;
+  if (search) {
+    filtered = filtered.filter(r =>
+      (r.title || '').toLowerCase().includes(search) ||
+      (r.ebay_sku || '').toLowerCase().includes(search) ||
+      (r.shopify_sku || '').toLowerCase().includes(search));
+  }
+  if (filter === 'matched') filtered = filtered.filter(r => r.ebay_sku && r.shopify_sku);
+  if (filter === 'ebay_only') filtered = filtered.filter(r => r.ebay_sku && !r.shopify_sku);
+  if (filter === 'shopify_only') filtered = filtered.filter(r => r.shopify_sku && !r.ebay_sku);
+  if (filter === 'qty_variance') filtered = filtered.filter(r => r.qty_variance);
+
+  document.getElementById('summary-row').style.display = 'grid';
+  document.getElementById('stat-total').textContent = inventory.length;
+  document.getElementById('stat-matched').textContent = inventory.filter(r => r.ebay_sku && r.shopify_sku).length;
+  document.getElementById('stat-ebay-only').textContent = inventory.filter(r => r.ebay_sku && !r.shopify_sku).length;
+  document.getElementById('stat-shopify-only').textContent = inventory.filter(r => r.shopify_sku && !r.ebay_sku).length;
+
+  if (!filtered.length) {
+    document.getElementById('table-area').innerHTML = '<div class="empty">No rows match this filter.</div>';
+    return;
+  }
+  let html = `<table><thead><tr>
+    <th>Title</th><th>eBay SKU</th><th>eBay Qty</th><th>Shopify SKU</th><th>Shopify Qty</th><th>Shopify Price</th><th>Status</th>
+  </tr></thead><tbody>`;
+  for (const r of filtered) {
+    const status = !r.ebay_sku ? '<span class="missing">Shopify only</span>'
+      : !r.shopify_sku ? '<span class="missing">eBay only</span>'
+      : r.qty_variance ? '<span class="warn">Qty mismatch</span>'
+      : 'Matched';
+    html += `<tr>
+      <td>${escapeHtml(r.title)}</td>
+      <td class="muted">${escapeHtml(r.ebay_sku || '—')}</td>
+      <td class="muted">${r.ebay_qty ?? '—'}</td>
+      <td class="muted">${escapeHtml(r.shopify_sku || '—')}</td>
+      <td class="muted">${r.shopify_qty ?? '—'}</td>
+      <td class="muted">${r.shopify_price != null ? '$' + Number(r.shopify_price).toFixed(2) : '—'}</td>
+      <td>${status}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('table-area').innerHTML = html;
+}
+
+loadInventory();
+</script>
+</body>
+</html>
