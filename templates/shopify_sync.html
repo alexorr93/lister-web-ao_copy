@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Shopify Sync — Lister AI</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<style>
+:root { --bg: #1a0611; --card: #1e2535; --border: #2d3348; --text: #f1f5f9; --muted: #64748b; --accent: #2563eb; --green: #16a34a; --red: #dc2626; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.nav { background: var(--card); border-bottom: 1px solid var(--border); padding: 0 16px; display: flex; align-items: center; gap: 6px; overflow-x: auto; height: 52px; position: sticky; top: 0; z-index: 100; }
+.nav-logo { font-weight: 800; font-size: 15px; color: var(--text); margin-right: 8px; white-space: nowrap; }
+.nav-btn { padding: 6px 14px; border-radius: 8px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; background: transparent; color: var(--muted); transition: all 0.15s; text-decoration: none; display: inline-block; }
+.nav-btn:hover { background: #1e2535; color: var(--text); }
+.nav-btn.active { color: #fff; background: var(--accent); }
+.nav-spacer { flex: 1; }
+.nav-download { padding: 6px 12px; background: #1e2535; border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; }
+.main { max-width: 1200px; margin: 0 auto; padding: 20px 16px; }
+h1 { font-size: 20px; margin-bottom: 4px; }
+.sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+.btn { padding: 9px 16px; border-radius: 8px; border: 1px solid var(--border); background: #1e2535; color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; margin-bottom: 14px; }
+.btn:hover { background: var(--border); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+th { text-align: left; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid var(--border); }
+tr:last-child td { border-bottom: none; }
+.muted { color: var(--muted); }
+.yes { color: var(--green); font-weight: 700; }
+.no { color: var(--red); font-weight: 700; }
+.status-msg { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+.empty { text-align: center; padding: 40px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-logo">📦 Lister AI</div>
+  <a class="nav-btn" href="/">📊 Dashboard</a>
+  <a class="nav-btn" href="/financials">💰 Financials</a>
+  <a class="nav-btn" href="/acquisitions">🛒 Lots</a>
+  <a class="nav-btn" href="/inventory">📦 Inventory</a>
+  <a class="nav-btn active" href="/shopify-sync">🔁 Shopify Sync</a>
+  <div class="nav-spacer"></div>
+  <a class="nav-download" href="/logout" style="color:#ef4444;border-color:#7f1d1d;">⏻ Logout</a>
+</nav>
+
+<div class="main">
+  <h1>Shopify Sync</h1>
+  <div class="sub">Step 1: everything sold on eBay today, checked live against both platforms. Read-only — nothing gets changed yet.</div>
+
+  <button class="btn btn-primary" onclick="loadToday()">🔄 Check Today's Sales</button>
+  <div id="status" class="status-msg"></div>
+
+  <div id="table-area"><div class="empty">Click above to check today's eBay sales against Shopify.</div></div>
+</div>
+
+<script>
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function loadToday() {
+  document.getElementById('status').textContent = 'Checking live quantities on both platforms...';
+  document.getElementById('table-area').innerHTML = '';
+  try {
+    const r = await fetch('/api/shopify-sync/today');
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    document.getElementById('status').textContent = `Date: ${data.date} — ${data.items.length} distinct SKU(s) sold on eBay today.`;
+    renderTable(data.items);
+  } catch(e) {
+    document.getElementById('status').textContent = `❌ ${e.message}`;
+  }
+}
+
+function renderTable(items) {
+  if (!items.length) {
+    document.getElementById('table-area').innerHTML = '<div class="empty">Nothing sold on eBay today (with a real SKU) yet.</div>';
+    return;
+  }
+  let html = `<table><thead><tr>
+    <th>SKU</th><th>eBay Item</th><th>Qty Sold Today (eBay)</th><th>eBay Live Qty</th><th>Found in Shopify?</th><th>Shopify Live Qty</th><th>Shopify Title</th>
+  </tr></thead><tbody>`;
+  for (const it of items) {
+    html += `<tr>
+      <td class="muted">${escapeHtml(it.sku)}</td>
+      <td>${escapeHtml(it.title || '')}</td>
+      <td>${it.qty_sold_today}</td>
+      <td>${it.ebay_live_qty ?? '—'}</td>
+      <td class="${it.shopify_found ? 'yes' : 'no'}">${it.shopify_found ? '✔ Yes' : '✘ No'}</td>
+      <td>${it.shopify_live_qty ?? '—'}</td>
+      <td class="muted">${escapeHtml(it.shopify_title || '')}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('table-area').innerHTML = html;
+}
+</script>
+</body>
+</html>

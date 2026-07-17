@@ -1189,6 +1189,14 @@ async def inventory_page(request: Request):
         return RedirectResponse("/login", status_code=302)
     return templates.TemplateResponse("inventory.html", {"request": request, "is_admin": is_admin})
 
+@app.get("/shopify-sync", response_class=HTMLResponse)
+async def shopify_sync_page(request: Request):
+    business_id, is_admin = get_business_info(request)
+    if not business_id:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("shopify_sync.html", {"request": request, "is_admin": is_admin})
+
 class AcquisitionCreate(BaseModel):
     sku: str
     name: Optional[str] = None
@@ -4735,6 +4743,78 @@ async def sync_inventory_now(request: Request):
             _sync_status[business_id] = {"running": False, "result": {"error": str(e)}, "started_at": _sync_status.get(business_id, {}).get("started_at"), "finished_at": _dt.datetime.utcnow().isoformat()}
     asyncio.create_task(_run())
     return {"ok": True, "started": True}
+
+@app.get("/api/shopify-sync/today")
+async def shopify_sync_today(request: Request):
+    """Step 1, deliberately minimal: every eBay sale from today, checked LIVE (not
+    from any cached/synced table) against both eBay's own current quantity and
+    Shopify's current quantity for the same SKU. Read-only — nothing gets adjusted."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import requests as _req, datetime as _dt
+
+    today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+    res = supabase.table("orders").select("sku,title,quantity,order_id").eq("business_id", business_id)\
+        .eq("platform", "eBay").eq("order_date", today).execute()
+    rows = res.data or []
+
+    sold_by_sku = {}
+    for r in rows:
+        sku = r.get("sku") or ""
+        if not sku or sku in ("(no SKU)",) or sku.lower().startswith("lister-"):
+            continue
+        entry = sold_by_sku.setdefault(sku, {"sku": sku, "title": r.get("title", ""), "qty_sold_today": 0, "order_ids": []})
+        entry["qty_sold_today"] += r.get("quantity", 0) or 0
+        entry["order_ids"].append(r.get("order_id"))
+
+    if not sold_by_sku:
+        return {"date": today, "items": []}
+
+    ebay_token = get_ebay_access_token(business_id)
+    settings = get_ebay_settings(business_id)
+    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+    shopify_token = get_shopify_access_token(business_id) if domain else None
+
+    items = []
+    for sku, entry in sold_by_sku.items():
+        ebay_live_qty = None
+        try:
+            r = _req.get(f"{EBAY_API_BASE}/sell/inventory/v1/inventory_item/{sku}",
+                         headers=ebay_headers(ebay_token, content_language=False), timeout=15)
+            if r.status_code == 200:
+                ebay_live_qty = (r.json().get("availability", {}) or {}).get("shipToLocationAvailability", {}).get("quantity")
+        except Exception:
+            pass
+
+        shopify_found = False
+        shopify_live_qty = None
+        shopify_title = None
+        if domain and shopify_token:
+            try:
+                gql = _req.post(
+                    f"https://{domain}/admin/api/2024-10/graphql.json",
+                    headers={"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"},
+                    json={"query": '{ productVariants(first: 1, query: "sku:' + sku.replace('"','') + '") { edges { node { sku inventoryQuantity product { title status } } } } }'},
+                    timeout=15,
+                )
+                if gql.status_code == 200:
+                    edges = (gql.json().get("data", {}) or {}).get("productVariants", {}).get("edges", [])
+                    if edges:
+                        node = edges[0]["node"]
+                        shopify_found = True
+                        shopify_live_qty = node.get("inventoryQuantity")
+                        shopify_title = (node.get("product") or {}).get("title")
+            except Exception:
+                pass
+
+        items.append({
+            "sku": sku, "title": entry["title"], "qty_sold_today": entry["qty_sold_today"],
+            "ebay_live_qty": ebay_live_qty,
+            "shopify_found": shopify_found, "shopify_live_qty": shopify_live_qty, "shopify_title": shopify_title,
+        })
+
+    return {"date": today, "items": items}
 
 @app.get("/api/inventory")
 async def list_inventory(request: Request):
