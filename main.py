@@ -134,7 +134,13 @@ def photo_url(photo_id: str, thumb: bool = False) -> str:
 def get_all_photo_ids(primary_photo_id: str) -> list:
     """A listing only stores its primary photo_id, but scans capture multiple photos
     per group (group_photos table). Marketplace listings should use ALL of them,
-    not just the primary — this looks up the rest via the shared group_id."""
+    not just the primary — this looks up the rest via the shared group_id.
+
+    Always returns primary_photo_id first. group_photos has no defined order, so
+    without this, "Make Main Photo" (which only ever updates the listing's
+    photo_id) had no actual effect on eBay/Shopify submissions — the photo array
+    sent to both marketplaces came back in whatever order Supabase happened to
+    return group_photos, ignoring which one was chosen as primary."""
     pid = str(primary_photo_id or "")
     if not pid:
         return []
@@ -145,7 +151,9 @@ def get_all_photo_ids(primary_photo_id: str) -> list:
             return [pid]
         gp = supabase.table("group_photos").select("photo_id").eq("group_id", group_id).execute()
         all_pids = [r["photo_id"] for r in (gp.data or []) if r.get("photo_id")]
-        return all_pids if all_pids else [pid]
+        if not all_pids:
+            return [pid]
+        return [pid] + [p for p in all_pids if p != pid]
     except Exception:
         return [pid]
 
@@ -623,7 +631,12 @@ async def get_listings(request: Request, archived: bool = False):
 
         for l in listings:
             pid = str(l.get("photo_id") or "")
-            all_photos = group_photo_map.get(pid, [pid] if pid else [])
+            raw_photos = group_photo_map.get(pid, [pid] if pid else [])
+            # group_photos has no defined order — always put the listing's actual
+            # photo_id first, so "Make Main Photo" (which only ever updates
+            # photo_id) actually sticks after a reload instead of reverting to
+            # whatever order Supabase happened to return.
+            all_photos = ([pid] + [p for p in raw_photos if p != pid]) if pid else raw_photos
             l["thumb_url"]  = photo_url(pid, thumb=True)
             l["full_url"]   = photo_url(pid)
             l["all_photos"] = [{"id": p, "thumb": photo_url(p, thumb=True), "full": photo_url(p)} for p in all_photos if p]
@@ -683,15 +696,7 @@ async def export_ebay_csv(request: Request):
         cond = str(item.get("condition") or "used").strip().lower()
         cond_id = "NEW" if cond == "new" else "USED"
         pid = str(item.get("photo_id") or "")
-        # Look up all photos for this listing via group_photos table
-        try:
-            _gp = supabase.table("group_photos").select("photo_id").eq("group_id",
-                (supabase.table("group_photos").select("group_id").eq("photo_id", pid).execute().data or [{}])[0].get("group_id", "")
-            ).execute()
-            _all_pids = [r["photo_id"] for r in (_gp.data or [])] if _gp.data else [pid]
-            pic = "|".join(photo_url(p) for p in _all_pids if p) if _all_pids else (photo_url(pid) if pid else "")
-        except Exception:
-            pic = photo_url(pid) if pid else ""
+        pic = "|".join(photo_url(p) for p in get_all_photo_ids(pid) if photo_url(p))
         category_id = "12576"
         price = float(item.get("price") or item.get("price_used") or 0)
         writer.writerow([
