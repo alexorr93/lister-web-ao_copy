@@ -293,7 +293,7 @@ async function pollEbayListingsSync() {
   }
 }
 
-function applyPushResult(it, idx, res) {
+function applyPushResult(it, idx, res, retryFnName, retryLabel) {
   const cell = document.getElementById('push-cell-' + idx);
   const row = document.getElementById('row-' + idx);
   if (res.status === 'success') {
@@ -301,9 +301,28 @@ function applyPushResult(it, idx, res) {
     it.shopify_live_qty = res.new_quantity;
     it.qty_matches = true;
     row.classList.add('synced');
-    cell.innerHTML = `<span class="synced-badge">✔ Set to ${res.new_quantity}</span><button class="push-again" onclick="pushOne(${idx})">push again</button>`;
+    cell.innerHTML = `<span class="synced-badge">✔ Set to ${res.new_quantity}</span>`
+      + `<button class="push-again" onclick="${retryFnName || 'pushOne'}(${idx})">${retryLabel || 'push again'}</button>`;
   } else {
     cell.innerHTML = `<span class="no">✘ ${res.error || res.status}</span>`;
+  }
+}
+
+async function endOnShopify(idx) {
+  const it = currentItems[idx];
+  const cell = document.getElementById('push-cell-' + idx);
+  cell.textContent = 'Ending...';
+  try {
+    const payload = Object.assign({}, it, {ebay_live_qty: 0});
+    const r = await fetch('/api/shopify-sync/push', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify([payload]),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    it.ebay_live_qty = 0;
+    applyPushResult(it, idx, data.results[0], 'endOnShopify', 'end again');
+  } catch(e) {
+    cell.innerHTML = `<span class="no">✘ ${e.message}</span>`;
   }
 }
 
@@ -405,10 +424,13 @@ function renderTable() {
     const ignoreBtn = it.ignored ? '' : `<button class="ignore-link" onclick="ignoreItem(${idx})">ignore</button>`;
     let pushCell;
     if (statusLabel) {
-      const needsPush = it.shopify_found && !synced && it.ebay_live_qty != null;
-      pushCell = `<span class="muted">${statusLabel}</span>`
-        + (needsPush ? `<button class="push-again" onclick="pushOne(${idx})">Push → ${it.ebay_live_qty}</button>` : '')
-        + unignoreBtn + ignoreBtn;
+      // Always offer this, regardless of whether the numbers already look like
+      // they match — the point is an explicit, unmissable action to force
+      // Shopify to 0 for something you just ended on eBay, not something gated
+      // behind our own (sometimes wrong) idea of whether it's already in sync.
+      const endBtn = it.shopify_found
+        ? `<button class="push-again" onclick="endOnShopify(${idx})">End on Shopify (set to 0)</button>` : '';
+      pushCell = `<span class="muted">${statusLabel}</span>` + endBtn + unignoreBtn + ignoreBtn;
     } else if (it.shopify_found) {
       if (synced) {
         pushCell = `<span class="synced-badge">✔ Already Synced</span><button class="push-again" onclick="pushOne(${idx})">push again</button>${ignoreBtn}`;
