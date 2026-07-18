@@ -5014,6 +5014,57 @@ async def shopify_sync_debug_catalog_search(request: Request, q: str):
                for k, v in catalog.items() if q_lower in k]
     return {"catalog_size": len(catalog), "complete": complete, "pages_fetched": pages, "matches": matches}
 
+@app.get("/api/shopify-sync/debug-exact-match")
+async def shopify_sync_debug_exact_match(request: Request, ebay_title: str):
+    """Temporary read-only diagnostic: runs the EXACT dict-key lookup
+    _shopify_sync_check_one uses (not the substring search debug-catalog-search
+    does — those are two different tests, and substring matching was giving false
+    confidence that titles were matching when the exact lookup was still failing).
+    If it doesn't match, finds the closest substring candidate and returns both
+    normalized strings as codepoint lists so an invisible character (NBSP, zero-
+    width space, curly vs straight punctuation) can't hide in a text diff."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    settings = get_ebay_settings(business_id)
+    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+    shopify_token = get_shopify_access_token(business_id) if domain else None
+    if not domain or not shopify_token:
+        raise HTTPException(400, "Shopify not connected")
+
+    loc_headers = {"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"}
+    location_id = _get_shopify_primary_location_id(domain, loc_headers)
+    if not location_id:
+        raise HTTPException(400, "Could not determine Shopify location")
+    catalog, complete, pages = _fetch_all_shopify_products(domain, shopify_token, location_id)
+
+    ebay_norm = _shopify_sync_norm(ebay_title)
+    exact_match = catalog.get(ebay_norm)
+
+    def _codepoints(s):
+        return [f"U+{ord(c):04X}({c!r})" for c in s]
+
+    result = {
+        "catalog_complete": complete, "catalog_pages": pages, "catalog_size": len(catalog),
+        "ebay_title": ebay_title, "ebay_norm_title": ebay_norm,
+        "exact_match_found": exact_match is not None,
+    }
+    if exact_match:
+        result["matched_shopify_title"] = exact_match["title"]
+        result["matched_qty"] = exact_match["qty"]
+    else:
+        # Substring search among catalog keys for anything that looks related, to
+        # find the near-miss candidate even though the exact key lookup failed.
+        words = [w for w in ebay_norm.split() if len(w) > 3]
+        candidates = [k for k in catalog if any(w in k for w in words)]
+        result["near_miss_candidates"] = [{
+            "shopify_norm_title": k,
+            "same_length": len(k) == len(ebay_norm),
+            "ebay_codepoints": _codepoints(ebay_norm),
+            "shopify_codepoints": _codepoints(k),
+        } for k in candidates[:3]]
+    return result
+
 @app.get("/api/shopify-sync/debug-item")
 async def shopify_sync_debug_item(request: Request, q: str):
     """Temporary read-only diagnostic: dump every push_log row, the current snapshot
