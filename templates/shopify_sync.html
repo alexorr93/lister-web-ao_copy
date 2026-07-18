@@ -102,14 +102,27 @@ function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-let currentItems = [];
-let currentView = 'active'; // 'active' hides ignored rows, 'inactive' shows only ignored rows
+let todayItems = [];   // full /today result for the selected date range
+let currentItems = []; // whichever set is actually rendered right now
+let currentView = 'active';
 
 function setView(view) {
   currentView = view;
   document.getElementById('tab-active').classList.toggle('active', view === 'active');
   document.getElementById('tab-inactive').classList.toggle('active', view === 'inactive');
-  renderTable();
+  refreshCurrentView();
+}
+
+// Active and Inactive are genuinely separate datasets, not one array split by a
+// filter — Inactive isn't scoped to the date range at all (see /inactive-items),
+// so it can't be derived from todayItems.
+function refreshCurrentView() {
+  if (currentView === 'inactive') {
+    loadInactive();
+  } else {
+    currentItems = todayItems.filter(it => !it.ignored && !it.ebay_ended);
+    renderTable();
+  }
 }
 
 function setToday() {
@@ -167,7 +180,22 @@ async function loadToday() {
     if (!r.ok) throw new Error(data.detail || 'Failed');
     const rangeLabel = data.start_date === data.end_date ? data.start_date : `${data.start_date} – ${data.end_date}`;
     document.getElementById('status').textContent = `${rangeLabel} — ${data.items.length} distinct SKU(s) sold on eBay.`;
-    currentItems = data.items.slice().sort((a, b) => rowGroup(a) - rowGroup(b));
+    todayItems = data.items.slice().sort((a, b) => rowGroup(a) - rowGroup(b));
+    refreshCurrentView();
+  } catch(e) {
+    document.getElementById('status').textContent = `❌ ${e.message}`;
+  }
+}
+
+async function loadInactive() {
+  document.getElementById('status').textContent = 'Loading...';
+  document.getElementById('table-area').innerHTML = '';
+  try {
+    const r = await fetch('/api/shopify-sync/inactive-items', {cache: 'no-store'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    document.getElementById('status').textContent = `${data.items.length} inactive item(s) — ended on eBay or ignored. Not limited to the selected date range.`;
+    currentItems = data.items;
     renderTable();
   } catch(e) {
     document.getElementById('status').textContent = `❌ ${e.message}`;
@@ -279,8 +307,11 @@ async function ignoreItem(idx) {
     });
     if (!r.ok) throw new Error((await r.json()).detail || 'Failed');
     it.ignored = true;
-    currentItems = currentItems.slice().sort((a, b) => rowGroup(a) - rowGroup(b));
-    renderTable();
+    // Re-pull both datasets from the server rather than patching in place — the
+    // item may now need to move between todayItems and the inactive-items list,
+    // and refetching (cheap local reads, no external calls) is simpler than
+    // hand-syncing two arrays.
+    await loadToday(); // loadToday() already calls refreshCurrentView() when it finishes
   } catch(e) {
     alert('Failed to ignore: ' + e.message);
   }
@@ -294,26 +325,21 @@ async function unignoreItem(idx) {
     });
     if (!r.ok) throw new Error((await r.json()).detail || 'Failed');
     it.ignored = false;
-    currentItems = currentItems.slice().sort((a, b) => rowGroup(a) - rowGroup(b));
-    renderTable();
+    await loadToday(); // loadToday() already calls refreshCurrentView() when it finishes
   } catch(e) {
     alert('Failed to unignore: ' + e.message);
   }
 }
 
 function renderTable() {
-  // Always operates on the full currentItems array and filters here, keeping idx
-  // as each item's real index into currentItems — filtering the array itself
-  // before rendering would desync every onclick="...(idx)" handler from the item
-  // it's actually supposed to act on (the exact bug already caught once before).
-  const isInactive = it => !!it.ignored || !!it.ebay_ended;
-  const visible = currentItems
-    .map((it, idx) => ({it, idx}))
-    .filter(({it}) => currentView === 'inactive' ? isInactive(it) : !isInactive(it));
+  // currentItems is already the correctly-scoped set for the current view (see
+  // refreshCurrentView) — no filtering here, just render it with idx as each
+  // item's real index into currentItems for the onclick handlers below.
+  const visible = currentItems.map((it, idx) => ({it, idx}));
 
   if (!visible.length) {
     const msg = currentView === 'inactive'
-      ? 'Nothing ended on eBay or ignored in this range.'
+      ? 'Nothing ended on eBay or ignored right now.'
       : 'Nothing sold on eBay in this range (with a real SKU) yet.';
     document.getElementById('table-area').innerHTML = `<div class="empty">${msg}</div>`;
     return;
@@ -351,7 +377,7 @@ function renderTable() {
     html += `<tr id="row-${idx}" class="${it.ignored ? 'ignored' : (synced ? 'synced' : '')}">
       <td class="muted">${escapeHtml(it.sku)}</td>
       <td>${escapeHtml(it.title || '')}</td>
-      <td>${it.qty_sold_today}</td>
+      <td>${it.qty_sold_today ?? '—'}</td>
       <td>${it.ebay_live_qty ?? '—'}</td>
       <td class="${it.shopify_found ? 'yes' : 'no'}">${it.shopify_found ? '✔ Yes' : '✘ No'}</td>
       <td>${it.shopify_live_qty ?? '—'}</td>
