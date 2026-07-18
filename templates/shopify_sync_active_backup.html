@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Shopify Sync — Lister AI</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<style>
+:root { --bg: #1a0611; --card: #1e2535; --border: #2d3348; --text: #f1f5f9; --muted: #64748b; --accent: #16a34a; --green: #16a34a; --red: #dc2626; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.nav { background: var(--card); border-bottom: 1px solid var(--border); padding: 0 16px; display: flex; align-items: center; gap: 6px; overflow-x: auto; height: 52px; position: sticky; top: 0; z-index: 100; }
+.nav-logo { font-weight: 800; font-size: 15px; color: var(--text); margin-right: 8px; white-space: nowrap; }
+.nav-btn { padding: 6px 14px; border-radius: 8px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; background: transparent; color: var(--muted); transition: all 0.15s; text-decoration: none; display: inline-block; }
+.nav-btn:hover { background: #1e2535; color: var(--text); }
+.nav-btn.active { color: #fff; background: var(--accent); }
+.nav-spacer { flex: 1; }
+.nav-download { padding: 6px 12px; background: #1e2535; border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; }
+.main { max-width: 1200px; margin: 0 auto; padding: 20px 16px; }
+h1 { font-size: 20px; margin-bottom: 4px; }
+.sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+.filter-bar { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin-bottom: 18px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.field-label { font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; margin-bottom: 4px; }
+.field-input { background: #fff; color: #111; border: none; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.quick-range { display: flex; gap: 6px; }
+.quick-range button { padding: 8px 10px; font-size: 12px; }
+.btn { padding: 9px 16px; border-radius: 8px; border: 1px solid var(--border); background: #1e2535; color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; }
+.btn:hover { background: var(--border); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-orange { background: #ea580c; border-color: #ea580c; color: #fff; }
+.btn-orange:hover { background: #c2410c; }
+table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+th { text-align: left; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; padding: 10px 12px; border-bottom: 1px solid var(--border); position: sticky; top: 52px; background: var(--card); z-index: 10; }
+td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid var(--border); }
+tr:last-child td { border-bottom: none; }
+.muted { color: var(--muted); }
+.yes { color: var(--green); font-weight: 700; }
+.no { color: var(--red); font-weight: 700; }
+.status-msg { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+.empty { text-align: center; padding: 40px; color: var(--muted); }
+tr.synced td { background: rgba(22, 163, 74, 0.16); }
+tr.ignored td { color: var(--muted); opacity: 0.55; }
+tr.ignored:hover td { opacity: 0.85; }
+.synced-badge { color: var(--green); font-weight: 700; }
+.push-again, .ignore-link, .unignore-link { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); background: none; border: none; text-decoration: underline; cursor: pointer; padding: 0; }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-logo">📦 Lister AI</div>
+  <a class="nav-btn" href="/">📊 Dashboard</a>
+  <a class="nav-btn" href="/financials">💰 Financials</a>
+  <a class="nav-btn" href="/acquisitions">🛒 Lots</a>
+  <a class="nav-btn" href="/inventory">📦 Inventory</a>
+  <a class="nav-btn active" href="/shopify-sync">🔁 Shopify Sync</a>
+  <div class="nav-spacer"></div>
+  <a class="nav-download" href="/logout" style="color:#ef4444;border-color:#7f1d1d;">⏻ Logout</a>
+</nav>
+
+<div class="main">
+  <h1>Shopify Sync</h1>
+  <div class="sub">Everything sold on eBay in the selected range, matched against the last synced Shopify/eBay quantities. Reads local data only — click Sync Now to refresh it. Nothing gets changed until you push.</div>
+
+  <div class="filter-bar">
+    <div>
+      <div class="field-label">Start Date</div>
+      <input type="date" class="field-input" id="start-date"/>
+    </div>
+    <div>
+      <div class="field-label">End Date</div>
+      <input type="date" class="field-input" id="end-date"/>
+    </div>
+    <button class="btn btn-primary" onclick="loadToday()">Apply</button>
+    <div class="quick-range">
+      <button class="btn" onclick="setToday()">Today</button>
+      <button class="btn" onclick="setRange(7)">Last 7d</button>
+      <button class="btn" onclick="setRange(30)">Last 30d</button>
+      <button class="btn" onclick="setThisMonth()">This Month</button>
+      <button class="btn" onclick="setLastMonth()">Last Month</button>
+    </div>
+    <button class="btn btn-primary" onclick="syncNow()" title="Refreshes live eBay/Shopify quantities into the local snapshot — this is the only action that calls out to eBay/Shopify">🔄 Sync Now</button>
+    <button class="btn btn-orange" onclick="pushAllFound()" title="Pushes every row that's found in Shopify but not yet matching eBay — sets each to eBay's live quantity">⚡ Push All Found</button>
+    <span id="last-synced" style="font-size:11px;color:var(--muted);align-self:center;"></span>
+  </div>
+
+  <div id="status" class="status-msg"></div>
+
+  <div id="table-area"><div class="empty">Loading today's sales…</div></div>
+</div>
+
+<script>
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+let currentItems = [];
+
+function setToday() {
+  const now = new Date();
+  const d = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+  document.getElementById('start-date').value = d;
+  document.getElementById('end-date').value = d;
+  loadToday();
+}
+
+function setRange(days) {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - days);
+  document.getElementById('end-date').value = end.toISOString().slice(0,10);
+  document.getElementById('start-date').value = start.toISOString().slice(0,10);
+  loadToday();
+}
+
+function setThisMonth() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  document.getElementById('start-date').value = start.toISOString().slice(0,10);
+  document.getElementById('end-date').value = now.toISOString().slice(0,10);
+  loadToday();
+}
+
+function setLastMonth() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const end = new Date(now.getFullYear(), now.getMonth(), 0);
+  document.getElementById('start-date').value = start.toISOString().slice(0,10);
+  document.getElementById('end-date').value = end.toISOString().slice(0,10);
+  loadToday();
+}
+
+// Sort group: 0 = not found in Shopify (red, needs attention first), 1 = found but
+// not yet matching eBay (needs a push), 2 = found and matching (nothing to do),
+// 3 = ignored (always last, regardless of match state).
+function rowGroup(it) {
+  if (it.ignored) return 3;
+  if (!it.shopify_found) return 0;
+  const qtyMatch = it.ebay_live_qty != null && it.shopify_live_qty != null && it.ebay_live_qty === it.shopify_live_qty;
+  return qtyMatch ? 2 : 1;
+}
+
+async function loadToday() {
+  const start = document.getElementById('start-date').value;
+  const end = document.getElementById('end-date').value;
+  document.getElementById('status').textContent = 'Loading...';
+  document.getElementById('table-area').innerHTML = '';
+  try {
+    const r = await fetch('/api/shopify-sync/today?start=' + start + '&end=' + end, {cache: 'no-store'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    const rangeLabel = data.start_date === data.end_date ? data.start_date : `${data.start_date} – ${data.end_date}`;
+    document.getElementById('status').textContent = `${rangeLabel} — ${data.items.length} distinct SKU(s) sold on eBay.`;
+    currentItems = data.items.slice().sort((a, b) => rowGroup(a) - rowGroup(b));
+    renderTable(currentItems);
+  } catch(e) {
+    document.getElementById('status').textContent = `❌ ${e.message}`;
+  }
+}
+
+async function loadSyncStatus() {
+  try {
+    const r = await fetch('/api/shopify-sync/sync-status', {cache: 'no-store'});
+    const data = await r.json();
+    // Postgres already returns an explicit offset (e.g. "...+00:00") for a
+    // timestamptz column — appending 'Z' on top of that produced "Invalid Date".
+    document.getElementById('last-synced').textContent = data.last_synced_at
+      ? 'Last synced: ' + new Date(data.last_synced_at).toLocaleString()
+      : 'Never synced — click Sync Now';
+  } catch(e) {}
+}
+
+async function syncNow() {
+  if (!currentItems.length) { alert('Nothing on screen to sync — nothing sold in this range.'); return; }
+  document.getElementById('status').textContent = 'Starting sync (runs in the background — safe to leave this page, it\'ll pick up where it left off)...';
+  try {
+    const r = await fetch('/api/shopify-sync/refresh', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(currentItems.map(it => ({title: it.title, sku: it.sku, legacy_item_id: it.legacy_item_id}))),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed to start');
+    pollRefreshStatus();
+  } catch(e) {
+    document.getElementById('status').textContent = `❌ ${e.message}`;
+  }
+}
+
+async function pollRefreshStatus() {
+  try {
+    const r = await fetch('/api/shopify-sync/refresh-status', {cache: 'no-store'});
+    const data = await r.json();
+    if (data.running) {
+      document.getElementById('status').textContent = 'Syncing live quantities from eBay and Shopify — this can take a few minutes for a big catalog, safe to leave open...';
+      setTimeout(pollRefreshStatus, 4000);
+      return;
+    }
+    if (data.result) {
+      document.getElementById('status').textContent = data.result.error
+        ? `❌ ${data.result.error}`
+        : `✅ Synced ${data.result.checked} item(s) — ${data.result.ebay_checked ?? 0} new eBay lookup(s), ${data.result.ebay_reused ?? 0} reused from before.`;
+      loadSyncStatus();
+      loadToday();
+    }
+  } catch(e) {
+    document.getElementById('status').textContent = `❌ ${e.message}`;
+  }
+}
+
+function applyPushResult(it, idx, res) {
+  const cell = document.getElementById('push-cell-' + idx);
+  const row = document.getElementById('row-' + idx);
+  if (res.status === 'success') {
+    it.already_pushed = true;
+    it.shopify_live_qty = res.new_quantity;
+    it.qty_matches = true;
+    row.classList.add('synced');
+    cell.innerHTML = `<span class="synced-badge">✔ Set to ${res.new_quantity}</span><button class="push-again" onclick="pushOne(${idx})">push again</button>`;
+  } else {
+    cell.innerHTML = `<span class="no">✘ ${res.error || res.status}</span>`;
+  }
+}
+
+async function pushOne(idx) {
+  const it = currentItems[idx];
+  if (it.ebay_live_qty == null) { alert('eBay quantity unknown for this item — click Sync Now first.'); return; }
+  const cell = document.getElementById('push-cell-' + idx);
+  cell.textContent = 'Pushing...';
+  try {
+    const r = await fetch('/api/shopify-sync/push', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify([it]),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    applyPushResult(it, idx, data.results[0]);
+  } catch(e) {
+    cell.innerHTML = `<span class="no">✘ ${e.message}</span>`;
+  }
+}
+
+async function pushAllFound() {
+  const targets = currentItems
+    .map((it, idx) => ({it, idx}))
+    .filter(({it}) => it.shopify_found && rowGroup(it) === 1 && it.ebay_live_qty != null);
+  if (!targets.length) { alert('Nothing needs pushing — every found item already matches, or eBay quantity is unknown (click Sync Now).'); return; }
+  if (!confirm(`Set Shopify quantity to match eBay for ${targets.length} item(s)? This changes your live Shopify listings.`)) return;
+  document.getElementById('status').textContent = `Pushing ${targets.length} item(s)...`;
+  targets.forEach(({idx}) => { document.getElementById('push-cell-' + idx).textContent = 'Pushing...'; });
+  try {
+    const r = await fetch('/api/shopify-sync/push', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(targets.map(t => t.it)),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    targets.forEach(({it, idx}, i) => applyPushResult(it, idx, data.results[i]));
+    document.getElementById('status').textContent = `✅ Pushed ${targets.length} item(s).`;
+  } catch(e) {
+    document.getElementById('status').textContent = `❌ ${e.message}`;
+  }
+}
+
+async function ignoreItem(idx) {
+  const it = currentItems[idx];
+  try {
+    const r = await fetch('/api/shopify-sync/ignore', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({title: it.title}),
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || 'Failed');
+    it.ignored = true;
+    currentItems = currentItems.slice().sort((a, b) => rowGroup(a) - rowGroup(b));
+    renderTable(currentItems);
+  } catch(e) {
+    alert('Failed to ignore: ' + e.message);
+  }
+}
+
+async function unignoreItem(idx) {
+  const it = currentItems[idx];
+  try {
+    const r = await fetch('/api/shopify-sync/unignore', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({title: it.title}),
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || 'Failed');
+    it.ignored = false;
+    currentItems = currentItems.slice().sort((a, b) => rowGroup(a) - rowGroup(b));
+    renderTable(currentItems);
+  } catch(e) {
+    alert('Failed to unignore: ' + e.message);
+  }
+}
+
+function renderTable(items) {
+  if (!items.length) {
+    document.getElementById('table-area').innerHTML = '<div class="empty">Nothing sold on eBay in this range (with a real SKU) yet.</div>';
+    return;
+  }
+  let html = `<table><thead><tr>
+    <th>SKU</th><th>eBay Item</th><th>Qty Sold (eBay)</th><th>eBay Live Qty</th><th>Found in Shopify?</th><th>Shopify Live Qty</th><th>Shopify Title</th><th>Push</th>
+  </tr></thead><tbody>`;
+  items.forEach((it, idx) => {
+    // Green = the two live quantities already agree, so there's nothing left to push —
+    // true whether that's because we pushed (this session or a past one) or the
+    // numbers just happen to already line up. Compared directly, not inferred from
+    // push history, since eBay Live Qty is now populated for real.
+    const qtyMatch = it.ebay_live_qty != null && it.shopify_live_qty != null && it.ebay_live_qty === it.shopify_live_qty;
+    const synced = it.shopify_found && qtyMatch;
+    let pushCell;
+    if (it.ignored) {
+      pushCell = `<span class="muted">Ignored</span><button class="unignore-link" onclick="unignoreItem(${idx})">unignore</button>`;
+    } else if (it.shopify_found) {
+      if (synced) {
+        pushCell = `<span class="synced-badge">✔ Already Synced</span><button class="push-again" onclick="pushOne(${idx})">push again</button><button class="ignore-link" onclick="ignoreItem(${idx})">ignore</button>`;
+      } else if (it.ebay_live_qty == null) {
+        pushCell = `<span class="muted">Sync Now for eBay qty</span><button class="ignore-link" onclick="ignoreItem(${idx})">ignore</button>`;
+      } else {
+        pushCell = `<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOne(${idx})">Push → ${it.ebay_live_qty}</button><button class="ignore-link" onclick="ignoreItem(${idx})">ignore</button>`;
+      }
+    } else {
+      pushCell = `<span class="muted">—</span><button class="ignore-link" onclick="ignoreItem(${idx})">ignore</button>`;
+    }
+    html += `<tr id="row-${idx}" class="${it.ignored ? 'ignored' : (synced ? 'synced' : '')}">
+      <td class="muted">${escapeHtml(it.sku)}</td>
+      <td>${escapeHtml(it.title || '')}</td>
+      <td>${it.qty_sold_today}</td>
+      <td>${it.ebay_live_qty ?? '—'}</td>
+      <td class="${it.shopify_found ? 'yes' : 'no'}">${it.shopify_found ? '✔ Yes' : '✘ No'}</td>
+      <td>${it.shopify_live_qty ?? '—'}</td>
+      <td class="muted">${escapeHtml(it.shopify_title || '')}</td>
+      <td id="push-cell-${idx}">${pushCell}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('table-area').innerHTML = html;
+}
+
+setToday();
+loadSyncStatus();
+
+// If a sync is already running when the page loads, resume polling instead of losing track of it.
+(async function checkSyncOnLoad() {
+  try {
+    const r = await fetch('/api/shopify-sync/refresh-status', {cache: 'no-store'});
+    const data = await r.json();
+    if (data.running) pollRefreshStatus();
+  } catch(e) {}
+})();
+</script>
+</body>
+</html>
