@@ -4866,6 +4866,62 @@ def _fetch_all_shopify_products(domain: str, shopify_token: str, location_id: st
         cursor = page_info.get("endCursor")
     return catalog, True, pages
 
+def _safe_int(v):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+def _ebay_xml_to_dict(elem):
+    """Strips XML namespaces and turns an ElementTree element into nested dicts/lists
+    — eBay's Trading API responses are deeply nested and namespace-qualified
+    (urn:ebay:apis:eBLBaseComponents on every tag). Repeated child tags become a list."""
+    children = list(elem)
+    if not children:
+        return elem.text
+    result = {}
+    for child in children:
+        tag = child.tag.split("}")[-1]
+        val = _ebay_xml_to_dict(child)
+        if tag in result:
+            if not isinstance(result[tag], list):
+                result[tag] = [result[tag]]
+            result[tag].append(val)
+        else:
+            result[tag] = val
+    return result
+
+def _ebay_get_item_status(token: str, item_id: str) -> dict:
+    """Trading API GetItem — the genuine SELLER-facing endpoint for 'what's the
+    status of my own listing', works for any item regardless of how it was
+    created. NOT the Buy Browse API: that's the public buyer-search/browse API,
+    sharing its rate-limit quota with every other use of that API (confirmed:
+    that shared quota is exactly what got exhausted before this fix). GetItem is
+    a separate seller-account quota bucket entirely. OAuth token goes in the XML
+    body (eBayAuthToken), not an Authorization header — that's how Trading API
+    auth works, unlike the REST APIs used elsewhere in this file."""
+    import requests as _req
+    import xml.etree.ElementTree as ET
+
+    xml_body = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+        f'<RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>'
+        f'<ItemID>{item_id}</ItemID>'
+        '<DetailLevel>ReturnAll</DetailLevel>'
+        '<IncludeItemSpecifics>false</IncludeItemSpecifics>'
+        '</GetItemRequest>'
+    )
+    headers = {
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "1193",
+        "X-EBAY-API-CALL-NAME": "GetItem",
+        "X-EBAY-API-SITEID": "0",
+        "Content-Type": "text/xml",
+    }
+    r = _req.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_body.encode("utf-8"), timeout=20)
+    root = ET.fromstring(r.content)
+    return _ebay_xml_to_dict(root)
+
 def _shopify_sync_check_one(norm_title: str, entry: dict, ebay_token: str, shopify_catalog: dict) -> dict:
     """The eBay side of the lookup for one sold title (Shopify's side is now a plain
     dict lookup against the pre-fetched catalog — see _fetch_all_shopify_products).
@@ -4875,6 +4931,7 @@ def _shopify_sync_check_one(norm_title: str, entry: dict, ebay_token: str, shopi
 
     sku = entry["sku"]
     ebay_live_qty = None
+    ebay_ended = False
     if sku and sku != "(no SKU)" and not sku.lower().startswith("lister-"):
         try:
             r = _req.get(f"{EBAY_API_BASE}/sell/inventory/v1/inventory_item/{sku}",
@@ -4886,29 +4943,37 @@ def _shopify_sync_check_one(norm_title: str, entry: dict, ebay_token: str, shopi
 
     # Most of these listings weren't created via the Inventory API (no SKU-keyed
     # inventory item exists for them), so the lookup above returns nothing for
-    # them. Fall back to the Browse API by the listing's own (legacy) item ID —
-    # works for any live eBay listing regardless of how it was created. A 404
-    # means the listing has ended, i.e. genuinely sold out (qty 0).
+    # them. Fall back to Trading API's GetItem by the listing's own (legacy) item
+    # ID — the real seller-facing endpoint for this, works for any listing
+    # regardless of how it was created, on its own separate rate-limit quota.
     legacy_item_id = entry.get("legacy_item_id")
     if ebay_live_qty is None and legacy_item_id:
         try:
-            r = _req.get(f"{EBAY_API_BASE}/buy/browse/v1/item/get_item_by_legacy_id",
-                         params={"legacy_item_id": legacy_item_id},
-                         headers={**ebay_headers(ebay_token, content_language=False), "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"},
-                         timeout=15)
-            if r.status_code == 200:
-                avail = (r.json().get("estimatedAvailabilities") or [])
-                if avail:
-                    ebay_live_qty = avail[0].get("estimatedAvailableQuantity")
-            elif r.status_code == 404:
+            resp = _ebay_get_item_status(ebay_token, legacy_item_id)
+            ack = resp.get("Ack")
+            item = resp.get("Item") or {}
+            if ack in ("Success", "Warning") and item:
+                selling_status = item.get("SellingStatus") or {}
+                listing_status = selling_status.get("ListingStatus")
+                total_qty = _safe_int(item.get("Quantity"))
+                sold_qty = _safe_int(selling_status.get("QuantitySold")) or 0
+                if listing_status and listing_status != "Active":
+                    ebay_live_qty = 0
+                    ebay_ended = True
+                elif total_qty is not None:
+                    ebay_live_qty = max(total_qty - sold_qty, 0)
+            else:
+                # GetItem fails outright (item deleted / genuinely gone) for a
+                # listing that no longer exists at all — treat the same as ended.
                 ebay_live_qty = 0
+                ebay_ended = True
         except Exception:
             pass
 
     match = shopify_catalog.get(norm_title)
     return {
         "norm_title": norm_title, "sku": sku, "legacy_item_id": legacy_item_id,
-        "ebay_live_qty": ebay_live_qty, "shopify_found": match is not None,
+        "ebay_live_qty": ebay_live_qty, "ebay_ended": ebay_ended, "shopify_found": match is not None,
         "shopify_live_qty": match["qty"] if match else None,
         "shopify_title": match["title"] if match else None,
         "shopify_inventory_item_id": match["inventory_item_id"] if match else None,
@@ -5144,11 +5209,9 @@ async def shopify_sync_debug_exact_match(request: Request, ebay_title: str):
 
 @app.get("/api/shopify-sync/debug-ebay-lookup")
 async def shopify_sync_debug_ebay_lookup(request: Request, order_id: str):
-    """Temporary read-only diagnostic: runs the exact SKU + Browse API eBay lookups
-    _shopify_sync_check_one does for one order, but returns the raw HTTP status and
-    body from each call instead of silently swallowing failures — every eBay Live
-    Qty on the page has been coming back blank, and the normal code path has no way
-    to say why."""
+    """Temporary read-only diagnostic: runs the exact SKU + Trading API GetItem
+    lookups _shopify_sync_check_one does for one order, and returns the raw
+    response instead of silently swallowing failures."""
     import requests as _req
     business_id = require_auth(request)
     if not business_id:
@@ -5185,15 +5248,11 @@ async def shopify_sync_debug_ebay_lookup(request: Request, order_id: str):
 
     if token_ok and legacy_item_id:
         try:
-            r = _req.get(f"{EBAY_API_BASE}/buy/browse/v1/item/get_item_by_legacy_id",
-                         params={"legacy_item_id": legacy_item_id},
-                         headers={**ebay_headers(token, content_language=False), "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"},
-                         timeout=15)
-            result["browse_lookup"] = {"status": r.status_code, "body": r.text[:1000]}
+            result["get_item_lookup"] = _ebay_get_item_status(token, legacy_item_id)
         except Exception as e:
-            result["browse_lookup"] = {"exception": str(e)}
+            result["get_item_lookup"] = {"exception": str(e)}
     else:
-        result["browse_lookup"] = {"skipped": "no legacy_item_id"}
+        result["get_item_lookup"] = {"skipped": "no legacy_item_id"}
 
     return result
 
