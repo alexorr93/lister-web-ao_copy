@@ -4887,47 +4887,40 @@ def _shopify_sync_check_one(norm_title: str, entry: dict, ebay_token: str, shopi
         "shopify_inventory_item_id": match["inventory_item_id"] if match else None,
     }
 
-@app.post("/api/shopify-sync/refresh")
-async def shopify_sync_refresh(request: Request, days_back: int = 30):
-    """The only place that makes live eBay/Shopify calls for this feature. Walks every
-    distinct title sold on eBay in the last `days_back` days and writes a fresh
-    snapshot row per title into shopify_sync_snapshot. The 'today' endpoint below reads
-    only from that table — this is what makes it instant regardless of range size.
-    Parallelized (blocking I/O, so threads) since a real backlog is a lot of titles."""
-    business_id = require_auth(request)
-    if not business_id:
-        raise HTTPException(401, "Unauthorized")
-    import datetime as _dt, concurrent.futures, asyncio
+_shopify_sync_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
+
+def _shopify_sync_refresh_work(business_id: str, days_back: int) -> dict:
+    """The actual work, run off the event loop entirely (see the endpoint below).
+    A full catalog scan with rate-limit backoff can now run well past the ~30-60s a
+    reverse proxy will wait for one HTTP response (confirmed: Railway's edge
+    returned a plain-text "upstream error" on a wide-range sync) — this has to be a
+    background job with a polled status, the same pattern already used for
+    Financials' Sync Now, not a single request/response."""
+    import datetime as _dt, concurrent.futures
 
     end_date = _dt.datetime.utcnow().strftime("%Y-%m-%d")
     start_date = (_dt.datetime.utcnow() - _dt.timedelta(days=days_back)).strftime("%Y-%m-%d")
     sold_by_title = _shopify_sync_sold_by_title(business_id, start_date, end_date)
     if not sold_by_title:
-        return {"ok": True, "checked": 0}
+        return {"checked": 0}
 
     ebay_token = get_ebay_access_token(business_id)
     settings = get_ebay_settings(business_id)
     domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
     shopify_token = get_shopify_access_token(business_id) if domain else None
 
-    def _run_all():
-        shopify_catalog = {}
-        if domain and shopify_token:
-            loc_headers = {"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"}
-            location_id = _get_shopify_primary_location_id(domain, loc_headers)
-            if location_id:
-                shopify_catalog = _fetch_all_shopify_products(domain, shopify_token, location_id)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-            return list(pool.map(
-                lambda kv: _shopify_sync_check_one(kv[0], kv[1], ebay_token, shopify_catalog),
-                sold_by_title.items(),
-            ))
+    shopify_catalog = {}
+    if domain and shopify_token:
+        loc_headers = {"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"}
+        location_id = _get_shopify_primary_location_id(domain, loc_headers)
+        if location_id:
+            shopify_catalog = _fetch_all_shopify_products(domain, shopify_token, location_id)
 
-    # Offload the whole blocking batch to a worker thread — without this, the
-    # synchronous pool.map() call below runs directly on the asyncio event loop
-    # thread and blocks it, which stalls every other request the server is
-    # handling (not just this tab) until the sync finishes.
-    results = await asyncio.to_thread(_run_all)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(
+            lambda kv: _shopify_sync_check_one(kv[0], kv[1], ebay_token, shopify_catalog),
+            sold_by_title.items(),
+        ))
 
     now_iso = _dt.datetime.utcnow().isoformat()
     rows = [{
@@ -4940,7 +4933,47 @@ async def shopify_sync_refresh(request: Request, days_back: int = 30):
     } for r in results]
     supabase.table("shopify_sync_snapshot").upsert(rows, on_conflict="business_id,norm_title").execute()
 
-    return {"ok": True, "checked": len(rows), "synced_at": now_iso}
+    return {"checked": len(rows), "synced_at": now_iso}
+
+async def _run_shopify_sync_refresh_background(business_id: str, days_back: int):
+    import asyncio, datetime as _dt
+    try:
+        result = await asyncio.to_thread(_shopify_sync_refresh_work, business_id, days_back)
+        _shopify_sync_job_status[business_id] = {
+            "running": False, "result": result,
+            "started_at": _shopify_sync_job_status.get(business_id, {}).get("started_at"),
+            "finished_at": _dt.datetime.utcnow().isoformat(),
+        }
+    except Exception as e:
+        _shopify_sync_job_status[business_id] = {
+            "running": False, "result": {"error": str(e)},
+            "started_at": _shopify_sync_job_status.get(business_id, {}).get("started_at"),
+            "finished_at": _dt.datetime.utcnow().isoformat(),
+        }
+
+@app.post("/api/shopify-sync/refresh")
+async def shopify_sync_refresh(request: Request, days_back: int = 30):
+    """Kicks off the catalog/eBay sync as a background task and returns immediately —
+    see _shopify_sync_refresh_work for why this can't be a synchronous request/response."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio, datetime as _dt
+    if _shopify_sync_job_status.get(business_id, {}).get("running"):
+        return {"started": False, "already_running": True}
+    _shopify_sync_job_status[business_id] = {
+        "running": True, "result": None,
+        "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None,
+    }
+    asyncio.create_task(_run_shopify_sync_refresh_background(business_id, days_back))
+    return {"started": True}
+
+@app.get("/api/shopify-sync/refresh-status")
+async def shopify_sync_refresh_status(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    return _shopify_sync_job_status.get(business_id, {"running": False, "result": None, "started_at": None, "finished_at": None})
 
 @app.get("/api/shopify-sync/debug-catalog-search")
 async def shopify_sync_debug_catalog_search(request: Request, q: str):

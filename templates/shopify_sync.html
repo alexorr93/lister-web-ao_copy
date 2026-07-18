@@ -171,14 +171,33 @@ async function loadSyncStatus() {
 }
 
 async function syncNow() {
-  document.getElementById('status').textContent = 'Syncing live quantities from eBay and Shopify (this can take a bit for a wide range)...';
+  document.getElementById('status').textContent = 'Starting sync (runs in the background — safe to leave this page, it\'ll pick up where it left off)...';
   try {
     const r = await fetch('/api/shopify-sync/refresh?days_back=30', {method: 'POST'});
     const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || 'Failed');
-    document.getElementById('status').textContent = `✅ Synced ${data.checked} item(s).`;
-    loadSyncStatus();
-    loadToday();
+    if (!r.ok) throw new Error(data.detail || 'Failed to start');
+    pollRefreshStatus();
+  } catch(e) {
+    document.getElementById('status').textContent = `❌ ${e.message}`;
+  }
+}
+
+async function pollRefreshStatus() {
+  try {
+    const r = await fetch('/api/shopify-sync/refresh-status');
+    const data = await r.json();
+    if (data.running) {
+      document.getElementById('status').textContent = 'Syncing live quantities from eBay and Shopify — this can take a few minutes for a big catalog, safe to leave open...';
+      setTimeout(pollRefreshStatus, 4000);
+      return;
+    }
+    if (data.result) {
+      document.getElementById('status').textContent = data.result.error
+        ? `❌ ${data.result.error}`
+        : `✅ Synced ${data.result.checked} item(s).`;
+      loadSyncStatus();
+      loadToday();
+    }
   } catch(e) {
     document.getElementById('status').textContent = `❌ ${e.message}`;
   }
@@ -312,6 +331,15 @@ function renderTable(items) {
 
 setToday();
 loadSyncStatus();
+
+// If a sync is already running when the page loads, resume polling instead of losing track of it.
+(async function checkSyncOnLoad() {
+  try {
+    const r = await fetch('/api/shopify-sync/refresh-status');
+    const data = await r.json();
+    if (data.running) pollRefreshStatus();
+  } catch(e) {}
+})();
 </script>
 </body>
 </html>
