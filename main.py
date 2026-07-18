@@ -5317,18 +5317,35 @@ async def _run_ebay_active_listings_sync_background(business_id: str):
             "finished_at": _dt.datetime.utcnow().isoformat(),
         }
 
+ACTIVE_LISTINGS_SYNC_COOLDOWN_DAYS = 3  # ~twice a week — this is a full-account ActiveList pull, not a per-item lookup, so it has no business running more often than that regardless of how many times the button gets clicked
+
 @app.post("/api/acquisitions/sync-active-listings")
-async def acquisitions_sync_active_listings(request: Request):
+async def acquisitions_sync_active_listings(request: Request, force: bool = False):
     """Kicks off the real eBay ActiveList pull as a background job — this is what
     populates the Lots page's Active Listings column. Counts get grouped by SKU
     prefix (before the first '-') in GET /api/acquisitions, the same lot-matching
-    convention already used by /api/acquisitions/debug-sku."""
+    convention already used by /api/acquisitions/debug-sku. Hard-capped to once
+    every ACTIVE_LISTINGS_SYNC_COOLDOWN_DAYS regardless of how often this is called —
+    a full-account listings pull has no reason to run more than a couple times a
+    week, and this makes that true structurally instead of just by convention."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     import asyncio, datetime as _dt
     if _ebay_active_listings_job_status.get(business_id, {}).get("running"):
         return {"started": False, "already_running": True}
+
+    last_res = supabase.table("ebay_listing_status").select("updated_at")\
+        .eq("business_id", business_id).eq("listing_status", "Active")\
+        .order("updated_at", desc=True).limit(1).execute()
+    last_synced_at = (last_res.data or [{}])[0].get("updated_at")
+    if last_synced_at and not force:
+        age = _dt.datetime.utcnow() - _dt.datetime.fromisoformat(last_synced_at.replace("Z", "+00:00")).replace(tzinfo=None)
+        if age < _dt.timedelta(days=ACTIVE_LISTINGS_SYNC_COOLDOWN_DAYS):
+            return {"started": False, "reason": "cooldown", "last_synced_at": last_synced_at,
+                    "next_allowed_at": (_dt.datetime.fromisoformat(last_synced_at.replace("Z", "+00:00")).replace(tzinfo=None)
+                                         + _dt.timedelta(days=ACTIVE_LISTINGS_SYNC_COOLDOWN_DAYS)).isoformat()}
+
     _ebay_active_listings_job_status[business_id] = {
         "running": True, "result": None,
         "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None,
