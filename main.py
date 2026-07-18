@@ -4763,14 +4763,19 @@ def _shopify_sync_sold_by_title(business_id: str, start_date: str, end_date: str
             entry["legacy_item_id"] = r.get("legacy_item_id")
     return sold_by_title
 
-def _fetch_all_shopify_products(domain: str, shopify_token: str) -> dict:
+def _fetch_all_shopify_products(domain: str, shopify_token: str, location_id: str) -> dict:
     """Paginates the entire Shopify catalog once and returns norm_title -> {title,
     qty, inventory_item_id}. Replaces per-item Shopify search: their query-string
     search syntax silently returns zero results whenever a title contains '&' or
     '+' (confirmed — a listing with both in its title matched nothing, even after
     stripping quotes), so search was never reliable for real part titles. A full
     catalog scan sidesteps that class of bug entirely and costs far fewer API calls
-    for stores with more sold titles than pages of products."""
+    for stores with more sold titles than pages of products.
+
+    qty is read from inventoryLevel at `location_id` specifically, NOT the variant's
+    inventoryQuantity field — that field is the total across ALL locations, which
+    disagreed with reality for a multi-location store (showed 1 in aggregate while
+    the actual primary-location stock, the one push writes to, was 0)."""
     import requests as _req
     catalog = {}
     cursor = None
@@ -4778,7 +4783,9 @@ def _fetch_all_shopify_products(domain: str, shopify_token: str) -> dict:
     while True:
         after_clause = f', after: "{cursor}"' if cursor else ""
         query = ('{ products(first: 250' + after_clause + ') { pageInfo { hasNextPage endCursor } '
-                 'edges { node { title variants(first: 1) { edges { node { inventoryQuantity inventoryItem { id } } } } } } } }')
+                 'edges { node { title variants(first: 1) { edges { node { inventoryItem { id '
+                 'inventoryLevel(locationId: "' + location_id + '") { quantities(names: ["available"]) { quantity } } '
+                 '} } } } } } } }')
         r = _req.post(f"https://{domain}/admin/api/2024-10/graphql.json", headers=headers,
                        json={"query": query}, timeout=30)
         if r.status_code != 200:
@@ -4788,8 +4795,13 @@ def _fetch_all_shopify_products(domain: str, shopify_token: str) -> dict:
             node = e["node"]
             title = node.get("title")
             variant_edges = (node.get("variants") or {}).get("edges", [])
-            qty = variant_edges[0]["node"].get("inventoryQuantity") if variant_edges else None
-            inv_item_id = (variant_edges[0]["node"].get("inventoryItem") or {}).get("id") if variant_edges else None
+            qty = None
+            inv_item_id = None
+            if variant_edges:
+                inv_item = variant_edges[0]["node"].get("inventoryItem") or {}
+                inv_item_id = inv_item.get("id")
+                quantities = (inv_item.get("inventoryLevel") or {}).get("quantities") or []
+                qty = quantities[0]["quantity"] if quantities else None
             catalog[_shopify_sync_norm(title)] = {"title": title, "qty": qty, "inventory_item_id": inv_item_id}
         page_info = products.get("pageInfo", {})
         if not page_info.get("hasNextPage"):
@@ -4869,7 +4881,12 @@ async def shopify_sync_refresh(request: Request, days_back: int = 30):
     shopify_token = get_shopify_access_token(business_id) if domain else None
 
     def _run_all():
-        shopify_catalog = _fetch_all_shopify_products(domain, shopify_token) if domain and shopify_token else {}
+        shopify_catalog = {}
+        if domain and shopify_token:
+            loc_headers = {"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"}
+            location_id = _get_shopify_primary_location_id(domain, loc_headers)
+            if location_id:
+                shopify_catalog = _fetch_all_shopify_products(domain, shopify_token, location_id)
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
             return list(pool.map(
                 lambda kv: _shopify_sync_check_one(kv[0], kv[1], ebay_token, shopify_catalog),
@@ -4910,7 +4927,11 @@ async def shopify_sync_debug_catalog_search(request: Request, q: str):
     if not domain or not shopify_token:
         raise HTTPException(400, "Shopify not connected")
 
-    catalog = _fetch_all_shopify_products(domain, shopify_token)
+    loc_headers = {"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"}
+    location_id = _get_shopify_primary_location_id(domain, loc_headers)
+    if not location_id:
+        raise HTTPException(400, "Could not determine Shopify location")
+    catalog = _fetch_all_shopify_products(domain, shopify_token, location_id)
     q_lower = q.lower()
     matches = [{"title": v["title"], "norm_title": k, "qty": v["qty"]}
                for k, v in catalog.items() if q_lower in k]
