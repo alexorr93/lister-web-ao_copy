@@ -4862,6 +4862,27 @@ async def shopify_sync_today(request: Request, date: str = None):
             "shopify_inventory_item_id": shopify_inventory_item_id,
         })
 
+    # Real server-side "already pushed" check against the push audit table —
+    # most recent successful push per order_id wins, since a row can be re-pushed.
+    try:
+        log_res = supabase.table("shopify_push_log").select("order_id,new_quantity,created_at")\
+            .eq("business_id", business_id).eq("status", "success").order("created_at").execute()
+        pushed_by_order_id = {}
+        for row in (log_res.data or []):
+            for oid in (row.get("order_id") or "").split(","):
+                oid = oid.strip()
+                if oid:
+                    pushed_by_order_id[oid] = row.get("new_quantity")
+        for it in items:
+            match = next((pushed_by_order_id[oid] for oid in it["order_ids"] if oid in pushed_by_order_id), None)
+            it["already_pushed"] = match is not None
+            it["qty_matches"] = match is not None and match == it.get("shopify_live_qty")
+    except Exception as e:
+        print(f"shopify_push_log read failed: {e}")
+        for it in items:
+            it["already_pushed"] = False
+            it["qty_matches"] = False
+
     return {"date": today, "items": items}
 
 def _get_shopify_primary_location_id(domain: str, headers: dict) -> str:
@@ -4899,7 +4920,7 @@ async def shopify_sync_push(request: Request, items: List[dict] = Body(...)):
         order_ids = it.get("order_ids", [])
         log_row = {
             "business_id": business_id, "order_id": ",".join(order_ids) if order_ids else "",
-            "sku": sku, "quantity_deducted": qty, "shopify_inventory_item_id": inv_item_id,
+            "sku": sku, "title": it.get("title"), "quantity_deducted": qty,
         }
         if not inv_item_id or not qty:
             log_row["status"] = "no_shopify_match"
@@ -4939,9 +4960,9 @@ async def shopify_sync_push(request: Request, items: List[dict] = Body(...)):
                 results.append({"title": it.get("title"), "status": "error", "error": str(e)})
 
         try:
-            supabase.table("shopify_qty_sync_log").insert(log_row).execute()
-        except Exception:
-            pass
+            supabase.table("shopify_push_log").insert(log_row).execute()
+        except Exception as e:
+            print(f"shopify_push_log insert failed: {e}")
 
     return {"ok": True, "results": results}
 

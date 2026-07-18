@@ -65,21 +65,6 @@ function escapeHtml(s) {
 }
 
 let currentItems = [];
-let currentDate = null;
-
-// There's no server-side push audit log to read back (shopify_qty_sync_log
-// doesn't exist in the DB), so "already pushed today" is tracked here in the
-// browser instead, keyed by date + the eBay order id(s) behind each row.
-function pushKey(it) {
-  return ((it.order_ids || []).slice().sort().join(',')) || (it.sku + '|' + it.title);
-}
-function loadPushedMap(date) {
-  try { return JSON.parse(localStorage.getItem('shopify_sync_pushed_' + date)) || {}; }
-  catch(e) { return {}; }
-}
-function savePushedMap(date, map) {
-  try { localStorage.setItem('shopify_sync_pushed_' + date, JSON.stringify(map)); } catch(e) {}
-}
 
 async function loadToday() {
   document.getElementById('status').textContent = 'Checking live quantities on both platforms...';
@@ -91,15 +76,7 @@ async function loadToday() {
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed');
     document.getElementById('status').textContent = `Date: ${data.date} — ${data.items.length} distinct SKU(s) sold on eBay today.`;
-    currentDate = data.date;
-    const pushedMap = loadPushedMap(data.date);
-    currentItems = data.items.map(it => {
-      const storedQty = pushedMap[pushKey(it)];
-      return Object.assign({}, it, {
-        already_pushed: storedQty !== undefined,
-        qty_matches: storedQty !== undefined && storedQty === it.shopify_live_qty,
-      });
-    });
+    currentItems = data.items;
     renderTable(currentItems);
   } catch(e) {
     document.getElementById('status').textContent = `❌ ${e.message}`;
@@ -123,9 +100,6 @@ async function pushOne(idx) {
       it.already_pushed = true;
       it.shopify_live_qty = res.new_quantity;
       it.qty_matches = true;
-      const map = loadPushedMap(currentDate);
-      map[pushKey(it)] = res.new_quantity;
-      savePushedMap(currentDate, map);
       row.classList.add('synced');
       cell.innerHTML = `<span class="synced-badge">✔ Pushed — now ${res.new_quantity}</span><button class="push-again" onclick="pushOne(${idx})">push again</button>`;
     } else {
