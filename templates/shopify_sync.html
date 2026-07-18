@@ -29,7 +29,7 @@ h1 { font-size: 20px; margin-bottom: 4px; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn-orange { background: #ea580c; border-color: #ea580c; color: #fff; }
 .btn-orange:hover { background: #c2410c; }
-.view-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.view-tabs { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
 .view-tab { padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; }
 .view-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
@@ -90,8 +90,11 @@ tr.ignored:hover td { opacity: 0.85; }
   <div class="view-tabs">
     <button class="view-tab active" id="tab-active" onclick="setView('active')">Active</button>
     <button class="view-tab" id="tab-inactive" onclick="setView('inactive')">Inactive</button>
-    <button class="btn" onclick="syncEbayListings()" title="Pulls your real eBay Unsold-listings bucket via the Trading API — this is what actually populates the Inactive tab" style="margin-left:8px;">🔄 Sync eBay Listings</button>
-    <span id="ebay-listings-synced" style="font-size:11px;color:var(--muted);align-self:center;"></span>
+  </div>
+
+  <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+    <button class="btn" onclick="syncEbayListings()" title="Pulls your real eBay Unsold-listings bucket via the Trading API — this is what actually populates the Inactive tab">🔄 Sync eBay Listings</button>
+    <span id="ebay-listings-synced" style="font-size:11px;color:var(--muted);"></span>
   </div>
 
   <div id="status" class="status-msg"></div>
