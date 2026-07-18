@@ -29,6 +29,9 @@ h1 { font-size: 20px; margin-bottom: 4px; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn-orange { background: #ea580c; border-color: #ea580c; color: #fff; }
 .btn-orange:hover { background: #c2410c; }
+.view-tabs { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
+.view-tab { padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; }
+.view-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 th { text-align: left; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; padding: 10px 12px; border-bottom: 1px solid var(--border); position: sticky; top: 52px; background: var(--card); z-index: 10; }
 td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid var(--border); }
@@ -62,31 +65,55 @@ tr.ignored:hover td { opacity: 0.85; }
   <h1>Shopify Sync</h1>
   <div class="sub">Everything sold on eBay in the selected range, matched against the last synced Shopify/eBay quantities. Reads local data only — click Sync Now to refresh it. Nothing gets changed until you push.</div>
 
-  <div class="filter-bar">
-    <div>
-      <div class="field-label">Start Date</div>
-      <input type="date" class="field-input" id="start-date"/>
-    </div>
-    <div>
-      <div class="field-label">End Date</div>
-      <input type="date" class="field-input" id="end-date"/>
-    </div>
-    <button class="btn btn-primary" onclick="loadToday()">Apply</button>
-    <div class="quick-range">
-      <button class="btn" onclick="setToday()">Today</button>
-      <button class="btn" onclick="setRange(7)">Last 7d</button>
-      <button class="btn" onclick="setRange(30)">Last 30d</button>
-      <button class="btn" onclick="setThisMonth()">This Month</button>
-      <button class="btn" onclick="setLastMonth()">Last Month</button>
-    </div>
-    <button class="btn btn-primary" onclick="syncNow()" title="Refreshes live eBay/Shopify quantities into the local snapshot — this is the only action that calls out to eBay/Shopify">🔄 Sync Now</button>
-    <button class="btn btn-orange" onclick="pushAllFound()" title="Pushes every row that's found in Shopify but not yet matching eBay — sets each to eBay's live quantity">⚡ Push All Found</button>
-    <span id="last-synced" style="font-size:11px;color:var(--muted);align-self:center;"></span>
+  <div class="view-tabs">
+    <button class="view-tab active" id="tab-active" onclick="setView('active')">Active</button>
+    <button class="view-tab" id="tab-inactive" onclick="setView('inactive')">Inactive</button>
   </div>
 
-  <div id="status" class="status-msg"></div>
+  <div id="active-panel">
+    <div class="filter-bar">
+      <div>
+        <div class="field-label">Start Date</div>
+        <input type="date" class="field-input" id="start-date"/>
+      </div>
+      <div>
+        <div class="field-label">End Date</div>
+        <input type="date" class="field-input" id="end-date"/>
+      </div>
+      <button class="btn btn-primary" onclick="loadToday()">Apply</button>
+      <div class="quick-range">
+        <button class="btn" onclick="setToday()">Today</button>
+        <button class="btn" onclick="setRange(7)">Last 7d</button>
+        <button class="btn" onclick="setRange(30)">Last 30d</button>
+        <button class="btn" onclick="setThisMonth()">This Month</button>
+        <button class="btn" onclick="setLastMonth()">Last Month</button>
+      </div>
+      <button class="btn btn-primary" onclick="syncNow()" title="Refreshes live eBay/Shopify quantities into the local snapshot — this is the only action that calls out to eBay/Shopify">🔄 Sync Now</button>
+      <button class="btn btn-orange" onclick="pushAllFound()" title="Pushes every row that's found in Shopify but not yet matching eBay — sets each to eBay's live quantity">⚡ Push All Found</button>
+      <span id="last-synced" style="font-size:11px;color:var(--muted);align-self:center;"></span>
+    </div>
 
-  <div id="table-area"><div class="empty">Loading today's sales…</div></div>
+    <div id="status" class="status-msg"></div>
+
+    <div id="table-area"><div class="empty">Loading today's sales…</div></div>
+  </div>
+
+  <div id="inactive-panel" style="display:none;">
+    <div class="filter-bar">
+      <div>
+        <div class="field-label">Show Top</div>
+        <input type="number" class="field-input" id="inactive-limit" value="15" min="1" max="500" style="width:80px;"/>
+      </div>
+      <button class="btn btn-primary" onclick="loadInactive()">Load</button>
+      <button class="btn" onclick="syncEbayListings()" title="Pulls your real eBay Unsold-listings bucket via the Trading API — this is what actually populates this tab">🔄 Sync eBay Listings</button>
+      <button class="btn btn-orange" onclick="checkInactiveInShopify()" title="Checks exactly the items currently shown below against your live Shopify catalog">🔍 Check in Shopify</button>
+      <span id="inactive-last-synced" style="font-size:11px;color:var(--muted);align-self:center;"></span>
+    </div>
+
+    <div id="inactive-status" class="status-msg"></div>
+
+    <div id="inactive-table-area"><div class="empty">Click "Sync eBay Listings" to pull your inactive eBay listings.</div></div>
+  </div>
 </div>
 
 <script>
@@ -95,6 +122,19 @@ function escapeHtml(s) {
 }
 
 let currentItems = [];
+let inactiveItems = [];
+let inactiveLoaded = false;
+
+function setView(view) {
+  document.getElementById('tab-active').classList.toggle('active', view === 'active');
+  document.getElementById('tab-inactive').classList.toggle('active', view === 'inactive');
+  document.getElementById('active-panel').style.display = view === 'active' ? '' : 'none';
+  document.getElementById('inactive-panel').style.display = view === 'inactive' ? '' : 'none';
+  if (view === 'inactive' && !inactiveLoaded) {
+    inactiveLoaded = true;
+    loadInactive();
+  }
+}
 
 function setToday() {
   const now = new Date();
@@ -344,6 +384,165 @@ loadSyncStatus();
     if (data.running) pollRefreshStatus();
   } catch(e) {}
 })();
+
+// --- Inactive tab: entirely separate state from currentItems on purpose — mixing
+// the two views' arrays is exactly what desynced row indexes last time this was tried.
+
+async function loadInactive() {
+  const limit = Math.max(1, parseInt(document.getElementById('inactive-limit').value, 10) || 15);
+  document.getElementById('inactive-status').textContent = 'Loading...';
+  document.getElementById('inactive-table-area').innerHTML = '';
+  try {
+    const r = await fetch('/api/shopify-sync/inactive-items?limit=' + limit, {cache: 'no-store'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    inactiveItems = data.items;
+    document.getElementById('inactive-status').textContent = `Showing ${data.items.length} of ${data.total} inactive eBay listing(s).`;
+    document.getElementById('inactive-last-synced').textContent = data.last_synced_at
+      ? 'eBay listings last synced: ' + new Date(data.last_synced_at).toLocaleString()
+      : 'Never synced — click Sync eBay Listings';
+    renderInactiveTable();
+  } catch(e) {
+    document.getElementById('inactive-status').textContent = `❌ ${e.message}`;
+  }
+}
+
+async function syncEbayListings() {
+  document.getElementById('inactive-status').textContent = 'Pulling your inactive eBay listings (runs in the background — safe to leave this page)...';
+  try {
+    const r = await fetch('/api/shopify-sync/sync-ebay-listings', {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed to start');
+    pollEbayListingsSync();
+  } catch(e) {
+    document.getElementById('inactive-status').textContent = `❌ ${e.message}`;
+  }
+}
+
+async function pollEbayListingsSync() {
+  try {
+    const r = await fetch('/api/shopify-sync/sync-ebay-listings-status', {cache: 'no-store'});
+    const data = await r.json();
+    if (data.running) {
+      document.getElementById('inactive-status').textContent = 'Pulling your inactive eBay listings...';
+      setTimeout(pollEbayListingsSync, 4000);
+      return;
+    }
+    if (data.result) {
+      document.getElementById('inactive-status').textContent = data.result.error
+        ? `❌ ${data.result.error}`
+        : `✅ Synced ${data.result.checked} inactive listing(s).`;
+      loadInactive();
+    }
+  } catch(e) {
+    document.getElementById('inactive-status').textContent = `❌ ${e.message}`;
+  }
+}
+
+async function checkInactiveInShopify() {
+  if (!inactiveItems.length) { alert('Nothing loaded — click Sync eBay Listings first.'); return; }
+  document.getElementById('inactive-status').textContent = `Checking ${inactiveItems.length} item(s) against your live Shopify catalog...`;
+  try {
+    const r = await fetch('/api/shopify-sync/inactive-check', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(inactiveItems.map(it => ({item_id: it.item_id, title: it.title, sku: it.sku}))),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed to start');
+    pollInactiveCheck();
+  } catch(e) {
+    document.getElementById('inactive-status').textContent = `❌ ${e.message}`;
+  }
+}
+
+async function pollInactiveCheck() {
+  try {
+    const r = await fetch('/api/shopify-sync/inactive-check-status', {cache: 'no-store'});
+    const data = await r.json();
+    if (data.running) {
+      document.getElementById('inactive-status').textContent = 'Checking against your live Shopify catalog...';
+      setTimeout(pollInactiveCheck, 4000);
+      return;
+    }
+    if (data.result) {
+      if (data.result.error) {
+        document.getElementById('inactive-status').textContent = `❌ ${data.result.error}`;
+        return;
+      }
+      const byId = {};
+      (data.result.results || []).forEach(res => { byId[res.item_id] = res; });
+      inactiveItems.forEach(it => {
+        const match = byId[it.item_id];
+        if (match) Object.assign(it, match, {checked: true});
+      });
+      document.getElementById('inactive-status').textContent = `✅ Checked ${data.result.checked} item(s) against Shopify.`;
+      renderInactiveTable();
+    }
+  } catch(e) {
+    document.getElementById('inactive-status').textContent = `❌ ${e.message}`;
+  }
+}
+
+async function pushInactiveOne(idx, forceZero) {
+  const it = inactiveItems[idx];
+  const cell = document.getElementById('inactive-push-cell-' + idx);
+  cell.textContent = 'Pushing...';
+  const payload = {
+    shopify_inventory_item_id: it.shopify_inventory_item_id,
+    ebay_live_qty: forceZero ? 0 : it.ebay_live_qty,
+    sku: it.sku, title: it.title,
+  };
+  try {
+    const r = await fetch('/api/shopify-sync/push', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify([payload]),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    const res = data.results[0];
+    if (res.status === 'success') {
+      it.shopify_live_qty = res.new_quantity;
+      cell.innerHTML = `<span class="synced-badge">✔ Set to ${res.new_quantity}</span><button class="push-again" onclick="pushInactiveOne(${idx}, false)">push again</button><button class="ignore-link" onclick="pushInactiveOne(${idx}, true)">end (0)</button>`;
+    } else {
+      cell.innerHTML = `<span class="no">✘ ${res.error || res.status}</span>`;
+    }
+  } catch(e) {
+    cell.innerHTML = `<span class="no">✘ ${e.message}</span>`;
+  }
+}
+
+function renderInactiveTable() {
+  if (!inactiveItems.length) {
+    document.getElementById('inactive-table-area').innerHTML = '<div class="empty">No inactive eBay listings loaded yet.</div>';
+    return;
+  }
+  let html = `<table><thead><tr>
+    <th>SKU</th><th>eBay Item</th><th>eBay Qty Remaining</th><th>Ended</th><th>Found in Shopify?</th><th>Shopify Live Qty</th><th>Shopify Title</th><th>Action</th>
+  </tr></thead><tbody>`;
+  inactiveItems.forEach((it, idx) => {
+    let actionCell;
+    if (!it.checked) {
+      actionCell = '<span class="muted">Check in Shopify</span>';
+    } else if (!it.shopify_found) {
+      actionCell = '<span class="no">✘ Not in Shopify</span>';
+    } else if (it.shopify_live_qty === it.ebay_live_qty) {
+      actionCell = `<span class="synced-badge">✔ Already Synced</span><button class="push-again" onclick="pushInactiveOne(${idx}, false)">push again</button><button class="ignore-link" onclick="pushInactiveOne(${idx}, true)">end (0)</button>`;
+    } else {
+      actionCell = `<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushInactiveOne(${idx}, false)">Push → ${it.ebay_live_qty}</button><button class="ignore-link" onclick="pushInactiveOne(${idx}, true)">end (0)</button>`;
+    }
+    html += `<tr>
+      <td class="muted">${escapeHtml(it.sku)}</td>
+      <td>${escapeHtml(it.title || '')}</td>
+      <td>${it.ebay_live_qty ?? '—'}</td>
+      <td class="muted">${it.end_time ? new Date(it.end_time).toLocaleDateString() : '—'}</td>
+      <td class="${it.checked ? (it.shopify_found ? 'yes' : 'no') : 'muted'}">${it.checked ? (it.shopify_found ? '✔ Yes' : '✘ No') : '—'}</td>
+      <td>${it.shopify_live_qty ?? '—'}</td>
+      <td class="muted">${escapeHtml(it.shopify_title || '')}</td>
+      <td id="inactive-push-cell-${idx}">${actionCell}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('inactive-table-area').innerHTML = html;
+}
 </script>
 </body>
 </html>

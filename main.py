@@ -5129,6 +5129,234 @@ async def shopify_sync_refresh_status(request: Request, response: Response):
     response.headers["Cache-Control"] = "no-store"
     return _shopify_sync_job_status.get(business_id, {"running": False, "result": None, "started_at": None, "finished_at": None})
 
+def _ebay_get_unsold_listings_page(token: str, page_number: int, entries_per_page: int = 200) -> dict:
+    """One page of eBay's Trading API GetMyeBaySelling / UnsoldList — eBay's own
+    'ended without selling, still sitting there inactive' bucket, the same thing
+    Seller Hub itself calls Unsold. Same seller-facing Trading API family as
+    _ebay_get_item_status (OAuth token in the XML body, not an Authorization header,
+    on its own quota — NOT the Buy Browse API)."""
+    import requests as _req
+    import xml.etree.ElementTree as ET
+
+    xml_body = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+        f'<RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>'
+        '<UnsoldList><Include>true</Include>'
+        f'<Pagination><EntriesPerPage>{entries_per_page}</EntriesPerPage><PageNumber>{page_number}</PageNumber></Pagination>'
+        '</UnsoldList>'
+        '<DetailLevel>ReturnAll</DetailLevel>'
+        '</GetMyeBaySellingRequest>'
+    )
+    headers = {
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "1193",
+        "X-EBAY-API-CALL-NAME": "GetMyeBaySelling",
+        "X-EBAY-API-SITEID": "0",
+        "Content-Type": "text/xml",
+    }
+    r = _req.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_body.encode("utf-8"), timeout=30)
+    root = ET.fromstring(r.content)
+    return _ebay_xml_to_dict(root)
+
+def _sync_ebay_unsold_listings_work(business_id: str) -> dict:
+    """Pulls every page of eBay's real UnsoldList and wholesale-replaces
+    ebay_listing_status for this business — a listing that's since been relisted or
+    sold should disappear from 'inactive', not linger from a stale row, so this is a
+    full delete+replace rather than an incremental upsert."""
+    import datetime as _dt
+
+    token = get_ebay_access_token(business_id)
+    all_items = []
+    page = 1
+    total_pages = 1
+    while page <= total_pages:
+        resp = _ebay_get_unsold_listings_page(token, page)
+        ack = resp.get("Ack")
+        if ack not in ("Success", "Warning"):
+            raise Exception(f"eBay GetMyeBaySelling failed (Ack={ack}): {resp.get('Errors')}")
+        unsold = resp.get("UnsoldList") or {}
+        item_array = unsold.get("ItemArray") or {}
+        items = item_array.get("Item") or []
+        if isinstance(items, dict):
+            items = [items]
+        all_items.extend(items)
+        pagination = unsold.get("PaginationResult") or {}
+        total_pages = _safe_int(pagination.get("TotalNumberOfPages")) or 1
+        page += 1
+
+    now_iso = _dt.datetime.utcnow().isoformat()
+    rows = []
+    for it in all_items:
+        title = it.get("Title")
+        listing_details = it.get("ListingDetails") or {}
+        rows.append({
+            "business_id": business_id, "item_id": it.get("ItemID"),
+            "sku": it.get("SKU"), "title": title, "norm_title": _shopify_sync_norm(title),
+            "quantity": _safe_int(it.get("Quantity")), "quantity_sold": _safe_int(it.get("QuantitySold")),
+            "listing_status": "Unsold", "end_time": listing_details.get("EndTime"),
+            "updated_at": now_iso,
+        })
+
+    supabase.table("ebay_listing_status").delete().eq("business_id", business_id).execute()
+    if rows:
+        supabase.table("ebay_listing_status").upsert(rows, on_conflict="business_id,item_id").execute()
+
+    return {"checked": len(rows), "synced_at": now_iso}
+
+_ebay_listings_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
+
+async def _run_ebay_listings_sync_background(business_id: str):
+    import asyncio, datetime as _dt
+    try:
+        result = await asyncio.to_thread(_sync_ebay_unsold_listings_work, business_id)
+        _ebay_listings_job_status[business_id] = {
+            "running": False, "result": result,
+            "started_at": _ebay_listings_job_status.get(business_id, {}).get("started_at"),
+            "finished_at": _dt.datetime.utcnow().isoformat(),
+        }
+    except Exception as e:
+        _ebay_listings_job_status[business_id] = {
+            "running": False, "result": {"error": str(e)},
+            "started_at": _ebay_listings_job_status.get(business_id, {}).get("started_at"),
+            "finished_at": _dt.datetime.utcnow().isoformat(),
+        }
+
+@app.post("/api/shopify-sync/sync-ebay-listings")
+async def shopify_sync_sync_ebay_listings(request: Request):
+    """Kicks off the real eBay Unsold-listings pull as a background job — this is
+    what actually populates the Inactive tab. No date range, no Shopify calls here at
+    all; just eBay's own current inactive-listings bucket."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio, datetime as _dt
+    if _ebay_listings_job_status.get(business_id, {}).get("running"):
+        return {"started": False, "already_running": True}
+    _ebay_listings_job_status[business_id] = {
+        "running": True, "result": None,
+        "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None,
+    }
+    asyncio.create_task(_run_ebay_listings_sync_background(business_id))
+    return {"started": True}
+
+@app.get("/api/shopify-sync/sync-ebay-listings-status")
+async def shopify_sync_sync_ebay_listings_status(request: Request, response: Response):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    response.headers["Cache-Control"] = "no-store"
+    return _ebay_listings_job_status.get(business_id, {"running": False, "result": None, "started_at": None, "finished_at": None})
+
+@app.get("/api/shopify-sync/inactive-items")
+async def shopify_sync_inactive_items(request: Request, response: Response, limit: int = 15):
+    """Pure local read of the last eBay Unsold-listings sync — zero external calls,
+    so this is instant no matter how many total inactive listings there are. Ordered
+    by end_time desc (most recently ended first) and capped at `limit` so the page
+    never tries to render/act on all ~260 at once; Shopify matching is a separate,
+    explicit step (see /inactive-check) scoped to exactly what this returns."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    response.headers["Cache-Control"] = "no-store"
+    limit = max(1, min(limit, 500))
+
+    res = supabase.table("ebay_listing_status").select("*").eq("business_id", business_id).execute()
+    rows = res.data or []
+    total = len(rows)
+    rows.sort(key=lambda r: r.get("end_time") or "", reverse=True)
+    rows = rows[:limit]
+
+    items = [{
+        "item_id": r.get("item_id"), "sku": r.get("sku") or "", "title": r.get("title") or "",
+        "end_time": r.get("end_time"),
+        "ebay_live_qty": max((r.get("quantity") or 0) - (r.get("quantity_sold") or 0), 0),
+        "shopify_found": False, "shopify_live_qty": None, "shopify_title": None, "shopify_inventory_item_id": None,
+    } for r in rows]
+
+    last_synced = max((r.get("updated_at") for r in (res.data or []) if r.get("updated_at")), default=None)
+    return {"items": items, "total": total, "last_synced_at": last_synced}
+
+_inactive_check_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
+
+def _inactive_check_work(business_id: str, items: list) -> dict:
+    """Matches exactly the N inactive items the page currently has on screen against
+    a fresh Shopify catalog scan — the same _fetch_all_shopify_products already used
+    by the Active tab. Deliberately not persisted anywhere: this is a live check on
+    demand, same explicit-action contract as Sync Now, just without a snapshot table
+    on this side."""
+    settings = get_ebay_settings(business_id)
+    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+    if not domain:
+        return {"error": "Shopify not connected"}
+    shopify_token = get_shopify_access_token(business_id)
+    if not shopify_token:
+        return {"error": "Shopify not connected"}
+    loc_headers = {"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"}
+    location_id = _get_shopify_primary_location_id(domain, loc_headers)
+    if not location_id:
+        return {"error": "Could not determine Shopify location"}
+
+    shopify_catalog, catalog_complete, catalog_pages = _fetch_all_shopify_products(domain, shopify_token, location_id)
+    if not catalog_complete:
+        return {"error": f"Shopify catalog scan was rate-limited and only got through "
+                          f"{catalog_pages} page(s) ({len(shopify_catalog)} products) before giving up. "
+                          f"Try again in a minute."}
+
+    results = []
+    for it in items:
+        norm_title = _shopify_sync_norm(it.get("title") or "")
+        match = shopify_catalog.get(norm_title)
+        results.append({
+            "item_id": it.get("item_id"), "shopify_found": match is not None,
+            "shopify_live_qty": match["qty"] if match else None,
+            "shopify_title": match["title"] if match else None,
+            "shopify_inventory_item_id": match["inventory_item_id"] if match else None,
+        })
+    return {"checked": len(results), "results": results}
+
+async def _run_inactive_check_background(business_id: str, items: list):
+    import asyncio, datetime as _dt
+    try:
+        result = await asyncio.to_thread(_inactive_check_work, business_id, items)
+        _inactive_check_job_status[business_id] = {
+            "running": False, "result": result,
+            "started_at": _inactive_check_job_status.get(business_id, {}).get("started_at"),
+            "finished_at": _dt.datetime.utcnow().isoformat(),
+        }
+    except Exception as e:
+        _inactive_check_job_status[business_id] = {
+            "running": False, "result": {"error": str(e)},
+            "started_at": _inactive_check_job_status.get(business_id, {}).get("started_at"),
+            "finished_at": _dt.datetime.utcnow().isoformat(),
+        }
+
+@app.post("/api/shopify-sync/inactive-check")
+async def shopify_sync_inactive_check(request: Request, items: List[dict] = Body(...)):
+    """Kicks off a Shopify catalog match for exactly the inactive items currently on
+    screen (title/sku/item_id) as a background job — the catalog scan itself is the
+    same operation that needs background treatment on the Active tab, regardless of
+    how few items are being matched against it."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio, datetime as _dt
+    if _inactive_check_job_status.get(business_id, {}).get("running"):
+        return {"started": False, "already_running": True}
+    _inactive_check_job_status[business_id] = {
+        "running": True, "result": None,
+        "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None,
+    }
+    asyncio.create_task(_run_inactive_check_background(business_id, items))
+    return {"started": True}
+
+@app.get("/api/shopify-sync/inactive-check-status")
+async def shopify_sync_inactive_check_status(request: Request, response: Response):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    response.headers["Cache-Control"] = "no-store"
+    return _inactive_check_job_status.get(business_id, {"running": False, "result": None, "started_at": None, "finished_at": None})
+
 @app.get("/api/shopify-sync/debug-catalog-search")
 async def shopify_sync_debug_catalog_search(request: Request, q: str):
     """Temporary read-only diagnostic: pulls the full live Shopify catalog (same
