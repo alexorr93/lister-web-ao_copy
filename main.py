@@ -4775,8 +4775,16 @@ def _fetch_all_shopify_products(domain: str, shopify_token: str, location_id: st
     qty is read from inventoryLevel at `location_id` specifically, NOT the variant's
     inventoryQuantity field — that field is the total across ALL locations, which
     disagreed with reality for a multi-location store (showed 1 in aggregate while
-    the actual primary-location stock, the one push writes to, was 0)."""
-    import requests as _req
+    the actual primary-location stock, the one push writes to, was 0).
+
+    A large catalog is ~20 paginated requests; Shopify's GraphQL cost-based rate
+    limit can throttle (429) partway through that run. The old version silently gave
+    up on the first non-200 response, returning an incomplete catalog that made
+    real, existing products look "not found" simply because they were on a later
+    page that never got fetched. This version backs off and retries on 429, and
+    proactively paces itself using Shopify's own throttle-status extension so it
+    rarely needs to."""
+    import requests as _req, time
     catalog = {}
     cursor = None
     headers = {"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"}
@@ -4786,11 +4794,25 @@ def _fetch_all_shopify_products(domain: str, shopify_token: str, location_id: st
                  'edges { node { title variants(first: 1) { edges { node { inventoryItem { id '
                  'inventoryLevel(locationId: "' + location_id + '") { quantities(names: ["available"]) { quantity } } '
                  '} } } } } } } }')
-        r = _req.post(f"https://{domain}/admin/api/2024-10/graphql.json", headers=headers,
-                       json={"query": query}, timeout=30)
-        if r.status_code != 200:
+
+        body = None
+        for attempt in range(6):
+            r = _req.post(f"https://{domain}/admin/api/2024-10/graphql.json", headers=headers,
+                           json={"query": query}, timeout=30)
+            if r.status_code == 200:
+                body = r.json()
+                break
+            if r.status_code == 429:
+                wait = float(r.headers.get("Retry-After", 2 ** attempt))
+                time.sleep(min(wait, 30))
+                continue
             break
-        products = (r.json().get("data", {}) or {}).get("products", {}) or {}
+        if body is None:
+            # Genuinely failed (not just throttled) after retries — stop here rather
+            # than loop forever, but whatever was collected so far is still returned.
+            break
+
+        products = (body.get("data", {}) or {}).get("products", {}) or {}
         for e in products.get("edges", []):
             node = e["node"]
             title = node.get("title")
@@ -4803,6 +4825,14 @@ def _fetch_all_shopify_products(domain: str, shopify_token: str, location_id: st
                 quantities = (inv_item.get("inventoryLevel") or {}).get("quantities") or []
                 qty = quantities[0]["quantity"] if quantities else None
             catalog[_shopify_sync_norm(title)] = {"title": title, "qty": qty, "inventory_item_id": inv_item_id}
+
+        # Pace ourselves against Shopify's own cost budget instead of waiting to get
+        # throttled — cheaper than reactive 429 handling for a long paginated run.
+        throttle = ((body.get("extensions", {}) or {}).get("cost", {}) or {}).get("throttleStatus", {})
+        available, cost, restore_rate = throttle.get("currentlyAvailable"), (body.get("extensions", {}) or {}).get("cost", {}).get("requestedQueryCost"), throttle.get("restoreRate")
+        if available is not None and cost and restore_rate and available < cost:
+            time.sleep(min((cost - available) / restore_rate, 10))
+
         page_info = products.get("pageInfo", {})
         if not page_info.get("hasNextPage"):
             break

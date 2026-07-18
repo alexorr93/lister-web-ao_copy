@@ -162,8 +162,10 @@ async function loadSyncStatus() {
   try {
     const r = await fetch('/api/shopify-sync/sync-status');
     const data = await r.json();
+    // Postgres already returns an explicit offset (e.g. "...+00:00") for a
+    // timestamptz column — appending 'Z' on top of that produced "Invalid Date".
     document.getElementById('last-synced').textContent = data.last_synced_at
-      ? 'Last synced: ' + new Date(data.last_synced_at + 'Z').toLocaleString()
+      ? 'Last synced: ' + new Date(data.last_synced_at).toLocaleString()
       : 'Never synced — click Sync Now';
   } catch(e) {}
 }
