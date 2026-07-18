@@ -5014,18 +5014,21 @@ async def shopify_sync_debug_catalog_search(request: Request, q: str):
                for k, v in catalog.items() if q_lower in k]
     return {"catalog_size": len(catalog), "complete": complete, "pages_fetched": pages, "matches": matches}
 
-@app.get("/api/shopify-sync/debug-exact-match-by-sku")
-async def shopify_sync_debug_exact_match_by_sku(request: Request, sku: str):
+@app.get("/api/shopify-sync/debug-exact-match-by-order")
+async def shopify_sync_debug_exact_match_by_order(request: Request, order_id: str):
     """Same as debug-exact-match, but pulls the eBay title straight from the orders
-    table by SKU instead of accepting it as a URL param — a hand-retyped title would
-    silently 'fix' whatever invisible character is actually the bug, testing nothing."""
+    table by order_id (the actual unique key) instead of accepting it as a URL param
+    — a hand-retyped title would silently 'fix' whatever invisible character is
+    actually the bug, testing nothing. NOT sku: sku is a lot/location code here, not
+    a unique product ID (confirmed elsewhere in this file) — using it to look up a
+    specific order pulled a completely unrelated listing that happened to share it."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     order_res = supabase.table("orders").select("title").eq("business_id", business_id)\
-        .eq("platform", "eBay").eq("sku", sku).limit(1).execute()
+        .eq("platform", "eBay").eq("order_id", order_id).limit(1).execute()
     if not order_res.data:
-        raise HTTPException(404, f"No eBay order found with sku={sku}")
+        raise HTTPException(404, f"No eBay order found with order_id={order_id}")
     return await shopify_sync_debug_exact_match(request, ebay_title=order_res.data[0]["title"])
 
 @app.get("/api/shopify-sync/debug-exact-match")
