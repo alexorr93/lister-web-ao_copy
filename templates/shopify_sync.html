@@ -90,6 +90,8 @@ tr.ignored:hover td { opacity: 0.85; }
   <div class="view-tabs">
     <button class="view-tab active" id="tab-active" onclick="setView('active')">Active</button>
     <button class="view-tab" id="tab-inactive" onclick="setView('inactive')">Inactive</button>
+    <button class="btn" onclick="syncEbayListings()" title="Pulls your real eBay Unsold-listings bucket via the Trading API — this is what actually populates the Inactive tab" style="margin-left:8px;">🔄 Sync eBay Listings</button>
+    <span id="ebay-listings-synced" style="font-size:11px;color:var(--muted);align-self:center;"></span>
   </div>
 
   <div id="status" class="status-msg"></div>
@@ -247,6 +249,50 @@ async function pollRefreshStatus() {
   }
 }
 
+async function loadEbayListingsSyncStatus() {
+  try {
+    const r = await fetch('/api/shopify-sync/sync-ebay-listings-status', {cache: 'no-store'});
+    const data = await r.json();
+    if (data.result && !data.result.error && data.result.synced_at) {
+      document.getElementById('ebay-listings-synced').textContent =
+        'eBay listings last synced: ' + new Date(data.result.synced_at).toLocaleString();
+    }
+  } catch(e) {}
+}
+
+async function syncEbayListings() {
+  document.getElementById('status').textContent = 'Starting eBay listings sync (runs in the background)...';
+  try {
+    const r = await fetch('/api/shopify-sync/sync-ebay-listings', {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed to start');
+    pollEbayListingsSync();
+  } catch(e) {
+    document.getElementById('status').textContent = `❌ ${e.message}`;
+  }
+}
+
+async function pollEbayListingsSync() {
+  try {
+    const r = await fetch('/api/shopify-sync/sync-ebay-listings-status', {cache: 'no-store'});
+    const data = await r.json();
+    if (data.running) {
+      document.getElementById('status').textContent = 'Pulling your eBay Unsold-listings bucket — safe to leave open...';
+      setTimeout(pollEbayListingsSync, 4000);
+      return;
+    }
+    if (data.result) {
+      document.getElementById('status').textContent = data.result.error
+        ? `❌ ${data.result.error}`
+        : `✅ Found ${data.result.checked} inactive eBay listing(s).`;
+      loadEbayListingsSyncStatus();
+      if (currentView === 'inactive') loadInactive();
+    }
+  } catch(e) {
+    document.getElementById('status').textContent = `❌ ${e.message}`;
+  }
+}
+
 function applyPushResult(it, idx, res) {
   const cell = document.getElementById('push-cell-' + idx);
   const row = document.getElementById('row-' + idx);
@@ -391,6 +437,7 @@ function renderTable() {
 
 setToday();
 loadSyncStatus();
+loadEbayListingsSyncStatus();
 
 // If a sync is already running when the page loads, resume polling instead of losing track of it.
 (async function checkSyncOnLoad() {
@@ -398,6 +445,11 @@ loadSyncStatus();
     const r = await fetch('/api/shopify-sync/refresh-status', {cache: 'no-store'});
     const data = await r.json();
     if (data.running) pollRefreshStatus();
+  } catch(e) {}
+  try {
+    const r2 = await fetch('/api/shopify-sync/sync-ebay-listings-status', {cache: 'no-store'});
+    const data2 = await r2.json();
+    if (data2.running) pollEbayListingsSync();
   } catch(e) {}
 })();
 </script>
