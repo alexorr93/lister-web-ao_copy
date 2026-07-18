@@ -483,13 +483,16 @@ async function pollInactiveCheck() {
   }
 }
 
-async function pushInactiveOne(idx, forceZero) {
+async function pushInactiveOne(idx) {
+  // Inactive means ended on eBay — the only thing that ever matters here is
+  // whether Shopify is already 0. There's no "remaining eBay qty" that should ever
+  // get pushed; the only target is 0.
   const it = inactiveItems[idx];
   const cell = document.getElementById('inactive-push-cell-' + idx);
   cell.textContent = 'Pushing...';
   const payload = {
     shopify_inventory_item_id: it.shopify_inventory_item_id,
-    ebay_live_qty: forceZero ? 0 : it.ebay_live_qty,
+    ebay_live_qty: 0,
     sku: it.sku, title: it.title,
   };
   try {
@@ -501,7 +504,7 @@ async function pushInactiveOne(idx, forceZero) {
     const res = data.results[0];
     if (res.status === 'success') {
       it.shopify_live_qty = res.new_quantity;
-      cell.innerHTML = `<span class="synced-badge">✔ Set to ${res.new_quantity}</span><button class="push-again" onclick="pushInactiveOne(${idx}, false)">push again</button><button class="ignore-link" onclick="pushInactiveOne(${idx}, true)">end (0)</button>`;
+      cell.innerHTML = `<span class="synced-badge">✔ Set to 0</span>`;
     } else {
       cell.innerHTML = `<span class="no">✘ ${res.error || res.status}</span>`;
     }
@@ -516,7 +519,7 @@ function renderInactiveTable() {
     return;
   }
   let html = `<table><thead><tr>
-    <th>SKU</th><th>eBay Item</th><th>eBay Qty Remaining</th><th>Ended</th><th>Found in Shopify?</th><th>Shopify Live Qty</th><th>Shopify Title</th><th>Action</th>
+    <th>SKU</th><th>eBay Item</th><th>Ended</th><th>Found in Shopify?</th><th>Shopify Live Qty</th><th>Shopify Title</th><th>Action</th>
   </tr></thead><tbody>`;
   inactiveItems.forEach((it, idx) => {
     let actionCell;
@@ -524,15 +527,14 @@ function renderInactiveTable() {
       actionCell = '<span class="muted">Check in Shopify</span>';
     } else if (!it.shopify_found) {
       actionCell = '<span class="no">✘ Not in Shopify</span>';
-    } else if (it.shopify_live_qty === it.ebay_live_qty) {
-      actionCell = `<span class="synced-badge">✔ Already Synced</span><button class="push-again" onclick="pushInactiveOne(${idx}, false)">push again</button><button class="ignore-link" onclick="pushInactiveOne(${idx}, true)">end (0)</button>`;
+    } else if (it.shopify_live_qty === 0) {
+      actionCell = `<span class="synced-badge">✔ Already 0</span>`;
     } else {
-      actionCell = `<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushInactiveOne(${idx}, false)">Push → ${it.ebay_live_qty}</button><button class="ignore-link" onclick="pushInactiveOne(${idx}, true)">end (0)</button>`;
+      actionCell = `<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushInactiveOne(${idx})">End (set to 0)</button>`;
     }
     html += `<tr>
       <td class="muted">${escapeHtml(it.sku)}</td>
       <td>${escapeHtml(it.title || '')}</td>
-      <td>${it.ebay_live_qty ?? '—'}</td>
       <td class="muted">${it.end_time ? new Date(it.end_time).toLocaleDateString() : '—'}</td>
       <td class="${it.checked ? (it.shopify_found ? 'yes' : 'no') : 'muted'}">${it.checked ? (it.shopify_found ? '✔ Yes' : '✘ No') : '—'}</td>
       <td>${it.shopify_live_qty ?? '—'}</td>
