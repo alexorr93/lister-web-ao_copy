@@ -5043,10 +5043,14 @@ async def shopify_sync_push(request: Request, items: List[dict] = Body(...)):
                 }
                 r = _req.post(f"https://{domain}/admin/api/2024-10/graphql.json", headers=headers, json=mutation, timeout=20)
                 resp = r.json() if r.status_code == 200 else {}
-                errors = (resp.get("data", {}) or {}).get("inventorySetQuantities", {}).get("userErrors", [])
-                if r.status_code == 200 and not errors:
-                    changes = (resp.get("data", {}) or {}).get("inventorySetQuantities", {}).get("inventoryAdjustmentGroup", {}).get("changes", [])
-                    new_qty = changes[0]["quantityAfterChange"] if changes else target_qty
+                gql_errors = resp.get("errors") or []
+                errors = (resp.get("data", {}) or {}).get("inventorySetQuantities", {}).get("userErrors", []) if not gql_errors else gql_errors
+                if r.status_code == 200 and not gql_errors and not errors:
+                    # This is a "set", not an "adjust" — we already know exactly what we
+                    # set it to, so use that directly rather than trusting Shopify's
+                    # quantityAfterChange field (it comes back null for set operations,
+                    # unlike for adjustQuantities where it's reliable).
+                    new_qty = target_qty
                     log_row["status"] = "success"
                     log_row["new_quantity"] = new_qty
                     results.append({"title": it.get("title"), "status": "success", "new_quantity": new_qty})

@@ -195,7 +195,6 @@ function applyPushResult(it, idx, res) {
 async function pushOne(idx) {
   const it = currentItems[idx];
   if (it.ebay_live_qty == null) { alert('eBay quantity unknown for this item — click Sync Now first.'); return; }
-  if (!confirm(`Set Shopify quantity for "${it.title}" to ${it.ebay_live_qty} (currently ${it.shopify_live_qty ?? 'unknown'})? This changes your live Shopify listing.`)) return;
   const cell = document.getElementById('push-cell-' + idx);
   cell.textContent = 'Pushing...';
   try {
