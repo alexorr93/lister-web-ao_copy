@@ -4839,6 +4839,24 @@ async def shopify_sync_today(request: Request, date: str = None):
             "shopify_inventory_item_id": shopify_inventory_item_id,
         })
 
+    # Cross-check the push audit log so already-synced rows can be flagged even
+    # after a page reload (the client's own "just pushed" state doesn't survive that).
+    try:
+        log_res = supabase.table("shopify_qty_sync_log").select("order_id")\
+            .eq("business_id", business_id).eq("status", "success")\
+            .gte("created_at", f"{today}T00:00:00").execute()
+        pushed_order_ids = set()
+        for row in (log_res.data or []):
+            for oid in (row.get("order_id") or "").split(","):
+                oid = oid.strip()
+                if oid:
+                    pushed_order_ids.add(oid)
+        for it in items:
+            it["already_pushed"] = any(oid in pushed_order_ids for oid in it["order_ids"])
+    except Exception:
+        for it in items:
+            it["already_pushed"] = False
+
     return {"date": today, "items": items}
 
 def _get_shopify_primary_location_id(domain: str, headers: dict) -> str:
