@@ -148,9 +148,9 @@ function setLastMonth() {
 
 // Sort group: 0 = not found in Shopify (red, needs attention first), 1 = found but
 // not yet matching eBay (needs a push), 2 = found and matching (nothing to do),
-// 3 = ignored (always last, regardless of match state).
+// 3 = inactive — ignored or ended on eBay (always last, regardless of match state).
 function rowGroup(it) {
-  if (it.ignored) return 3;
+  if (it.ignored || it.ebay_ended) return 3;
   if (!it.shopify_found) return 0;
   const qtyMatch = it.ebay_live_qty != null && it.shopify_live_qty != null && it.ebay_live_qty === it.shopify_live_qty;
   return qtyMatch ? 2 : 1;
@@ -306,13 +306,14 @@ function renderTable() {
   // as each item's real index into currentItems — filtering the array itself
   // before rendering would desync every onclick="...(idx)" handler from the item
   // it's actually supposed to act on (the exact bug already caught once before).
+  const isInactive = it => !!it.ignored || !!it.ebay_ended;
   const visible = currentItems
     .map((it, idx) => ({it, idx}))
-    .filter(({it}) => currentView === 'inactive' ? !!it.ignored : !it.ignored);
+    .filter(({it}) => currentView === 'inactive' ? isInactive(it) : !isInactive(it));
 
   if (!visible.length) {
     const msg = currentView === 'inactive'
-      ? 'Nothing ignored in this range.'
+      ? 'Nothing ended on eBay or ignored in this range.'
       : 'Nothing sold on eBay in this range (with a real SKU) yet.';
     document.getElementById('table-area').innerHTML = `<div class="empty">${msg}</div>`;
     return;
@@ -327,19 +328,25 @@ function renderTable() {
     // push history, since eBay Live Qty is now populated for real.
     const qtyMatch = it.ebay_live_qty != null && it.shopify_live_qty != null && it.ebay_live_qty === it.shopify_live_qty;
     const synced = it.shopify_found && qtyMatch;
+    const statusLabel = it.ignored ? 'Ignored' : (it.ebay_ended ? 'Ended on eBay' : null);
+    const unignoreBtn = it.ignored ? `<button class="unignore-link" onclick="unignoreItem(${idx})">unignore</button>` : '';
+    const ignoreBtn = it.ignored ? '' : `<button class="ignore-link" onclick="ignoreItem(${idx})">ignore</button>`;
     let pushCell;
-    if (it.ignored) {
-      pushCell = `<span class="muted">Ignored</span><button class="unignore-link" onclick="unignoreItem(${idx})">unignore</button>`;
+    if (statusLabel) {
+      const needsPush = it.shopify_found && !synced && it.ebay_live_qty != null;
+      pushCell = `<span class="muted">${statusLabel}</span>`
+        + (needsPush ? `<button class="push-again" onclick="pushOne(${idx})">Push → ${it.ebay_live_qty}</button>` : '')
+        + unignoreBtn + ignoreBtn;
     } else if (it.shopify_found) {
       if (synced) {
-        pushCell = `<span class="synced-badge">✔ Already Synced</span><button class="push-again" onclick="pushOne(${idx})">push again</button><button class="ignore-link" onclick="ignoreItem(${idx})">ignore</button>`;
+        pushCell = `<span class="synced-badge">✔ Already Synced</span><button class="push-again" onclick="pushOne(${idx})">push again</button>${ignoreBtn}`;
       } else if (it.ebay_live_qty == null) {
-        pushCell = `<span class="muted">Sync Now for eBay qty</span><button class="ignore-link" onclick="ignoreItem(${idx})">ignore</button>`;
+        pushCell = `<span class="muted">Sync Now for eBay qty</span>${ignoreBtn}`;
       } else {
-        pushCell = `<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOne(${idx})">Push → ${it.ebay_live_qty}</button><button class="ignore-link" onclick="ignoreItem(${idx})">ignore</button>`;
+        pushCell = `<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOne(${idx})">Push → ${it.ebay_live_qty}</button>${ignoreBtn}`;
       }
     } else {
-      pushCell = `<span class="muted">—</span><button class="ignore-link" onclick="ignoreItem(${idx})">ignore</button>`;
+      pushCell = `<span class="muted">—</span>${ignoreBtn}`;
     }
     html += `<tr id="row-${idx}" class="${it.ignored ? 'ignored' : (synced ? 'synced' : '')}">
       <td class="muted">${escapeHtml(it.sku)}</td>

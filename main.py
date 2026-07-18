@@ -4870,6 +4870,7 @@ def _shopify_sync_check_one(norm_title: str, entry: dict, ebay_token: str, shopi
 
     sku = entry["sku"]
     ebay_live_qty = None
+    ebay_ended = False
     if sku and sku != "(no SKU)" and not sku.lower().startswith("lister-"):
         try:
             r = _req.get(f"{EBAY_API_BASE}/sell/inventory/v1/inventory_item/{sku}",
@@ -4896,14 +4897,20 @@ def _shopify_sync_check_one(norm_title: str, entry: dict, ebay_token: str, shopi
                 if avail:
                     ebay_live_qty = avail[0].get("estimatedAvailableQuantity")
             elif r.status_code == 404:
+                # The listing itself is gone — genuinely ended, not just temporarily
+                # out of stock on an otherwise-live listing (that would be a 200
+                # with qty 0). We already make this exact call for every sold item;
+                # this is that same response telling us something we were
+                # previously throwing away by collapsing both cases into qty=0.
                 ebay_live_qty = 0
+                ebay_ended = True
         except Exception:
             pass
 
     match = shopify_catalog.get(norm_title)
     return {
         "norm_title": norm_title, "sku": sku, "legacy_item_id": legacy_item_id,
-        "ebay_live_qty": ebay_live_qty, "shopify_found": match is not None,
+        "ebay_live_qty": ebay_live_qty, "ebay_ended": ebay_ended, "shopify_found": match is not None,
         "shopify_live_qty": match["qty"] if match else None,
         "shopify_title": match["title"] if match else None,
         "shopify_inventory_item_id": match["inventory_item_id"] if match else None,
@@ -4957,7 +4964,7 @@ def _shopify_sync_refresh_work(business_id: str, days_back: int) -> dict:
     rows = [{
         "business_id": business_id, "norm_title": r["norm_title"],
         "title": sold_by_title[r["norm_title"]]["title"], "sku": r["sku"],
-        "legacy_item_id": r["legacy_item_id"], "ebay_live_qty": r["ebay_live_qty"],
+        "legacy_item_id": r["legacy_item_id"], "ebay_live_qty": r["ebay_live_qty"], "ebay_ended": r["ebay_ended"],
         "shopify_found": r["shopify_found"], "shopify_live_qty": r["shopify_live_qty"],
         "shopify_title": r["shopify_title"], "shopify_inventory_item_id": r["shopify_inventory_item_id"],
         "updated_at": now_iso,
@@ -5206,7 +5213,7 @@ async def shopify_sync_today(request: Request, response: Response, date: str = N
         items.append({
             "sku": entry["sku"], "title": entry["title"], "qty_sold_today": entry["qty_sold_today"],
             "order_ids": entry["order_ids"],
-            "ebay_live_qty": snap.get("ebay_live_qty"),
+            "ebay_live_qty": snap.get("ebay_live_qty"), "ebay_ended": bool(snap.get("ebay_ended")),
             "shopify_found": bool(snap.get("shopify_found")), "shopify_live_qty": snap.get("shopify_live_qty"),
             "shopify_title": snap.get("shopify_title"), "shopify_inventory_item_id": snap.get("shopify_inventory_item_id"),
             "snapshot_updated_at": snap.get("updated_at"),
