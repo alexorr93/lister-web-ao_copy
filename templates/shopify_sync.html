@@ -146,7 +146,7 @@ async function loadToday() {
   document.getElementById('status').textContent = 'Loading...';
   document.getElementById('table-area').innerHTML = '';
   try {
-    const r = await fetch('/api/shopify-sync/today?start=' + start + '&end=' + end);
+    const r = await fetch('/api/shopify-sync/today?start=' + start + '&end=' + end, {cache: 'no-store'});
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed');
     const rangeLabel = data.start_date === data.end_date ? data.start_date : `${data.start_date} – ${data.end_date}`;
@@ -160,7 +160,7 @@ async function loadToday() {
 
 async function loadSyncStatus() {
   try {
-    const r = await fetch('/api/shopify-sync/sync-status');
+    const r = await fetch('/api/shopify-sync/sync-status', {cache: 'no-store'});
     const data = await r.json();
     // Postgres already returns an explicit offset (e.g. "...+00:00") for a
     // timestamptz column — appending 'Z' on top of that produced "Invalid Date".
@@ -184,7 +184,7 @@ async function syncNow() {
 
 async function pollRefreshStatus() {
   try {
-    const r = await fetch('/api/shopify-sync/refresh-status');
+    const r = await fetch('/api/shopify-sync/refresh-status', {cache: 'no-store'});
     const data = await r.json();
     if (data.running) {
       document.getElementById('status').textContent = 'Syncing live quantities from eBay and Shopify — this can take a few minutes for a big catalog, safe to leave open...';
@@ -335,7 +335,7 @@ loadSyncStatus();
 // If a sync is already running when the page loads, resume polling instead of losing track of it.
 (async function checkSyncOnLoad() {
   try {
-    const r = await fetch('/api/shopify-sync/refresh-status');
+    const r = await fetch('/api/shopify-sync/refresh-status', {cache: 'no-store'});
     const data = await r.json();
     if (data.running) pollRefreshStatus();
   } catch(e) {}

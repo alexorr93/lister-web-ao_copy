@@ -7,7 +7,7 @@ import csv
 import io
 from datetime import datetime
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, HTTPException, UploadFile, File, Body
+from fastapi import FastAPI, Request, HTTPException, UploadFile, File, Body, Response
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -4969,10 +4969,11 @@ async def shopify_sync_refresh(request: Request, days_back: int = 30):
     return {"started": True}
 
 @app.get("/api/shopify-sync/refresh-status")
-async def shopify_sync_refresh_status(request: Request):
+async def shopify_sync_refresh_status(request: Request, response: Response):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
+    response.headers["Cache-Control"] = "no-store"
     return _shopify_sync_job_status.get(business_id, {"running": False, "result": None, "started_at": None, "finished_at": None})
 
 @app.get("/api/shopify-sync/debug-catalog-search")
@@ -5046,17 +5047,18 @@ async def shopify_sync_unignore(request: Request, body: dict = Body(...)):
     return {"ok": True}
 
 @app.get("/api/shopify-sync/sync-status")
-async def shopify_sync_status(request: Request):
+async def shopify_sync_status(request: Request, response: Response):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
+    response.headers["Cache-Control"] = "no-store"
     res = supabase.table("shopify_sync_snapshot").select("updated_at").eq("business_id", business_id)\
         .order("updated_at", desc=True).limit(1).execute()
     last = res.data[0]["updated_at"] if res.data else None
     return {"last_synced_at": last}
 
 @app.get("/api/shopify-sync/today")
-async def shopify_sync_today(request: Request, date: str = None, start: str = None, end: str = None):
+async def shopify_sync_today(request: Request, response: Response, date: str = None, start: str = None, end: str = None):
     """Step 1: every eBay sale in the selected date range, matched against the last
     synced snapshot of live eBay/Shopify quantities (see /refresh above). Reads only
     from local tables — zero external API calls, so this is fast no matter how wide
@@ -5072,6 +5074,7 @@ async def shopify_sync_today(request: Request, date: str = None, start: str = No
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
+    response.headers["Cache-Control"] = "no-store"
     import datetime as _dt, re as _re
 
     _date_re = r"^\d{4}-\d{2}-\d{2}$"
