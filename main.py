@@ -4762,7 +4762,7 @@ async def shopify_sync_today(request: Request, date: str = None):
     import requests as _req, datetime as _dt, re as _re
 
     today = date if date and _re.match(r"^\d{4}-\d{2}-\d{2}$", date) else _dt.datetime.utcnow().strftime("%Y-%m-%d")
-    res = supabase.table("orders").select("sku,title,quantity,order_id").eq("business_id", business_id)\
+    res = supabase.table("orders").select("sku,title,quantity,order_id,legacy_item_id").eq("business_id", business_id)\
         .eq("platform", "eBay").eq("order_date", today).execute()
     rows = res.data or []
 
@@ -4775,9 +4775,11 @@ async def shopify_sync_today(request: Request, date: str = None):
         if not title:
             continue
         key = _norm(title)
-        entry = sold_by_title.setdefault(key, {"title": title, "sku": r.get("sku") or "", "qty_sold_today": 0, "order_ids": []})
+        entry = sold_by_title.setdefault(key, {"title": title, "sku": r.get("sku") or "", "legacy_item_id": "", "qty_sold_today": 0, "order_ids": []})
         entry["qty_sold_today"] += r.get("quantity", 0) or 0
         entry["order_ids"].append(r.get("order_id"))
+        if not entry["legacy_item_id"] and r.get("legacy_item_id"):
+            entry["legacy_item_id"] = r.get("legacy_item_id")
 
     if not sold_by_title:
         return {"date": today, "items": []}
@@ -4797,6 +4799,27 @@ async def shopify_sync_today(request: Request, date: str = None):
                              headers=ebay_headers(ebay_token, content_language=False), timeout=15)
                 if r.status_code == 200:
                     ebay_live_qty = (r.json().get("availability", {}) or {}).get("shipToLocationAvailability", {}).get("quantity")
+            except Exception:
+                pass
+
+        # Most of these listings weren't created via the Inventory API (no SKU-keyed
+        # inventory item exists for them), so the lookup above returns nothing for
+        # them. Fall back to the Browse API by the listing's own (legacy) item ID —
+        # works for any live eBay listing regardless of how it was created. A 404
+        # means the listing has ended, i.e. genuinely sold out (qty 0).
+        legacy_item_id = entry.get("legacy_item_id")
+        if ebay_live_qty is None and legacy_item_id:
+            try:
+                r = _req.get(f"{EBAY_API_BASE}/buy/browse/v1/item/get_item_by_legacy_id",
+                             params={"legacy_item_id": legacy_item_id},
+                             headers={**ebay_headers(ebay_token, content_language=False), "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"},
+                             timeout=15)
+                if r.status_code == 200:
+                    avail = (r.json().get("estimatedAvailabilities") or [])
+                    if avail:
+                        ebay_live_qty = avail[0].get("estimatedAvailableQuantity")
+                elif r.status_code == 404:
+                    ebay_live_qty = 0
             except Exception:
                 pass
 
