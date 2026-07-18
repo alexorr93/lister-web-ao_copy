@@ -5197,6 +5197,36 @@ async def shopify_sync_debug_ebay_lookup(request: Request, order_id: str):
 
     return result
 
+@app.get("/api/shopify-sync/debug-summary")
+async def shopify_sync_debug_summary(request: Request):
+    """Temporary read-only diagnostic: how much of the snapshot table is actually
+    populated right now, broken down by whether eBay's side was ever successfully
+    checked (vs still null from before the incremental-sync fix, or from items that
+    hit the rate limit before it landed)."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+
+    snap_res = supabase.table("shopify_sync_snapshot").select(
+        "norm_title,title,sku,ebay_live_qty,ebay_ended,shopify_found,shopify_live_qty,updated_at"
+    ).eq("business_id", business_id).execute()
+    rows = snap_res.data or []
+
+    ebay_known = [r for r in rows if r.get("ebay_live_qty") is not None]
+    ebay_unknown = [r for r in rows if r.get("ebay_live_qty") is None]
+    shopify_found = [r for r in rows if r.get("shopify_found")]
+
+    return {
+        "total_snapshot_rows": len(rows),
+        "ebay_qty_known": len(ebay_known),
+        "ebay_qty_still_unknown": len(ebay_unknown),
+        "shopify_found_count": len(shopify_found),
+        "sample_still_unknown": [
+            {"title": r.get("title"), "sku": r.get("sku"), "updated_at": r.get("updated_at")}
+            for r in ebay_unknown[:15]
+        ],
+    }
+
 @app.get("/api/shopify-sync/debug-item")
 async def shopify_sync_debug_item(request: Request, q: str):
     """Temporary read-only diagnostic: dump every push_log row, the current snapshot
