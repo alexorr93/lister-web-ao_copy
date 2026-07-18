@@ -4763,10 +4763,45 @@ def _shopify_sync_sold_by_title(business_id: str, start_date: str, end_date: str
             entry["legacy_item_id"] = r.get("legacy_item_id")
     return sold_by_title
 
-def _shopify_sync_check_one(norm_title: str, entry: dict, ebay_token: str, domain: str, shopify_token: str) -> dict:
-    """The actual live eBay + Shopify lookup for one sold title. Runs off the request
-    thread (see refresh endpoint) since it's pure blocking I/O — parallelizing this is
-    what keeps a multi-day resync from taking forever."""
+def _fetch_all_shopify_products(domain: str, shopify_token: str) -> dict:
+    """Paginates the entire Shopify catalog once and returns norm_title -> {title,
+    qty, inventory_item_id}. Replaces per-item Shopify search: their query-string
+    search syntax silently returns zero results whenever a title contains '&' or
+    '+' (confirmed — a listing with both in its title matched nothing, even after
+    stripping quotes), so search was never reliable for real part titles. A full
+    catalog scan sidesteps that class of bug entirely and costs far fewer API calls
+    for stores with more sold titles than pages of products."""
+    import requests as _req
+    catalog = {}
+    cursor = None
+    headers = {"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"}
+    while True:
+        after_clause = f', after: "{cursor}"' if cursor else ""
+        query = ('{ products(first: 250' + after_clause + ') { pageInfo { hasNextPage endCursor } '
+                 'edges { node { title variants(first: 1) { edges { node { inventoryQuantity inventoryItem { id } } } } } } } }')
+        r = _req.post(f"https://{domain}/admin/api/2024-10/graphql.json", headers=headers,
+                       json={"query": query}, timeout=30)
+        if r.status_code != 200:
+            break
+        products = (r.json().get("data", {}) or {}).get("products", {}) or {}
+        for e in products.get("edges", []):
+            node = e["node"]
+            title = node.get("title")
+            variant_edges = (node.get("variants") or {}).get("edges", [])
+            qty = variant_edges[0]["node"].get("inventoryQuantity") if variant_edges else None
+            inv_item_id = (variant_edges[0]["node"].get("inventoryItem") or {}).get("id") if variant_edges else None
+            catalog[_shopify_sync_norm(title)] = {"title": title, "qty": qty, "inventory_item_id": inv_item_id}
+        page_info = products.get("pageInfo", {})
+        if not page_info.get("hasNextPage"):
+            break
+        cursor = page_info.get("endCursor")
+    return catalog
+
+def _shopify_sync_check_one(norm_title: str, entry: dict, ebay_token: str, shopify_catalog: dict) -> dict:
+    """The eBay side of the lookup for one sold title (Shopify's side is now a plain
+    dict lookup against the pre-fetched catalog — see _fetch_all_shopify_products).
+    Runs off the request thread (see refresh endpoint) since it's pure blocking I/O —
+    parallelizing this is what keeps a multi-day resync from taking forever."""
     import requests as _req
 
     sku = entry["sku"]
@@ -4801,42 +4836,13 @@ def _shopify_sync_check_one(norm_title: str, entry: dict, ebay_token: str, domai
         except Exception:
             pass
 
-    shopify_found = False
-    shopify_live_qty = None
-    shopify_title = None
-    shopify_inventory_item_id = None
-    if domain and shopify_token:
-        try:
-            safe_title = entry["title"].replace('"', '').replace("'", "")[:80]
-            gql = _req.post(
-                f"https://{domain}/admin/api/2024-10/graphql.json",
-                headers={"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"},
-                json={"query": '{ products(first: 5, query: "title:\'' + safe_title + '\'") { edges { node { title variants(first: 1) { edges { node { inventoryQuantity inventoryItem { id } } } } } } } }'},
-                timeout=15,
-            )
-            if gql.status_code == 200:
-                edges = (gql.json().get("data", {}) or {}).get("products", {}).get("edges", [])
-                # Shopify's search is fuzzy — only accept a candidate whose title
-                # normalizes to an EXACT match, so we don't repeat the SKU mistake
-                # with a different kind of false positive.
-                for e in edges:
-                    node = e["node"]
-                    if _shopify_sync_norm(node.get("title")) == norm_title:
-                        shopify_found = True
-                        shopify_title = node.get("title")
-                        variant_edges = (node.get("variants") or {}).get("edges", [])
-                        if variant_edges:
-                            shopify_live_qty = variant_edges[0]["node"].get("inventoryQuantity")
-                            shopify_inventory_item_id = (variant_edges[0]["node"].get("inventoryItem") or {}).get("id")
-                        break
-        except Exception:
-            pass
-
+    match = shopify_catalog.get(norm_title)
     return {
         "norm_title": norm_title, "sku": sku, "legacy_item_id": legacy_item_id,
-        "ebay_live_qty": ebay_live_qty, "shopify_found": shopify_found,
-        "shopify_live_qty": shopify_live_qty, "shopify_title": shopify_title,
-        "shopify_inventory_item_id": shopify_inventory_item_id,
+        "ebay_live_qty": ebay_live_qty, "shopify_found": match is not None,
+        "shopify_live_qty": match["qty"] if match else None,
+        "shopify_title": match["title"] if match else None,
+        "shopify_inventory_item_id": match["inventory_item_id"] if match else None,
     }
 
 @app.post("/api/shopify-sync/refresh")
@@ -4863,9 +4869,10 @@ async def shopify_sync_refresh(request: Request, days_back: int = 30):
     shopify_token = get_shopify_access_token(business_id) if domain else None
 
     def _run_all():
+        shopify_catalog = _fetch_all_shopify_products(domain, shopify_token) if domain and shopify_token else {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
             return list(pool.map(
-                lambda kv: _shopify_sync_check_one(kv[0], kv[1], ebay_token, domain, shopify_token),
+                lambda kv: _shopify_sync_check_one(kv[0], kv[1], ebay_token, shopify_catalog),
                 sold_by_title.items(),
             ))
 
@@ -4905,48 +4912,6 @@ async def shopify_sync_debug_item(request: Request, q: str):
     order_rows = supabase.table("orders").select("order_id,order_date,sku,title,quantity,platform").eq("business_id", business_id)\
         .eq("platform", "eBay").ilike("title", f"%{q}%").gte("order_date", cutoff).execute().data or []
     return {"push_log": push_rows, "snapshot": snap_rows, "recent_orders": order_rows}
-
-@app.get("/api/shopify-sync/debug-shopify-search")
-async def shopify_sync_debug_shopify_search(request: Request, title: str):
-    """Temporary read-only diagnostic: runs the EXACT same Shopify title search
-    _shopify_sync_check_one uses, and returns the raw candidates plus the computed
-    norm_title for both sides, so a failed match can be seen character-by-character
-    instead of guessed at (truncation, curly vs straight quotes, etc.)."""
-    import requests as _req
-    business_id = require_auth(request)
-    if not business_id:
-        raise HTTPException(401, "Unauthorized")
-    settings = get_ebay_settings(business_id)
-    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
-    shopify_token = get_shopify_access_token(business_id) if domain else None
-    if not domain or not shopify_token:
-        raise HTTPException(400, "Shopify not connected")
-
-    norm_title = _shopify_sync_norm(title)
-    safe_title = title.replace('"', '').replace("'", "")[:80]
-    gql = _req.post(
-        f"https://{domain}/admin/api/2024-10/graphql.json",
-        headers={"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"},
-        json={"query": '{ products(first: 5, query: "title:\'' + safe_title + '\'") { edges { node { title variants(first: 1) { edges { node { inventoryQuantity } } } } } } }'},
-        timeout=15,
-    )
-    body = gql.json() if gql.status_code == 200 else {"http_status": gql.status_code, "body": gql.text[:500]}
-    edges = ((body.get("data", {}) or {}).get("products", {}) or {}).get("edges", [])
-    candidates = [{
-        "title": e["node"].get("title"),
-        "norm_title": _shopify_sync_norm(e["node"].get("title")),
-        "exact_match": _shopify_sync_norm(e["node"].get("title")) == norm_title,
-    } for e in edges]
-
-    return {
-        "input_title": title,
-        "input_title_length": len(title),
-        "safe_title_sent_to_shopify": safe_title,
-        "was_truncated": len(title) > 80,
-        "our_norm_title": norm_title,
-        "shopify_candidates": candidates,
-        "raw_response": body if not edges else None,
-    }
 
 @app.post("/api/shopify-sync/ignore")
 async def shopify_sync_ignore(request: Request, body: dict = Body(...)):
