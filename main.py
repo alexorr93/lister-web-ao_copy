@@ -1437,7 +1437,29 @@ async def list_acquisitions(request: Request):
         raise HTTPException(401, "Unauthorized")
     res = supabase.table("acquisitions").select("*").eq("business_id", business_id)\
         .order("date", desc=True).execute()
-    return {"acquisitions": res.data or []}
+    acquisitions = res.data or []
+
+    # Active-listings count per lot — purely a local read against the last eBay
+    # ActiveList sync (see /api/acquisitions/sync-active-listings), zero live calls
+    # on page load. Matched by SKU prefix before the first '-', the same convention
+    # already used by /api/acquisitions/debug-sku (e.g. 'RJ-123' belongs to lot 'RJ').
+    active_res = supabase.table("ebay_listing_status").select("sku,updated_at")\
+        .eq("business_id", business_id).eq("listing_status", "Active").execute()
+    active_rows = active_res.data or []
+    counts_by_prefix = {}
+    for row in active_rows:
+        sku = row.get("sku") or ""
+        if "-" not in sku:
+            continue
+        prefix = sku.split("-", 1)[0]
+        counts_by_prefix[prefix] = counts_by_prefix.get(prefix, 0) + 1
+    active_synced_at = max((r.get("updated_at") for r in active_rows if r.get("updated_at")), default=None)
+
+    for a in acquisitions:
+        a["active_listings"] = counts_by_prefix.get(a.get("sku"), 0)
+        a["active_listings_synced_at"] = active_synced_at
+
+    return {"acquisitions": acquisitions}
 
 @app.post("/api/acquisitions")
 async def create_acquisition(request: Request, body: AcquisitionCreate):
@@ -5197,11 +5219,130 @@ def _sync_ebay_unsold_listings_work(business_id: str) -> dict:
             "updated_at": now_iso,
         })
 
-    supabase.table("ebay_listing_status").delete().eq("business_id", business_id).execute()
+    # Scoped to listing_status="Unsold" specifically — this table also holds "Active"
+    # rows synced independently by the Lots page (see _sync_ebay_active_listings_work
+    # below); an unscoped delete here would wipe those out on every Inactive-tab sync.
+    supabase.table("ebay_listing_status").delete().eq("business_id", business_id).eq("listing_status", "Unsold").execute()
     if rows:
         supabase.table("ebay_listing_status").upsert(rows, on_conflict="business_id,item_id").execute()
 
     return {"checked": len(rows), "synced_at": now_iso}
+
+def _ebay_get_active_listings_page(token: str, page_number: int, entries_per_page: int = 200) -> dict:
+    """One page of eBay's Trading API GetMyeBaySelling / ActiveList — same call
+    family as _ebay_get_unsold_listings_page, just the Active bucket instead of
+    Unsold. Used by the Lots page to count each lot's currently-active listings."""
+    import requests as _req
+    import xml.etree.ElementTree as ET
+
+    xml_body = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+        f'<RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>'
+        '<ActiveList><Include>true</Include>'
+        f'<Pagination><EntriesPerPage>{entries_per_page}</EntriesPerPage><PageNumber>{page_number}</PageNumber></Pagination>'
+        '</ActiveList>'
+        '<DetailLevel>ReturnAll</DetailLevel>'
+        '</GetMyeBaySellingRequest>'
+    )
+    headers = {
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "1193",
+        "X-EBAY-API-CALL-NAME": "GetMyeBaySelling",
+        "X-EBAY-API-SITEID": "0",
+        "Content-Type": "text/xml",
+    }
+    r = _req.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_body.encode("utf-8"), timeout=30)
+    root = ET.fromstring(r.content)
+    return _ebay_xml_to_dict(root)
+
+def _sync_ebay_active_listings_work(business_id: str) -> dict:
+    """Pulls every page of eBay's real ActiveList and wholesale-replaces just the
+    listing_status='Active' rows in ebay_listing_status for this business — scoped
+    delete so this can never touch the Unsold rows the Inactive tab owns."""
+    import datetime as _dt
+
+    token = get_ebay_access_token(business_id)
+    all_items = []
+    page = 1
+    total_pages = 1
+    while page <= total_pages:
+        resp = _ebay_get_active_listings_page(token, page)
+        ack = resp.get("Ack")
+        if ack not in ("Success", "Warning"):
+            raise Exception(f"eBay GetMyeBaySelling failed (Ack={ack}): {resp.get('Errors')}")
+        active = resp.get("ActiveList") or {}
+        item_array = active.get("ItemArray") or {}
+        items = item_array.get("Item") or []
+        if isinstance(items, dict):
+            items = [items]
+        all_items.extend(items)
+        pagination = active.get("PaginationResult") or {}
+        total_pages = _safe_int(pagination.get("TotalNumberOfPages")) or 1
+        page += 1
+
+    now_iso = _dt.datetime.utcnow().isoformat()
+    rows = []
+    for it in all_items:
+        title = it.get("Title")
+        listing_details = it.get("ListingDetails") or {}
+        rows.append({
+            "business_id": business_id, "item_id": it.get("ItemID"),
+            "sku": it.get("SKU"), "title": title, "norm_title": _shopify_sync_norm(title),
+            "quantity": _safe_int(it.get("Quantity")), "quantity_sold": _safe_int(it.get("QuantitySold")),
+            "listing_status": "Active", "end_time": listing_details.get("EndTime"),
+            "updated_at": now_iso,
+        })
+
+    supabase.table("ebay_listing_status").delete().eq("business_id", business_id).eq("listing_status", "Active").execute()
+    if rows:
+        supabase.table("ebay_listing_status").upsert(rows, on_conflict="business_id,item_id").execute()
+
+    return {"checked": len(rows), "synced_at": now_iso}
+
+_ebay_active_listings_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
+
+async def _run_ebay_active_listings_sync_background(business_id: str):
+    import asyncio, datetime as _dt
+    try:
+        result = await asyncio.to_thread(_sync_ebay_active_listings_work, business_id)
+        _ebay_active_listings_job_status[business_id] = {
+            "running": False, "result": result,
+            "started_at": _ebay_active_listings_job_status.get(business_id, {}).get("started_at"),
+            "finished_at": _dt.datetime.utcnow().isoformat(),
+        }
+    except Exception as e:
+        _ebay_active_listings_job_status[business_id] = {
+            "running": False, "result": {"error": str(e)},
+            "started_at": _ebay_active_listings_job_status.get(business_id, {}).get("started_at"),
+            "finished_at": _dt.datetime.utcnow().isoformat(),
+        }
+
+@app.post("/api/acquisitions/sync-active-listings")
+async def acquisitions_sync_active_listings(request: Request):
+    """Kicks off the real eBay ActiveList pull as a background job — this is what
+    populates the Lots page's Active Listings column. Counts get grouped by SKU
+    prefix (before the first '-') in GET /api/acquisitions, the same lot-matching
+    convention already used by /api/acquisitions/debug-sku."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio, datetime as _dt
+    if _ebay_active_listings_job_status.get(business_id, {}).get("running"):
+        return {"started": False, "already_running": True}
+    _ebay_active_listings_job_status[business_id] = {
+        "running": True, "result": None,
+        "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None,
+    }
+    asyncio.create_task(_run_ebay_active_listings_sync_background(business_id))
+    return {"started": True}
+
+@app.get("/api/acquisitions/sync-active-listings-status")
+async def acquisitions_sync_active_listings_status(request: Request, response: Response):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    response.headers["Cache-Control"] = "no-store"
+    return _ebay_active_listings_job_status.get(business_id, {"running": False, "result": None, "started_at": None, "finished_at": None})
 
 _ebay_listings_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
 
