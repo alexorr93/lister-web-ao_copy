@@ -4745,19 +4745,23 @@ async def sync_inventory_now(request: Request):
     return {"ok": True, "started": True}
 
 @app.get("/api/shopify-sync/today")
-async def shopify_sync_today(request: Request):
+async def shopify_sync_today(request: Request, date: str = None):
     """Step 1, deliberately minimal: every eBay sale from today, checked LIVE (not
     from any cached/synced table). eBay's own quantity is looked up by SKU (that's
     genuinely eBay's own item key). Shopify is matched by TITLE — SKU here is just
     a lot/location code, not a unique product ID, so it's useless for cross-platform
     matching (confirmed: it was matching completely unrelated items that happened to
-    share a storage location). Read-only — nothing gets adjusted."""
+    share a storage location). Read-only — nothing gets adjusted.
+
+    'date' is the caller's local calendar date (YYYY-MM-DD) — server UTC time was
+    used before, which drifts a day off from the user's "today" depending on time
+    of day and timezone. Falls back to server UTC date if the caller omits it."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
-    import requests as _req, datetime as _dt
+    import requests as _req, datetime as _dt, re as _re
 
-    today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+    today = date if date and _re.match(r"^\d{4}-\d{2}-\d{2}$", date) else _dt.datetime.utcnow().strftime("%Y-%m-%d")
     res = supabase.table("orders").select("sku,title,quantity,order_id").eq("business_id", business_id)\
         .eq("platform", "eBay").eq("order_date", today).execute()
     rows = res.data or []

@@ -67,7 +67,9 @@ async function loadToday() {
   document.getElementById('status').textContent = 'Checking live quantities on both platforms...';
   document.getElementById('table-area').innerHTML = '';
   try {
-    const r = await fetch('/api/shopify-sync/today');
+    const now = new Date();
+    const localDate = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+    const r = await fetch('/api/shopify-sync/today?date=' + localDate);
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed');
     document.getElementById('status').textContent = `Date: ${data.date} — ${data.items.length} distinct SKU(s) sold on eBay today.`;
