@@ -29,6 +29,9 @@ h1 { font-size: 20px; margin-bottom: 4px; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn-orange { background: #ea580c; border-color: #ea580c; color: #fff; }
 .btn-orange:hover { background: #c2410c; }
+.view-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.view-tab { padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; }
+.view-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 th { text-align: left; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; padding: 10px 12px; border-bottom: 1px solid var(--border); position: sticky; top: 52px; background: var(--card); z-index: 10; }
 td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid var(--border); }
@@ -84,6 +87,11 @@ tr.ignored:hover td { opacity: 0.85; }
     <span id="last-synced" style="font-size:11px;color:var(--muted);align-self:center;"></span>
   </div>
 
+  <div class="view-tabs">
+    <button class="view-tab active" id="tab-active" onclick="setView('active')">Active</button>
+    <button class="view-tab" id="tab-inactive" onclick="setView('inactive')">Inactive</button>
+  </div>
+
   <div id="status" class="status-msg"></div>
 
   <div id="table-area"><div class="empty">Loading today's sales…</div></div>
@@ -95,6 +103,14 @@ function escapeHtml(s) {
 }
 
 let currentItems = [];
+let currentView = 'active'; // 'active' hides ignored rows, 'inactive' shows only ignored rows
+
+function setView(view) {
+  currentView = view;
+  document.getElementById('tab-active').classList.toggle('active', view === 'active');
+  document.getElementById('tab-inactive').classList.toggle('active', view === 'inactive');
+  renderTable();
+}
 
 function setToday() {
   const now = new Date();
@@ -152,7 +168,7 @@ async function loadToday() {
     const rangeLabel = data.start_date === data.end_date ? data.start_date : `${data.start_date} – ${data.end_date}`;
     document.getElementById('status').textContent = `${rangeLabel} — ${data.items.length} distinct SKU(s) sold on eBay.`;
     currentItems = data.items.slice().sort((a, b) => rowGroup(a) - rowGroup(b));
-    renderTable(currentItems);
+    renderTable();
   } catch(e) {
     document.getElementById('status').textContent = `❌ ${e.message}`;
   }
@@ -264,7 +280,7 @@ async function ignoreItem(idx) {
     if (!r.ok) throw new Error((await r.json()).detail || 'Failed');
     it.ignored = true;
     currentItems = currentItems.slice().sort((a, b) => rowGroup(a) - rowGroup(b));
-    renderTable(currentItems);
+    renderTable();
   } catch(e) {
     alert('Failed to ignore: ' + e.message);
   }
@@ -279,21 +295,32 @@ async function unignoreItem(idx) {
     if (!r.ok) throw new Error((await r.json()).detail || 'Failed');
     it.ignored = false;
     currentItems = currentItems.slice().sort((a, b) => rowGroup(a) - rowGroup(b));
-    renderTable(currentItems);
+    renderTable();
   } catch(e) {
     alert('Failed to unignore: ' + e.message);
   }
 }
 
-function renderTable(items) {
-  if (!items.length) {
-    document.getElementById('table-area').innerHTML = '<div class="empty">Nothing sold on eBay in this range (with a real SKU) yet.</div>';
+function renderTable() {
+  // Always operates on the full currentItems array and filters here, keeping idx
+  // as each item's real index into currentItems — filtering the array itself
+  // before rendering would desync every onclick="...(idx)" handler from the item
+  // it's actually supposed to act on (the exact bug already caught once before).
+  const visible = currentItems
+    .map((it, idx) => ({it, idx}))
+    .filter(({it}) => currentView === 'inactive' ? !!it.ignored : !it.ignored);
+
+  if (!visible.length) {
+    const msg = currentView === 'inactive'
+      ? 'Nothing ignored in this range.'
+      : 'Nothing sold on eBay in this range (with a real SKU) yet.';
+    document.getElementById('table-area').innerHTML = `<div class="empty">${msg}</div>`;
     return;
   }
   let html = `<table><thead><tr>
     <th>SKU</th><th>eBay Item</th><th>Qty Sold (eBay)</th><th>eBay Live Qty</th><th>Found in Shopify?</th><th>Shopify Live Qty</th><th>Shopify Title</th><th>Push</th>
   </tr></thead><tbody>`;
-  items.forEach((it, idx) => {
+  visible.forEach(({it, idx}) => {
     // Green = the two live quantities already agree, so there's nothing left to push —
     // true whether that's because we pushed (this session or a past one) or the
     // numbers just happen to already line up. Compared directly, not inferred from
