@@ -5126,6 +5126,46 @@ async def shopify_sync_debug_item(request: Request, q: str):
         .eq("platform", "eBay").or_(f"title.ilike.%{q}%,sku.ilike.%{q}%").gte("order_date", cutoff).execute().data or []
     return {"push_log": push_rows, "snapshot": snap_rows, "recent_orders": order_rows}
 
+@app.get("/api/shopify-sync/inactive-items")
+async def shopify_sync_inactive_items(request: Request, response: Response):
+    """Everything currently flagged ended-on-eBay or manually ignored, from the full
+    synced snapshot — deliberately NOT scoped to any date range. The 'today' endpoint
+    ties every item to when it SOLD (order_date); a listing that ended today may have
+    sold on a completely different day, or never sold at all, so date-filtering this
+    the same way would exclude it entirely regardless of its ended/ignored status
+    (confirmed: this is exactly what happened before this endpoint existed)."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    response.headers["Cache-Control"] = "no-store"
+
+    snap_res = supabase.table("shopify_sync_snapshot").select("*").eq("business_id", business_id)\
+        .eq("ebay_ended", True).execute()
+    ignored_res = supabase.table("shopify_sync_ignored").select("norm_title,title").eq("business_id", business_id).execute()
+
+    by_norm = {}
+    for row in (snap_res.data or []):
+        by_norm[row["norm_title"]] = {
+            "title": row.get("title"), "sku": row.get("sku"),
+            "ebay_live_qty": row.get("ebay_live_qty"), "ebay_ended": True,
+            "shopify_found": bool(row.get("shopify_found")), "shopify_live_qty": row.get("shopify_live_qty"),
+            "shopify_title": row.get("shopify_title"), "shopify_inventory_item_id": row.get("shopify_inventory_item_id"),
+            "ignored": False, "order_ids": [], "qty_sold_today": None,
+        }
+    for row in (ignored_res.data or []):
+        nt = row["norm_title"]
+        if nt in by_norm:
+            by_norm[nt]["ignored"] = True
+        else:
+            by_norm[nt] = {
+                "title": row.get("title"), "sku": None,
+                "ebay_live_qty": None, "ebay_ended": False,
+                "shopify_found": False, "shopify_live_qty": None,
+                "shopify_title": None, "shopify_inventory_item_id": None,
+                "ignored": True, "order_ids": [], "qty_sold_today": None,
+            }
+    return {"items": list(by_norm.values())}
+
 @app.post("/api/shopify-sync/ignore")
 async def shopify_sync_ignore(request: Request, body: dict = Body(...)):
     business_id = require_auth(request)
