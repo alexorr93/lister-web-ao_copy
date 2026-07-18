@@ -119,6 +119,7 @@ tr:last-child td { border-bottom: none; }
 <script>
 let acquisitions = [];
 let editMode = false;
+let uncategorized = {active_listings_value: 0, active_listings_count: 0, sales_total: 0};
 
 function fmtMoney(n) {
   if (n === null || n === undefined) return '—';
@@ -268,6 +269,7 @@ async function loadAcquisitions() {
   const r = await fetch('/api/acquisitions');
   const data = await r.json();
   acquisitions = data.acquisitions || [];
+  uncategorized = data.uncategorized || {active_listings_value: 0, active_listings_count: 0, sales_total: 0};
   const syncedAt = acquisitions.find(a => a.active_listings_synced_at)?.active_listings_synced_at;
   document.getElementById('active-listings-synced').textContent = syncedAt
     ? 'Active listings last synced: ' + new Date(syncedAt).toLocaleString()
@@ -363,6 +365,13 @@ function renderTable() {
     <td>${fmtMoney(totalPayouts)}</td>
     <td class="${totalProfit >= 0 ? 'pos' : 'neg'}">${fmtMoney(totalProfit)}</td>
     <td></td><td>${fmtMoney(totalActiveListingsValue)} <span class="muted">(${totalActiveListingsCount})</span></td>
+  </tr>`;
+  html += `<tr class="muted" style="border-top:1px solid var(--border);">
+    <td colspan="4">Uncategorized (SKUs not matching any lot)</td>
+    <td></td><td></td><td></td>
+    <td>${fmtMoney(uncategorized.sales_total)}</td>
+    <td></td><td></td>
+    <td>${fmtMoney(uncategorized.active_listings_value)} (${uncategorized.active_listings_count})</td>
   </tr>`;
   html += '</tbody></table>';
   document.getElementById('table-area').innerHTML = html;

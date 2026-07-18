@@ -1441,30 +1441,68 @@ async def list_acquisitions(request: Request):
 
     # Active-listings dollar value per lot — purely a local read against the last
     # eBay ActiveList sync (see /api/acquisitions/sync-active-listings), zero live
-    # calls on page load. Matched by SKU prefix before the first '-', the same
-    # convention already used by /api/acquisitions/debug-sku (e.g. 'RJ-123' belongs
-    # to lot 'RJ'). quantity_available is eBay's own real remaining-count field.
+    # calls on page load. Matched by SKU prefix before the first '-' when there is
+    # one (e.g. 'RJ-123' belongs to lot 'RJ'); a bare SKU with no '-' at all
+    # (e.g. just 'RJ') belongs to that same lot directly — both forms transpose to
+    # the same lot SKU. quantity_available is eBay's own real remaining-count field.
+    def _lot_prefix(sku: str) -> str:
+        return sku.split("-", 1)[0] if "-" in sku else sku
+
     active_res = supabase.table("ebay_listing_status").select("sku,price,quantity_available,updated_at")\
         .eq("business_id", business_id).eq("listing_status", "Active").execute()
     active_rows = active_res.data or []
+    known_lot_skus = {a["sku"] for a in acquisitions if a.get("sku")}
+
     value_by_prefix = {}
     count_by_prefix = {}
+    uncategorized_value, uncategorized_count = 0, 0
     for row in active_rows:
         sku = row.get("sku") or ""
-        if "-" not in sku:
+        if not sku:
             continue
-        prefix = sku.split("-", 1)[0]
+        prefix = _lot_prefix(sku)
         value = (row.get("price") or 0) * (row.get("quantity_available") or 0)
-        value_by_prefix[prefix] = value_by_prefix.get(prefix, 0) + value
-        count_by_prefix[prefix] = count_by_prefix.get(prefix, 0) + 1
+        if prefix in known_lot_skus:
+            value_by_prefix[prefix] = value_by_prefix.get(prefix, 0) + value
+            count_by_prefix[prefix] = count_by_prefix.get(prefix, 0) + 1
+        else:
+            uncategorized_value += value
+            uncategorized_count += 1
     active_synced_at = max((r.get("updated_at") for r in active_rows if r.get("updated_at")), default=None)
+
+    # Same transpose rule applied to sales, for the "Uncategorized" row's sales total.
+    # Paginated fetch — this business has thousands of orders, well past Supabase's
+    # default single-request row cap.
+    all_orders = []
+    start = 0
+    while True:
+        page = supabase.table("orders").select("sku,final_net").eq("business_id", business_id)\
+            .range(start, start + 999).execute().data or []
+        all_orders.extend(page)
+        if len(page) < 1000:
+            break
+        start += 1000
+
+    uncategorized_sales = 0
+    for o in all_orders:
+        sku = o.get("sku") or ""
+        if not sku or sku.lower() in ("(no sku)",) or sku.lower().startswith("lister-"):
+            continue
+        if _lot_prefix(sku) not in known_lot_skus:
+            uncategorized_sales += o.get("final_net") or 0
 
     for a in acquisitions:
         a["active_listings_value"] = round(value_by_prefix.get(a.get("sku"), 0), 2)
         a["active_listings_count"] = count_by_prefix.get(a.get("sku"), 0)
         a["active_listings_synced_at"] = active_synced_at
 
-    return {"acquisitions": acquisitions}
+    uncategorized = {
+        "active_listings_value": round(uncategorized_value, 2),
+        "active_listings_count": uncategorized_count,
+        "sales_total": round(uncategorized_sales, 2),
+    }
+
+    return {"acquisitions": acquisitions, "uncategorized": uncategorized}
 
 @app.post("/api/acquisitions")
 async def create_acquisition(request: Request, body: AcquisitionCreate):
