@@ -4931,6 +4931,20 @@ def _shopify_sync_refresh_work(business_id: str, days_back: int) -> dict:
     if not sold_by_title:
         return {"checked": 0}
 
+    # Only ever call eBay's API for a title we've never successfully gotten a live
+    # quantity for — re-checking every item in the window on every single run is
+    # what exhausted eBay's daily Browse API rate limit (confirmed: hundreds of
+    # redundant re-checks of already-known items across repeated syncs). No
+    # .in_() filter here — real titles can contain commas/quotes that corrupt
+    # PostgREST's in.() syntax (confirmed elsewhere on this page) — fetch
+    # everything for the business and match locally instead.
+    existing_res = supabase.table("shopify_sync_snapshot").select("norm_title,ebay_live_qty,ebay_ended")\
+        .eq("business_id", business_id).execute()
+    known_ebay = {
+        row["norm_title"]: {"ebay_live_qty": row.get("ebay_live_qty"), "ebay_ended": bool(row.get("ebay_ended"))}
+        for row in (existing_res.data or []) if row.get("ebay_live_qty") is not None
+    }
+
     ebay_token = get_ebay_access_token(business_id)
     settings = get_ebay_settings(business_id)
     domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
@@ -4952,24 +4966,47 @@ def _shopify_sync_refresh_work(business_id: str, days_back: int) -> dict:
                                   f"{catalog_pages} page(s) ({len(shopify_catalog)} products) before giving up. "
                                   f"Nothing was changed — try Sync Now again in a minute."}
 
+    need_ebay_check = {k: v for k, v in sold_by_title.items() if k not in known_ebay}
+    already_known = {k: v for k, v in sold_by_title.items() if k in known_ebay}
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-        results = list(pool.map(
+        checked_results = list(pool.map(
             lambda kv: _shopify_sync_check_one(kv[0], kv[1], ebay_token, shopify_catalog),
-            sold_by_title.items(),
+            need_ebay_check.items(),
         ))
 
+    # Shopify data is always refreshed (cheap — it's just a dict lookup against the
+    # catalog we already fetched above), but the eBay side is reused as-is rather
+    # than re-hitting an API we've already gotten a real answer from.
+    reused_results = []
+    for norm_title, entry in already_known.items():
+        known = known_ebay[norm_title]
+        match = shopify_catalog.get(norm_title)
+        reused_results.append({
+            "norm_title": norm_title, "sku": entry["sku"], "legacy_item_id": entry.get("legacy_item_id"),
+            "ebay_live_qty": known["ebay_live_qty"], "ebay_ended": known["ebay_ended"],
+            "shopify_found": match is not None,
+            "shopify_live_qty": match["qty"] if match else None,
+            "shopify_title": match["title"] if match else None,
+            "shopify_inventory_item_id": match["inventory_item_id"] if match else None,
+        })
+
+    results = checked_results + reused_results
     now_iso = _dt.datetime.utcnow().isoformat()
     rows = [{
         "business_id": business_id, "norm_title": r["norm_title"],
         "title": sold_by_title[r["norm_title"]]["title"], "sku": r["sku"],
-        "legacy_item_id": r["legacy_item_id"], "ebay_live_qty": r["ebay_live_qty"],
+        "legacy_item_id": r["legacy_item_id"], "ebay_live_qty": r["ebay_live_qty"], "ebay_ended": r["ebay_ended"],
         "shopify_found": r["shopify_found"], "shopify_live_qty": r["shopify_live_qty"],
         "shopify_title": r["shopify_title"], "shopify_inventory_item_id": r["shopify_inventory_item_id"],
         "updated_at": now_iso,
     } for r in results]
     supabase.table("shopify_sync_snapshot").upsert(rows, on_conflict="business_id,norm_title").execute()
 
-    return {"checked": len(rows), "synced_at": now_iso, "catalog_products": len(shopify_catalog)}
+    return {
+        "checked": len(rows), "ebay_checked": len(checked_results), "ebay_reused": len(reused_results),
+        "synced_at": now_iso, "catalog_products": len(shopify_catalog),
+    }
 
 async def _run_shopify_sync_refresh_background(business_id: str, days_back: int):
     import asyncio, datetime as _dt

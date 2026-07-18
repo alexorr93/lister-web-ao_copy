@@ -194,7 +194,7 @@ async function pollRefreshStatus() {
     if (data.result) {
       document.getElementById('status').textContent = data.result.error
         ? `❌ ${data.result.error}`
-        : `✅ Synced ${data.result.checked} item(s).`;
+        : `✅ Synced ${data.result.checked} item(s) — ${data.result.ebay_checked ?? 0} new eBay lookup(s), ${data.result.ebay_reused ?? 0} reused from before.`;
       loadSyncStatus();
       loadToday();
     }
