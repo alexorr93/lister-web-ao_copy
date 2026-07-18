@@ -4744,6 +4744,19 @@ async def sync_inventory_now(request: Request):
     asyncio.create_task(_run())
     return {"ok": True, "started": True}
 
+@app.get("/api/shopify-sync/debug-log")
+async def shopify_sync_debug_log(request: Request):
+    """Temporary read-only diagnostic: dump raw shopify_qty_sync_log rows for this
+    business so we can see actual column names/values instead of guessing."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    try:
+        res = supabase.table("shopify_qty_sync_log").select("*").eq("business_id", business_id).limit(20).execute()
+        return {"rows": res.data, "error": None}
+    except Exception as e:
+        return {"rows": None, "error": str(e)}
+
 @app.get("/api/shopify-sync/today")
 async def shopify_sync_today(request: Request, date: str = None):
     """Step 1, deliberately minimal: every eBay sale from today, checked LIVE (not
