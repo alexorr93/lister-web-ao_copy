@@ -171,9 +171,13 @@ async function loadSyncStatus() {
 }
 
 async function syncNow() {
+  if (!currentItems.length) { alert('Nothing on screen to sync — nothing sold in this range.'); return; }
   document.getElementById('status').textContent = 'Starting sync (runs in the background — safe to leave this page, it\'ll pick up where it left off)...';
   try {
-    const r = await fetch('/api/shopify-sync/refresh?days_back=30', {method: 'POST'});
+    const r = await fetch('/api/shopify-sync/refresh', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(currentItems.map(it => ({title: it.title, sku: it.sku, legacy_item_id: it.legacy_item_id}))),
+    });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed to start');
     pollRefreshStatus();

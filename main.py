@@ -4981,18 +4981,30 @@ def _shopify_sync_check_one(norm_title: str, entry: dict, ebay_token: str, shopi
 
 _shopify_sync_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
 
-def _shopify_sync_refresh_work(business_id: str, days_back: int) -> dict:
+def _shopify_sync_refresh_work(business_id: str, items: list) -> dict:
     """The actual work, run off the event loop entirely (see the endpoint below).
     A full catalog scan with rate-limit backoff can now run well past the ~30-60s a
     reverse proxy will wait for one HTTP response (confirmed: Railway's edge
     returned a plain-text "upstream error" on a wide-range sync) — this has to be a
     background job with a polled status, the same pattern already used for
-    Financials' Sync Now, not a single request/response."""
+    Financials' Sync Now, not a single request/response.
+
+    `items` is the exact list the page already has on screen (from /today) — this
+    checks live quantity for exactly those items, nothing else. There is no date
+    range here on purpose: /today already turned the user's filtered range into a
+    concrete list of sold items (a snapshot of `orders` as of right now), so a
+    second, independent date window on this side was never meaningful — it just
+    silently drifted from whatever range the page was actually showing (confirmed
+    bug: this used to hardcode a 30-day lookback regardless of the page's filter)."""
     import datetime as _dt, concurrent.futures
 
-    end_date = _dt.datetime.utcnow().strftime("%Y-%m-%d")
-    start_date = (_dt.datetime.utcnow() - _dt.timedelta(days=days_back)).strftime("%Y-%m-%d")
-    sold_by_title = _shopify_sync_sold_by_title(business_id, start_date, end_date)
+    sold_by_title = {}
+    for it in items:
+        title = (it.get("title") or "").strip()
+        if not title:
+            continue
+        key = _shopify_sync_norm(title)
+        sold_by_title[key] = {"title": title, "sku": it.get("sku") or "", "legacy_item_id": it.get("legacy_item_id") or ""}
     if not sold_by_title:
         return {"checked": 0}
 
@@ -5073,10 +5085,10 @@ def _shopify_sync_refresh_work(business_id: str, days_back: int) -> dict:
         "synced_at": now_iso, "catalog_products": len(shopify_catalog),
     }
 
-async def _run_shopify_sync_refresh_background(business_id: str, days_back: int):
+async def _run_shopify_sync_refresh_background(business_id: str, items: list):
     import asyncio, datetime as _dt
     try:
-        result = await asyncio.to_thread(_shopify_sync_refresh_work, business_id, days_back)
+        result = await asyncio.to_thread(_shopify_sync_refresh_work, business_id, items)
         _shopify_sync_job_status[business_id] = {
             "running": False, "result": result,
             "started_at": _shopify_sync_job_status.get(business_id, {}).get("started_at"),
@@ -5090,9 +5102,12 @@ async def _run_shopify_sync_refresh_background(business_id: str, days_back: int)
         }
 
 @app.post("/api/shopify-sync/refresh")
-async def shopify_sync_refresh(request: Request, days_back: int = 30):
-    """Kicks off the catalog/eBay sync as a background task and returns immediately —
-    see _shopify_sync_refresh_work for why this can't be a synchronous request/response."""
+async def shopify_sync_refresh(request: Request, items: List[dict] = Body(...)):
+    """Kicks off the catalog/eBay live-quantity check as a background task and returns
+    immediately — see _shopify_sync_refresh_work for why this can't be a synchronous
+    request/response. `items` is exactly what /today returned to the page (the
+    caller's currentItems) — this checks live quantity for those items only, there is
+    no date range on this endpoint at all."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
@@ -5103,7 +5118,7 @@ async def shopify_sync_refresh(request: Request, days_back: int = 30):
         "running": True, "result": None,
         "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None,
     }
-    asyncio.create_task(_run_shopify_sync_refresh_background(business_id, days_back))
+    asyncio.create_task(_run_shopify_sync_refresh_background(business_id, items))
     return {"started": True}
 
 @app.get("/api/shopify-sync/refresh-status")
@@ -5390,8 +5405,8 @@ async def shopify_sync_today(request: Request, response: Response, date: str = N
     for norm_title, entry in sold_by_title.items():
         snap = snapshots.get(norm_title) or {}
         items.append({
-            "sku": entry["sku"], "title": entry["title"], "qty_sold_today": entry["qty_sold_today"],
-            "order_ids": entry["order_ids"],
+            "sku": entry["sku"], "title": entry["title"], "legacy_item_id": entry["legacy_item_id"],
+            "qty_sold_today": entry["qty_sold_today"], "order_ids": entry["order_ids"],
             "ebay_live_qty": snap.get("ebay_live_qty"),
             "shopify_found": bool(snap.get("shopify_found")), "shopify_live_qty": snap.get("shopify_live_qty"),
             "shopify_title": snap.get("shopify_title"), "shopify_inventory_item_id": snap.get("shopify_inventory_item_id"),
