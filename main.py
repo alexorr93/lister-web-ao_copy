@@ -4849,7 +4849,7 @@ async def shopify_sync_refresh(request: Request, days_back: int = 30):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
-    import datetime as _dt, concurrent.futures
+    import datetime as _dt, concurrent.futures, asyncio
 
     end_date = _dt.datetime.utcnow().strftime("%Y-%m-%d")
     start_date = (_dt.datetime.utcnow() - _dt.timedelta(days=days_back)).strftime("%Y-%m-%d")
@@ -4862,11 +4862,18 @@ async def shopify_sync_refresh(request: Request, days_back: int = 30):
     domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
     shopify_token = get_shopify_access_token(business_id) if domain else None
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-        results = list(pool.map(
-            lambda kv: _shopify_sync_check_one(kv[0], kv[1], ebay_token, domain, shopify_token),
-            sold_by_title.items(),
-        ))
+    def _run_all():
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            return list(pool.map(
+                lambda kv: _shopify_sync_check_one(kv[0], kv[1], ebay_token, domain, shopify_token),
+                sold_by_title.items(),
+            ))
+
+    # Offload the whole blocking batch to a worker thread — without this, the
+    # synchronous pool.map() call below runs directly on the asyncio event loop
+    # thread and blocks it, which stalls every other request the server is
+    # handling (not just this tab) until the sync finishes.
+    results = await asyncio.to_thread(_run_all)
 
     now_iso = _dt.datetime.utcnow().isoformat()
     rows = [{
