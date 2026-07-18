@@ -5101,12 +5101,17 @@ async def shopify_sync_today(request: Request, response: Response, date: str = N
     if not sold_by_title:
         return {"start_date": start_date, "end_date": end_date, "items": []}
 
-    snap_res = supabase.table("shopify_sync_snapshot").select("*").eq("business_id", business_id)\
-        .in_("norm_title", list(sold_by_title.keys())).execute()
+    # Fetch every snapshot/ignored row for this business rather than filtering with
+    # .in_("norm_title", [...]) — a title list built from real part titles can contain
+    # commas, parentheses, or other characters that break PostgREST's in.() filter
+    # syntax, silently dropping rows from the result with no error raised (confirmed:
+    # a verified-correct snapshot row disappeared from a same-batch .in_() query while
+    # being fetchable individually). Matching locally in Python sidesteps that
+    # entirely, the same fix already applied to Shopify's own search.
+    snap_res = supabase.table("shopify_sync_snapshot").select("*").eq("business_id", business_id).execute()
     snapshots = {row["norm_title"]: row for row in (snap_res.data or [])}
 
-    ignored_res = supabase.table("shopify_sync_ignored").select("norm_title").eq("business_id", business_id)\
-        .in_("norm_title", list(sold_by_title.keys())).execute()
+    ignored_res = supabase.table("shopify_sync_ignored").select("norm_title").eq("business_id", business_id).execute()
     ignored_titles = {row["norm_title"] for row in (ignored_res.data or [])}
 
     items = []
