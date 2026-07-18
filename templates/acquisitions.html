@@ -277,15 +277,18 @@ async function loadAcquisitions() {
   renderTable();
 }
 
-async function syncActiveListings() {
+async function syncActiveListings(force) {
   document.getElementById('active-listings-synced').textContent = 'Pulling your active eBay listings (runs in the background, can take a while for a large account)...';
   try {
-    const r = await fetch('/api/acquisitions/sync-active-listings', {method: 'POST'});
+    const r = await fetch('/api/acquisitions/sync-active-listings' + (force ? '?force=true' : ''), {method: 'POST'});
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed to start');
     if (data.reason === 'cooldown') {
+      if (confirm(`Active listings were synced ${new Date(data.last_synced_at).toLocaleString()} — full resyncs are normally capped to twice a week. Force a resync right now anyway?`)) {
+        return syncActiveListings(true);
+      }
       document.getElementById('active-listings-synced').textContent =
-        `Active listings synced ${new Date(data.last_synced_at).toLocaleString()} — full resyncs are capped to twice a week, next one available ${new Date(data.next_allowed_at).toLocaleString()}.`;
+        `Active listings synced ${new Date(data.last_synced_at).toLocaleString()} — next automatic sync available ${new Date(data.next_allowed_at).toLocaleString()}.`;
       return;
     }
     pollActiveListingsSync();
