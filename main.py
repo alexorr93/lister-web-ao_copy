@@ -4763,30 +4763,33 @@ def _shopify_sync_sold_by_title(business_id: str, start_date: str, end_date: str
             entry["legacy_item_id"] = r.get("legacy_item_id")
     return sold_by_title
 
-def _fetch_all_shopify_products(domain: str, shopify_token: str, location_id: str) -> dict:
-    """Paginates the entire Shopify catalog once and returns norm_title -> {title,
-    qty, inventory_item_id}. Replaces per-item Shopify search: their query-string
-    search syntax silently returns zero results whenever a title contains '&' or
-    '+' (confirmed — a listing with both in its title matched nothing, even after
-    stripping quotes), so search was never reliable for real part titles. A full
-    catalog scan sidesteps that class of bug entirely and costs far fewer API calls
-    for stores with more sold titles than pages of products.
+def _fetch_all_shopify_products(domain: str, shopify_token: str, location_id: str) -> tuple:
+    """Paginates the entire Shopify catalog once and returns (catalog, complete, pages)
+    where catalog is norm_title -> {title, qty, inventory_item_id}. Replaces per-item
+    Shopify search: their query-string search syntax silently returns zero results
+    whenever a title contains '&' or '+' (confirmed — a listing with both in its title
+    matched nothing, even after stripping quotes), so search was never reliable for
+    real part titles. A full catalog scan sidesteps that class of bug entirely and
+    costs far fewer API calls for stores with more sold titles than pages of products.
 
     qty is read from inventoryLevel at `location_id` specifically, NOT the variant's
     inventoryQuantity field — that field is the total across ALL locations, which
     disagreed with reality for a multi-location store (showed 1 in aggregate while
     the actual primary-location stock, the one push writes to, was 0).
 
-    A large catalog is ~20 paginated requests; Shopify's GraphQL cost-based rate
-    limit can throttle (429) partway through that run. The old version silently gave
-    up on the first non-200 response, returning an incomplete catalog that made
-    real, existing products look "not found" simply because they were on a later
-    page that never got fetched. This version backs off and retries on 429, and
-    proactively paces itself using Shopify's own throttle-status extension so it
-    rarely needs to."""
+    A large catalog is ~20 paginated requests; Shopify's GraphQL cost-based rate limit
+    can throttle (429) partway through that run. Backs off and retries on 429, and
+    paces itself using Shopify's own throttle-status extension — but rate limiting can
+    still eventually exhaust the retry budget. `complete` tells the caller whether
+    pagination actually reached the end or gave up partway through: the caller MUST
+    NOT treat a non-complete catalog as ground truth, since previously-correct
+    products.get("hasNextPage") products absent only because their page was never
+    fetched would wrongly look deleted/not-found (confirmed: this silently overwrote
+    a correct 'found' row back to 'not found' on a later, incomplete run)."""
     import requests as _req, time
     catalog = {}
     cursor = None
+    pages = 0
     headers = {"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"}
     while True:
         after_clause = f', after: "{cursor}"' if cursor else ""
@@ -4796,7 +4799,7 @@ def _fetch_all_shopify_products(domain: str, shopify_token: str, location_id: st
                  '} } } } } } } }')
 
         body = None
-        for attempt in range(6):
+        for attempt in range(8):
             r = _req.post(f"https://{domain}/admin/api/2024-10/graphql.json", headers=headers,
                            json={"query": query}, timeout=30)
             if r.status_code == 200:
@@ -4804,13 +4807,14 @@ def _fetch_all_shopify_products(domain: str, shopify_token: str, location_id: st
                 break
             if r.status_code == 429:
                 wait = float(r.headers.get("Retry-After", 2 ** attempt))
-                time.sleep(min(wait, 30))
+                time.sleep(min(wait, 60))
                 continue
             break
         if body is None:
-            # Genuinely failed (not just throttled) after retries — stop here rather
-            # than loop forever, but whatever was collected so far is still returned.
-            break
+            # Genuinely failed (not just throttled) after retries — stop here and
+            # tell the caller this catalog is incomplete, don't pretend it's whole.
+            return catalog, False, pages
+        pages += 1
 
         products = (body.get("data", {}) or {}).get("products", {}) or {}
         for e in products.get("edges", []):
@@ -4837,7 +4841,7 @@ def _fetch_all_shopify_products(domain: str, shopify_token: str, location_id: st
         if not page_info.get("hasNextPage"):
             break
         cursor = page_info.get("endCursor")
-    return catalog
+    return catalog, True, pages
 
 def _shopify_sync_check_one(norm_title: str, entry: dict, ebay_token: str, shopify_catalog: dict) -> dict:
     """The eBay side of the lookup for one sold title (Shopify's side is now a plain
@@ -4914,7 +4918,16 @@ def _shopify_sync_refresh_work(business_id: str, days_back: int) -> dict:
         loc_headers = {"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"}
         location_id = _get_shopify_primary_location_id(domain, loc_headers)
         if location_id:
-            shopify_catalog = _fetch_all_shopify_products(domain, shopify_token, location_id)
+            shopify_catalog, catalog_complete, catalog_pages = _fetch_all_shopify_products(domain, shopify_token, location_id)
+            if not catalog_complete:
+                # Don't write ANYTHING — an incomplete catalog would mark real,
+                # existing products "not found" just because their page never got
+                # fetched, silently overwriting correct data from a prior run.
+                # Leaving the snapshot untouched and reporting the failure is safer
+                # than a run that "succeeds" while quietly making things wrong.
+                return {"error": f"Shopify catalog scan was rate-limited and only got through "
+                                  f"{catalog_pages} page(s) ({len(shopify_catalog)} products) before giving up. "
+                                  f"Nothing was changed — try Sync Now again in a minute."}
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(
@@ -4933,7 +4946,7 @@ def _shopify_sync_refresh_work(business_id: str, days_back: int) -> dict:
     } for r in results]
     supabase.table("shopify_sync_snapshot").upsert(rows, on_conflict="business_id,norm_title").execute()
 
-    return {"checked": len(rows), "synced_at": now_iso}
+    return {"checked": len(rows), "synced_at": now_iso, "catalog_products": len(shopify_catalog)}
 
 async def _run_shopify_sync_refresh_background(business_id: str, days_back: int):
     import asyncio, datetime as _dt
@@ -4995,11 +5008,11 @@ async def shopify_sync_debug_catalog_search(request: Request, q: str):
     location_id = _get_shopify_primary_location_id(domain, loc_headers)
     if not location_id:
         raise HTTPException(400, "Could not determine Shopify location")
-    catalog = _fetch_all_shopify_products(domain, shopify_token, location_id)
+    catalog, complete, pages = _fetch_all_shopify_products(domain, shopify_token, location_id)
     q_lower = q.lower()
     matches = [{"title": v["title"], "norm_title": k, "qty": v["qty"]}
                for k, v in catalog.items() if q_lower in k]
-    return {"catalog_size": len(catalog), "matches": matches}
+    return {"catalog_size": len(catalog), "complete": complete, "pages_fetched": pages, "matches": matches}
 
 @app.get("/api/shopify-sync/debug-item")
 async def shopify_sync_debug_item(request: Request, q: str):
