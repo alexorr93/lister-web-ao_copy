@@ -5105,6 +5105,61 @@ async def shopify_sync_debug_exact_match(request: Request, ebay_title: str):
         } for k in candidates[:3]]
     return result
 
+@app.get("/api/shopify-sync/debug-ebay-lookup")
+async def shopify_sync_debug_ebay_lookup(request: Request, order_id: str):
+    """Temporary read-only diagnostic: runs the exact SKU + Browse API eBay lookups
+    _shopify_sync_check_one does for one order, but returns the raw HTTP status and
+    body from each call instead of silently swallowing failures — every eBay Live
+    Qty on the page has been coming back blank, and the normal code path has no way
+    to say why."""
+    import requests as _req
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+
+    order_res = supabase.table("orders").select("sku,title,legacy_item_id").eq("business_id", business_id)\
+        .eq("platform", "eBay").eq("order_id", order_id).limit(1).execute()
+    if not order_res.data:
+        raise HTTPException(404, f"No eBay order found with order_id={order_id}")
+    row = order_res.data[0]
+    sku = row.get("sku") or ""
+    legacy_item_id = row.get("legacy_item_id") or ""
+
+    try:
+        token = get_ebay_access_token(business_id)
+        token_ok = True
+        token_error = None
+    except Exception as e:
+        token = None
+        token_ok = False
+        token_error = str(e)
+
+    result = {"sku": sku, "legacy_item_id": legacy_item_id, "token_acquired": token_ok, "token_error": token_error}
+
+    if token_ok and sku and sku != "(no SKU)" and not sku.lower().startswith("lister-"):
+        try:
+            r = _req.get(f"{EBAY_API_BASE}/sell/inventory/v1/inventory_item/{sku}",
+                         headers=ebay_headers(token, content_language=False), timeout=15)
+            result["sku_lookup"] = {"status": r.status_code, "body": r.text[:1000]}
+        except Exception as e:
+            result["sku_lookup"] = {"exception": str(e)}
+    else:
+        result["sku_lookup"] = {"skipped": "no usable sku"}
+
+    if token_ok and legacy_item_id:
+        try:
+            r = _req.get(f"{EBAY_API_BASE}/buy/browse/v1/item/get_item_by_legacy_id",
+                         params={"legacy_item_id": legacy_item_id},
+                         headers={**ebay_headers(token, content_language=False), "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"},
+                         timeout=15)
+            result["browse_lookup"] = {"status": r.status_code, "body": r.text[:1000]}
+        except Exception as e:
+            result["browse_lookup"] = {"exception": str(e)}
+    else:
+        result["browse_lookup"] = {"skipped": "no legacy_item_id"}
+
+    return result
+
 @app.get("/api/shopify-sync/debug-item")
 async def shopify_sync_debug_item(request: Request, q: str):
     """Temporary read-only diagnostic: dump every push_log row, the current snapshot
