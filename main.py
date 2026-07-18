@@ -4940,19 +4940,20 @@ async def shopify_sync_debug_catalog_search(request: Request, q: str):
 @app.get("/api/shopify-sync/debug-item")
 async def shopify_sync_debug_item(request: Request, q: str):
     """Temporary read-only diagnostic: dump every push_log row, the current snapshot
-    row, and the last 90 days of eBay order rows matching a title substring, so we can
-    trace where a specific quantity came from."""
+    row, and the last 90 days of eBay order rows matching a title OR sku substring, so
+    we can trace where a specific quantity came from even when q is a SKU, not a title
+    fragment."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     import datetime as _dt
     cutoff = (_dt.datetime.utcnow() - _dt.timedelta(days=90)).strftime("%Y-%m-%d")
     push_rows = supabase.table("shopify_push_log").select("*").eq("business_id", business_id)\
-        .ilike("title", f"%{q}%").execute().data or []
+        .or_(f"title.ilike.%{q}%,sku.ilike.%{q}%").execute().data or []
     snap_rows = supabase.table("shopify_sync_snapshot").select("*").eq("business_id", business_id)\
-        .ilike("title", f"%{q}%").execute().data or []
+        .or_(f"title.ilike.%{q}%,sku.ilike.%{q}%").execute().data or []
     order_rows = supabase.table("orders").select("order_id,order_date,sku,title,quantity,platform").eq("business_id", business_id)\
-        .eq("platform", "eBay").ilike("title", f"%{q}%").gte("order_date", cutoff).execute().data or []
+        .eq("platform", "eBay").or_(f"title.ilike.%{q}%,sku.ilike.%{q}%").gte("order_date", cutoff).execute().data or []
     return {"push_log": push_rows, "snapshot": snap_rows, "recent_orders": order_rows}
 
 @app.post("/api/shopify-sync/ignore")
