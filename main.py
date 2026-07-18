@@ -5361,6 +5361,18 @@ async def acquisitions_sync_active_listings_status(request: Request, response: R
     response.headers["Cache-Control"] = "no-store"
     return _ebay_active_listings_job_status.get(business_id, {"running": False, "result": None, "started_at": None, "finished_at": None})
 
+@app.get("/api/acquisitions/debug-active-listing-raw")
+async def debug_active_listing_raw(request: Request):
+    """Temporary read-only diagnostic: one raw page (3 items) of eBay's real
+    ActiveList response, unmodified — so the actual price field name/shape can be
+    confirmed before building a dollar-total column on top of a guess."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    token = get_ebay_access_token(business_id)
+    resp = _ebay_get_active_listings_page(token, 1, entries_per_page=3)
+    return resp
+
 _ebay_listings_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
 
 async def _run_ebay_listings_sync_background(business_id: str):
