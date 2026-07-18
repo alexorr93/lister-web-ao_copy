@@ -19,7 +19,12 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .main { max-width: 1200px; margin: 0 auto; padding: 20px 16px; }
 h1 { font-size: 20px; margin-bottom: 4px; }
 .sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
-.btn { padding: 9px 16px; border-radius: 8px; border: 1px solid var(--border); background: #1e2535; color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; margin-bottom: 14px; }
+.filter-bar { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin-bottom: 18px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.field-label { font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; margin-bottom: 4px; }
+.field-input { background: #fff; color: #111; border: none; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.quick-range { display: flex; gap: 6px; }
+.quick-range button { padding: 8px 10px; font-size: 12px; }
+.btn { padding: 9px 16px; border-radius: 8px; border: 1px solid var(--border); background: #1e2535; color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; }
 .btn:hover { background: var(--border); }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
@@ -51,12 +56,30 @@ tr.synced td { background: rgba(22, 163, 74, 0.16); }
 
 <div class="main">
   <h1>Shopify Sync</h1>
-  <div class="sub">Step 1: everything sold on eBay today, checked live against both platforms. Read-only — nothing gets changed yet.</div>
+  <div class="sub">Everything sold on eBay in the selected range, checked live against both platforms. Read-only — nothing gets changed until you push.</div>
 
-  <button class="btn btn-primary" onclick="loadToday()">🔄 Check Today's Sales</button>
+  <div class="filter-bar">
+    <div>
+      <div class="field-label">Start Date</div>
+      <input type="date" class="field-input" id="start-date"/>
+    </div>
+    <div>
+      <div class="field-label">End Date</div>
+      <input type="date" class="field-input" id="end-date"/>
+    </div>
+    <button class="btn btn-primary" onclick="loadToday()">🔄 Apply</button>
+    <div class="quick-range">
+      <button class="btn" onclick="setToday()">Today</button>
+      <button class="btn" onclick="setRange(7)">Last 7d</button>
+      <button class="btn" onclick="setRange(30)">Last 30d</button>
+      <button class="btn" onclick="setThisMonth()">This Month</button>
+      <button class="btn" onclick="setLastMonth()">Last Month</button>
+    </div>
+  </div>
+
   <div id="status" class="status-msg"></div>
 
-  <div id="table-area"><div class="empty">Click above to check today's eBay sales against Shopify.</div></div>
+  <div id="table-area"><div class="empty">Loading today's sales…</div></div>
 </div>
 
 <script>
@@ -66,16 +89,51 @@ function escapeHtml(s) {
 
 let currentItems = [];
 
+function setToday() {
+  const now = new Date();
+  const d = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+  document.getElementById('start-date').value = d;
+  document.getElementById('end-date').value = d;
+  loadToday();
+}
+
+function setRange(days) {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - days);
+  document.getElementById('end-date').value = end.toISOString().slice(0,10);
+  document.getElementById('start-date').value = start.toISOString().slice(0,10);
+  loadToday();
+}
+
+function setThisMonth() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  document.getElementById('start-date').value = start.toISOString().slice(0,10);
+  document.getElementById('end-date').value = now.toISOString().slice(0,10);
+  loadToday();
+}
+
+function setLastMonth() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const end = new Date(now.getFullYear(), now.getMonth(), 0);
+  document.getElementById('start-date').value = start.toISOString().slice(0,10);
+  document.getElementById('end-date').value = end.toISOString().slice(0,10);
+  loadToday();
+}
+
 async function loadToday() {
+  const start = document.getElementById('start-date').value;
+  const end = document.getElementById('end-date').value;
   document.getElementById('status').textContent = 'Checking live quantities on both platforms...';
   document.getElementById('table-area').innerHTML = '';
   try {
-    const now = new Date();
-    const localDate = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
-    const r = await fetch('/api/shopify-sync/today?date=' + localDate);
+    const r = await fetch('/api/shopify-sync/today?start=' + start + '&end=' + end);
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed');
-    document.getElementById('status').textContent = `Date: ${data.date} — ${data.items.length} distinct SKU(s) sold on eBay today.`;
+    const rangeLabel = data.start_date === data.end_date ? data.start_date : `${data.start_date} – ${data.end_date}`;
+    document.getElementById('status').textContent = `${rangeLabel} — ${data.items.length} distinct SKU(s) sold on eBay.`;
     currentItems = data.items;
     renderTable(currentItems);
   } catch(e) {
@@ -112,17 +170,17 @@ async function pushOne(idx) {
 
 function renderTable(items) {
   if (!items.length) {
-    document.getElementById('table-area').innerHTML = '<div class="empty">Nothing sold on eBay today (with a real SKU) yet.</div>';
+    document.getElementById('table-area').innerHTML = '<div class="empty">Nothing sold on eBay in this range (with a real SKU) yet.</div>';
     return;
   }
   let html = `<table><thead><tr>
-    <th>SKU</th><th>eBay Item</th><th>Qty Sold Today (eBay)</th><th>eBay Live Qty</th><th>Found in Shopify?</th><th>Shopify Live Qty</th><th>Shopify Title</th><th>Push</th>
+    <th>SKU</th><th>eBay Item</th><th>Qty Sold (eBay)</th><th>eBay Live Qty</th><th>Found in Shopify?</th><th>Shopify Live Qty</th><th>Shopify Title</th><th>Push</th>
   </tr></thead><tbody>`;
   items.forEach((it, idx) => {
     const synced = !!it.already_pushed && !!it.qty_matches;
     const pushCell = it.shopify_found
       ? (synced
-          ? `<span class="synced-badge">✔ Synced</span><button class="push-again" onclick="pushOne(${idx})">push again</button>`
+          ? `<span class="synced-badge">✔ Already Pushed</span><button class="push-again" onclick="pushOne(${idx})">push again</button>`
           : `<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOne(${idx})">Push -${it.qty_sold_today}</button>`)
       : '—';
     html += `<tr id="row-${idx}" class="${synced ? 'synced' : ''}">
@@ -139,6 +197,8 @@ function renderTable(items) {
   html += '</tbody></table>';
   document.getElementById('table-area').innerHTML = html;
 }
+
+setToday();
 </script>
 </body>
 </html>

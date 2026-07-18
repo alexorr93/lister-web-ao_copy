@@ -4745,25 +4745,34 @@ async def sync_inventory_now(request: Request):
     return {"ok": True, "started": True}
 
 @app.get("/api/shopify-sync/today")
-async def shopify_sync_today(request: Request, date: str = None):
-    """Step 1, deliberately minimal: every eBay sale from today, checked LIVE (not
-    from any cached/synced table). eBay's own quantity is looked up by SKU (that's
-    genuinely eBay's own item key). Shopify is matched by TITLE — SKU here is just
-    a lot/location code, not a unique product ID, so it's useless for cross-platform
-    matching (confirmed: it was matching completely unrelated items that happened to
-    share a storage location). Read-only — nothing gets adjusted.
+async def shopify_sync_today(request: Request, date: str = None, start: str = None, end: str = None):
+    """Step 1, deliberately minimal: every eBay sale in the selected date range, checked
+    LIVE (not from any cached/synced table). eBay's own quantity is looked up by SKU
+    (that's genuinely eBay's own item key), falling back to the Browse API by legacy
+    item ID for listings that weren't created via the Inventory API. Shopify is matched
+    by TITLE — SKU here is just a lot/location code, not a unique product ID, so it's
+    useless for cross-platform matching (confirmed: it was matching completely
+    unrelated items that happened to share a storage location). Read-only — nothing
+    gets adjusted.
 
-    'date' is the caller's local calendar date (YYYY-MM-DD) — server UTC time was
-    used before, which drifts a day off from the user's "today" depending on time
-    of day and timezone. Falls back to server UTC date if the caller omits it."""
+    start/end are the caller's local calendar dates (YYYY-MM-DD) — server UTC time was
+    used before, which drifts a day off from the user's "today" depending on time of
+    day and timezone. 'date' is accepted as a single-day alias for start=end=date, for
+    older callers. Falls back to server UTC "today" for both if nothing is given."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     import requests as _req, datetime as _dt, re as _re
 
-    today = date if date and _re.match(r"^\d{4}-\d{2}-\d{2}$", date) else _dt.datetime.utcnow().strftime("%Y-%m-%d")
+    _date_re = r"^\d{4}-\d{2}-\d{2}$"
+    server_today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+    if date and _re.match(_date_re, date):
+        start = end = date
+    start_date = start if start and _re.match(_date_re, start) else server_today
+    end_date = end if end and _re.match(_date_re, end) else server_today
+
     res = supabase.table("orders").select("sku,title,quantity,order_id,legacy_item_id").eq("business_id", business_id)\
-        .eq("platform", "eBay").eq("order_date", today).execute()
+        .eq("platform", "eBay").gte("order_date", start_date).lte("order_date", end_date).execute()
     rows = res.data or []
 
     def _norm(t):
@@ -4782,7 +4791,7 @@ async def shopify_sync_today(request: Request, date: str = None):
             entry["legacy_item_id"] = r.get("legacy_item_id")
 
     if not sold_by_title:
-        return {"date": today, "items": []}
+        return {"start_date": start_date, "end_date": end_date, "items": []}
 
     ebay_token = get_ebay_access_token(business_id)
     settings = get_ebay_settings(business_id)
@@ -4883,7 +4892,7 @@ async def shopify_sync_today(request: Request, date: str = None):
             it["already_pushed"] = False
             it["qty_matches"] = False
 
-    return {"date": today, "items": items}
+    return {"start_date": start_date, "end_date": end_date, "items": items}
 
 def _get_shopify_primary_location_id(domain: str, headers: dict) -> str:
     import requests as _req
