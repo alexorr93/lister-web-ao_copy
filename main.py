@@ -4744,16 +4744,162 @@ async def sync_inventory_now(request: Request):
     asyncio.create_task(_run())
     return {"ok": True, "started": True}
 
+def _shopify_sync_norm(t):
+    return " ".join((t or "").strip().lower().split())
+
+def _shopify_sync_sold_by_title(business_id: str, start_date: str, end_date: str) -> dict:
+    res = supabase.table("orders").select("sku,title,quantity,order_id,legacy_item_id").eq("business_id", business_id)\
+        .eq("platform", "eBay").gte("order_date", start_date).lte("order_date", end_date).execute()
+    sold_by_title = {}
+    for r in (res.data or []):
+        title = r.get("title") or ""
+        if not title:
+            continue
+        key = _shopify_sync_norm(title)
+        entry = sold_by_title.setdefault(key, {"title": title, "sku": r.get("sku") or "", "legacy_item_id": "", "qty_sold_today": 0, "order_ids": []})
+        entry["qty_sold_today"] += r.get("quantity", 0) or 0
+        entry["order_ids"].append(r.get("order_id"))
+        if not entry["legacy_item_id"] and r.get("legacy_item_id"):
+            entry["legacy_item_id"] = r.get("legacy_item_id")
+    return sold_by_title
+
+def _shopify_sync_check_one(norm_title: str, entry: dict, ebay_token: str, domain: str, shopify_token: str) -> dict:
+    """The actual live eBay + Shopify lookup for one sold title. Runs off the request
+    thread (see refresh endpoint) since it's pure blocking I/O — parallelizing this is
+    what keeps a multi-day resync from taking forever."""
+    import requests as _req
+
+    sku = entry["sku"]
+    ebay_live_qty = None
+    if sku and sku != "(no SKU)" and not sku.lower().startswith("lister-"):
+        try:
+            r = _req.get(f"{EBAY_API_BASE}/sell/inventory/v1/inventory_item/{sku}",
+                         headers=ebay_headers(ebay_token, content_language=False), timeout=15)
+            if r.status_code == 200:
+                ebay_live_qty = (r.json().get("availability", {}) or {}).get("shipToLocationAvailability", {}).get("quantity")
+        except Exception:
+            pass
+
+    # Most of these listings weren't created via the Inventory API (no SKU-keyed
+    # inventory item exists for them), so the lookup above returns nothing for
+    # them. Fall back to the Browse API by the listing's own (legacy) item ID —
+    # works for any live eBay listing regardless of how it was created. A 404
+    # means the listing has ended, i.e. genuinely sold out (qty 0).
+    legacy_item_id = entry.get("legacy_item_id")
+    if ebay_live_qty is None and legacy_item_id:
+        try:
+            r = _req.get(f"{EBAY_API_BASE}/buy/browse/v1/item/get_item_by_legacy_id",
+                         params={"legacy_item_id": legacy_item_id},
+                         headers={**ebay_headers(ebay_token, content_language=False), "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"},
+                         timeout=15)
+            if r.status_code == 200:
+                avail = (r.json().get("estimatedAvailabilities") or [])
+                if avail:
+                    ebay_live_qty = avail[0].get("estimatedAvailableQuantity")
+            elif r.status_code == 404:
+                ebay_live_qty = 0
+        except Exception:
+            pass
+
+    shopify_found = False
+    shopify_live_qty = None
+    shopify_title = None
+    shopify_inventory_item_id = None
+    if domain and shopify_token:
+        try:
+            safe_title = entry["title"].replace('"', '').replace("'", "")[:80]
+            gql = _req.post(
+                f"https://{domain}/admin/api/2024-10/graphql.json",
+                headers={"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"},
+                json={"query": '{ products(first: 5, query: "title:\'' + safe_title + '\'") { edges { node { title variants(first: 1) { edges { node { inventoryQuantity inventoryItem { id } } } } } } } }'},
+                timeout=15,
+            )
+            if gql.status_code == 200:
+                edges = (gql.json().get("data", {}) or {}).get("products", {}).get("edges", [])
+                # Shopify's search is fuzzy — only accept a candidate whose title
+                # normalizes to an EXACT match, so we don't repeat the SKU mistake
+                # with a different kind of false positive.
+                for e in edges:
+                    node = e["node"]
+                    if _shopify_sync_norm(node.get("title")) == norm_title:
+                        shopify_found = True
+                        shopify_title = node.get("title")
+                        variant_edges = (node.get("variants") or {}).get("edges", [])
+                        if variant_edges:
+                            shopify_live_qty = variant_edges[0]["node"].get("inventoryQuantity")
+                            shopify_inventory_item_id = (variant_edges[0]["node"].get("inventoryItem") or {}).get("id")
+                        break
+        except Exception:
+            pass
+
+    return {
+        "norm_title": norm_title, "sku": sku, "legacy_item_id": legacy_item_id,
+        "ebay_live_qty": ebay_live_qty, "shopify_found": shopify_found,
+        "shopify_live_qty": shopify_live_qty, "shopify_title": shopify_title,
+        "shopify_inventory_item_id": shopify_inventory_item_id,
+    }
+
+@app.post("/api/shopify-sync/refresh")
+async def shopify_sync_refresh(request: Request, days_back: int = 30):
+    """The only place that makes live eBay/Shopify calls for this feature. Walks every
+    distinct title sold on eBay in the last `days_back` days and writes a fresh
+    snapshot row per title into shopify_sync_snapshot. The 'today' endpoint below reads
+    only from that table — this is what makes it instant regardless of range size.
+    Parallelized (blocking I/O, so threads) since a real backlog is a lot of titles."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import datetime as _dt, concurrent.futures
+
+    end_date = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+    start_date = (_dt.datetime.utcnow() - _dt.timedelta(days=days_back)).strftime("%Y-%m-%d")
+    sold_by_title = _shopify_sync_sold_by_title(business_id, start_date, end_date)
+    if not sold_by_title:
+        return {"ok": True, "checked": 0}
+
+    ebay_token = get_ebay_access_token(business_id)
+    settings = get_ebay_settings(business_id)
+    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+    shopify_token = get_shopify_access_token(business_id) if domain else None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(
+            lambda kv: _shopify_sync_check_one(kv[0], kv[1], ebay_token, domain, shopify_token),
+            sold_by_title.items(),
+        ))
+
+    now_iso = _dt.datetime.utcnow().isoformat()
+    rows = [{
+        "business_id": business_id, "norm_title": r["norm_title"],
+        "title": sold_by_title[r["norm_title"]]["title"], "sku": r["sku"],
+        "legacy_item_id": r["legacy_item_id"], "ebay_live_qty": r["ebay_live_qty"],
+        "shopify_found": r["shopify_found"], "shopify_live_qty": r["shopify_live_qty"],
+        "shopify_title": r["shopify_title"], "shopify_inventory_item_id": r["shopify_inventory_item_id"],
+        "updated_at": now_iso,
+    } for r in results]
+    supabase.table("shopify_sync_snapshot").upsert(rows, on_conflict="business_id,norm_title").execute()
+
+    return {"ok": True, "checked": len(rows), "synced_at": now_iso}
+
+@app.get("/api/shopify-sync/sync-status")
+async def shopify_sync_status(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    res = supabase.table("shopify_sync_snapshot").select("updated_at").eq("business_id", business_id)\
+        .order("updated_at", desc=True).limit(1).execute()
+    last = res.data[0]["updated_at"] if res.data else None
+    return {"last_synced_at": last}
+
 @app.get("/api/shopify-sync/today")
 async def shopify_sync_today(request: Request, date: str = None, start: str = None, end: str = None):
-    """Step 1, deliberately minimal: every eBay sale in the selected date range, checked
-    LIVE (not from any cached/synced table). eBay's own quantity is looked up by SKU
-    (that's genuinely eBay's own item key), falling back to the Browse API by legacy
-    item ID for listings that weren't created via the Inventory API. Shopify is matched
-    by TITLE — SKU here is just a lot/location code, not a unique product ID, so it's
-    useless for cross-platform matching (confirmed: it was matching completely
-    unrelated items that happened to share a storage location). Read-only — nothing
-    gets adjusted.
+    """Step 1: every eBay sale in the selected date range, matched against the last
+    synced snapshot of live eBay/Shopify quantities (see /refresh above). Reads only
+    from local tables — zero external API calls, so this is fast no matter how wide
+    the date range is. Click 'Sync Now' to refresh the snapshot itself. Shopify is
+    matched by TITLE — SKU here is just a lot/location code, not a unique product ID,
+    so it's useless for cross-platform matching (confirmed: it was matching completely
+    unrelated items that happened to share a storage location).
 
     start/end are the caller's local calendar dates (YYYY-MM-DD) — server UTC time was
     used before, which drifts a day off from the user's "today" depending on time of
@@ -4762,7 +4908,7 @@ async def shopify_sync_today(request: Request, date: str = None, start: str = No
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
-    import requests as _req, datetime as _dt, re as _re
+    import datetime as _dt, re as _re
 
     _date_re = r"^\d{4}-\d{2}-\d{2}$"
     server_today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
@@ -4771,104 +4917,24 @@ async def shopify_sync_today(request: Request, date: str = None, start: str = No
     start_date = start if start and _re.match(_date_re, start) else server_today
     end_date = end if end and _re.match(_date_re, end) else server_today
 
-    res = supabase.table("orders").select("sku,title,quantity,order_id,legacy_item_id").eq("business_id", business_id)\
-        .eq("platform", "eBay").gte("order_date", start_date).lte("order_date", end_date).execute()
-    rows = res.data or []
-
-    def _norm(t):
-        return " ".join((t or "").strip().lower().split())
-
-    sold_by_title = {}
-    for r in rows:
-        title = r.get("title") or ""
-        if not title:
-            continue
-        key = _norm(title)
-        entry = sold_by_title.setdefault(key, {"title": title, "sku": r.get("sku") or "", "legacy_item_id": "", "qty_sold_today": 0, "order_ids": []})
-        entry["qty_sold_today"] += r.get("quantity", 0) or 0
-        entry["order_ids"].append(r.get("order_id"))
-        if not entry["legacy_item_id"] and r.get("legacy_item_id"):
-            entry["legacy_item_id"] = r.get("legacy_item_id")
-
+    sold_by_title = _shopify_sync_sold_by_title(business_id, start_date, end_date)
     if not sold_by_title:
         return {"start_date": start_date, "end_date": end_date, "items": []}
 
-    ebay_token = get_ebay_access_token(business_id)
-    settings = get_ebay_settings(business_id)
-    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
-    shopify_token = get_shopify_access_token(business_id) if domain else None
+    snap_res = supabase.table("shopify_sync_snapshot").select("*").eq("business_id", business_id)\
+        .in_("norm_title", list(sold_by_title.keys())).execute()
+    snapshots = {row["norm_title"]: row for row in (snap_res.data or [])}
 
     items = []
     for norm_title, entry in sold_by_title.items():
-        sku = entry["sku"]
-        ebay_live_qty = None
-        if sku and sku != "(no SKU)" and not sku.lower().startswith("lister-"):
-            try:
-                r = _req.get(f"{EBAY_API_BASE}/sell/inventory/v1/inventory_item/{sku}",
-                             headers=ebay_headers(ebay_token, content_language=False), timeout=15)
-                if r.status_code == 200:
-                    ebay_live_qty = (r.json().get("availability", {}) or {}).get("shipToLocationAvailability", {}).get("quantity")
-            except Exception:
-                pass
-
-        # Most of these listings weren't created via the Inventory API (no SKU-keyed
-        # inventory item exists for them), so the lookup above returns nothing for
-        # them. Fall back to the Browse API by the listing's own (legacy) item ID —
-        # works for any live eBay listing regardless of how it was created. A 404
-        # means the listing has ended, i.e. genuinely sold out (qty 0).
-        legacy_item_id = entry.get("legacy_item_id")
-        if ebay_live_qty is None and legacy_item_id:
-            try:
-                r = _req.get(f"{EBAY_API_BASE}/buy/browse/v1/item/get_item_by_legacy_id",
-                             params={"legacy_item_id": legacy_item_id},
-                             headers={**ebay_headers(ebay_token, content_language=False), "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"},
-                             timeout=15)
-                if r.status_code == 200:
-                    avail = (r.json().get("estimatedAvailabilities") or [])
-                    if avail:
-                        ebay_live_qty = avail[0].get("estimatedAvailableQuantity")
-                elif r.status_code == 404:
-                    ebay_live_qty = 0
-            except Exception:
-                pass
-
-        shopify_found = False
-        shopify_live_qty = None
-        shopify_title = None
-        shopify_inventory_item_id = None
-        if domain and shopify_token:
-            try:
-                safe_title = entry["title"].replace('"', '').replace("'", "")[:80]
-                gql = _req.post(
-                    f"https://{domain}/admin/api/2024-10/graphql.json",
-                    headers={"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"},
-                    json={"query": '{ products(first: 5, query: "title:\'' + safe_title + '\'") { edges { node { title variants(first: 1) { edges { node { inventoryQuantity inventoryItem { id } } } } } } } }'},
-                    timeout=15,
-                )
-                if gql.status_code == 200:
-                    edges = (gql.json().get("data", {}) or {}).get("products", {}).get("edges", [])
-                    # Shopify's search is fuzzy — only accept a candidate whose title
-                    # normalizes to an EXACT match, so we don't repeat the SKU mistake
-                    # with a different kind of false positive.
-                    for e in edges:
-                        node = e["node"]
-                        if _norm(node.get("title")) == norm_title:
-                            shopify_found = True
-                            shopify_title = node.get("title")
-                            variant_edges = (node.get("variants") or {}).get("edges", [])
-                            if variant_edges:
-                                shopify_live_qty = variant_edges[0]["node"].get("inventoryQuantity")
-                                shopify_inventory_item_id = (variant_edges[0]["node"].get("inventoryItem") or {}).get("id")
-                            break
-            except Exception:
-                pass
-
+        snap = snapshots.get(norm_title) or {}
         items.append({
-            "sku": sku, "title": entry["title"], "qty_sold_today": entry["qty_sold_today"],
+            "sku": entry["sku"], "title": entry["title"], "qty_sold_today": entry["qty_sold_today"],
             "order_ids": entry["order_ids"],
-            "ebay_live_qty": ebay_live_qty,
-            "shopify_found": shopify_found, "shopify_live_qty": shopify_live_qty, "shopify_title": shopify_title,
-            "shopify_inventory_item_id": shopify_inventory_item_id,
+            "ebay_live_qty": snap.get("ebay_live_qty"),
+            "shopify_found": bool(snap.get("shopify_found")), "shopify_live_qty": snap.get("shopify_live_qty"),
+            "shopify_title": snap.get("shopify_title"), "shopify_inventory_item_id": snap.get("shopify_inventory_item_id"),
+            "snapshot_updated_at": snap.get("updated_at"),
         })
 
     # Real server-side "already pushed" check against the push audit table —
@@ -4909,7 +4975,7 @@ async def shopify_sync_push(request: Request, items: List[dict] = Body(...)):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
-    import requests as _req
+    import requests as _req, datetime as _dt
 
     settings = get_ebay_settings(business_id)
     domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
@@ -4958,6 +5024,14 @@ async def shopify_sync_push(request: Request, items: List[dict] = Body(...)):
                     log_row["status"] = "success"
                     log_row["new_quantity"] = new_qty
                     results.append({"title": it.get("title"), "status": "success", "new_quantity": new_qty})
+                    # Keep the snapshot in sync immediately so the row reflects the push
+                    # right away, without waiting on the next full Sync Now.
+                    try:
+                        supabase.table("shopify_sync_snapshot")\
+                            .update({"shopify_live_qty": new_qty, "updated_at": _dt.datetime.utcnow().isoformat()})\
+                            .eq("business_id", business_id).eq("norm_title", _shopify_sync_norm(it.get("title"))).execute()
+                    except Exception as e:
+                        print(f"shopify_sync_snapshot update after push failed: {e}")
                 else:
                     err_msg = "; ".join(e.get("message", "") for e in errors) or f"HTTP {r.status_code}"
                     log_row["status"] = "error"

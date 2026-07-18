@@ -56,7 +56,7 @@ tr.synced td { background: rgba(22, 163, 74, 0.16); }
 
 <div class="main">
   <h1>Shopify Sync</h1>
-  <div class="sub">Everything sold on eBay in the selected range, checked live against both platforms. Read-only — nothing gets changed until you push.</div>
+  <div class="sub">Everything sold on eBay in the selected range, matched against the last synced Shopify/eBay quantities. Reads local data only — click Sync Now to refresh it. Nothing gets changed until you push.</div>
 
   <div class="filter-bar">
     <div>
@@ -67,7 +67,7 @@ tr.synced td { background: rgba(22, 163, 74, 0.16); }
       <div class="field-label">End Date</div>
       <input type="date" class="field-input" id="end-date"/>
     </div>
-    <button class="btn btn-primary" onclick="loadToday()">🔄 Apply</button>
+    <button class="btn btn-primary" onclick="loadToday()">Apply</button>
     <div class="quick-range">
       <button class="btn" onclick="setToday()">Today</button>
       <button class="btn" onclick="setRange(7)">Last 7d</button>
@@ -75,6 +75,8 @@ tr.synced td { background: rgba(22, 163, 74, 0.16); }
       <button class="btn" onclick="setThisMonth()">This Month</button>
       <button class="btn" onclick="setLastMonth()">Last Month</button>
     </div>
+    <button class="btn btn-primary" onclick="syncNow()" title="Refreshes live eBay/Shopify quantities into the local snapshot — this is the only action that calls out to eBay/Shopify">🔄 Sync Now</button>
+    <span id="last-synced" style="font-size:11px;color:var(--muted);align-self:center;"></span>
   </div>
 
   <div id="status" class="status-msg"></div>
@@ -126,7 +128,7 @@ function setLastMonth() {
 async function loadToday() {
   const start = document.getElementById('start-date').value;
   const end = document.getElementById('end-date').value;
-  document.getElementById('status').textContent = 'Checking live quantities on both platforms...';
+  document.getElementById('status').textContent = 'Loading...';
   document.getElementById('table-area').innerHTML = '';
   try {
     const r = await fetch('/api/shopify-sync/today?start=' + start + '&end=' + end);
@@ -136,6 +138,30 @@ async function loadToday() {
     document.getElementById('status').textContent = `${rangeLabel} — ${data.items.length} distinct SKU(s) sold on eBay.`;
     currentItems = data.items;
     renderTable(currentItems);
+  } catch(e) {
+    document.getElementById('status').textContent = `❌ ${e.message}`;
+  }
+}
+
+async function loadSyncStatus() {
+  try {
+    const r = await fetch('/api/shopify-sync/sync-status');
+    const data = await r.json();
+    document.getElementById('last-synced').textContent = data.last_synced_at
+      ? 'Last synced: ' + new Date(data.last_synced_at + 'Z').toLocaleString()
+      : 'Never synced — click Sync Now';
+  } catch(e) {}
+}
+
+async function syncNow() {
+  document.getElementById('status').textContent = 'Syncing live quantities from eBay and Shopify (this can take a bit for a wide range)...';
+  try {
+    const r = await fetch('/api/shopify-sync/refresh?days_back=30', {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    document.getElementById('status').textContent = `✅ Synced ${data.checked} item(s).`;
+    loadSyncStatus();
+    loadToday();
   } catch(e) {
     document.getElementById('status').textContent = `❌ ${e.message}`;
   }
@@ -177,10 +203,15 @@ function renderTable(items) {
     <th>SKU</th><th>eBay Item</th><th>Qty Sold (eBay)</th><th>eBay Live Qty</th><th>Found in Shopify?</th><th>Shopify Live Qty</th><th>Shopify Title</th><th>Push</th>
   </tr></thead><tbody>`;
   items.forEach((it, idx) => {
-    const synced = !!it.already_pushed && !!it.qty_matches;
+    // Green = the two live quantities already agree, so there's nothing left to push —
+    // true whether that's because we pushed (this session or a past one) or the
+    // numbers just happen to already line up. Compared directly, not inferred from
+    // push history, since eBay Live Qty is now populated for real.
+    const qtyMatch = it.ebay_live_qty != null && it.shopify_live_qty != null && it.ebay_live_qty === it.shopify_live_qty;
+    const synced = it.shopify_found && qtyMatch;
     const pushCell = it.shopify_found
       ? (synced
-          ? `<span class="synced-badge">✔ Already Pushed</span><button class="push-again" onclick="pushOne(${idx})">push again</button>`
+          ? `<span class="synced-badge">✔ Already Synced</span><button class="push-again" onclick="pushOne(${idx})">push again</button>`
           : `<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOne(${idx})">Push -${it.qty_sold_today}</button>`)
       : '—';
     html += `<tr id="row-${idx}" class="${synced ? 'synced' : ''}">
@@ -199,6 +230,7 @@ function renderTable(items) {
 }
 
 setToday();
+loadSyncStatus();
 </script>
 </body>
 </html>
