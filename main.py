@@ -4881,6 +4881,24 @@ async def shopify_sync_refresh(request: Request, days_back: int = 30):
 
     return {"ok": True, "checked": len(rows), "synced_at": now_iso}
 
+@app.get("/api/shopify-sync/debug-item")
+async def shopify_sync_debug_item(request: Request, q: str):
+    """Temporary read-only diagnostic: dump every push_log row, the current snapshot
+    row, and the last 90 days of eBay order rows matching a title substring, so we can
+    trace where a specific quantity came from."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import datetime as _dt
+    cutoff = (_dt.datetime.utcnow() - _dt.timedelta(days=90)).strftime("%Y-%m-%d")
+    push_rows = supabase.table("shopify_push_log").select("*").eq("business_id", business_id)\
+        .ilike("title", f"%{q}%").execute().data or []
+    snap_rows = supabase.table("shopify_sync_snapshot").select("*").eq("business_id", business_id)\
+        .ilike("title", f"%{q}%").execute().data or []
+    order_rows = supabase.table("orders").select("order_id,order_date,sku,title,quantity,platform").eq("business_id", business_id)\
+        .eq("platform", "eBay").ilike("title", f"%{q}%").gte("order_date", cutoff).execute().data or []
+    return {"push_log": push_rows, "snapshot": snap_rows, "recent_orders": order_rows}
+
 @app.get("/api/shopify-sync/sync-status")
 async def shopify_sync_status(request: Request):
     business_id = require_auth(request)
