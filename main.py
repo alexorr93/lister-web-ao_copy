@@ -4988,8 +4988,12 @@ def _get_shopify_primary_location_id(domain: str, headers: dict) -> str:
 @app.post("/api/shopify-sync/push")
 async def shopify_sync_push(request: Request, items: List[dict] = Body(...)):
     """Step 2: takes the exact rows the user selected from Step 1 (already carrying
-    the Shopify inventoryItem id from that live check) and decreases Shopify's
-    quantity by whatever sold on eBay today. Logs every attempt for audit/undo."""
+    the Shopify inventoryItem id from that live check) and SETS Shopify's quantity to
+    match eBay's live quantity exactly — not a relative decrement. A decrement compounds
+    drift whenever the two platforms are already out of sync (confirmed: found a listing
+    at -1 in Shopify that no push ever touched — a relative delta would have made that
+    worse, not fixed it). Setting to eBay's live number is self-correcting instead.
+    Logs every attempt for audit/undo."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
@@ -5008,21 +5012,24 @@ async def shopify_sync_push(request: Request, items: List[dict] = Body(...)):
     results = []
     for it in items:
         inv_item_id = it.get("shopify_inventory_item_id")
-        qty = it.get("qty_sold_today", 0)
+        target_qty = it.get("ebay_live_qty")
         sku = it.get("sku", "")
         order_ids = it.get("order_ids", [])
         log_row = {
             "business_id": business_id, "order_id": ",".join(order_ids) if order_ids else "",
-            "sku": sku, "title": it.get("title"), "quantity_deducted": qty,
+            "sku": sku, "title": it.get("title"), "quantity_deducted": it.get("qty_sold_today", 0),
         }
-        if not inv_item_id or not qty:
+        if not inv_item_id:
             log_row["status"] = "no_shopify_match"
             results.append({"title": it.get("title"), "status": "no_shopify_match"})
+        elif target_qty is None:
+            log_row["status"] = "no_ebay_qty"
+            results.append({"title": it.get("title"), "status": "no_ebay_qty", "error": "eBay quantity unknown — click Sync Now first"})
         else:
             try:
                 mutation = {
-                    "query": """mutation adjust($input: InventoryAdjustQuantitiesInput!) {
-                        inventoryAdjustQuantities(input: $input) {
+                    "query": """mutation setQty($input: InventorySetQuantitiesInput!) {
+                        inventorySetQuantities(input: $input) {
                             inventoryAdjustmentGroup { changes { name delta quantityAfterChange } }
                             userErrors { field message }
                         }
@@ -5030,15 +5037,16 @@ async def shopify_sync_push(request: Request, items: List[dict] = Body(...)):
                     "variables": {"input": {
                         "reason": "correction",
                         "name": "available",
-                        "changes": [{"inventoryItemId": inv_item_id, "locationId": location_id, "delta": -abs(int(qty))}],
+                        "ignoreCompareQuantity": True,
+                        "quantities": [{"inventoryItemId": inv_item_id, "locationId": location_id, "quantity": int(target_qty)}],
                     }},
                 }
                 r = _req.post(f"https://{domain}/admin/api/2024-10/graphql.json", headers=headers, json=mutation, timeout=20)
                 resp = r.json() if r.status_code == 200 else {}
-                errors = (resp.get("data", {}) or {}).get("inventoryAdjustQuantities", {}).get("userErrors", [])
+                errors = (resp.get("data", {}) or {}).get("inventorySetQuantities", {}).get("userErrors", [])
                 if r.status_code == 200 and not errors:
-                    changes = (resp.get("data", {}) or {}).get("inventoryAdjustQuantities", {}).get("inventoryAdjustmentGroup", {}).get("changes", [])
-                    new_qty = changes[0]["quantityAfterChange"] if changes else None
+                    changes = (resp.get("data", {}) or {}).get("inventorySetQuantities", {}).get("inventoryAdjustmentGroup", {}).get("changes", [])
+                    new_qty = changes[0]["quantityAfterChange"] if changes else target_qty
                     log_row["status"] = "success"
                     log_row["new_quantity"] = new_qty
                     results.append({"title": it.get("title"), "status": "success", "new_quantity": new_qty})

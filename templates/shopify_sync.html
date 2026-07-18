@@ -27,6 +27,8 @@ h1 { font-size: 20px; margin-bottom: 4px; }
 .btn { padding: 9px 16px; border-radius: 8px; border: 1px solid var(--border); background: #1e2535; color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; }
 .btn:hover { background: var(--border); }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-orange { background: #ea580c; border-color: #ea580c; color: #fff; }
+.btn-orange:hover { background: #c2410c; }
 table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 th { text-align: left; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
 td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid var(--border); }
@@ -76,6 +78,7 @@ tr.synced td { background: rgba(22, 163, 74, 0.16); }
       <button class="btn" onclick="setLastMonth()">Last Month</button>
     </div>
     <button class="btn btn-primary" onclick="syncNow()" title="Refreshes live eBay/Shopify quantities into the local snapshot — this is the only action that calls out to eBay/Shopify">🔄 Sync Now</button>
+    <button class="btn btn-orange" onclick="pushAllFound()" title="Pushes every row that's found in Shopify but not yet matching eBay — sets each to eBay's live quantity">⚡ Push All Found</button>
     <span id="last-synced" style="font-size:11px;color:var(--muted);align-self:center;"></span>
   </div>
 
@@ -125,6 +128,14 @@ function setLastMonth() {
   loadToday();
 }
 
+// Sort group: 0 = not found in Shopify (red, needs attention first), 1 = found but
+// not yet matching eBay (needs a push), 2 = found and matching (nothing to do).
+function rowGroup(it) {
+  if (!it.shopify_found) return 0;
+  const qtyMatch = it.ebay_live_qty != null && it.shopify_live_qty != null && it.ebay_live_qty === it.shopify_live_qty;
+  return qtyMatch ? 2 : 1;
+}
+
 async function loadToday() {
   const start = document.getElementById('start-date').value;
   const end = document.getElementById('end-date').value;
@@ -136,7 +147,7 @@ async function loadToday() {
     if (!r.ok) throw new Error(data.detail || 'Failed');
     const rangeLabel = data.start_date === data.end_date ? data.start_date : `${data.start_date} – ${data.end_date}`;
     document.getElementById('status').textContent = `${rangeLabel} — ${data.items.length} distinct SKU(s) sold on eBay.`;
-    currentItems = data.items;
+    currentItems = data.items.slice().sort((a, b) => rowGroup(a) - rowGroup(b));
     renderTable(currentItems);
   } catch(e) {
     document.getElementById('status').textContent = `❌ ${e.message}`;
@@ -167,11 +178,25 @@ async function syncNow() {
   }
 }
 
-async function pushOne(idx) {
-  const it = currentItems[idx];
-  if (!confirm(`Decrease Shopify quantity for "${it.title}" by ${it.qty_sold_today}? This changes your live Shopify listing.`)) return;
+function applyPushResult(it, idx, res) {
   const cell = document.getElementById('push-cell-' + idx);
   const row = document.getElementById('row-' + idx);
+  if (res.status === 'success') {
+    it.already_pushed = true;
+    it.shopify_live_qty = res.new_quantity;
+    it.qty_matches = true;
+    row.classList.add('synced');
+    cell.innerHTML = `<span class="synced-badge">✔ Set to ${res.new_quantity}</span><button class="push-again" onclick="pushOne(${idx})">push again</button>`;
+  } else {
+    cell.innerHTML = `<span class="no">✘ ${res.error || res.status}</span>`;
+  }
+}
+
+async function pushOne(idx) {
+  const it = currentItems[idx];
+  if (it.ebay_live_qty == null) { alert('eBay quantity unknown for this item — click Sync Now first.'); return; }
+  if (!confirm(`Set Shopify quantity for "${it.title}" to ${it.ebay_live_qty} (currently ${it.shopify_live_qty ?? 'unknown'})? This changes your live Shopify listing.`)) return;
+  const cell = document.getElementById('push-cell-' + idx);
   cell.textContent = 'Pushing...';
   try {
     const r = await fetch('/api/shopify-sync/push', {
@@ -179,18 +204,30 @@ async function pushOne(idx) {
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed');
-    const res = data.results[0];
-    if (res.status === 'success') {
-      it.already_pushed = true;
-      it.shopify_live_qty = res.new_quantity;
-      it.qty_matches = true;
-      row.classList.add('synced');
-      cell.innerHTML = `<span class="synced-badge">✔ Pushed — now ${res.new_quantity}</span><button class="push-again" onclick="pushOne(${idx})">push again</button>`;
-    } else {
-      cell.innerHTML = `<span class="no">✘ ${res.error || res.status}</span>`;
-    }
+    applyPushResult(it, idx, data.results[0]);
   } catch(e) {
     cell.innerHTML = `<span class="no">✘ ${e.message}</span>`;
+  }
+}
+
+async function pushAllFound() {
+  const targets = currentItems
+    .map((it, idx) => ({it, idx}))
+    .filter(({it}) => it.shopify_found && rowGroup(it) === 1 && it.ebay_live_qty != null);
+  if (!targets.length) { alert('Nothing needs pushing — every found item already matches, or eBay quantity is unknown (click Sync Now).'); return; }
+  if (!confirm(`Set Shopify quantity to match eBay for ${targets.length} item(s)? This changes your live Shopify listings.`)) return;
+  document.getElementById('status').textContent = `Pushing ${targets.length} item(s)...`;
+  targets.forEach(({idx}) => { document.getElementById('push-cell-' + idx).textContent = 'Pushing...'; });
+  try {
+    const r = await fetch('/api/shopify-sync/push', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(targets.map(t => t.it)),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    targets.forEach(({it, idx}, i) => applyPushResult(it, idx, data.results[i]));
+    document.getElementById('status').textContent = `✅ Pushed ${targets.length} item(s).`;
+  } catch(e) {
+    document.getElementById('status').textContent = `❌ ${e.message}`;
   }
 }
 
@@ -209,11 +246,16 @@ function renderTable(items) {
     // push history, since eBay Live Qty is now populated for real.
     const qtyMatch = it.ebay_live_qty != null && it.shopify_live_qty != null && it.ebay_live_qty === it.shopify_live_qty;
     const synced = it.shopify_found && qtyMatch;
-    const pushCell = it.shopify_found
-      ? (synced
-          ? `<span class="synced-badge">✔ Already Synced</span><button class="push-again" onclick="pushOne(${idx})">push again</button>`
-          : `<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOne(${idx})">Push -${it.qty_sold_today}</button>`)
-      : '—';
+    let pushCell = '—';
+    if (it.shopify_found) {
+      if (synced) {
+        pushCell = `<span class="synced-badge">✔ Already Synced</span><button class="push-again" onclick="pushOne(${idx})">push again</button>`;
+      } else if (it.ebay_live_qty == null) {
+        pushCell = `<span class="muted">Sync Now for eBay qty</span>`;
+      } else {
+        pushCell = `<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOne(${idx})">Push → ${it.ebay_live_qty}</button>`;
+      }
+    }
     html += `<tr id="row-${idx}" class="${synced ? 'synced' : ''}">
       <td class="muted">${escapeHtml(it.sku)}</td>
       <td>${escapeHtml(it.title || '')}</td>
