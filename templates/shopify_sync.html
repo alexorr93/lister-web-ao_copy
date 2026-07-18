@@ -39,8 +39,10 @@ tr:last-child td { border-bottom: none; }
 .status-msg { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
 .empty { text-align: center; padding: 40px; color: var(--muted); }
 tr.synced td { background: rgba(22, 163, 74, 0.16); }
+tr.ignored td { color: var(--muted); opacity: 0.55; }
+tr.ignored:hover td { opacity: 0.85; }
 .synced-badge { color: var(--green); font-weight: 700; }
-.push-again { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); background: none; border: none; text-decoration: underline; cursor: pointer; padding: 0; }
+.push-again, .ignore-link, .unignore-link { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); background: none; border: none; text-decoration: underline; cursor: pointer; padding: 0; }
 </style>
 </head>
 <body>
@@ -129,8 +131,10 @@ function setLastMonth() {
 }
 
 // Sort group: 0 = not found in Shopify (red, needs attention first), 1 = found but
-// not yet matching eBay (needs a push), 2 = found and matching (nothing to do).
+// not yet matching eBay (needs a push), 2 = found and matching (nothing to do),
+// 3 = ignored (always last, regardless of match state).
 function rowGroup(it) {
+  if (it.ignored) return 3;
   if (!it.shopify_found) return 0;
   const qtyMatch = it.ebay_live_qty != null && it.shopify_live_qty != null && it.ebay_live_qty === it.shopify_live_qty;
   return qtyMatch ? 2 : 1;
@@ -230,6 +234,36 @@ async function pushAllFound() {
   }
 }
 
+async function ignoreItem(idx) {
+  const it = currentItems[idx];
+  try {
+    const r = await fetch('/api/shopify-sync/ignore', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({title: it.title}),
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || 'Failed');
+    it.ignored = true;
+    currentItems = currentItems.slice().sort((a, b) => rowGroup(a) - rowGroup(b));
+    renderTable(currentItems);
+  } catch(e) {
+    alert('Failed to ignore: ' + e.message);
+  }
+}
+
+async function unignoreItem(idx) {
+  const it = currentItems[idx];
+  try {
+    const r = await fetch('/api/shopify-sync/unignore', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({title: it.title}),
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || 'Failed');
+    it.ignored = false;
+    currentItems = currentItems.slice().sort((a, b) => rowGroup(a) - rowGroup(b));
+    renderTable(currentItems);
+  } catch(e) {
+    alert('Failed to unignore: ' + e.message);
+  }
+}
+
 function renderTable(items) {
   if (!items.length) {
     document.getElementById('table-area').innerHTML = '<div class="empty">Nothing sold on eBay in this range (with a real SKU) yet.</div>';
@@ -245,17 +279,21 @@ function renderTable(items) {
     // push history, since eBay Live Qty is now populated for real.
     const qtyMatch = it.ebay_live_qty != null && it.shopify_live_qty != null && it.ebay_live_qty === it.shopify_live_qty;
     const synced = it.shopify_found && qtyMatch;
-    let pushCell = '—';
-    if (it.shopify_found) {
+    let pushCell;
+    if (it.ignored) {
+      pushCell = `<span class="muted">Ignored</span><button class="unignore-link" onclick="unignoreItem(${idx})">unignore</button>`;
+    } else if (it.shopify_found) {
       if (synced) {
-        pushCell = `<span class="synced-badge">✔ Already Synced</span><button class="push-again" onclick="pushOne(${idx})">push again</button>`;
+        pushCell = `<span class="synced-badge">✔ Already Synced</span><button class="push-again" onclick="pushOne(${idx})">push again</button><button class="ignore-link" onclick="ignoreItem(${idx})">ignore</button>`;
       } else if (it.ebay_live_qty == null) {
-        pushCell = `<span class="muted">Sync Now for eBay qty</span>`;
+        pushCell = `<span class="muted">Sync Now for eBay qty</span><button class="ignore-link" onclick="ignoreItem(${idx})">ignore</button>`;
       } else {
-        pushCell = `<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOne(${idx})">Push → ${it.ebay_live_qty}</button>`;
+        pushCell = `<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOne(${idx})">Push → ${it.ebay_live_qty}</button><button class="ignore-link" onclick="ignoreItem(${idx})">ignore</button>`;
       }
+    } else {
+      pushCell = `<span class="muted">—</span><button class="ignore-link" onclick="ignoreItem(${idx})">ignore</button>`;
     }
-    html += `<tr id="row-${idx}" class="${synced ? 'synced' : ''}">
+    html += `<tr id="row-${idx}" class="${it.ignored ? 'ignored' : (synced ? 'synced' : '')}">
       <td class="muted">${escapeHtml(it.sku)}</td>
       <td>${escapeHtml(it.title || '')}</td>
       <td>${it.qty_sold_today}</td>

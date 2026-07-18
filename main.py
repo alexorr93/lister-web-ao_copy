@@ -4906,6 +4906,32 @@ async def shopify_sync_debug_item(request: Request, q: str):
         .eq("platform", "eBay").ilike("title", f"%{q}%").gte("order_date", cutoff).execute().data or []
     return {"push_log": push_rows, "snapshot": snap_rows, "recent_orders": order_rows}
 
+@app.post("/api/shopify-sync/ignore")
+async def shopify_sync_ignore(request: Request, body: dict = Body(...)):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "title required")
+    supabase.table("shopify_sync_ignored").upsert(
+        {"business_id": business_id, "norm_title": _shopify_sync_norm(title), "title": title},
+        on_conflict="business_id,norm_title",
+    ).execute()
+    return {"ok": True}
+
+@app.post("/api/shopify-sync/unignore")
+async def shopify_sync_unignore(request: Request, body: dict = Body(...)):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "title required")
+    supabase.table("shopify_sync_ignored").delete()\
+        .eq("business_id", business_id).eq("norm_title", _shopify_sync_norm(title)).execute()
+    return {"ok": True}
+
 @app.get("/api/shopify-sync/sync-status")
 async def shopify_sync_status(request: Request):
     business_id = require_auth(request)
@@ -4950,6 +4976,10 @@ async def shopify_sync_today(request: Request, date: str = None, start: str = No
         .in_("norm_title", list(sold_by_title.keys())).execute()
     snapshots = {row["norm_title"]: row for row in (snap_res.data or [])}
 
+    ignored_res = supabase.table("shopify_sync_ignored").select("norm_title").eq("business_id", business_id)\
+        .in_("norm_title", list(sold_by_title.keys())).execute()
+    ignored_titles = {row["norm_title"] for row in (ignored_res.data or [])}
+
     items = []
     for norm_title, entry in sold_by_title.items():
         snap = snapshots.get(norm_title) or {}
@@ -4960,6 +4990,7 @@ async def shopify_sync_today(request: Request, date: str = None, start: str = No
             "shopify_found": bool(snap.get("shopify_found")), "shopify_live_qty": snap.get("shopify_live_qty"),
             "shopify_title": snap.get("shopify_title"), "shopify_inventory_item_id": snap.get("shopify_inventory_item_id"),
             "snapshot_updated_at": snap.get("updated_at"),
+            "ignored": norm_title in ignored_titles,
         })
 
     # Real server-side "already pushed" check against the push audit table —
