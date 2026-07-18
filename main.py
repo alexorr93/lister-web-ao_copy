@@ -4906,6 +4906,48 @@ async def shopify_sync_debug_item(request: Request, q: str):
         .eq("platform", "eBay").ilike("title", f"%{q}%").gte("order_date", cutoff).execute().data or []
     return {"push_log": push_rows, "snapshot": snap_rows, "recent_orders": order_rows}
 
+@app.get("/api/shopify-sync/debug-shopify-search")
+async def shopify_sync_debug_shopify_search(request: Request, title: str):
+    """Temporary read-only diagnostic: runs the EXACT same Shopify title search
+    _shopify_sync_check_one uses, and returns the raw candidates plus the computed
+    norm_title for both sides, so a failed match can be seen character-by-character
+    instead of guessed at (truncation, curly vs straight quotes, etc.)."""
+    import requests as _req
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    settings = get_ebay_settings(business_id)
+    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+    shopify_token = get_shopify_access_token(business_id) if domain else None
+    if not domain or not shopify_token:
+        raise HTTPException(400, "Shopify not connected")
+
+    norm_title = _shopify_sync_norm(title)
+    safe_title = title.replace('"', '').replace("'", "")[:80]
+    gql = _req.post(
+        f"https://{domain}/admin/api/2024-10/graphql.json",
+        headers={"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"},
+        json={"query": '{ products(first: 5, query: "title:\'' + safe_title + '\'") { edges { node { title variants(first: 1) { edges { node { inventoryQuantity } } } } } } }'},
+        timeout=15,
+    )
+    body = gql.json() if gql.status_code == 200 else {"http_status": gql.status_code, "body": gql.text[:500]}
+    edges = ((body.get("data", {}) or {}).get("products", {}) or {}).get("edges", [])
+    candidates = [{
+        "title": e["node"].get("title"),
+        "norm_title": _shopify_sync_norm(e["node"].get("title")),
+        "exact_match": _shopify_sync_norm(e["node"].get("title")) == norm_title,
+    } for e in edges]
+
+    return {
+        "input_title": title,
+        "input_title_length": len(title),
+        "safe_title_sent_to_shopify": safe_title,
+        "was_truncated": len(title) > 80,
+        "our_norm_title": norm_title,
+        "shopify_candidates": candidates,
+        "raw_response": body if not edges else None,
+    }
+
 @app.post("/api/shopify-sync/ignore")
 async def shopify_sync_ignore(request: Request, body: dict = Body(...)):
     business_id = require_auth(request)
