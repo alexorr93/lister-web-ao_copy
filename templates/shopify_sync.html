@@ -99,6 +99,7 @@ async function pushOne(idx) {
     if (res.status === 'success') {
       it.already_pushed = true;
       it.shopify_live_qty = res.new_quantity;
+      it.qty_matches = true;
       row.classList.add('synced');
       cell.innerHTML = `<span class="synced-badge">✔ Pushed — now ${res.new_quantity}</span><button class="push-again" onclick="pushOne(${idx})">push again</button>`;
     } else {
@@ -118,7 +119,7 @@ function renderTable(items) {
     <th>SKU</th><th>eBay Item</th><th>Qty Sold Today (eBay)</th><th>eBay Live Qty</th><th>Found in Shopify?</th><th>Shopify Live Qty</th><th>Shopify Title</th><th>Push</th>
   </tr></thead><tbody>`;
   items.forEach((it, idx) => {
-    const synced = !!it.already_pushed;
+    const synced = !!it.already_pushed && !!it.qty_matches;
     const pushCell = it.shopify_found
       ? (synced
           ? `<span class="synced-badge">✔ Synced</span><button class="push-again" onclick="pushOne(${idx})">push again</button>`

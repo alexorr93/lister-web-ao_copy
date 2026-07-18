@@ -4842,20 +4842,23 @@ async def shopify_sync_today(request: Request, date: str = None):
     # Cross-check the push audit log so already-synced rows can be flagged even
     # after a page reload (the client's own "just pushed" state doesn't survive that).
     try:
-        log_res = supabase.table("shopify_qty_sync_log").select("order_id")\
-            .eq("business_id", business_id).eq("status", "success")\
-            .gte("created_at", f"{today}T00:00:00").execute()
-        pushed_order_ids = set()
+        log_res = supabase.table("shopify_qty_sync_log").select("order_id,new_quantity")\
+            .eq("business_id", business_id).eq("status", "success").execute()
+        # Most recent successful push per order_id wins (a SKU can be re-pushed).
+        pushed_by_order_id = {}
         for row in (log_res.data or []):
             for oid in (row.get("order_id") or "").split(","):
                 oid = oid.strip()
                 if oid:
-                    pushed_order_ids.add(oid)
+                    pushed_by_order_id[oid] = row.get("new_quantity")
         for it in items:
-            it["already_pushed"] = any(oid in pushed_order_ids for oid in it["order_ids"])
+            match = next((pushed_by_order_id[oid] for oid in it["order_ids"] if oid in pushed_by_order_id), None)
+            it["already_pushed"] = match is not None
+            it["qty_matches"] = match is not None and match == it.get("shopify_live_qty")
     except Exception:
         for it in items:
             it["already_pushed"] = False
+            it["qty_matches"] = False
 
     return {"date": today, "items": items}
 
