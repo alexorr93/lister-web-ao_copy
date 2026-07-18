@@ -4895,6 +4895,27 @@ async def shopify_sync_refresh(request: Request, days_back: int = 30):
 
     return {"ok": True, "checked": len(rows), "synced_at": now_iso}
 
+@app.get("/api/shopify-sync/debug-catalog-search")
+async def shopify_sync_debug_catalog_search(request: Request, q: str):
+    """Temporary read-only diagnostic: pulls the full live Shopify catalog (same
+    paginated scan Sync Now uses) and returns every product whose title contains q
+    (case-insensitive substring), with both the raw and normalized title, so a
+    near-miss title mismatch can be seen and compared directly against eBay's title."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    settings = get_ebay_settings(business_id)
+    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+    shopify_token = get_shopify_access_token(business_id) if domain else None
+    if not domain or not shopify_token:
+        raise HTTPException(400, "Shopify not connected")
+
+    catalog = _fetch_all_shopify_products(domain, shopify_token)
+    q_lower = q.lower()
+    matches = [{"title": v["title"], "norm_title": k, "qty": v["qty"]}
+               for k, v in catalog.items() if q_lower in k]
+    return {"catalog_size": len(catalog), "matches": matches}
+
 @app.get("/api/shopify-sync/debug-item")
 async def shopify_sync_debug_item(request: Request, q: str):
     """Temporary read-only diagnostic: dump every push_log row, the current snapshot
