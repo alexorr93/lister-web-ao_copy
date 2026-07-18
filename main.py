@@ -4978,7 +4978,16 @@ def _sync_ebay_unsold_listings_work(business_id: str) -> dict:
     """The actual work for the eBay-inactive-listings sync — pulls every page of
     UnsoldList and replaces the ebay_listing_status table wholesale for this
     business (a listing that got relisted or sold since the last sync should
-    disappear from 'inactive', not linger from a stale row)."""
+    disappear from 'inactive', not linger from a stale row).
+
+    Also matches each listing against the live Shopify catalog directly, storing
+    shopify_found/shopify_live_qty/etc on this same row. This does NOT read
+    shopify_sync_snapshot — that table is only ever populated for titles that have
+    a recent order (see _shopify_sync_refresh_work), and an unsold listing that
+    never sold, by definition, has no order at all. Cross-referencing against the
+    orders-scoped table made every unsold item show as "not found in Shopify" even
+    when it plainly was (confirmed on a real listing) — this does its own
+    independent catalog match instead."""
     import datetime as _dt
 
     token = get_ebay_access_token(business_id)
@@ -5001,16 +5010,36 @@ def _sync_ebay_unsold_listings_work(business_id: str) -> dict:
         total_pages = _safe_int(pagination.get("TotalNumberOfPages")) or 1
         page += 1
 
+    settings = get_ebay_settings(business_id)
+    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+    shopify_token = get_shopify_access_token(business_id) if domain else None
+    shopify_catalog = {}
+    if domain and shopify_token:
+        loc_headers = {"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"}
+        location_id = _get_shopify_primary_location_id(domain, loc_headers)
+        if location_id:
+            shopify_catalog, catalog_complete, _pages = _fetch_all_shopify_products(domain, shopify_token, location_id)
+            if not catalog_complete:
+                # Same rule as the main Sync Now job: an incomplete catalog must
+                # never be trusted as "not found" for real products.
+                raise Exception("Shopify catalog scan was rate-limited and didn't complete — try again in a minute.")
+
     now_iso = _dt.datetime.utcnow().isoformat()
     rows = []
     for it in all_items:
         title = it.get("Title")
+        norm_title = _shopify_sync_norm(title)
         listing_details = it.get("ListingDetails") or {}
+        match = shopify_catalog.get(norm_title)
         rows.append({
             "business_id": business_id, "item_id": it.get("ItemID"),
-            "sku": it.get("SKU"), "title": title, "norm_title": _shopify_sync_norm(title),
+            "sku": it.get("SKU"), "title": title, "norm_title": norm_title,
             "quantity": _safe_int(it.get("Quantity")), "quantity_sold": _safe_int(it.get("QuantitySold")),
             "listing_status": "Unsold", "end_time": listing_details.get("EndTime"),
+            "shopify_found": match is not None,
+            "shopify_live_qty": match["qty"] if match else None,
+            "shopify_title": match["title"] if match else None,
+            "shopify_inventory_item_id": match["inventory_item_id"] if match else None,
             "updated_at": now_iso,
         })
 
@@ -5283,44 +5312,43 @@ async def shopify_sync_inactive_items(request: Request, response: Response):
     sold at all, so this can't be tied to order_date the way /today is (confirmed:
     that's exactly what made this tab useless before ebay_listing_status existed —
     it could only ever show items that happened to already have a sale on record).
-    Cross-referenced against the Shopify snapshot (by title) purely for display, same
-    as the Active tab; also overlaid with manually-ignored items so both concepts of
-    'inactive' show in one place."""
+
+    Shopify match data (shopify_found etc.) comes straight from ebay_listing_status
+    itself, NOT shopify_sync_snapshot — that table is only ever populated for titles
+    with a recent order, and an unsold listing that never sold has none, which made
+    every unsold item show "not found in Shopify" even when it plainly was
+    (confirmed on a real listing). Also overlaid with manually-ignored items so both
+    concepts of 'inactive' show in one place."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     response.headers["Cache-Control"] = "no-store"
 
     listing_res = supabase.table("ebay_listing_status").select("*").eq("business_id", business_id).execute()
-    snap_res = supabase.table("shopify_sync_snapshot").select("*").eq("business_id", business_id).execute()
     ignored_res = supabase.table("shopify_sync_ignored").select("norm_title,title").eq("business_id", business_id).execute()
-
-    snapshots = {row["norm_title"]: row for row in (snap_res.data or [])}
     ignored_titles = {row["norm_title"] for row in (ignored_res.data or [])}
 
     by_norm = {}
     for row in (listing_res.data or []):
         nt = row.get("norm_title") or ""
-        snap = snapshots.get(nt) or {}
         remaining = row.get("quantity")
         sold = row.get("quantity_sold")
         ebay_qty = (remaining - sold) if (remaining is not None and sold is not None) else 0
         by_norm[nt] = {
             "title": row.get("title"), "sku": row.get("sku"),
             "ebay_live_qty": max(ebay_qty, 0), "ebay_ended": True,
-            "shopify_found": bool(snap.get("shopify_found")), "shopify_live_qty": snap.get("shopify_live_qty"),
-            "shopify_title": snap.get("shopify_title"), "shopify_inventory_item_id": snap.get("shopify_inventory_item_id"),
+            "shopify_found": bool(row.get("shopify_found")), "shopify_live_qty": row.get("shopify_live_qty"),
+            "shopify_title": row.get("shopify_title"), "shopify_inventory_item_id": row.get("shopify_inventory_item_id"),
             "ignored": nt in ignored_titles, "order_ids": [], "qty_sold_today": None,
         }
     for row in (ignored_res.data or []):
         nt = row["norm_title"]
         if nt not in by_norm:
-            snap = snapshots.get(nt) or {}
             by_norm[nt] = {
-                "title": row.get("title"), "sku": snap.get("sku"),
-                "ebay_live_qty": snap.get("ebay_live_qty"), "ebay_ended": bool(snap.get("ebay_ended")),
-                "shopify_found": bool(snap.get("shopify_found")), "shopify_live_qty": snap.get("shopify_live_qty"),
-                "shopify_title": snap.get("shopify_title"), "shopify_inventory_item_id": snap.get("shopify_inventory_item_id"),
+                "title": row.get("title"), "sku": None,
+                "ebay_live_qty": None, "ebay_ended": False,
+                "shopify_found": False, "shopify_live_qty": None,
+                "shopify_title": None, "shopify_inventory_item_id": None,
                 "ignored": True, "order_ids": [], "qty_sold_today": None,
             }
     return {"items": list(by_norm.values())}
