@@ -1439,24 +1439,29 @@ async def list_acquisitions(request: Request):
         .order("date", desc=True).execute()
     acquisitions = res.data or []
 
-    # Active-listings count per lot — purely a local read against the last eBay
-    # ActiveList sync (see /api/acquisitions/sync-active-listings), zero live calls
-    # on page load. Matched by SKU prefix before the first '-', the same convention
-    # already used by /api/acquisitions/debug-sku (e.g. 'RJ-123' belongs to lot 'RJ').
-    active_res = supabase.table("ebay_listing_status").select("sku,updated_at")\
+    # Active-listings dollar value per lot — purely a local read against the last
+    # eBay ActiveList sync (see /api/acquisitions/sync-active-listings), zero live
+    # calls on page load. Matched by SKU prefix before the first '-', the same
+    # convention already used by /api/acquisitions/debug-sku (e.g. 'RJ-123' belongs
+    # to lot 'RJ'). quantity_available is eBay's own real remaining-count field.
+    active_res = supabase.table("ebay_listing_status").select("sku,price,quantity_available,updated_at")\
         .eq("business_id", business_id).eq("listing_status", "Active").execute()
     active_rows = active_res.data or []
-    counts_by_prefix = {}
+    value_by_prefix = {}
+    count_by_prefix = {}
     for row in active_rows:
         sku = row.get("sku") or ""
         if "-" not in sku:
             continue
         prefix = sku.split("-", 1)[0]
-        counts_by_prefix[prefix] = counts_by_prefix.get(prefix, 0) + 1
+        value = (row.get("price") or 0) * (row.get("quantity_available") or 0)
+        value_by_prefix[prefix] = value_by_prefix.get(prefix, 0) + value
+        count_by_prefix[prefix] = count_by_prefix.get(prefix, 0) + 1
     active_synced_at = max((r.get("updated_at") for r in active_rows if r.get("updated_at")), default=None)
 
     for a in acquisitions:
-        a["active_listings"] = counts_by_prefix.get(a.get("sku"), 0)
+        a["active_listings_value"] = round(value_by_prefix.get(a.get("sku"), 0), 2)
+        a["active_listings_count"] = count_by_prefix.get(a.get("sku"), 0)
         a["active_listings_synced_at"] = active_synced_at
 
     return {"acquisitions": acquisitions}
@@ -4894,6 +4899,12 @@ def _safe_int(v):
     except (TypeError, ValueError):
         return None
 
+def _safe_float(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
 def _ebay_xml_to_dict(elem):
     """Strips XML namespaces and turns an ElementTree element into nested dicts/lists
     — eBay's Trading API responses are deeply nested and namespace-qualified
@@ -5211,10 +5222,17 @@ def _sync_ebay_unsold_listings_work(business_id: str) -> dict:
     for it in all_items:
         title = it.get("Title")
         listing_details = it.get("ListingDetails") or {}
+        selling_status = it.get("SellingStatus") or {}
         rows.append({
             "business_id": business_id, "item_id": it.get("ItemID"),
             "sku": it.get("SKU"), "title": title, "norm_title": _shopify_sync_norm(title),
-            "quantity": _safe_int(it.get("Quantity")), "quantity_sold": _safe_int(it.get("QuantitySold")),
+            # QuantityAvailable is eBay's own real remaining-count field — QuantitySold
+            # isn't actually present on these items at all (confirmed against a real
+            # response), so deriving "remaining" from quantity-quantity_sold was
+            # silently wrong; QuantityAvailable is what's actually accurate.
+            "quantity": _safe_int(it.get("Quantity")), "quantity_available": _safe_int(it.get("QuantityAvailable")),
+            "price": _safe_float(selling_status.get("CurrentPrice")),
+            "start_time": listing_details.get("StartTime"),
             "listing_status": "Unsold", "end_time": listing_details.get("EndTime"),
             "updated_at": now_iso,
         })
@@ -5255,49 +5273,90 @@ def _ebay_get_active_listings_page(token: str, page_number: int, entries_per_pag
     root = ET.fromstring(r.content)
     return _ebay_xml_to_dict(root)
 
-def _sync_ebay_active_listings_work(business_id: str) -> dict:
-    """Pulls every page of eBay's real ActiveList and wholesale-replaces just the
-    listing_status='Active' rows in ebay_listing_status for this business — scoped
-    delete so this can never touch the Unsold rows the Inactive tab owns."""
-    import datetime as _dt
+def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> dict:
+    """Pulls eBay's real ActiveList one page at a time, upserting each page
+    immediately and checkpointing progress in app_settings (via
+    get_ebay_settings/save_ebay_setting — the same key-value store already used by
+    sync_orders_for_business's ORDERS_SYNC_CHECKPOINT) — so a large account survives
+    a server restart or crash mid-run by resuming from the last completed page
+    instead of starting over. The user's own internet connection has no bearing on
+    this at all, since it already runs as a detached server-side background task."""
+    import datetime as _dt, time as _time
 
     token = get_ebay_access_token(business_id)
-    all_items = []
+    settings = get_ebay_settings(business_id)
+
     page = 1
-    total_pages = 1
+    run_started_at = None
+    if resume:
+        checkpoint_page = _safe_int(settings.get("EBAY_ACTIVE_LISTINGS_SYNC_CHECKPOINT_PAGE"))
+        run_started_at = settings.get("EBAY_ACTIVE_LISTINGS_SYNC_RUN_STARTED_AT") or None
+        if checkpoint_page and run_started_at:
+            page = checkpoint_page + 1
+
+    if not run_started_at:
+        run_started_at = _dt.datetime.utcnow().isoformat()
+        save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_RUN_STARTED_AT", run_started_at)
+        save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_CHECKPOINT_PAGE", "0")
+
+    total_pages = page  # guarantees at least one fetch even when resuming past page 1
+    total_rows = 0
     while page <= total_pages:
-        resp = _ebay_get_active_listings_page(token, page)
+        resp = None
+        for attempt in range(4):
+            try:
+                resp = _ebay_get_active_listings_page(token, page)
+                break
+            except Exception:
+                if attempt == 3:
+                    raise
+                _time.sleep(2 ** attempt)
         ack = resp.get("Ack")
         if ack not in ("Success", "Warning"):
             raise Exception(f"eBay GetMyeBaySelling failed (Ack={ack}): {resp.get('Errors')}")
+
         active = resp.get("ActiveList") or {}
         item_array = active.get("ItemArray") or {}
         items = item_array.get("Item") or []
         if isinstance(items, dict):
             items = [items]
-        all_items.extend(items)
         pagination = active.get("PaginationResult") or {}
         total_pages = _safe_int(pagination.get("TotalNumberOfPages")) or 1
+
+        now_iso = _dt.datetime.utcnow().isoformat()
+        rows = []
+        for it in items:
+            title = it.get("Title")
+            listing_details = it.get("ListingDetails") or {}
+            selling_status = it.get("SellingStatus") or {}
+            rows.append({
+                "business_id": business_id, "item_id": it.get("ItemID"),
+                "sku": it.get("SKU"), "title": title, "norm_title": _shopify_sync_norm(title),
+                "quantity": _safe_int(it.get("Quantity")), "quantity_available": _safe_int(it.get("QuantityAvailable")),
+                "price": _safe_float(selling_status.get("CurrentPrice")),
+                "start_time": listing_details.get("StartTime"),
+                "listing_status": "Active", "end_time": listing_details.get("EndTime"),
+                "updated_at": now_iso,
+            })
+        if rows:
+            supabase.table("ebay_listing_status").upsert(rows, on_conflict="business_id,item_id").execute()
+        total_rows += len(rows)
+
+        # Checkpoint AFTER this page lands, so an interruption mid-next-page still
+        # resumes from here rather than re-doing this completed one.
+        save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_CHECKPOINT_PAGE", str(page))
         page += 1
 
-    now_iso = _dt.datetime.utcnow().isoformat()
-    rows = []
-    for it in all_items:
-        title = it.get("Title")
-        listing_details = it.get("ListingDetails") or {}
-        rows.append({
-            "business_id": business_id, "item_id": it.get("ItemID"),
-            "sku": it.get("SKU"), "title": title, "norm_title": _shopify_sync_norm(title),
-            "quantity": _safe_int(it.get("Quantity")), "quantity_sold": _safe_int(it.get("QuantitySold")),
-            "listing_status": "Active", "end_time": listing_details.get("EndTime"),
-            "updated_at": now_iso,
-        })
+    # Every page landed — drop any Active row this run never touched (sold, ended,
+    # or relisted under a different item_id since the run started).
+    supabase.table("ebay_listing_status").delete()\
+        .eq("business_id", business_id).eq("listing_status", "Active")\
+        .lt("updated_at", run_started_at).execute()
 
-    supabase.table("ebay_listing_status").delete().eq("business_id", business_id).eq("listing_status", "Active").execute()
-    if rows:
-        supabase.table("ebay_listing_status").upsert(rows, on_conflict="business_id,item_id").execute()
+    save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_CHECKPOINT_PAGE", "")
+    save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_RUN_STARTED_AT", "")
 
-    return {"checked": len(rows), "synced_at": now_iso}
+    return {"checked": total_rows, "synced_at": _dt.datetime.utcnow().isoformat()}
 
 _ebay_active_listings_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
 

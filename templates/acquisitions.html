@@ -345,7 +345,7 @@ function renderTable() {
       <td>${fmtMoney(a.total_payouts)}</td>
       <td class="${profitClass}">${fmtMoney(a.profit)}</td>
       <td class="${roiClass}">${a.roi_pct == null ? '—' : a.roi_pct + '%'}</td>
-      <td>${a.active_listings ?? 0}</td>
+      <td>${fmtMoney(a.active_listings_value)} <span class="muted">(${a.active_listings_count ?? 0})</span></td>
     </tr>`;
   }
   const totalCost = sorted.reduce((n, a) => n + (a.cost || 0), 0);
@@ -353,7 +353,8 @@ function renderTable() {
   const totalEbay = sorted.reduce((n, a) => n + (a.ebay || 0), 0);
   const totalPayouts = sorted.reduce((n, a) => n + (a.total_payouts || 0), 0);
   const totalProfit = sorted.reduce((n, a) => n + (a.profit || 0), 0);
-  const totalActiveListings = sorted.reduce((n, a) => n + (a.active_listings || 0), 0);
+  const totalActiveListingsValue = sorted.reduce((n, a) => n + (a.active_listings_value || 0), 0);
+  const totalActiveListingsCount = sorted.reduce((n, a) => n + (a.active_listings_count || 0), 0);
   html += `<tr style="font-weight:800;border-top:2px solid var(--border);background:rgba(255,255,255,0.03);">
     <td colspan="4">TOTAL (${sorted.length} lot${sorted.length===1?'':'s'})</td>
     <td>${fmtMoney(totalCost)}</td>
@@ -361,7 +362,7 @@ function renderTable() {
     <td>${fmtMoney(totalEbay)}</td>
     <td>${fmtMoney(totalPayouts)}</td>
     <td class="${totalProfit >= 0 ? 'pos' : 'neg'}">${fmtMoney(totalProfit)}</td>
-    <td></td><td>${totalActiveListings}</td>
+    <td></td><td>${fmtMoney(totalActiveListingsValue)} <span class="muted">(${totalActiveListingsCount})</span></td>
   </tr>`;
   html += '</tbody></table>';
   document.getElementById('table-area').innerHTML = html;
