@@ -4744,8 +4744,26 @@ async def sync_inventory_now(request: Request):
     asyncio.create_task(_run())
     return {"ok": True, "started": True}
 
+# Invisible in any renderer — but real characters to a string comparison. Confirmed
+# root cause of a title that would never exact-match no matter how many times it was
+# synced: the eBay-sourced title had a leading U+200B (zero-width space) that Python's
+# .strip()/.split() don't treat as whitespace, so it survived every normalization
+# pass and made the string permanently unequal to Shopify's clean title. Built with
+# chr(), never literal characters, so the source stays reviewable — an invisible
+# character typed directly into this file would defeat the whole point.
+_ZERO_WIDTH_CHARS = (
+    chr(0x200b),  # zero-width space
+    chr(0x200c),  # zero-width non-joiner
+    chr(0x200d),  # zero-width joiner
+    chr(0xfeff),  # zero-width no-break space / BOM
+    chr(0x00ad),  # soft hyphen
+)
+
 def _shopify_sync_norm(t):
-    return " ".join((t or "").strip().lower().split())
+    t = t or ""
+    for ch in _ZERO_WIDTH_CHARS:
+        t = t.replace(ch, "")
+    return " ".join(t.strip().lower().split())
 
 def _shopify_sync_sold_by_title(business_id: str, start_date: str, end_date: str) -> dict:
     res = supabase.table("orders").select("sku,title,quantity,order_id,legacy_item_id").eq("business_id", business_id)\
