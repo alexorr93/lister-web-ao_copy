@@ -4875,7 +4875,6 @@ def _shopify_sync_check_one(norm_title: str, entry: dict, ebay_token: str, shopi
 
     sku = entry["sku"]
     ebay_live_qty = None
-    ebay_ended = False
     if sku and sku != "(no SKU)" and not sku.lower().startswith("lister-"):
         try:
             r = _req.get(f"{EBAY_API_BASE}/sell/inventory/v1/inventory_item/{sku}",
@@ -4902,201 +4901,18 @@ def _shopify_sync_check_one(norm_title: str, entry: dict, ebay_token: str, shopi
                 if avail:
                     ebay_live_qty = avail[0].get("estimatedAvailableQuantity")
             elif r.status_code == 404:
-                # The listing itself is gone — genuinely ended, not just temporarily
-                # out of stock on an otherwise-live listing (that would be a 200
-                # with qty 0). We already make this exact call for every sold item;
-                # this is that same response telling us something we were
-                # previously throwing away by collapsing both cases into qty=0.
                 ebay_live_qty = 0
-                ebay_ended = True
         except Exception:
             pass
 
     match = shopify_catalog.get(norm_title)
     return {
         "norm_title": norm_title, "sku": sku, "legacy_item_id": legacy_item_id,
-        "ebay_live_qty": ebay_live_qty, "ebay_ended": ebay_ended, "shopify_found": match is not None,
+        "ebay_live_qty": ebay_live_qty, "shopify_found": match is not None,
         "shopify_live_qty": match["qty"] if match else None,
         "shopify_title": match["title"] if match else None,
         "shopify_inventory_item_id": match["inventory_item_id"] if match else None,
     }
-
-def _ebay_xml_to_dict(elem):
-    """Strips XML namespaces and turns an ElementTree element into nested dicts/lists
-    — eBay's Trading API responses are deeply nested and namespace-qualified
-    (urn:ebay:apis:eBLBaseComponents on every tag), so addressing fields by explicit
-    namespaced paths would be unreadable. Repeated child tags become a list."""
-    children = list(elem)
-    if not children:
-        return elem.text
-    result = {}
-    for child in children:
-        tag = child.tag.split("}")[-1]
-        val = _ebay_xml_to_dict(child)
-        if tag in result:
-            if not isinstance(result[tag], list):
-                result[tag] = [result[tag]]
-            result[tag].append(val)
-        else:
-            result[tag] = val
-    return result
-
-def _safe_int(v):
-    try:
-        return int(v)
-    except (TypeError, ValueError):
-        return None
-
-def _ebay_get_unsold_listings_page(token: str, page_number: int, entries_per_page: int = 200) -> dict:
-    """One page of eBay's Trading API GetMyeBaySelling / UnsoldList — this is eBay's
-    own bucket for 'listing ended without selling, still sitting there' (what Seller
-    Hub itself calls Unsold), which is what 'inactive eBay listings' actually means.
-    Not the REST Inventory/Browse APIs used elsewhere on this page — those only see
-    listings created via the Inventory API, or a specific known item, and cannot
-    enumerate 'everything currently inactive' the way this legacy call can. Trading
-    API accepts the same OAuth user token, just passed inside the XML body instead
-    of an Authorization header."""
-    import requests as _req
-    import xml.etree.ElementTree as ET
-
-    xml_body = (
-        '<?xml version="1.0" encoding="utf-8"?>'
-        '<GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
-        f'<RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>'
-        '<UnsoldList><Include>true</Include>'
-        f'<Pagination><EntriesPerPage>{entries_per_page}</EntriesPerPage><PageNumber>{page_number}</PageNumber></Pagination>'
-        '</UnsoldList>'
-        '<DetailLevel>ReturnAll</DetailLevel>'
-        '</GetMyeBaySellingRequest>'
-    )
-    headers = {
-        "X-EBAY-API-COMPATIBILITY-LEVEL": "1193",
-        "X-EBAY-API-CALL-NAME": "GetMyeBaySelling",
-        "X-EBAY-API-SITEID": "0",
-        "Content-Type": "text/xml",
-    }
-    r = _req.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_body.encode("utf-8"), timeout=30)
-    root = ET.fromstring(r.content)
-    return _ebay_xml_to_dict(root)
-
-def _sync_ebay_unsold_listings_work(business_id: str) -> dict:
-    """The actual work for the eBay-inactive-listings sync — pulls every page of
-    UnsoldList and replaces the ebay_listing_status table wholesale for this
-    business (a listing that got relisted or sold since the last sync should
-    disappear from 'inactive', not linger from a stale row).
-
-    Also matches each listing against the live Shopify catalog directly, storing
-    shopify_found/shopify_live_qty/etc on this same row. This does NOT read
-    shopify_sync_snapshot — that table is only ever populated for titles that have
-    a recent order (see _shopify_sync_refresh_work), and an unsold listing that
-    never sold, by definition, has no order at all. Cross-referencing against the
-    orders-scoped table made every unsold item show as "not found in Shopify" even
-    when it plainly was (confirmed on a real listing) — this does its own
-    independent catalog match instead."""
-    import datetime as _dt
-
-    token = get_ebay_access_token(business_id)
-    all_items = []
-    page = 1
-    total_pages = 1
-    while page <= total_pages:
-        resp = _ebay_get_unsold_listings_page(token, page)
-        ack = resp.get("Ack")
-        if ack not in ("Success", "Warning"):
-            errors = resp.get("Errors")
-            raise Exception(f"eBay GetMyeBaySelling failed (Ack={ack}): {errors}")
-        unsold = resp.get("UnsoldList") or {}
-        item_array = unsold.get("ItemArray") or {}
-        items = item_array.get("Item") or []
-        if isinstance(items, dict):
-            items = [items]
-        all_items.extend(items)
-        pagination = unsold.get("PaginationResult") or {}
-        total_pages = _safe_int(pagination.get("TotalNumberOfPages")) or 1
-        page += 1
-
-    settings = get_ebay_settings(business_id)
-    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
-    shopify_token = get_shopify_access_token(business_id) if domain else None
-    shopify_catalog = {}
-    if domain and shopify_token:
-        loc_headers = {"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"}
-        location_id = _get_shopify_primary_location_id(domain, loc_headers)
-        if location_id:
-            shopify_catalog, catalog_complete, _pages = _fetch_all_shopify_products(domain, shopify_token, location_id)
-            if not catalog_complete:
-                # Same rule as the main Sync Now job: an incomplete catalog must
-                # never be trusted as "not found" for real products.
-                raise Exception("Shopify catalog scan was rate-limited and didn't complete — try again in a minute.")
-
-    now_iso = _dt.datetime.utcnow().isoformat()
-    rows = []
-    for it in all_items:
-        title = it.get("Title")
-        norm_title = _shopify_sync_norm(title)
-        listing_details = it.get("ListingDetails") or {}
-        match = shopify_catalog.get(norm_title)
-        rows.append({
-            "business_id": business_id, "item_id": it.get("ItemID"),
-            "sku": it.get("SKU"), "title": title, "norm_title": norm_title,
-            "quantity": _safe_int(it.get("Quantity")), "quantity_sold": _safe_int(it.get("QuantitySold")),
-            "listing_status": "Unsold", "end_time": listing_details.get("EndTime"),
-            "shopify_found": match is not None,
-            "shopify_live_qty": match["qty"] if match else None,
-            "shopify_title": match["title"] if match else None,
-            "shopify_inventory_item_id": match["inventory_item_id"] if match else None,
-            "updated_at": now_iso,
-        })
-
-    # Replace wholesale: delete rows this business had before, insert the fresh set.
-    # A row lingering from a listing that's since been relisted or sold would show
-    # as permanently "inactive" forever otherwise.
-    supabase.table("ebay_listing_status").delete().eq("business_id", business_id).execute()
-    if rows:
-        supabase.table("ebay_listing_status").upsert(rows, on_conflict="business_id,item_id").execute()
-
-    return {"checked": len(rows), "synced_at": now_iso}
-
-_ebay_listings_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
-
-async def _run_ebay_listings_sync_background(business_id: str):
-    import asyncio, datetime as _dt
-    try:
-        result = await asyncio.to_thread(_sync_ebay_unsold_listings_work, business_id)
-        _ebay_listings_job_status[business_id] = {
-            "running": False, "result": result,
-            "started_at": _ebay_listings_job_status.get(business_id, {}).get("started_at"),
-            "finished_at": _dt.datetime.utcnow().isoformat(),
-        }
-    except Exception as e:
-        _ebay_listings_job_status[business_id] = {
-            "running": False, "result": {"error": str(e)},
-            "started_at": _ebay_listings_job_status.get(business_id, {}).get("started_at"),
-            "finished_at": _dt.datetime.utcnow().isoformat(),
-        }
-
-@app.post("/api/shopify-sync/sync-ebay-listings")
-async def shopify_sync_sync_ebay_listings(request: Request):
-    business_id = require_auth(request)
-    if not business_id:
-        raise HTTPException(401, "Unauthorized")
-    import asyncio, datetime as _dt
-    if _ebay_listings_job_status.get(business_id, {}).get("running"):
-        return {"started": False, "already_running": True}
-    _ebay_listings_job_status[business_id] = {
-        "running": True, "result": None,
-        "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None,
-    }
-    asyncio.create_task(_run_ebay_listings_sync_background(business_id))
-    return {"started": True}
-
-@app.get("/api/shopify-sync/sync-ebay-listings-status")
-async def shopify_sync_sync_ebay_listings_status(request: Request, response: Response):
-    business_id = require_auth(request)
-    if not business_id:
-        raise HTTPException(401, "Unauthorized")
-    response.headers["Cache-Control"] = "no-store"
-    return _ebay_listings_job_status.get(business_id, {"running": False, "result": None, "started_at": None, "finished_at": None})
 
 _shopify_sync_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
 
@@ -5146,7 +4962,7 @@ def _shopify_sync_refresh_work(business_id: str, days_back: int) -> dict:
     rows = [{
         "business_id": business_id, "norm_title": r["norm_title"],
         "title": sold_by_title[r["norm_title"]]["title"], "sku": r["sku"],
-        "legacy_item_id": r["legacy_item_id"], "ebay_live_qty": r["ebay_live_qty"], "ebay_ended": r["ebay_ended"],
+        "legacy_item_id": r["legacy_item_id"], "ebay_live_qty": r["ebay_live_qty"],
         "shopify_found": r["shopify_found"], "shopify_live_qty": r["shopify_live_qty"],
         "shopify_title": r["shopify_title"], "shopify_inventory_item_id": r["shopify_inventory_item_id"],
         "updated_at": now_iso,
@@ -5308,56 +5124,6 @@ async def shopify_sync_debug_item(request: Request, q: str):
         .eq("platform", "eBay").or_(f"title.ilike.%{q}%,sku.ilike.%{q}%").gte("order_date", cutoff).execute().data or []
     return {"push_log": push_rows, "snapshot": snap_rows, "recent_orders": order_rows}
 
-@app.get("/api/shopify-sync/inactive-items")
-async def shopify_sync_inactive_items(request: Request, response: Response):
-    """Real eBay-inactive listings — from ebay_listing_status (eBay's own Unsold
-    bucket, synced via /sync-ebay-listings using the Trading API GetMyeBaySelling
-    call), not derived from anything in the orders table. Deliberately NOT scoped to
-    any date range: a listing that ended may have sold on a different day, or never
-    sold at all, so this can't be tied to order_date the way /today is (confirmed:
-    that's exactly what made this tab useless before ebay_listing_status existed —
-    it could only ever show items that happened to already have a sale on record).
-
-    Shopify match data (shopify_found etc.) comes straight from ebay_listing_status
-    itself, NOT shopify_sync_snapshot — that table is only ever populated for titles
-    with a recent order, and an unsold listing that never sold has none, which made
-    every unsold item show "not found in Shopify" even when it plainly was
-    (confirmed on a real listing). Also overlaid with manually-ignored items so both
-    concepts of 'inactive' show in one place."""
-    business_id = require_auth(request)
-    if not business_id:
-        raise HTTPException(401, "Unauthorized")
-    response.headers["Cache-Control"] = "no-store"
-
-    listing_res = supabase.table("ebay_listing_status").select("*").eq("business_id", business_id).execute()
-    ignored_res = supabase.table("shopify_sync_ignored").select("norm_title,title").eq("business_id", business_id).execute()
-    ignored_titles = {row["norm_title"] for row in (ignored_res.data or [])}
-
-    by_norm = {}
-    for row in (listing_res.data or []):
-        nt = row.get("norm_title") or ""
-        remaining = row.get("quantity")
-        sold = row.get("quantity_sold")
-        ebay_qty = (remaining - sold) if (remaining is not None and sold is not None) else 0
-        by_norm[nt] = {
-            "title": row.get("title"), "sku": row.get("sku"),
-            "ebay_live_qty": max(ebay_qty, 0), "ebay_ended": True,
-            "shopify_found": bool(row.get("shopify_found")), "shopify_live_qty": row.get("shopify_live_qty"),
-            "shopify_title": row.get("shopify_title"), "shopify_inventory_item_id": row.get("shopify_inventory_item_id"),
-            "ignored": nt in ignored_titles, "order_ids": [], "qty_sold_today": None,
-        }
-    for row in (ignored_res.data or []):
-        nt = row["norm_title"]
-        if nt not in by_norm:
-            by_norm[nt] = {
-                "title": row.get("title"), "sku": None,
-                "ebay_live_qty": None, "ebay_ended": False,
-                "shopify_found": False, "shopify_live_qty": None,
-                "shopify_title": None, "shopify_inventory_item_id": None,
-                "ignored": True, "order_ids": [], "qty_sold_today": None,
-            }
-    return {"items": list(by_norm.values())}
-
 @app.post("/api/shopify-sync/ignore")
 async def shopify_sync_ignore(request: Request, body: dict = Body(...)):
     business_id = require_auth(request)
@@ -5445,7 +5211,7 @@ async def shopify_sync_today(request: Request, response: Response, date: str = N
         items.append({
             "sku": entry["sku"], "title": entry["title"], "qty_sold_today": entry["qty_sold_today"],
             "order_ids": entry["order_ids"],
-            "ebay_live_qty": snap.get("ebay_live_qty"), "ebay_ended": bool(snap.get("ebay_ended")),
+            "ebay_live_qty": snap.get("ebay_live_qty"),
             "shopify_found": bool(snap.get("shopify_found")), "shopify_live_qty": snap.get("shopify_live_qty"),
             "shopify_title": snap.get("shopify_title"), "shopify_inventory_item_id": snap.get("shopify_inventory_item_id"),
             "snapshot_updated_at": snap.get("updated_at"),
