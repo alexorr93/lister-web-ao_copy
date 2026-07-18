@@ -4744,19 +4744,6 @@ async def sync_inventory_now(request: Request):
     asyncio.create_task(_run())
     return {"ok": True, "started": True}
 
-@app.get("/api/shopify-sync/debug-log")
-async def shopify_sync_debug_log(request: Request):
-    """Temporary read-only diagnostic: dump raw shopify_qty_sync_log rows for this
-    business so we can see actual column names/values instead of guessing."""
-    business_id = require_auth(request)
-    if not business_id:
-        raise HTTPException(401, "Unauthorized")
-    try:
-        res = supabase.table("shopify_qty_sync_log").select("*").eq("business_id", business_id).limit(20).execute()
-        return {"rows": res.data, "error": None}
-    except Exception as e:
-        return {"rows": None, "error": str(e)}
-
 @app.get("/api/shopify-sync/today")
 async def shopify_sync_today(request: Request, date: str = None):
     """Step 1, deliberately minimal: every eBay sale from today, checked LIVE (not
@@ -4851,27 +4838,6 @@ async def shopify_sync_today(request: Request, date: str = None):
             "shopify_found": shopify_found, "shopify_live_qty": shopify_live_qty, "shopify_title": shopify_title,
             "shopify_inventory_item_id": shopify_inventory_item_id,
         })
-
-    # Cross-check the push audit log so already-synced rows can be flagged even
-    # after a page reload (the client's own "just pushed" state doesn't survive that).
-    try:
-        log_res = supabase.table("shopify_qty_sync_log").select("order_id,new_quantity")\
-            .eq("business_id", business_id).eq("status", "success").execute()
-        # Most recent successful push per order_id wins (a SKU can be re-pushed).
-        pushed_by_order_id = {}
-        for row in (log_res.data or []):
-            for oid in (row.get("order_id") or "").split(","):
-                oid = oid.strip()
-                if oid:
-                    pushed_by_order_id[oid] = row.get("new_quantity")
-        for it in items:
-            match = next((pushed_by_order_id[oid] for oid in it["order_ids"] if oid in pushed_by_order_id), None)
-            it["already_pushed"] = match is not None
-            it["qty_matches"] = match is not None and match == it.get("shopify_live_qty")
-    except Exception:
-        for it in items:
-            it["already_pushed"] = False
-            it["qty_matches"] = False
 
     return {"date": today, "items": items}
 
