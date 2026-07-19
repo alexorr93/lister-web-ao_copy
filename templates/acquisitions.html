@@ -241,8 +241,10 @@ function toggleEditMode() {
   renderTable();
 }
 
-async function editCell(td, id, field, currentValue, inputType) {
+async function editCell(td, id, field, inputType) {
   if (!editMode || td.querySelector('input')) return;
+  const row = acquisitions.find(a => a.id === id);
+  const currentValue = row ? row[field] : null;
   const orig = td.textContent;
   const input = document.createElement('input');
   input.className = 'field-input';
@@ -383,16 +385,16 @@ function renderTable() {
     const roiClass = a.roi_pct == null ? '' : (a.roi_pct >= 0 ? 'pos' : 'neg');
     const profitClass = a.profit >= 0 ? 'pos' : 'neg';
     const editCls = editMode ? ' style="cursor:text;outline:1px dashed rgba(255,255,255,0.15);"' : '';
-    const ed = (field, value, type) => editMode
-      ? `onclick="editCell(this,'${a.id}','${field}',${JSON.stringify(value ?? '')},'${type||'text'}')"`
+    const ed = (field, type) => editMode
+      ? `onclick="editCell(this,'${a.id}','${field}','${type||'text'}')"`
       : '';
     html += `<tr>
-      <td class="sku"${editCls} ${ed('sku', a.sku)}>${escapeHtml(a.sku)}</td>
-      <td class="muted"${editCls} ${ed('name', a.name)}>${escapeHtml(a.name || '')}</td>
-      <td class="muted"${editCls} ${ed('payment_method', a.payment_method)}>${escapeHtml(a.payment_method || '')}</td>
-      <td class="muted"${editCls} ${ed('date', a.date, 'date')}>${escapeHtml(a.date || '')}</td>
-      <td${editCls} ${ed('cost', a.cost, 'number')}>${fmtMoney(a.cost)}</td>
-      <td${editCls} ${ed('cash', a.cash, 'number')}>${fmtMoney(a.cash)}</td>
+      <td class="sku"${editCls} ${ed('sku')}>${escapeHtml(a.sku)}</td>
+      <td class="muted"${editCls} ${ed('name')}>${escapeHtml(a.name || '')}</td>
+      <td class="muted"${editCls} ${ed('payment_method')}>${escapeHtml(a.payment_method || '')}</td>
+      <td class="muted"${editCls} ${ed('date', 'date')}>${escapeHtml(a.date || '')}</td>
+      <td${editCls} ${ed('cost', 'number')}>${fmtMoney(a.cost)}</td>
+      <td${editCls} ${ed('cash', 'number')}>${fmtMoney(a.cash)}</td>
       <td>${fmtMoney(a.ebay)}</td>
       <td>${fmtMoney(a.total_payouts)}</td>
       <td class="${profitClass}">${fmtMoney(a.profit)}</td>
