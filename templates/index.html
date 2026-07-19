@@ -28,16 +28,24 @@
 body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* NAV */
+/* NAV — shared across every page, see templates/_nav.html */
 .nav { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 16px; display: flex; align-items: center; gap: 6px; overflow-x: auto; height: 52px; position: sticky; top: 0; z-index: 100; }
-.nav-logo { font-weight: 800; font-size: 15px; color: var(--text); margin-right: 8px; white-space: nowrap; }
-.nav-btn { padding: 6px 14px; border-radius: 8px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; background: transparent; color: var(--muted); transition: all 0.15s; }
+.nav-btn { padding: 6px 14px; border-radius: 8px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; background: transparent; color: var(--muted); transition: all 0.15s; text-decoration: none; display: inline-block; font-family: inherit; }
 .nav-btn:hover { background: var(--card); color: var(--text); }
-.nav-btn.active { color: #fff; }
-.nav-btn[data-tab="dashboard"].active { background: var(--accent); }
-.nav-btn[data-tab="scan"].active { background: var(--orange); }
-.nav-btn[data-tab="upload"].active { background: #0891b2; }
-.nav-btn[data-tab="auction"].active { background: var(--amber); }
+.nav-spacer { flex: 1; }
+.nav-download { padding: 6px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; }
+.nav-account { font-size: 12px; color: var(--muted); margin-right: 4px; white-space: nowrap; }
+.nav-intake.active     { background: #2563eb; color: #fff; }
+.nav-upload.active     { background: #0891b2; color: #fff; }
+.nav-fastscan.active   { background: #16a34a; color: #fff; }
+.nav-archive.active    { background: #dc2626; color: #fff; }
+.nav-inventory.active  { background: #7c3aed; color: #fff; }
+.nav-financials.active { background: #ca8a04; color: #fff; }
+.nav-lots.active       { background: #ea580c; color: #fff; }
+.nav-shopify.active    { background: #95bf47; color: #fff; }
+.nav-categories.active { background: #0d9488; color: #fff; }
+.nav-auction.active    { background: #f59e0b; color: #1a0611; }
+.nav-settings.active   { background: #475569; color: #fff; }
 .pdf-drop-zone { border: 2px dashed var(--border); border-radius: 12px; padding: 28px; text-align: center; cursor: pointer; transition: border-color 0.15s; position: relative; overflow: hidden; margin-bottom: 14px; }
 .pdf-drop-zone:hover { border-color: var(--amber); }
 .pdf-drop-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
@@ -47,8 +55,6 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .pdf-result-table tr:hover td { background: var(--surface); }
 .pdf-value-high { color: #4ade80; font-weight: 700; }
 .pdf-value-low { color: #f59e0b; font-weight: 700; }
-.nav-btn[data-tab="settings"].active { background: #475569; }
-.nav-btn[data-tab="fastscan"].active { background: #16a34a; }
 .fastscan-zone { border: 2px dashed var(--border); border-radius: 12px; padding: 32px; text-align: center; cursor: pointer; transition: border-color 0.15s; position: relative; overflow: hidden; }
 .fastscan-zone:hover { border-color: #16a34a; }
 .fastscan-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; font-size: 0; }
@@ -88,8 +94,6 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .fastscan-group-thumbs > div:not(:first-child) { margin-left:-14px; border:2px solid #0d1117; }
 .fastscan-group-thumbs img { width:100%; height:100%; object-fit:cover; cursor:zoom-in; }
 .fastscan-group-count { font-size:10px; color:#64748b; margin-left:4px; }
-.nav-spacer { flex: 1; }
-.nav-download { padding: 6px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; }
 
 /* MAIN */
 .main { padding: 16px; max-width: 1700px; margin: 0 auto; }
@@ -231,8 +235,14 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .field-label { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 3px; }
 .field-input { width: 100%; padding: 8px 10px; background: #fff; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; }
 .field-input:focus { outline: none; border-color: var(--accent); }
-.modal-close { width: 100%; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 12px; }
-.modal-close:hover { background: var(--border); }
+.modal-desc-toggle { display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; }
+.modal-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.modal-action-btn { width: 100%; padding: 14px; border: none; border-radius: 10px; color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit; transition: filter 0.15s; }
+.modal-action-btn:hover { filter: brightness(1.1); }
+.modal-action-save     { background: #475569; }
+.modal-action-schedule { background: var(--accent); }
+.modal-action-publish  { background: #d97706; }
+.modal-action-shopify  { background: #95bf47; }
 
 /* BATCH UPLOAD */
 .upload-zone { border: 2px dashed var(--border); border-radius: 14px; padding: 32px; text-align: center; cursor: pointer; transition: border-color 0.15s; }
@@ -281,29 +291,12 @@ select.field-input { background: #fff; color: #0f172a; }
 </head>
 <body>
 
-<nav class="nav">
-  <div class="nav-logo">📦 Lister AI</div>
-  <button class="nav-btn active" data-tab="dashboard">📊 Dashboard</button>
-  <button class="nav-btn" data-tab="upload">📸 Upload</button>
-  <button class="nav-btn" data-tab="fastscan">⚡ Fast Scan</button>
-  {% if is_admin %}<button class="nav-btn" data-tab="auction">🔨 Auctions</button>{% endif %}
-  <button class="nav-btn" data-tab="settings">⚙️ Settings</button>
-  <a class="nav-btn" href="/categories" style="text-decoration:none;display:inline-block;">📂 Categories</a>
-  <a class="nav-btn" href="/archive" style="text-decoration:none;display:inline-block;">🗄️ Archive</a>
-  <a class="nav-btn" href="/financials" style="text-decoration:none;display:inline-block;">💰 Financials</a>
-  <a class="nav-btn" href="/acquisitions" style="text-decoration:none;display:inline-block;">🛒 Lots</a>
-  <a class="nav-btn" href="/inventory" style="text-decoration:none;display:inline-block;">📦 Inventory</a>
-  <a class="nav-btn" href="/shopify-sync" style="text-decoration:none;display:inline-block;">🔁 Shopify Sync</a>
-  <div class="nav-spacer"></div>
-  <a class="nav-download" href="#" onclick="window.location.href='/api/export/ebay-csv';return false;">⬇️ eBay CSV</a>
-  {% if account_label %}<span style="font-size:12px;color:var(--muted);margin-right:4px;white-space:nowrap;">👤 {{ account_label }}</span>{% endif %}
-  <a class="nav-download" href="/logout" style="color:#ef4444;border-color:#7f1d1d;">⏻ Logout</a>
-</nav>
+{% include "_nav.html" %}
 
 <div class="main">
 
   <!-- DASHBOARD TAB -->
-  <div class="tab-content active" id="tab-dashboard">
+  <div class="tab-content active" id="tab-intake">
     <div class="proc-bar-wrap" id="proc-bar-wrap" style="display:none">
       <div class="proc-bar-header">
         <span>Processing queue</span>
@@ -623,8 +616,11 @@ select.field-input { background: #fff; color: #0f172a; }
         </div>
       </div>
       <div>
-        <div class="field-label">eBay Description</div>
-        <textarea class="field-input" id="modal-desc-input" rows="4" oninput="modalDirty=true" style="resize:vertical;font-size:12px;line-height:1.5;"></textarea>
+        <div class="field-label modal-desc-toggle" onclick="toggleModalDesc()">
+          <span>eBay Description</span>
+          <span id="modal-desc-caret">▸</span>
+        </div>
+        <textarea class="field-input" id="modal-desc-input" rows="4" oninput="modalDirty=true" style="display:none;resize:vertical;font-size:12px;line-height:1.5;"></textarea>
       </div>
       <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:14px;">
         <div class="field-label" style="margin-bottom:8px;">eBay Listing</div>
@@ -651,21 +647,18 @@ select.field-input { background: #fff; color: #0f172a; }
         </div>
         <button class="btn" style="width:100%;margin-bottom:8px;" onclick="autoCategoryModal()">🎯 Auto-pick eBay Category</button>
         <div id="modal-category-status" style="font-size:11px;color:var(--muted);margin-bottom:8px;"></div>
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+        <div style="display:flex;gap:8px;align-items:center;">
           <input type="number" class="field-input" id="modal-ebay-hours" value="24" min="0.5" step="0.5" style="width:80px;" title="Hours from now"/>
-          <span style="font-size:12px;color:var(--muted);">hours from now</span>
-        </div>
-        <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px;margin-bottom:8px;" onclick="submitToEbay('schedule')">⏰ Schedule</button>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-          <button class="btn" style="font-size:11px;" onclick="submitToEbay('draft')">📝 Save as Draft</button>
-          <button class="btn" style="font-size:11px;color:var(--amber);border-color:var(--amber);" onclick="confirmPublishNow()">🚀 Publish Now</button>
+          <span style="font-size:12px;color:var(--muted);">hours from now (for Schedule)</span>
         </div>
       </div>
-      <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:14px;">
-        <div id="modal-shopify-status" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></div>
-        <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px;background:#95bf47;border-color:#95bf47;" onclick="publishToShopify()">🛍️ Publish to Shopify</button>
+      <div id="modal-shopify-status" style="font-size:12px;color:var(--muted);margin-top:14px;"></div>
+      <div class="modal-actions">
+        <button class="modal-action-btn modal-action-save" onclick="saveModal()">💾 Save</button>
+        <button class="modal-action-btn modal-action-schedule" onclick="submitToEbay('schedule')">⏰ Schedule to eBay</button>
+        <button class="modal-action-btn modal-action-publish" onclick="confirmPublishNow()">🚀 Publish to eBay</button>
+        <button class="modal-action-btn modal-action-shopify" onclick="publishToShopify()">🛍️ Publish to Shopify</button>
       </div>
-      <button class="modal-close" onclick="saveModal()">💾 Save & Close</button>
     </div>
   </div>
 </div>
@@ -983,7 +976,7 @@ let upCondition   = 'new';
 let upQtyVal      = 1;
 let upPhotos      = [];
 let upItems       = [];
-let activeTab     = 'dashboard';
+let activeTab     = 'intake';
 let auctionSessions = [];
 let activeSession = null;
 
@@ -991,12 +984,13 @@ let activeSession = null;
 document.querySelectorAll('.nav-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const tab = btn.dataset.tab;
+    if (!tab) return; // real page links (Archive, Lots, etc.) just navigate normally
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('tab-' + tab).classList.add('active');
     activeTab = tab;
-    if (tab === 'dashboard') { loadListings(); resolvePendingLotAssignments(); }
+    if (tab === 'intake') { loadListings(); resolvePendingLotAssignments(); }
     if (tab === 'auction')   loadAuctionSessions();
     if (tab === 'settings')  loadSettings();
   });
@@ -1697,6 +1691,14 @@ async function uploadExtraPhotos() {
   input.value = '';
 }
 
+function toggleModalDesc() {
+  const ta = document.getElementById('modal-desc-input');
+  const caret = document.getElementById('modal-desc-caret');
+  const open = ta.style.display !== 'none';
+  ta.style.display = open ? 'none' : 'block';
+  caret.textContent = open ? '▸' : '▾';
+}
+
 function openModal(id) {
   id = isNaN(id) ? id : Number(id);
   const l = listings.find(x => x.id === id);
@@ -1726,6 +1728,8 @@ function openModal(id) {
   document.getElementById('modal-price-input').value = l.price.toFixed(2);
   document.getElementById('modal-cond-input').value  = l.condition || 'used';
   document.getElementById('modal-desc-input').value = l.description || window._defaultDesc || '';
+  document.getElementById('modal-desc-input').style.display = 'none'; // collapsed by default, expand via toggleModalDesc()
+  document.getElementById('modal-desc-caret').textContent = '▸';
   const ebayStatusEl = document.getElementById('modal-ebay-status');
   if (ebayStatusEl) {
     if (l.ebay_status === 'published' && l.ebay_item_id) {
@@ -2564,8 +2568,8 @@ resolvePendingLotAssignments(); // catch up any lot assignments left pending fro
   }
 })();
 
-// Auto-refresh dashboard every 30s when on that tab
-setInterval(() => { if (activeTab === 'dashboard') { loadListings(); resolvePendingLotAssignments(); } }, 30000);
+// Auto-refresh Intake every 30s when on that tab
+setInterval(() => { if (activeTab === 'intake') { loadListings(); resolvePendingLotAssignments(); } }, 30000);
 setInterval(() => { if (activeTab === 'auction' && activeSession) loadAuctionItems(activeSession); }, 30000);
 
 async function rotatePhoto(dir) {

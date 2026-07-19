@@ -559,17 +559,26 @@ def get_business_info(request: Request):
         pass
     return None, False
 
-@app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request):
+def get_nav_context(request: Request):
+    """Returns the shared context every page's nav bar (templates/_nav.html) needs
+    — business_id, is_admin, account_label — or None if not logged in. Consolidates
+    what used to be near-identical boilerplate repeated in every page route."""
     business_id, is_admin = get_business_info(request)
     if not business_id:
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse("/login", status_code=302)
-    biz = supabase.table("businesses").select("name,email").eq("id", business_id).limit(1).execute()
+        return None
     account_label = ""
+    biz = supabase.table("businesses").select("name,email").eq("id", business_id).limit(1).execute()
     if biz.data:
         account_label = biz.data[0].get("email") or biz.data[0].get("name") or ""
-    return templates.TemplateResponse("index.html", {"request": request, "is_admin": is_admin, "account_label": account_label})
+    return {"business_id": business_id, "is_admin": is_admin, "account_label": account_label}
+
+@app.get("/", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    nav = get_nav_context(request)
+    if nav is None:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("index.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "intake"})
 
 # ── API: LISTINGS ─────────────────────────────────────────────── #
 
@@ -1073,11 +1082,11 @@ async def categories_tree(request: Request, root: str = None):
 
 @app.get("/categories", response_class=HTMLResponse)
 async def categories_page(request: Request):
-    business_id, is_admin = get_business_info(request)
-    if not business_id:
+    nav = get_nav_context(request)
+    if nav is None:
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/login", status_code=302)
-    return templates.TemplateResponse("categories.html", {"request": request, "is_admin": is_admin})
+    return templates.TemplateResponse("categories.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "categories"})
 
 @app.get("/api/ebay/category-search")
 async def ebay_category_search(q: str, request: Request):
@@ -1172,35 +1181,35 @@ async def restore_listings(request: Request, body: RestoreItems):
 
 @app.get("/financials", response_class=HTMLResponse)
 async def financials_page(request: Request):
-    business_id, is_admin = get_business_info(request)
-    if not business_id:
+    nav = get_nav_context(request)
+    if nav is None:
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/login", status_code=302)
-    return templates.TemplateResponse("financials.html", {"request": request, "is_admin": is_admin})
+    return templates.TemplateResponse("financials.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "financials"})
 
 @app.get("/acquisitions", response_class=HTMLResponse)
 async def acquisitions_page(request: Request):
-    business_id, is_admin = get_business_info(request)
-    if not business_id:
+    nav = get_nav_context(request)
+    if nav is None:
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/login", status_code=302)
-    return templates.TemplateResponse("acquisitions.html", {"request": request, "is_admin": is_admin})
+    return templates.TemplateResponse("acquisitions.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "lots"})
 
 @app.get("/inventory", response_class=HTMLResponse)
 async def inventory_page(request: Request):
-    business_id, is_admin = get_business_info(request)
-    if not business_id:
+    nav = get_nav_context(request)
+    if nav is None:
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/login", status_code=302)
-    return templates.TemplateResponse("inventory.html", {"request": request, "is_admin": is_admin})
+    return templates.TemplateResponse("inventory.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "inventory"})
 
 @app.get("/shopify-sync", response_class=HTMLResponse)
 async def shopify_sync_page(request: Request):
-    business_id, is_admin = get_business_info(request)
-    if not business_id:
+    nav = get_nav_context(request)
+    if nav is None:
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/login", status_code=302)
-    return templates.TemplateResponse("shopify_sync.html", {"request": request, "is_admin": is_admin})
+    return templates.TemplateResponse("shopify_sync.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "shopify"})
 
 class AcquisitionCreate(BaseModel):
     sku: str
@@ -2647,11 +2656,11 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
 
 @app.get("/archive", response_class=HTMLResponse)
 async def archive_page(request: Request):
-    business_id, is_admin = get_business_info(request)
-    if not business_id:
+    nav = get_nav_context(request)
+    if nav is None:
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/login", status_code=302)
-    return templates.TemplateResponse("archive.html", {"request": request, "is_admin": is_admin})
+    return templates.TemplateResponse("archive.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "archive"})
 
 @app.post("/api/listings/archive-batch")
 async def archive_batch(request: Request):
