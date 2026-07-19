@@ -1228,7 +1228,34 @@ def apply_acquisition_profits(business_id: str) -> dict:
     one atomic SQL statement, no pagination limits, no partial-upsert failures."""
     res = supabase.rpc("recalculate_acquisition_profits", {"biz_id": business_id}).execute()
     updated = res.data if isinstance(res.data, int) else 0
+    _apply_cash_to_profit(business_id)
     return {"updated": updated}
+
+def _apply_cash_to_profit(business_id: str):
+    """recalculate_acquisition_profits() (a Postgres function that lives only in
+    Supabase — there's no SQL source for it in this repo, and no DB credentials
+    available to edit it directly) computes Profit/ROI purely from cost vs. synced
+    eBay payouts; it has no notion of the manually-entered Cash field. Cash is value
+    already recovered outside eBay (e.g. selling part of a lot for cash), so it should
+    count toward profit exactly like a payout would. Layered on here in Python
+    immediately after every recalculation instead, using whatever baseline Profit the
+    SQL function just wrote — safe to re-run every time since each cycle starts from
+    that fresh (cash-less) baseline rather than a previously-corrected value."""
+    start = 0
+    while True:
+        page = supabase.table("acquisitions").select("id,cost,cash,profit")\
+            .eq("business_id", business_id).range(start, start + 999).execute().data or []
+        for row in page:
+            cash = row.get("cash") or 0
+            if not cash:
+                continue
+            cost = row.get("cost") or 0
+            profit = (row.get("profit") or 0) + cash
+            roi_pct = round(profit / cost * 100, 2) if cost else None
+            supabase.table("acquisitions").update({"profit": profit, "roi_pct": roi_pct}).eq("id", row["id"]).execute()
+        if len(page) < 1000:
+            break
+        start += 1000
 
 @app.get("/api/acquisitions/debug-sku/{sku}")
 async def debug_acquisition_sku(sku: str, request: Request):
