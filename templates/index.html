@@ -324,21 +324,6 @@ select.field-input { background: #fff; color: #0f172a; }
       <div id="batch-submit-text" style="font-size:12px;color:var(--muted);margin-top:4px;text-align:center;"></div>
     </div>
     <div id="lotsku-dropdown" class="lotsku-dropdown-panel"></div>
-    <div class="lot-picker-overlay" id="lot-picker-overlay" onclick="if(event.target===this) closeLotPicker()">
-      <div class="lot-picker-sheet">
-        <div class="lot-picker-header">
-          <div class="lot-picker-title">Select Lot SKU</div>
-          <button class="lot-picker-close" id="lot-picker-close-btn" onclick="closeLotPicker()">✕</button>
-        </div>
-        <input type="text" class="lot-picker-input" id="lot-picker-input" placeholder="Type to filter, e.g. MF"
-          autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-          oninput="renderLotWheel(this.value)" onkeydown="if(event.key==='Enter') selectTopLotMatch()"/>
-        <div class="lot-wheel-wrap">
-          <div class="lot-wheel" id="lot-wheel" onscroll="onLotWheelScroll()"></div>
-          <div class="lot-wheel-center-band"></div>
-        </div>
-      </div>
-    </div>
     <div class="tile-grid" id="tile-grid"></div>
     <div class="empty" id="dash-empty" style="display:none">
       <div class="empty-icon">📭</div>
@@ -548,6 +533,25 @@ select.field-input { background: #fff; color: #0f172a; }
   </div>
 
 </div><!-- /main -->
+
+<!-- LOT PICKER SHEET (Fast Scan / Batch Upload "active lot") — lives outside .tab-content
+     on purpose: it must stay visible/interactive no matter which tab is currently active,
+     since a display:none tab-content ancestor would hide this whole overlay too. -->
+<div class="lot-picker-overlay" id="lot-picker-overlay" onclick="if(event.target===this) closeLotPicker()">
+  <div class="lot-picker-sheet">
+    <div class="lot-picker-header">
+      <div class="lot-picker-title">Select Lot SKU</div>
+      <button class="lot-picker-close" id="lot-picker-close-btn" onclick="closeLotPicker()">✕</button>
+    </div>
+    <input type="text" class="lot-picker-input" id="lot-picker-input" placeholder="Type to filter, e.g. MF"
+      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+      oninput="renderLotWheel(this.value)" onkeydown="if(event.key==='Enter') selectTopLotMatch()"/>
+    <div class="lot-wheel-wrap">
+      <div class="lot-wheel" id="lot-wheel" onscroll="onLotWheelScroll()"></div>
+      <div class="lot-wheel-center-band"></div>
+    </div>
+  </div>
+</div>
 
 <!-- PHOTO MODAL -->
 <div class="modal-overlay" id="modal" onclick="closeModal(event)">
