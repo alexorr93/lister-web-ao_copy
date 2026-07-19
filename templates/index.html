@@ -35,6 +35,17 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .nav-spacer { flex: 1; }
 .nav-download { padding: 6px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; }
 .nav-account { font-size: 12px; color: var(--muted); margin-right: 4px; white-space: nowrap; }
+.nav-intake     { color: #3b82f6; }
+.nav-upload     { color: #22b8d8; }
+.nav-fastscan   { color: #22c55e; }
+.nav-archive    { color: #ef4444; }
+.nav-inventory  { color: #a78bfa; }
+.nav-financials { color: #eab308; }
+.nav-lots       { color: #fb923c; }
+.nav-shopify    { color: #95bf47; }
+.nav-categories { color: #14b8a6; }
+.nav-auction    { color: #f59e0b; }
+.nav-settings   { color: #94a3b8; }
 .nav-intake.active     { background: #2563eb; color: #fff; }
 .nav-upload.active     { background: #0891b2; color: #fff; }
 .nav-fastscan.active   { background: #16a34a; color: #fff; }
@@ -327,9 +338,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <button class="btn btn-primary" id="submit-shopify-btn" style="display:none;background:#95bf47;border-color:#95bf47;" onclick="submitSelectedToShopify()">🛍️ Publish to Shopify</button>
       <button class="btn" id="archive-selected-btn" style="display:none;color:var(--red);border-color:#991b1b;" onclick="archiveSelected()">🗄️ Archive Selected</button>
       <div class="spacer"></div>
-      <button class="btn" style="color:#dc2626;border-color:#dc2626;" onclick="archiveBothPublished()">🗄️ Archive Published (eBay+Shopify)</button>
-      <button class="btn" style="color:#dc2626;border-color:#dc2626;" onclick="selectFailed()">⚠️ Select Failed</button>
-      <button class="btn btn-danger" onclick="confirmClearBatch()">🗄️ Archive Batch</button>
+      <button class="btn" style="color:#dc2626;border-color:#dc2626;" onclick="archiveBothPublished()">🗄️ Archive Published</button>
     </div>
     <div id="batch-submit-progress" style="display:none;margin-bottom:10px;">
       <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;"><div id="batch-submit-bar" style="height:100%;background:var(--accent);width:0%;transition:width 0.2s;"></div></div>
@@ -617,7 +626,7 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
       <div>
         <div class="field-label modal-desc-toggle" onclick="toggleModalDesc()">
-          <span>eBay Description</span>
+          <span>eBay Description <span style="text-transform:none;font-weight:400;opacity:0.7;">(tap to edit)</span></span>
           <span id="modal-desc-caret">▸</span>
         </div>
         <textarea class="field-input" id="modal-desc-input" rows="4" oninput="modalDirty=true" style="display:none;resize:vertical;font-size:12px;line-height:1.5;"></textarea>
@@ -646,6 +655,10 @@ select.field-input { background: #fff; color: #0f172a; }
           <div id="modal-extra-photos-status" style="font-size:11px;color:var(--muted);margin-top:4px;"></div>
         </div>
         <button class="btn" style="width:100%;margin-bottom:8px;" onclick="autoCategoryModal()">🎯 Auto-pick eBay Category</button>
+        <div style="display:flex;gap:8px;margin-bottom:8px;">
+          <input type="text" inputmode="numeric" class="field-input" id="modal-category-manual-input" placeholder="Or enter eBay category ID manually" style="flex:1;"/>
+          <button class="btn" onclick="setModalCategoryManual()">Set</button>
+        </div>
         <div id="modal-category-status" style="font-size:11px;color:var(--muted);margin-bottom:8px;"></div>
         <div style="display:flex;gap:8px;align-items:center;">
           <input type="number" class="field-input" id="modal-ebay-hours" value="24" min="0.5" step="0.5" style="width:80px;" title="Hours from now"/>
@@ -913,7 +926,7 @@ async function tryResolveLotAssignment(groupId, lotSku) {
   const d = await r.json();
   if (!(d.listing && d.listing.status === 'scanned')) return false;
   const id = d.listing.id;
-  await updateField(id, 'ebay_sku', lotSku + '-' + id);
+  await api('POST', '/api/listings/' + id + '/assign-lot', {lot_sku: lotSku});
   return true;
 }
 
@@ -948,7 +961,7 @@ function pollForListingAndAssignLot(groupId, lotSku, opts) {
       if (d.listing && d.listing.status === 'scanned') {
         clearInterval(poll);
         const id = d.listing.id;
-        if (lotSku) { await updateField(id, 'ebay_sku', lotSku + '-' + id); clearPendingLotAssignment(groupId); }
+        if (lotSku) { await api('POST', '/api/listings/' + id + '/assign-lot', {lot_sku: lotSku}); clearPendingLotAssignment(groupId); }
         if (typeof opts.onDone === 'function') opts.onDone();
       }
     } catch(e) {}
@@ -1257,15 +1270,12 @@ function initTileListeners() {
         return;
       }
       el.classList.remove('invalid', 'missing');
-      var newSku = val + '-' + id;
-      updateField(id, 'ebay_sku', newSku).then(function(ok) {
-        if (ok) {
-          delete dirtyLotSkus[id];
-          if (l) l.ebay_sku = newSku;
-          toast('Lot SKU set to ' + val + ' ✓');
-        } else {
-          toast('Failed to save Lot SKU', 'error');
-        }
+      api('POST', '/api/listings/' + id + '/assign-lot', {lot_sku: val}).then(function(r) {
+        delete dirtyLotSkus[id];
+        if (l) l.ebay_sku = r.ebay_sku;
+        toast('Lot SKU set to ' + val + ' ✓');
+      }).catch(function() {
+        toast('Failed to save Lot SKU', 'error');
       });
     }
     if (el.classList.contains('tile-cat-input')) {
@@ -1452,13 +1462,6 @@ function toggleSelect(id) {
   updateStats();
 }
 function selectAll()   { listings.forEach(l => selected.add(String(l.id))); renderTiles(); }
-function selectFailed() {
-  selected.clear();
-  const failed = listings.filter(l => l.ebay_status === 'failed');
-  failed.forEach(l => selected.add(String(l.id)));
-  renderTiles();
-  toast(failed.length ? `Selected ${failed.length} failed item(s)` : 'No failed items right now ✓');
-}
 function deselectAll() { selected.clear(); renderTiles(); }
 function updateSubmitBtn() {
   const btn = document.getElementById('submit-ebay-btn');
@@ -1531,15 +1534,6 @@ async function rescanItem(id) {
     toast('Resubmitted to scanner ✓');
     setTimeout(loadListings, 1500);
   } catch(e) { toast('Re-scan failed', 'error'); }
-}
-
-async function confirmClearBatch() {
-  if (!confirm(`Archive all ${listings.length} items and clear this batch?`)) return;
-  try {
-    const r = await api('POST', '/api/listings/archive-batch');
-    toast(`✅ ${r.count} items archived`);
-    loadListings();
-  } catch(e) { toast('Failed to clear batch', 'error'); }
 }
 
 function showBatchProgress(current, total, label) {
@@ -1822,6 +1816,29 @@ async function autoCategoryModal() {
   } catch(e) {
     statusEl.textContent = '⚠️ ' + e.message;
     toast('Category match failed', 'error');
+  }
+}
+
+async function setModalCategoryManual() {
+  if (!modalItemId) return;
+  const input = document.getElementById('modal-category-manual-input');
+  const catId = input.value.trim();
+  if (!catId || !/^\d+$/.test(catId)) { toast('Enter a numeric eBay category ID', 'error'); return; }
+  const statusEl = document.getElementById('modal-category-status');
+  statusEl.textContent = 'Saving category ' + catId + '...';
+  try {
+    await updateField(modalItemId, 'ebay_category_id', catId);
+    statusEl.textContent = `✅ Category set manually to ID ${catId}`;
+    const l = listings.find(x => x.id === modalItemId);
+    if (l) { l.ebay_category_id = catId; l.ebay_category_is_default = false; }
+    changedFields.add(modalItemId + '_category');
+    delete dirtyCats[modalItemId];
+    renderTiles();
+    input.value = '';
+    toast('Category set ✓');
+  } catch(e) {
+    statusEl.textContent = '⚠️ ' + e.message;
+    toast('Failed to set category', 'error');
   }
 }
 

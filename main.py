@@ -32,9 +32,22 @@ def guess_brand_from_title(title: str) -> str:
     first_word = (title or "").split()[0].strip(",.;:-") if title else ""
     return first_word if first_word else "Unbranded"
 
+def _category_is_restricted_ok(cat_id: str, path_map: dict) -> bool:
+    """True only if cat_id is known locally (synced via sync_ebay_categories) AND its
+    path actually falls under Business & Industrial / eBay Motors. An id that's blank,
+    "0", or simply not in our synced tree at all does NOT count as verified-good."""
+    path = path_map.get(str(cat_id))
+    if path is None:
+        return False
+    return ("Business & Industrial" in path) or ("eBay Motors" in path)
+
 async def auto_fill_worker():
     """Runs continuously in the background. Any listing missing a brand or eBay category
-    gets one filled in automatically within seconds of the scan finishing — no manual click needed."""
+    gets one filled in automatically within seconds of the scan finishing — no manual click
+    needed. Also periodically re-validates listings that already have SOME category (e.g.
+    mantle-scanner's own initial guess, which is never restricted to Business & Industrial /
+    eBay Motors) — the null/0/blank check alone let a wrong category sail through forever
+    once mantle-scanner had written anything non-empty into ebay_category_id."""
     import asyncio
 
     def needs_category(row: dict) -> bool:
@@ -43,6 +56,30 @@ async def auto_fill_worker():
         # so treat None / "" / "0" all as "not actually categorized yet".
         return cat is None or str(cat).strip() in ("", "0")
 
+    def fix_row(row: dict):
+        title = row.get("title") or ""
+        biz_id = row.get("business_id")
+        if not title or title == "Scanning..." or not biz_id:
+            print(f"auto_fill_worker: skipping {row['id']} (title={title!r}, biz_id={biz_id})")
+            return
+        updates = {}
+        if not row.get("brand"):
+            updates["brand"] = guess_brand_from_title(title)
+        try:
+            suggestion = suggest_ebay_category(title, biz_id, restrict=True)
+            if suggestion:
+                updates["ebay_category_id"] = suggestion["category_id"]
+                print(f"auto_fill_worker: {row['id']} -> category {suggestion['category_id']} ({suggestion.get('name')})")
+            else:
+                fallback = get_ebay_settings(biz_id).get("EBAY_DEFAULT_CATEGORY_ID", "") or "26261"  # Other Business & Industrial — hard floor, no exceptions
+                updates["ebay_category_id"] = fallback
+                print(f"auto_fill_worker: {row['id']} -> no B&I/Motors match, locked to {fallback}")
+        except Exception as e:
+            print(f"auto_fill_worker category error for {row['id']}: {e}")
+        if updates:
+            supabase.table("listings").update(updates).eq("id", row["id"]).execute()
+
+    cycle = 0
     while True:
         try:
             res = supabase.table("listings").select("id,title,brand,ebay_category_id,business_id")\
@@ -52,27 +89,34 @@ async def auto_fill_worker():
             rows = [r for r in (res.data or []) if needs_category(r)]
             print(f"auto_fill_worker: query returned {len(res.data or [])} row(s), {len(rows)} need a category")
             for row in rows:
-                title = row.get("title") or ""
-                biz_id = row.get("business_id")
-                if not title or title == "Scanning..." or not biz_id:
-                    print(f"auto_fill_worker: skipping {row['id']} (title={title!r}, biz_id={biz_id})")
-                    continue
-                updates = {}
-                if not row.get("brand"):
-                    updates["brand"] = guess_brand_from_title(title)
-                try:
-                    suggestion = suggest_ebay_category(title, biz_id, restrict=True)
-                    if suggestion:
-                        updates["ebay_category_id"] = suggestion["category_id"]
-                        print(f"auto_fill_worker: {row['id']} -> category {suggestion['category_id']} ({suggestion.get('name')})")
-                    else:
-                        fallback = get_ebay_settings(biz_id).get("EBAY_DEFAULT_CATEGORY_ID", "") or "26261"  # Other Business & Industrial — hard floor, no exceptions
-                        updates["ebay_category_id"] = fallback
-                        print(f"auto_fill_worker: {row['id']} -> no B&I/Motors match, locked to {fallback}")
-                except Exception as e:
-                    print(f"auto_fill_worker category error for {row['id']}: {e}")
-                if updates:
-                    supabase.table("listings").update(updates).eq("id", row["id"]).execute()
+                fix_row(row)
+
+            # Every ~10th cycle (~80s), also sweep listings that already have SOME
+            # category and re-validate it against Business & Industrial / eBay Motors.
+            cycle += 1
+            if cycle % 10 == 0:
+                all_rows = []
+                start = 0
+                while True:
+                    page = supabase.table("listings").select("id,title,brand,ebay_category_id,business_id")\
+                        .neq("status", "archived")\
+                        .range(start, start + 999).execute().data or []
+                    all_rows.extend(page)
+                    if len(page) < 1000:
+                        break
+                    start += 1000
+                already_categorized = [r for r in all_rows if not needs_category(r)]
+                cat_ids = list({str(r["ebay_category_id"]) for r in already_categorized})
+                path_map = {}
+                for i in range(0, len(cat_ids), 500):
+                    chunk = cat_ids[i:i+500]
+                    pres = supabase.table("ebay_categories").select("category_id,path").in_("category_id", chunk).execute()
+                    for prow in (pres.data or []):
+                        path_map[str(prow["category_id"])] = prow.get("path") or ""
+                misfiled = [r for r in already_categorized if not _category_is_restricted_ok(r["ebay_category_id"], path_map)][:50]
+                print(f"auto_fill_worker: revalidation sweep found {len(misfiled)} listing(s) categorized outside Business & Industrial/eBay Motors")
+                for row in misfiled:
+                    fix_row(row)
         except Exception as e:
             print(f"auto_fill_worker error: {e}")
         await asyncio.sleep(8)
@@ -867,6 +911,44 @@ async def update_listing(item_id: str, body: UpdateField, request: Request):
     try:
         supabase.table("listings").update({body.field: body.value}).eq("id", item_id).execute()
         return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+class AssignLot(BaseModel):
+    lot_sku: str
+
+@app.post("/api/listings/{item_id}/assign-lot")
+async def assign_lot_sku(item_id: str, body: AssignLot, request: Request):
+    """Sets ebay_sku to '{lot}-{n}' where n is the next sequential number for that lot
+    (AM1-1, AM1-2, AM1-3...) — NOT the item's raw internal listing id. eBay still
+    requires every SKU/Custom Label to be unique per account, so some suffix is
+    unavoidable, but a small per-lot counter is what a human skimming the Lots page
+    actually expects, unlike an arbitrary large internal id."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    lot = (body.lot_sku or "").strip()
+    if not lot:
+        raise HTTPException(400, "lot_sku is required")
+    prefix = f"{lot}-"
+    all_rows = []
+    start = 0
+    while True:
+        page = supabase.table("listings").select("ebay_sku").eq("business_id", business_id)\
+            .ilike("ebay_sku", f"{prefix}%").range(start, start + 999).execute().data or []
+        all_rows.extend(page)
+        if len(page) < 1000:
+            break
+        start += 1000
+    max_n = 0
+    for row in all_rows:
+        suffix = (row.get("ebay_sku") or "")[len(prefix):]
+        if suffix.isdigit():
+            max_n = max(max_n, int(suffix))
+    new_sku = f"{prefix}{max_n + 1}"
+    try:
+        supabase.table("listings").update({"ebay_sku": new_sku}).eq("id", item_id).execute()
+        return {"ok": True, "ebay_sku": new_sku}
     except Exception as e:
         raise HTTPException(500, str(e))
 
