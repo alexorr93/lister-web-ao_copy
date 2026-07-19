@@ -2911,6 +2911,47 @@ async def add_photos_to_listing(item_id: str, request: Request):
     except Exception as e:
         raise HTTPException(500, str(e))
 
+@app.delete("/api/listings/{item_id}/photos/{photo_id}")
+async def delete_listing_photo(item_id: str, photo_id: str, request: Request):
+    """Unlinks one photo from a listing's photo group (doesn't touch storage — other
+    rows could still reference the same file). If the deleted photo was the listing's
+    primary photo_id, promotes another remaining photo to primary automatically.
+    Refuses to delete a listing's only remaining photo."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    try:
+        res = supabase.table("listings").select("photo_id").eq("id", item_id).limit(1).execute()
+        if not res.data:
+            raise HTTPException(404, "Listing not found")
+        primary_pid = str(res.data[0].get("photo_id") or "")
+        if not primary_pid:
+            raise HTTPException(400, "Listing has no primary photo")
+
+        group_row = supabase.table("group_photos").select("group_id").eq("photo_id", primary_pid).limit(1).execute()
+        group_id = (group_row.data or [{}])[0].get("group_id", "")
+        if not group_id:
+            raise HTTPException(400, "Could not find this listing's photo group")
+
+        group_photos = supabase.table("group_photos").select("photo_id").eq("group_id", group_id).execute().data or []
+        photo_ids = [p["photo_id"] for p in group_photos]
+        if photo_id not in photo_ids:
+            raise HTTPException(404, "Photo not found in this listing's group")
+        if len(photo_ids) <= 1:
+            raise HTTPException(400, "Can't delete the only photo on a listing")
+
+        supabase.table("group_photos").delete().eq("group_id", group_id).eq("photo_id", photo_id).execute()
+
+        new_primary = primary_pid
+        if photo_id == primary_pid:
+            new_primary = next(p for p in photo_ids if p != photo_id)
+            supabase.table("listings").update({"photo_id": new_primary}).eq("id", item_id).execute()
+        return {"ok": True, "photo_id": new_primary}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 @app.post("/api/photos/upload")
 async def upload_photo(request: Request):
     try:
