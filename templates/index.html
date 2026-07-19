@@ -139,15 +139,19 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tile-price-cond-row { display:flex; align-items:center; gap:6px; }
 .tile-price-input { width:70px; background:transparent; border:none; border-bottom:1px solid var(--border); color:#f8fafc; font-size:14px; font-weight:800; font-family:inherit; outline:none; padding:0 0 2px; }
 .tile-price-input:focus { border-bottom-color:var(--accent); }
-.tile-cat-input, .tile-brand-input, .tile-lotsku-input { width:100%; background:transparent; border:1px solid var(--border); border-radius:4px; color:#f8fafc; font-family:inherit; outline:none; padding:4px 6px; margin-top:4px; font-weight:400; }
+.tile-cat-input, .tile-brand-input { width:100%; background:transparent; border:1px solid var(--border); border-radius:4px; color:#f8fafc; font-family:inherit; outline:none; padding:4px 6px; margin-top:4px; font-weight:400; }
 .tile-cat-input { font-size:14px; line-height:1.35; resize:none; white-space:normal; overflow-wrap:break-word; display:block; overflow:hidden; }
-.tile-brand-input, .tile-lotsku-input { font-size:14px; }
+.tile-brand-input { font-size:14px; }
+.tile-lotsku-input { width:74px; flex-shrink:0; background:transparent; border:1px solid var(--border); border-radius:4px; color:#f8fafc; font-family:inherit; outline:none; padding:4px 6px; font-weight:600; font-size:12px; }
 .tile-title-input.field-reviewed, .tile-price-input.field-reviewed, .tile-cat-input.field-reviewed, .tile-brand-input.field-reviewed, .tile-lotsku-input.field-reviewed { border:2px solid #ec4899 !important; color:#fff; box-shadow:0 0 6px rgba(236,72,153,0.4); border-radius:4px; padding:2px 4px; }
 .tile-title-input.field-changed, .tile-price-input.field-changed, .tile-cat-input.field-changed, .tile-brand-input.field-changed, .tile-lotsku-input.field-changed { border:2px solid #facc15 !important; color:#fff; box-shadow:0 0 6px rgba(250,204,21,0.4); border-radius:4px; padding:2px 4px; }
 .tile-cat-input.default-warn { border:2px solid #dc2626 !important; color:#fca5a5; background:rgba(220,38,38,0.08); }
 .tile-lotsku-input.invalid, .tile-lotsku-input.missing { border:2px solid #dc2626 !important; color:#fca5a5; background:rgba(220,38,38,0.08); }
 .tile-cat-warn-label { color:#f87171; font-size:9px; font-weight:700; margin-top:2px; display:flex; align-items:center; gap:3px; }
-.tile-cond-toggle { display:flex; margin-left:auto; border:1px solid var(--border); border-radius:5px; overflow:hidden; }
+.tile-cond-toggle { display:flex; margin-left:auto; border:1px solid var(--border); border-radius:5px; overflow:hidden; flex-shrink:0; }
+.lotsku-dropdown-panel { position:fixed; z-index:9999; background:#1e2535; border:1px solid var(--border); border-radius:6px; box-shadow:0 8px 24px rgba(0,0,0,0.5); max-height:220px; overflow-y:auto; display:none; }
+.lotsku-option { padding:7px 10px; font-size:13px; color:#f8fafc; cursor:pointer; white-space:nowrap; }
+.lotsku-option:hover, .lotsku-option.hl { background:var(--accent); }
 .tile-cond-btn { font-size:10px; padding:4px 8px; background:transparent; border:none; color:var(--muted); cursor:pointer; font-family:inherit; font-weight:600; }
 .tile-cond-btn.active { background:var(--accent); color:#fff; }
 .proc-bar-wrap { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px 14px; margin-bottom:14px; }
@@ -295,7 +299,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;"><div id="batch-submit-bar" style="height:100%;background:var(--accent);width:0%;transition:width 0.2s;"></div></div>
       <div id="batch-submit-text" style="font-size:12px;color:var(--muted);margin-top:4px;text-align:center;"></div>
     </div>
-    <datalist id="lot-sku-list"></datalist>
+    <div id="lotsku-dropdown" class="lotsku-dropdown-panel"></div>
     <div class="tile-grid" id="tile-grid"></div>
     <div class="empty" id="dash-empty" style="display:none">
       <div class="empty-icon">📭</div>
@@ -608,11 +612,61 @@ async function loadLotSkus() {
     const r = await api('GET', '/api/acquisitions');
     const skus = (r.acquisitions || []).map(a => a.sku).filter(Boolean);
     knownLotSkus = new Set(skus);
-    document.getElementById('lot-sku-list').innerHTML =
-      skus.map(s => `<option value="${String(s).replace(/"/g,'&quot;')}">`).join('');
     renderTiles();
   } catch(e) { console.error('Failed to load Lot SKUs', e); }
 }
+
+// Custom dropdown for Lot SKU — native <datalist> turned out unreliable (its popup
+// gets pre-empted by the browser's own password-manager suggestion UI on this kind
+// of field) and, more importantly, doesn't reliably render at all in every browser.
+// This is a plain, always-visible-on-focus, type-to-filter list instead.
+let lotSkuDropdownInput = null;
+
+function showLotSkuDropdown(inputEl) {
+  lotSkuDropdownInput = inputEl;
+  renderLotSkuDropdown();
+}
+
+function renderLotSkuDropdown() {
+  const panel = document.getElementById('lotsku-dropdown');
+  const inputEl = lotSkuDropdownInput;
+  if (!inputEl) { panel.style.display = 'none'; return; }
+  const query = inputEl.value.trim().toLowerCase();
+  const all = Array.from(knownLotSkus).sort();
+  const matches = query ? all.filter(s => s.toLowerCase().includes(query)) : all;
+  if (!matches.length) { panel.style.display = 'none'; return; }
+  const rect = inputEl.getBoundingClientRect();
+  panel.style.left = rect.left + 'px';
+  panel.style.top = (rect.bottom + 4) + 'px';
+  panel.style.minWidth = Math.max(rect.width, 110) + 'px';
+  panel.innerHTML = matches.slice(0, 100).map((s, i) =>
+    `<div class="lotsku-option${i===0?' hl':''}" data-val="${s.replace(/"/g,'&quot;')}">${s}</div>`
+  ).join('');
+  panel.style.display = 'block';
+}
+
+function hideLotSkuDropdown() {
+  document.getElementById('lotsku-dropdown').style.display = 'none';
+  lotSkuDropdownInput = null;
+}
+
+document.addEventListener('mousedown', function(e) {
+  const panel = document.getElementById('lotsku-dropdown');
+  const opt = e.target.closest('.lotsku-option');
+  if (opt) {
+    e.preventDefault(); // keep focus on the input instead of the dropdown stealing it
+    const inputEl = lotSkuDropdownInput;
+    if (inputEl) {
+      inputEl.value = opt.dataset.val;
+      inputEl.blur(); // triggers the existing validate/save logic in the delegated blur handler
+    }
+    hideLotSkuDropdown();
+    return;
+  }
+  if (panel && !panel.contains(e.target) && !(e.target.classList && e.target.classList.contains('tile-lotsku-input'))) {
+    hideLotSkuDropdown();
+  }
+});
 
 function validateLotSkusForPublish(ids) {
   const missing = ids.map(id => listings.find(x => String(x.id) === id)).filter(l => l && !lotSkuFor(l));
@@ -796,6 +850,7 @@ function renderTiles() {
         <div class="tile-price-cond-row">
           <span style="color:var(--muted);font-size:11px;">$</span>
           <input class="tile-price-input${fieldClassFor(l.id,'price')}" type="number" step="0.01" value="${dirtyPrices[l.id] ?? l.price.toFixed(2)}" data-id="${l.id}">
+          <input class="tile-lotsku-input${fieldClassFor(l.id,'lotsku')}${lotSkuFor(l) ? '' : ' missing'}" type="text" value="${(dirtyLotSkus[l.id] ?? lotSkuFor(l)).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Lot SKU" title="Must match a real Lot SKU from the Lots page — required before this item can publish to eBay or Shopify" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" name="lot-sku-${l.id}">
           <div class="tile-cond-toggle">
             <button class="tile-cond-btn${isNew?'' :' active'}" data-id="${l.id}" data-cond="used">Used</button>
             <button class="tile-cond-btn${isNew?' active':''}" data-id="${l.id}" data-cond="new">New</button>
@@ -804,7 +859,6 @@ function renderTiles() {
         <textarea class="tile-cat-input${fieldClassFor(l.id,'category')}${l.ebay_category_is_default ? ' default-warn' : ''}" rows="2" data-id="${l.id}" data-catid="${l.ebay_category_id||''}" placeholder="eBay category" title="Click to edit — type a phrase to re-match, or a number to set the ID directly. Double-click to open full editor." ondblclick="openModal('${l.id}')">${(dirtyCats[l.id] ?? (l.ebay_category_path||'No category yet')).replace(/</g,'&lt;')}</textarea>
         ${l.ebay_category_is_default ? '<div class="tile-cat-warn-label">⚠️ Generic fallback — needs a real match</div>' : ''}
         <input class="tile-brand-input${fieldClassFor(l.id,'brand')}" type="text" value="${(dirtyBrands[l.id] ?? (l.brand||'')).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Brand" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="brand-${l.id}">
-        <input class="tile-lotsku-input${fieldClassFor(l.id,'lotsku')}${lotSkuFor(l) ? '' : ' missing'}" list="lot-sku-list" type="text" value="${(dirtyLotSkus[l.id] ?? lotSkuFor(l)).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Lot SKU (required)" title="Must match a real Lot SKU from the Lots page — required before this item can publish to eBay or Shopify" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" name="lot-sku-${l.id}">
       </div>
       <div class="tile-controls">
         <div class="tile-check${isSel?' checked':''}" onclick="event.stopPropagation();toggleSelect('${l.id}')"></div>
@@ -858,6 +912,7 @@ function initTileListeners() {
       reviewedFields.add(key);
       el.classList.add('field-reviewed');
     }
+    if (field === 'lotsku') showLotSkuDropdown(el);
   });
 
   // Actually typing a different value = YELLOW (changed), overrides pink, persists for the session
@@ -876,7 +931,7 @@ function initTileListeners() {
     }
     if (field === 'price') dirtyPrices[id] = el.value;
     if (field === 'brand') dirtyBrands[id] = el.value;
-    if (field === 'lotsku') dirtyLotSkus[id] = el.value;
+    if (field === 'lotsku') { dirtyLotSkus[id] = el.value; renderLotSkuDropdown(); }
     if (field === 'category') {
       dirtyCats[id] = el.value;
       el.style.height = 'auto';
@@ -911,6 +966,7 @@ function initTileListeners() {
       });
     }
     if (el.classList.contains('tile-lotsku-input')) {
+      hideLotSkuDropdown();
       var id = el.dataset.id, val = el.value.trim();
       var l = listings.find(function(x) { return String(x.id) === id; });
       if (!val) { el.classList.add('missing'); el.classList.remove('invalid'); delete dirtyLotSkus[id]; return; }
