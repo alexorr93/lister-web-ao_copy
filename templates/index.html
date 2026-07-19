@@ -139,12 +139,13 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tile-price-cond-row { display:flex; align-items:center; gap:6px; }
 .tile-price-input { width:70px; background:transparent; border:none; border-bottom:1px solid var(--border); color:#f8fafc; font-size:14px; font-weight:800; font-family:inherit; outline:none; padding:0 0 2px; }
 .tile-price-input:focus { border-bottom-color:var(--accent); }
-.tile-cat-input, .tile-brand-input { width:100%; background:transparent; border:1px solid var(--border); border-radius:4px; color:#f8fafc; font-family:inherit; outline:none; padding:4px 6px; margin-top:4px; font-weight:400; }
+.tile-cat-input, .tile-brand-input, .tile-lotsku-input { width:100%; background:transparent; border:1px solid var(--border); border-radius:4px; color:#f8fafc; font-family:inherit; outline:none; padding:4px 6px; margin-top:4px; font-weight:400; }
 .tile-cat-input { font-size:14px; line-height:1.35; resize:none; white-space:normal; overflow-wrap:break-word; display:block; overflow:hidden; }
-.tile-brand-input { font-size:14px; }
-.tile-title-input.field-reviewed, .tile-price-input.field-reviewed, .tile-cat-input.field-reviewed, .tile-brand-input.field-reviewed { border:2px solid #ec4899 !important; color:#fff; box-shadow:0 0 6px rgba(236,72,153,0.4); border-radius:4px; padding:2px 4px; }
-.tile-title-input.field-changed, .tile-price-input.field-changed, .tile-cat-input.field-changed, .tile-brand-input.field-changed { border:2px solid #facc15 !important; color:#fff; box-shadow:0 0 6px rgba(250,204,21,0.4); border-radius:4px; padding:2px 4px; }
+.tile-brand-input, .tile-lotsku-input { font-size:14px; }
+.tile-title-input.field-reviewed, .tile-price-input.field-reviewed, .tile-cat-input.field-reviewed, .tile-brand-input.field-reviewed, .tile-lotsku-input.field-reviewed { border:2px solid #ec4899 !important; color:#fff; box-shadow:0 0 6px rgba(236,72,153,0.4); border-radius:4px; padding:2px 4px; }
+.tile-title-input.field-changed, .tile-price-input.field-changed, .tile-cat-input.field-changed, .tile-brand-input.field-changed, .tile-lotsku-input.field-changed { border:2px solid #facc15 !important; color:#fff; box-shadow:0 0 6px rgba(250,204,21,0.4); border-radius:4px; padding:2px 4px; }
 .tile-cat-input.default-warn { border:2px solid #dc2626 !important; color:#fca5a5; background:rgba(220,38,38,0.08); }
+.tile-lotsku-input.invalid, .tile-lotsku-input.missing { border:2px solid #dc2626 !important; color:#fca5a5; background:rgba(220,38,38,0.08); }
 .tile-cat-warn-label { color:#f87171; font-size:9px; font-weight:700; margin-top:2px; display:flex; align-items:center; gap:3px; }
 .tile-cond-toggle { display:flex; margin-left:auto; border:1px solid var(--border); border-radius:5px; overflow:hidden; }
 .tile-cond-btn { font-size:10px; padding:4px 8px; background:transparent; border:none; color:var(--muted); cursor:pointer; font-family:inherit; font-weight:600; }
@@ -294,6 +295,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;"><div id="batch-submit-bar" style="height:100%;background:var(--accent);width:0%;transition:width 0.2s;"></div></div>
       <div id="batch-submit-text" style="font-size:12px;color:var(--muted);margin-top:4px;text-align:center;"></div>
     </div>
+    <datalist id="lot-sku-list"></datalist>
     <div class="tile-grid" id="tile-grid"></div>
     <div class="empty" id="dash-empty" style="display:none">
       <div class="empty-icon">📭</div>
@@ -581,10 +583,46 @@ let dirtyTitles   = {}; // id -> unsaved title text, so background refreshes don
 let dirtyPrices   = {}; // id -> unsaved price text
 let dirtyCats     = {}; // id -> unsaved category text
 let dirtyBrands   = {}; // id -> unsaved brand text
+let dirtyLotSkus  = {}; // id -> unsaved (possibly invalid, not-yet-saved) lot SKU text
+let knownLotSkus  = new Set(); // real Lot SKUs from the Lots page — publishing requires a match
 // Unified color-state system for ALL editable fields (title/price/brand/category):
 // no color = untouched, PINK = clicked into it (reviewed/confirmed as-is), YELLOW = actually changed. Keys are "id_field".
 let reviewedFields = new Set();
 let changedFields   = new Set();
+
+// A listing's ebay_sku is "{lotSku}-{listingId}" once a real lot has been picked
+// (see loadLotSkus/updateField('ebay_sku',...) below) — both push_listing_to_ebay and
+// push_listing_to_shopify already prefer ebay_sku over their "lister-{id}" fallback,
+// so deriving the lot from it here (same split-on-first-'-' rule used everywhere else
+// in the app, e.g. the Lots page) is enough to know what's actually been assigned,
+// with no separate column needed.
+function lotSkuFor(l) {
+  const sku = (l && l.ebay_sku) || '';
+  if (!sku) return '';
+  const prefix = sku.includes('-') ? sku.split('-')[0] : sku;
+  return knownLotSkus.has(prefix) ? prefix : '';
+}
+
+async function loadLotSkus() {
+  try {
+    const r = await api('GET', '/api/acquisitions');
+    const skus = (r.acquisitions || []).map(a => a.sku).filter(Boolean);
+    knownLotSkus = new Set(skus);
+    document.getElementById('lot-sku-list').innerHTML =
+      skus.map(s => `<option value="${String(s).replace(/"/g,'&quot;')}">`).join('');
+    renderTiles();
+  } catch(e) { console.error('Failed to load Lot SKUs', e); }
+}
+
+function validateLotSkusForPublish(ids) {
+  const missing = ids.map(id => listings.find(x => String(x.id) === id)).filter(l => l && !lotSkuFor(l));
+  if (missing.length) {
+    alert(`${missing.length} item(s) need a valid Lot SKU (must match a real lot from the Lots page) before they can publish:\n\n` +
+      missing.map(l => '• ' + (l.title || l.id)).join('\n'));
+    return false;
+  }
+  return true;
+}
 function fieldKey(id, field) { return id + '_' + field; }
 function fieldClassFor(id, field) {
   const key = fieldKey(id, field);
@@ -766,6 +804,7 @@ function renderTiles() {
         <textarea class="tile-cat-input${fieldClassFor(l.id,'category')}${l.ebay_category_is_default ? ' default-warn' : ''}" rows="2" data-id="${l.id}" data-catid="${l.ebay_category_id||''}" placeholder="eBay category" title="Click to edit — type a phrase to re-match, or a number to set the ID directly. Double-click to open full editor." ondblclick="openModal('${l.id}')">${(dirtyCats[l.id] ?? (l.ebay_category_path||'No category yet')).replace(/</g,'&lt;')}</textarea>
         ${l.ebay_category_is_default ? '<div class="tile-cat-warn-label">⚠️ Generic fallback — needs a real match</div>' : ''}
         <input class="tile-brand-input${fieldClassFor(l.id,'brand')}" type="text" value="${(dirtyBrands[l.id] ?? (l.brand||'')).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Brand">
+        <input class="tile-lotsku-input${fieldClassFor(l.id,'lotsku')}${lotSkuFor(l) ? '' : ' missing'}" list="lot-sku-list" type="text" value="${(dirtyLotSkus[l.id] ?? lotSkuFor(l)).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Lot SKU (required)" title="Must match a real Lot SKU from the Lots page — required before this item can publish to eBay or Shopify">
       </div>
       <div class="tile-controls">
         <div class="tile-check${isSel?' checked':''}" onclick="event.stopPropagation();toggleSelect('${l.id}')"></div>
@@ -806,6 +845,7 @@ function initTileListeners() {
     if (el.classList.contains('tile-price-input')) return 'price';
     if (el.classList.contains('tile-brand-input')) return 'brand';
     if (el.classList.contains('tile-cat-input')) return 'category';
+    if (el.classList.contains('tile-lotsku-input')) return 'lotsku';
     return null;
   }
 
@@ -836,6 +876,7 @@ function initTileListeners() {
     }
     if (field === 'price') dirtyPrices[id] = el.value;
     if (field === 'brand') dirtyBrands[id] = el.value;
+    if (field === 'lotsku') dirtyLotSkus[id] = el.value;
     if (field === 'category') {
       dirtyCats[id] = el.value;
       el.style.height = 'auto';
@@ -867,6 +908,29 @@ function initTileListeners() {
     if (el.classList.contains('tile-brand-input')) {
       updateField(el.dataset.id, 'brand', el.value).then(function(ok) {
         if (ok) delete dirtyBrands[el.dataset.id];
+      });
+    }
+    if (el.classList.contains('tile-lotsku-input')) {
+      var id = el.dataset.id, val = el.value.trim();
+      var l = listings.find(function(x) { return String(x.id) === id; });
+      if (!val) { el.classList.add('missing'); el.classList.remove('invalid'); delete dirtyLotSkus[id]; return; }
+      if (!knownLotSkus.has(val)) {
+        el.classList.add('invalid');
+        toast('"' + val + '" doesn\'t match any Lot SKU from the Lots page', 'error');
+        el.value = l ? lotSkuFor(l) : '';
+        delete dirtyLotSkus[id];
+        return;
+      }
+      el.classList.remove('invalid', 'missing');
+      var newSku = val + '-' + id;
+      updateField(id, 'ebay_sku', newSku).then(function(ok) {
+        if (ok) {
+          delete dirtyLotSkus[id];
+          if (l) l.ebay_sku = newSku;
+          toast('Lot SKU set to ' + val + ' ✓');
+        } else {
+          toast('Failed to save Lot SKU', 'error');
+        }
       });
     }
     if (el.classList.contains('tile-cat-input')) {
@@ -1158,6 +1222,7 @@ function hideBatchProgress() {
 async function submitSelected() {
   if (!selected.size) return;
   const ids = Array.from(selected);
+  if (!validateLotSkusForPublish(ids)) return;
   const hours = parseFloat(document.getElementById('batch-ebay-hours').value) || 2;
   const ok = confirm(`Schedule ${ids.length} item(s) to go live on eBay in ${hours} hour(s)?\n\nSchedule is the only bulk action here — nothing publishes immediately. You can still adjust or cancel any item individually before it goes live.`);
   if (!ok) return;
@@ -1182,6 +1247,7 @@ async function submitSelected() {
 async function submitSelectedNow() {
   if (!selected.size) return;
   const ids = Array.from(selected);
+  if (!validateLotSkusForPublish(ids)) return;
   const ok = confirm(`Publish ${ids.length} item(s) LIVE to eBay immediately?\n\nThis goes live right away, not scheduled — different from Schedule to eBay.`);
   if (!ok) return;
   let success = 0, failed = 0;
@@ -1205,6 +1271,7 @@ async function submitSelectedNow() {
 async function submitSelectedToShopify() {
   if (!selected.size) return;
   const ids = Array.from(selected);
+  if (!validateLotSkusForPublish(ids)) return;
   const ok = confirm(`Publish ${ids.length} item(s) live to Shopify now?\n\nThis publishes immediately (active), separately from anything sent to eBay.`);
   if (!ok) return;
   let success = 0, failed = 0;
@@ -2061,6 +2128,7 @@ async function loadShippingPolicyOptions() {
 loadListings();
 initTileListeners();
 loadShippingPolicyOptions();
+loadLotSkus();
 
 // Allow linking directly to a tab from other pages, e.g. /?tab=upload
 (function() {
