@@ -888,12 +888,66 @@ function selectLotSku(sku) {
 // ebay_sku = "{lot}-{listingId}" convention as the Dashboard's Lot SKU field). No-op
 // if no lot was active at scan time — that item just falls back to the existing
 // manual Lot SKU entry on the Dashboard, same as before this feature existed.
+//
+// The live setInterval below is only the FAST path, good while the tab stays open.
+// AI scanning can take a while, and this runs on phones — backgrounding the browser
+// (checking another app, screen lock, the tab getting reclaimed) can throttle or kill
+// a page's timers well before mantle-scanner finishes, silently dropping the
+// assignment with nothing left to retry. So every pending assignment is also written
+// to localStorage the moment scanning starts, and resolvePendingLotAssignments() below
+// re-checks every still-pending one on every page load / Dashboard visit — a durable
+// slow path that survives the tab dying mid-scan.
+const PENDING_LOT_KEY = 'lister_pending_lot_assignments';
+const PENDING_LOT_MAX_AGE_MS = 24 * 60 * 60 * 1000; // stop retrying after a day
+
+function getPendingLotAssignments() {
+  try { return JSON.parse(localStorage.getItem(PENDING_LOT_KEY) || '{}'); } catch(e) { return {}; }
+}
+function setPendingLotAssignment(groupId, lotSku) {
+  const m = getPendingLotAssignments();
+  m[groupId] = {lotSku: lotSku, ts: Date.now()};
+  localStorage.setItem(PENDING_LOT_KEY, JSON.stringify(m));
+}
+function clearPendingLotAssignment(groupId) {
+  const m = getPendingLotAssignments();
+  delete m[groupId];
+  localStorage.setItem(PENDING_LOT_KEY, JSON.stringify(m));
+}
+
+async function tryResolveLotAssignment(groupId, lotSku) {
+  const r = await fetch('/api/groups/' + groupId + '/listing', {credentials:'include'});
+  if (!r.ok) return false;
+  const d = await r.json();
+  if (!(d.listing && d.listing.status === 'scanned')) return false;
+  const id = d.listing.id;
+  await updateField(id, 'ebay_sku', lotSku + '-' + id);
+  return true;
+}
+
+// Slow-path sweep — safe to call anytime (page load, tab switch, periodic timer);
+// it's just a handful of idempotent GETs against already-pending groups.
+async function resolvePendingLotAssignments() {
+  const m = getPendingLotAssignments();
+  const entries = Object.entries(m);
+  if (!entries.length) return;
+  let changed = false;
+  for (const [groupId, info] of entries) {
+    if (Date.now() - (info.ts || 0) > PENDING_LOT_MAX_AGE_MS) { delete m[groupId]; changed = true; continue; }
+    try {
+      if (await tryResolveLotAssignment(groupId, info.lotSku)) { delete m[groupId]; changed = true; }
+    } catch(e) {}
+  }
+  if (changed) localStorage.setItem(PENDING_LOT_KEY, JSON.stringify(m));
+  if (typeof loadListings === 'function') loadListings();
+}
+
 function pollForListingAndAssignLot(groupId, lotSku, opts) {
   opts = opts || {};
+  if (lotSku) setPendingLotAssignment(groupId, lotSku);
   let pollCount = 0;
   const poll = setInterval(async () => {
     pollCount++;
-    if (pollCount > 40) { clearInterval(poll); return; }
+    if (pollCount > 40) { clearInterval(poll); return; } // slow-path sweep still owns retrying past this
     try {
       const r = await fetch('/api/groups/' + groupId + '/listing', {credentials:'include'});
       if (!r.ok) return;
@@ -901,7 +955,7 @@ function pollForListingAndAssignLot(groupId, lotSku, opts) {
       if (d.listing && d.listing.status === 'scanned') {
         clearInterval(poll);
         const id = d.listing.id;
-        if (lotSku) await updateField(id, 'ebay_sku', lotSku + '-' + id);
+        if (lotSku) { await updateField(id, 'ebay_sku', lotSku + '-' + id); clearPendingLotAssignment(groupId); }
         if (typeof opts.onDone === 'function') opts.onDone();
       }
     } catch(e) {}
@@ -942,7 +996,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.classList.add('active');
     document.getElementById('tab-' + tab).classList.add('active');
     activeTab = tab;
-    if (tab === 'dashboard') loadListings();
+    if (tab === 'dashboard') { loadListings(); resolvePendingLotAssignments(); }
     if (tab === 'auction')   loadAuctionSessions();
     if (tab === 'settings')  loadSettings();
   });
@@ -2498,6 +2552,7 @@ loadListings();
 initTileListeners();
 loadShippingPolicyOptions();
 loadLotSkus();
+resolvePendingLotAssignments(); // catch up any lot assignments left pending from a scan whose tab got backgrounded/killed
 
 // Allow linking directly to a tab from other pages, e.g. /?tab=upload
 (function() {
@@ -2510,7 +2565,7 @@ loadLotSkus();
 })();
 
 // Auto-refresh dashboard every 30s when on that tab
-setInterval(() => { if (activeTab === 'dashboard') loadListings(); }, 30000);
+setInterval(() => { if (activeTab === 'dashboard') { loadListings(); resolvePendingLotAssignments(); } }, 30000);
 setInterval(() => { if (activeTab === 'auction' && activeSession) loadAuctionItems(activeSession); }, 30000);
 
 async function rotatePhoto(dir) {
