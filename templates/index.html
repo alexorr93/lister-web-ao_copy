@@ -152,6 +152,30 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .lotsku-dropdown-panel { position:fixed; z-index:9999; background:#1e2535; border:1px solid var(--border); border-radius:6px; box-shadow:0 8px 24px rgba(0,0,0,0.5); max-height:220px; overflow-y:auto; display:none; }
 .lotsku-option { padding:7px 10px; font-size:13px; color:#f8fafc; cursor:pointer; white-space:nowrap; }
 .lotsku-option:hover, .lotsku-option.hl { background:var(--accent); }
+
+/* ACTIVE LOT BAR (Fast Scan / Batch Upload) */
+.active-lot-bar { display:flex; align-items:center; justify-content:space-between; gap:10px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px 14px; margin-bottom:14px; }
+.active-lot-bar.unset { border-color:#dc2626; background:rgba(220,38,38,0.08); }
+.active-lot-label { font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:0.05em; }
+.active-lot-value { font-size:18px; font-weight:800; color:var(--text); margin-top:1px; }
+.active-lot-value.unset { color:#f87171; }
+.active-lot-change-btn { flex-shrink:0; padding:8px 14px; border-radius:8px; border:1px solid var(--border); background:transparent; color:var(--text); font-family:inherit; font-size:13px; font-weight:700; cursor:pointer; }
+
+/* LOT PICKER SHEET — mobile-first "wheel" picker: type to filter, or scroll/tap to pick */
+.lot-picker-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:400; display:none; align-items:flex-end; justify-content:center; }
+.lot-picker-overlay.open { display:flex; }
+.lot-picker-sheet { background:var(--card); border:1px solid var(--border); border-radius:18px 18px 0 0; width:100%; max-width:480px; max-height:80vh; display:flex; flex-direction:column; padding:16px; }
+.lot-picker-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.lot-picker-title { font-size:16px; font-weight:800; color:var(--text); }
+.lot-picker-close { background:none; border:none; color:var(--muted); font-size:20px; cursor:pointer; padding:2px 8px; }
+.lot-picker-input { width:100%; padding:10px 12px; background:#fff; color:#0f172a; border:1px solid #cbd5e1; border-radius:8px; font-size:16px; margin-bottom:10px; }
+.lot-picker-input:focus { outline:none; border-color:var(--accent); }
+.lot-wheel-wrap { position:relative; flex:1; min-height:220px; overflow:hidden; border-radius:10px; background:var(--surface); }
+.lot-wheel-center-band { position:absolute; left:0; right:0; top:50%; height:44px; transform:translateY(-50%); border-top:1px solid var(--border); border-bottom:1px solid var(--border); pointer-events:none; }
+.lot-wheel { position:absolute; inset:0; overflow-y:auto; scroll-snap-type:y mandatory; padding:88px 0; }
+.lot-wheel-item { scroll-snap-align:center; height:44px; display:flex; align-items:center; justify-content:center; font-size:16px; color:var(--muted); cursor:pointer; transition:font-size 0.1s, color 0.1s; }
+.lot-wheel-item.centered { font-size:22px; font-weight:800; color:var(--text); }
+.lot-wheel-empty { text-align:center; color:var(--muted); font-size:13px; padding:24px 0; }
 .tile-cond-btn { font-size:10px; padding:4px 8px; background:transparent; border:none; color:var(--muted); cursor:pointer; font-family:inherit; font-weight:600; }
 .tile-cond-btn.active { background:var(--accent); color:#fff; }
 .proc-bar-wrap { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px 14px; margin-bottom:14px; }
@@ -300,6 +324,21 @@ select.field-input { background: #fff; color: #0f172a; }
       <div id="batch-submit-text" style="font-size:12px;color:var(--muted);margin-top:4px;text-align:center;"></div>
     </div>
     <div id="lotsku-dropdown" class="lotsku-dropdown-panel"></div>
+    <div class="lot-picker-overlay" id="lot-picker-overlay" onclick="if(event.target===this) closeLotPicker()">
+      <div class="lot-picker-sheet">
+        <div class="lot-picker-header">
+          <div class="lot-picker-title">Select Lot SKU</div>
+          <button class="lot-picker-close" id="lot-picker-close-btn" onclick="closeLotPicker()">✕</button>
+        </div>
+        <input type="text" class="lot-picker-input" id="lot-picker-input" placeholder="Type to filter, e.g. MF"
+          autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+          oninput="renderLotWheel(this.value)" onkeydown="if(event.key==='Enter') selectTopLotMatch()"/>
+        <div class="lot-wheel-wrap">
+          <div class="lot-wheel" id="lot-wheel" onscroll="onLotWheelScroll()"></div>
+          <div class="lot-wheel-center-band"></div>
+        </div>
+      </div>
+    </div>
     <div class="tile-grid" id="tile-grid"></div>
     <div class="empty" id="dash-empty" style="display:none">
       <div class="empty-icon">📭</div>
@@ -310,6 +349,13 @@ select.field-input { background: #fff; color: #0f172a; }
 
   <!-- UPLOAD TAB -->
   <div class="tab-content" id="tab-upload">
+    <div class="active-lot-bar" id="upload-lot-bar">
+      <div>
+        <div class="active-lot-label">Assigning to lot</div>
+        <div class="active-lot-value" id="upload-lot-value">—</div>
+      </div>
+      <button class="active-lot-change-btn" onclick="openLotPicker()">Change</button>
+    </div>
     <div id="upload-start">
       <div style="text-align:center;padding:2rem 0 1.5rem;">
         <div style="font-size:3.5rem;margin-bottom:12px;">🗂️</div>
@@ -356,6 +402,13 @@ select.field-input { background: #fff; color: #0f172a; }
       <div style="font-size:2.5rem;margin-bottom:10px;">⚡</div>
       <div style="font-size:20px;font-weight:800;color:var(--text);margin-bottom:6px;">Fast Scan</div>
       <div style="font-size:13px;color:var(--muted);">Select multiple photos — each becomes its own listing.</div>
+    </div>
+    <div class="active-lot-bar" id="fastscan-lot-bar">
+      <div>
+        <div class="active-lot-label">Assigning to lot</div>
+        <div class="active-lot-value" id="fastscan-lot-value">—</div>
+      </div>
+      <button class="active-lot-change-btn" onclick="openLotPicker()">Change</button>
     </div>
     <div class="fastscan-cond">
       <button class="fastscan-cond-btn" id="fs-cond-new" onclick="setFsCond('new')">✓ New</button>
@@ -589,6 +642,7 @@ let dirtyCats     = {}; // id -> unsaved category text
 let dirtyBrands   = {}; // id -> unsaved brand text
 let dirtyLotSkus  = {}; // id -> unsaved (possibly invalid, not-yet-saved) lot SKU text
 let knownLotSkus  = new Set(); // real Lot SKUs from the Lots page — publishing requires a match
+let lotSkusByRecency = []; // same SKUs, most-recently-created lot first — feeds the Fast Scan / Batch Upload lot picker
 // Unified color-state system for ALL editable fields (title/price/brand/category):
 // no color = untouched, PINK = clicked into it (reviewed/confirmed as-is), YELLOW = actually changed. Keys are "id_field".
 let reviewedFields = new Set();
@@ -610,9 +664,22 @@ function lotSkuFor(l) {
 async function loadLotSkus() {
   try {
     const r = await api('GET', '/api/acquisitions');
-    const skus = (r.acquisitions || []).map(a => a.sku).filter(Boolean);
+    const acqs = r.acquisitions || [];
+    const skus = acqs.map(a => a.sku).filter(Boolean);
     knownLotSkus = new Set(skus);
+    // A lot SKU can appear on more than one acquisition row (e.g. a second purchase
+    // added into the same lot later) — take the newest timestamp seen for that SKU.
+    // Prefers created_at (true system creation time); falls back to the user-entered
+    // acquisition "date" field if created_at isn't present on this table.
+    const newestByLot = {};
+    for (const a of acqs) {
+      if (!a.sku) continue;
+      const ts = a.created_at || a.date || '';
+      if (!newestByLot[a.sku] || ts > newestByLot[a.sku]) newestByLot[a.sku] = ts;
+    }
+    lotSkusByRecency = Array.from(knownLotSkus).sort((x, y) => (newestByLot[y] || '').localeCompare(newestByLot[x] || ''));
     renderTiles();
+    renderActiveLotBars();
   } catch(e) { console.error('Failed to load Lot SKUs', e); }
 }
 
@@ -677,6 +744,128 @@ function validateLotSkusForPublish(ids) {
   }
   return true;
 }
+
+// ── ACTIVE LOT (Fast Scan / Batch Upload) ───────────────────────
+// Sticky, per-device setting: whichever lot SKU was last picked stays active across
+// tab switches and app restarts (localStorage, not the shared Supabase data), so a
+// scanning station keeps assigning into the same lot until someone deliberately
+// changes it. Every item scanned/uploaded while a lot is active gets stamped with
+// ebay_sku = "{lot}-{listingId}" as soon as its listing exists — the same convention
+// the Dashboard's Lot SKU field already uses, so nothing downstream needed to change.
+let activeLotSku = localStorage.getItem('lister_active_lot_sku') || '';
+
+function setActiveLotSku(sku) {
+  activeLotSku = sku;
+  localStorage.setItem('lister_active_lot_sku', sku);
+  renderActiveLotBars();
+}
+
+function renderActiveLotBars() {
+  [['fastscan-lot-bar', 'fastscan-lot-value'], ['upload-lot-bar', 'upload-lot-value']].forEach(([barId, valId]) => {
+    const bar = document.getElementById(barId), val = document.getElementById(valId);
+    if (!bar || !val) return;
+    if (activeLotSku) {
+      bar.classList.remove('unset'); val.classList.remove('unset');
+      val.textContent = activeLotSku;
+    } else {
+      bar.classList.add('unset'); val.classList.add('unset');
+      val.textContent = 'None selected';
+    }
+  });
+}
+renderActiveLotBars();
+
+// Gate for Fast Scan / Batch Upload entry points — returns true if scanning may
+// proceed. Blocks and opens the picker if no lot has ever been chosen on this device.
+function requireActiveLotSku() {
+  if (activeLotSku) return true;
+  toast('Pick a Lot SKU before scanning', 'error');
+  openLotPicker();
+  return false;
+}
+
+function openLotPicker() {
+  document.getElementById('lot-picker-overlay').classList.add('open');
+  // Once a lot is already set, this is just a "change" — allow closing without picking.
+  // On the very first pick there's nothing valid to fall back to, so hide the close button.
+  document.getElementById('lot-picker-close-btn').style.display = activeLotSku ? '' : 'none';
+  const input = document.getElementById('lot-picker-input');
+  input.value = '';
+  loadLotSkus(); // pick up any lot created since the page loaded
+  renderLotWheel('');
+  setTimeout(() => input.focus(), 50);
+}
+
+function closeLotPicker() {
+  if (!activeLotSku) return; // mandatory first pick — nothing to cancel back to
+  document.getElementById('lot-picker-overlay').classList.remove('open');
+}
+
+function renderLotWheel(filterText) {
+  const wheel = document.getElementById('lot-wheel');
+  const q = (filterText || '').trim().toLowerCase();
+  const matches = q ? lotSkusByRecency.filter(s => s.toLowerCase().includes(q)) : lotSkusByRecency;
+  if (!matches.length) {
+    wheel.innerHTML = '<div class="lot-wheel-empty">No matching lots</div>';
+    return;
+  }
+  wheel.innerHTML = matches.map(s =>
+    `<div class="lot-wheel-item" data-val="${s.replace(/"/g,'&quot;')}" onclick="selectLotSku('${s.replace(/'/g,"\\'")}')">${s}</div>`
+  ).join('');
+  wheel.scrollTop = 0;
+  onLotWheelScroll();
+}
+
+function onLotWheelScroll() {
+  const wheel = document.getElementById('lot-wheel');
+  const items = wheel.querySelectorAll('.lot-wheel-item');
+  if (!items.length) return;
+  const center = wheel.getBoundingClientRect().top + wheel.clientHeight / 2;
+  let closest = null, closestDist = Infinity;
+  items.forEach(el => {
+    el.classList.remove('centered');
+    const r = el.getBoundingClientRect();
+    const dist = Math.abs((r.top + r.bottom) / 2 - center);
+    if (dist < closestDist) { closestDist = dist; closest = el; }
+  });
+  if (closest) closest.classList.add('centered');
+}
+
+function selectTopLotMatch() {
+  const el = document.querySelector('#lot-wheel .lot-wheel-item');
+  if (el) selectLotSku(el.dataset.val);
+}
+
+function selectLotSku(sku) {
+  setActiveLotSku(sku);
+  document.getElementById('lot-picker-overlay').classList.remove('open');
+}
+
+// Polls a just-submitted group until mantle-scanner finishes it into a listing, then
+// stamps the lot that was active when it was scanned onto that listing (same
+// ebay_sku = "{lot}-{listingId}" convention as the Dashboard's Lot SKU field). No-op
+// if no lot was active at scan time — that item just falls back to the existing
+// manual Lot SKU entry on the Dashboard, same as before this feature existed.
+function pollForListingAndAssignLot(groupId, lotSku, opts) {
+  opts = opts || {};
+  let pollCount = 0;
+  const poll = setInterval(async () => {
+    pollCount++;
+    if (pollCount > 40) { clearInterval(poll); return; }
+    try {
+      const r = await fetch('/api/groups/' + groupId + '/listing', {credentials:'include'});
+      if (!r.ok) return;
+      const d = await r.json();
+      if (d.listing && d.listing.status === 'scanned') {
+        clearInterval(poll);
+        const id = d.listing.id;
+        if (lotSku) await updateField(id, 'ebay_sku', lotSku + '-' + id);
+        if (typeof opts.onDone === 'function') opts.onDone();
+      }
+    } catch(e) {}
+  }, 3000);
+}
+
 function fieldKey(id, field) { return id + '_' + field; }
 function fieldClassFor(id, field) {
   const key = fieldKey(id, field);
@@ -1685,6 +1874,7 @@ function setUpCondition(c) {
 }
 
 async function startUploadBatch() {
+  if (!requireActiveLotSku()) return;
   upBatchId = crypto.randomUUID();
   upItems = []; upPhotos = []; upQtyVal = 1;
   document.getElementById('upload-start').style.display = 'none';
@@ -1729,6 +1919,9 @@ function upQty(d) {
 
 async function submitUploadItem() {
   if (!upPhotos.length) { toast('Select photos first', 'error'); return; }
+  if (!requireActiveLotSku()) return;
+  const lotForThis = activeLotSku;
+  const groupForThis = upGroupId;
   const prog = document.getElementById('up-progress');
   const bar  = document.getElementById('up-progress-bar');
   const txt  = document.getElementById('up-progress-text');
@@ -1743,6 +1936,9 @@ async function submitUploadItem() {
     await fetch('/api/photos/upload', {method:'POST', body:fd});
   }
   await api('POST', '/api/groups/submit', {group_id:upGroupId, condition:upCondition, quantity:upQtyVal});
+  pollForListingAndAssignLot(groupForThis, lotForThis, {onDone: function() {
+    if (typeof loadListings === 'function') loadListings();
+  }});
   upItems.push({count: upPhotos.length, qty: upQtyVal});
   prog.style.display = 'none';
   toast(`✅ Item ${upItems.length} sent to scanner`);
@@ -2075,6 +2271,7 @@ async function rescanQueueItem(btn) {
 async function startFastScan(input) {
   const files = Array.from(input.files);
   if (!files.length) return;
+  if (!requireActiveLotSku()) { input.value = ''; return; }
   document.getElementById('fastscan-progress').style.display = '';
   const queue = document.getElementById('fastscan-queue');
   var _existingCount = queue.children.length;
@@ -2094,6 +2291,7 @@ async function startFastScan(input) {
     var _thumb = el.dataset.objUrl || '';
     el.innerHTML = '<div onclick="" style="width:40px;height:40px;border-radius:8px;overflow:hidden;flex-shrink:0;background:#060810;cursor:zoom-in;"><img src="' + _thumb + '" style="width:100%;height:100%;object-fit:cover;"/></div><div style="flex:1;"><div style="font-size:14px;color:#e2e8f0;font-weight:600;">Photo ' + (_existingCount+i+1) + '</div><div style="font-size:12px;color:#fbbf24;margin-top:2px;">Uploading...</div></div><div style="width:7px;height:7px;border-radius:50%;background:#fbbf24;flex-shrink:0;"></div>';
     try {
+      const lotForThis = activeLotSku;
       const gr = await api('POST', '/api/groups', {session_id: crypto.randomUUID(), condition: fsCond});
       const gid = gr.group_id || gr.id;
       const blob = await compressForUpload(files[i]);
@@ -2105,24 +2303,11 @@ async function startFastScan(input) {
       el.dataset.gid = gid;
       var _thumb2 = el.dataset.objUrl || '';
       el.innerHTML = '<div onclick="window.open(this.parentElement.parentElement.dataset.objUrl)" style="width:40px;height:40px;border-radius:8px;overflow:hidden;flex-shrink:0;background:#060810;cursor:zoom-in;"><img src="' + _thumb2 + '" style="width:100%;height:100%;object-fit:cover;"/></div><div style="flex:1;"><div style="font-size:14px;color:#e2e8f0;font-weight:600;">Photo ' + (_existingCount+i+1) + '</div><div style="font-size:12px;color:#4ade80;margin-top:2px;">Sent to scanner</div></div><button onclick="rescanQueueItem(this);" style="padding:5px 12px;border-radius:7px;border:1px solid #1a2332;background:#0a0f18;color:#94a3b8;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0;">↺</button>';
-      (function(elRef, gid) {
-        var pollCount = 0;
-        var poll = setInterval(async function() {
-          pollCount++;
-          if (pollCount > 40) { clearInterval(poll); return; }
-          try {
-            var r = await fetch('/api/groups/' + gid + '/listing', {credentials:'include'});
-            if (!r.ok) return;
-            var d = await r.json();
-            if (d.listing && d.listing.status === 'scanned') {
-              clearInterval(poll);
-              var statusDiv = elRef.querySelectorAll('div > div')[1];
-              if (statusDiv) { statusDiv.textContent = 'Complete'; statusDiv.style.color = '#4ade80'; }
-              if (typeof loadListings === 'function') loadListings();
-            }
-          } catch(e) {}
-        }, 3000);
-      })(el, gid);
+      pollForListingAndAssignLot(gid, lotForThis, {onDone: function() {
+        var statusDiv = el.querySelectorAll('div > div')[1];
+        if (statusDiv) { statusDiv.textContent = 'Complete'; statusDiv.style.color = '#4ade80'; }
+        if (typeof loadListings === 'function') loadListings();
+      }});
     } catch(e) {
       var _thumb3 = el.dataset.objUrl || '';
       el.innerHTML = '<div onclick="window.open(this.parentElement.parentElement.dataset.objUrl)" style="width:40px;height:40px;border-radius:8px;overflow:hidden;flex-shrink:0;background:#060810;cursor:zoom-in;"><img src="' + _thumb3 + '" style="width:100%;height:100%;object-fit:cover;"/></div><div style="flex:1;"><div style="font-size:14px;color:#e2e8f0;font-weight:600;">Photo ' + (_existingCount+i+1) + '</div><div style="font-size:12px;color:#f87171;margin-top:2px;">&#x2717; Failed</div></div><button onclick="rescanQueueItem(this);" style="padding:5px 12px;border-radius:7px;border:1px solid rgba(239,68,68,0.4);background:rgba(239,68,68,0.08);color:#f87171;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0;">&#x21ba; Rescan</button>';
