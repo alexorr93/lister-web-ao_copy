@@ -122,6 +122,10 @@ tr:last-child td { border-bottom: none; }
     </div>
   </div>
 
+  <div style="margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+    <input type="checkbox" id="hide-empty-lots" checked onchange="renderTable()" style="width:15px;height:15px;cursor:pointer;">
+    <label for="hide-empty-lots" style="font-size:13px;color:var(--muted);cursor:pointer;">Hide lots with no active listings & no sales</label>
+  </div>
   <div id="table-area"><div class="empty">Loading...</div></div>
   </div><!-- /lots-panel -->
 
@@ -371,7 +375,15 @@ function renderTable() {
     document.getElementById('table-area').innerHTML = '<div class="empty">No acquisitions yet — add one above or import a CSV.</div>';
     return;
   }
-  const sorted = [...acquisitions].sort((a, b) => {
+  const hideEmpty = document.getElementById('hide-empty-lots')?.checked ?? true;
+  const visible = hideEmpty
+    ? acquisitions.filter(a => (a.active_listings_count || 0) > 0 || (a.total_payouts || 0) !== 0)
+    : acquisitions;
+  if (!visible.length) {
+    document.getElementById('table-area').innerHTML = '<div class="empty">Every lot has no active listings and no sales — uncheck "Hide lots with no active listings & no sales" to see them.</div>';
+    return;
+  }
+  const sorted = [...visible].sort((a, b) => {
     if (!a.date && !b.date) return 0;
     if (!a.date) return 1;
     if (!b.date) return -1;
