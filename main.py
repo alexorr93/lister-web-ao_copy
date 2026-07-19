@@ -1448,9 +1448,20 @@ async def list_acquisitions(request: Request):
     def _lot_prefix(sku: str) -> str:
         return sku.split("-", 1)[0] if "-" in sku else sku
 
-    active_res = supabase.table("ebay_listing_status").select("sku,price,quantity_available,updated_at")\
-        .eq("business_id", business_id).eq("listing_status", "Active").execute()
-    active_rows = active_res.data or []
+    # Paginated fetch — a single unpaginated .execute() silently caps at Supabase's
+    # default row limit (1000), which was quietly truncating this business's ~4,700
+    # active rows down to a fraction of the real total (confirmed: direct SQL on the
+    # table showed the full, correct numbers while this endpoint showed far less).
+    active_rows = []
+    start = 0
+    while True:
+        page = supabase.table("ebay_listing_status").select("sku,price,quantity_available,updated_at")\
+            .eq("business_id", business_id).eq("listing_status", "Active")\
+            .range(start, start + 999).execute().data or []
+        active_rows.extend(page)
+        if len(page) < 1000:
+            break
+        start += 1000
     known_lot_skus = {a["sku"] for a in acquisitions if a.get("sku")}
 
     value_by_prefix = {}
