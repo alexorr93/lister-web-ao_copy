@@ -40,6 +40,9 @@ tr:last-child td { border-bottom: none; }
 .neg { color: var(--red); font-weight: 700; }
 .empty { text-align: center; padding: 40px; color: var(--muted); }
 .status-msg { font-size: 12px; color: var(--muted); margin-top: 8px; }
+.view-tabs { display: flex; align-items: center; gap: 6px; margin-bottom: 16px; }
+.view-tab { padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; }
+.view-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 </style>
 </head>
 <body>
@@ -61,6 +64,12 @@ tr:last-child td { border-bottom: none; }
   <h1>Lots</h1>
   <div class="sub">SKU, Name, Payment_Method, Date, Cost, Cash are what you enter — eBay, Total_Payouts, and Profit are computed live from synced orders.</div>
 
+  <div class="view-tabs">
+    <button class="view-tab active" id="tab-lots" onclick="setView('lots')">Lots</button>
+    <button class="view-tab" id="tab-uncategorized" onclick="setView('uncategorized')">Uncategorized</button>
+  </div>
+
+  <div id="lots-panel">
   <div class="card">
     <div class="form-grid">
       <div>
@@ -114,12 +123,50 @@ tr:last-child td { border-bottom: none; }
   </div>
 
   <div id="table-area"><div class="empty">Loading...</div></div>
+  </div><!-- /lots-panel -->
+
+  <div id="uncategorized-panel" style="display:none;">
+    <div class="sub" id="uncategorized-status"></div>
+    <div id="uncategorized-table-area"><div class="empty">Loading...</div></div>
+  </div>
 </div>
 
 <script>
 let acquisitions = [];
 let editMode = false;
-let uncategorized = {active_listings_value: 0, active_listings_count: 0, sales_total: 0};
+let uncategorized = {active_listings_value: 0, active_listings_count: 0, sales_total: 0, items: []};
+
+function setView(view) {
+  document.getElementById('tab-lots').classList.toggle('active', view === 'lots');
+  document.getElementById('tab-uncategorized').classList.toggle('active', view === 'uncategorized');
+  document.getElementById('lots-panel').style.display = view === 'lots' ? '' : 'none';
+  document.getElementById('uncategorized-panel').style.display = view === 'uncategorized' ? '' : 'none';
+  if (view === 'uncategorized') renderUncategorizedTable();
+}
+
+function renderUncategorizedTable() {
+  const items = uncategorized.items || [];
+  document.getElementById('uncategorized-status').textContent =
+    `${items.length} active listing(s) not matching any lot — ${fmtMoney(uncategorized.active_listings_value)} in active-listing value, ${fmtMoney(uncategorized.sales_total)} in unmatched sales.`;
+  if (!items.length) {
+    document.getElementById('uncategorized-table-area').innerHTML = '<div class="empty">Nothing uncategorized — every active listing matches a lot.</div>';
+    return;
+  }
+  let html = `<table><thead><tr>
+    <th>SKU</th><th>eBay Item</th><th>Price</th><th>Qty Available</th><th>Value</th>
+  </tr></thead><tbody>`;
+  for (const it of items) {
+    html += `<tr>
+      <td class="sku muted">${escapeHtml(it.sku || '(blank)')}</td>
+      <td>${escapeHtml(it.title || '')}</td>
+      <td>${fmtMoney(it.price)}</td>
+      <td>${it.quantity_available ?? '—'}</td>
+      <td>${fmtMoney(it.value)}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('uncategorized-table-area').innerHTML = html;
+}
 
 function fmtMoney(n) {
   if (n === null || n === undefined) return '—';
@@ -269,7 +316,7 @@ async function loadAcquisitions() {
   const r = await fetch('/api/acquisitions');
   const data = await r.json();
   acquisitions = data.acquisitions || [];
-  uncategorized = data.uncategorized || {active_listings_value: 0, active_listings_count: 0, sales_total: 0};
+  uncategorized = data.uncategorized || {active_listings_value: 0, active_listings_count: 0, sales_total: 0, items: []};
   const syncedAt = acquisitions.find(a => a.active_listings_synced_at)?.active_listings_synced_at;
   document.getElementById('active-listings-synced').textContent = syncedAt
     ? 'Active listings last synced: ' + new Date(syncedAt).toLocaleString()

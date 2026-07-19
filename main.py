@@ -1455,7 +1455,7 @@ async def list_acquisitions(request: Request):
     active_rows = []
     start = 0
     while True:
-        page = supabase.table("ebay_listing_status").select("sku,price,quantity_available,updated_at")\
+        page = supabase.table("ebay_listing_status").select("item_id,sku,title,price,quantity_available,updated_at")\
             .eq("business_id", business_id).eq("listing_status", "Active")\
             .range(start, start + 999).execute().data or []
         active_rows.extend(page)
@@ -1467,18 +1467,25 @@ async def list_acquisitions(request: Request):
     value_by_prefix = {}
     count_by_prefix = {}
     uncategorized_value, uncategorized_count = 0, 0
+    uncategorized_items = []
     for row in active_rows:
         sku = row.get("sku") or ""
-        if not sku:
-            continue
-        prefix = _lot_prefix(sku)
         value = (row.get("price") or 0) * (row.get("quantity_available") or 0)
-        if prefix in known_lot_skus:
+        prefix = _lot_prefix(sku) if sku else None
+        # Blank SKU can never match a real lot — falls straight into uncategorized,
+        # same as any SKU whose prefix just doesn't correspond to a known lot.
+        if sku and prefix in known_lot_skus:
             value_by_prefix[prefix] = value_by_prefix.get(prefix, 0) + value
             count_by_prefix[prefix] = count_by_prefix.get(prefix, 0) + 1
         else:
             uncategorized_value += value
             uncategorized_count += 1
+            uncategorized_items.append({
+                "item_id": row.get("item_id"), "sku": sku, "title": row.get("title"),
+                "price": row.get("price"), "quantity_available": row.get("quantity_available"),
+                "value": round(value, 2),
+            })
+    uncategorized_items.sort(key=lambda r: r["value"], reverse=True)
     active_synced_at = max((r.get("updated_at") for r in active_rows if r.get("updated_at")), default=None)
 
     # Same transpose rule applied to sales, for the "Uncategorized" row's sales total.
@@ -1511,6 +1518,7 @@ async def list_acquisitions(request: Request):
         "active_listings_value": round(uncategorized_value, 2),
         "active_listings_count": uncategorized_count,
         "sales_total": round(uncategorized_sales, 2),
+        "items": uncategorized_items,
     }
 
     return {"acquisitions": acquisitions, "uncategorized": uncategorized}
@@ -4126,135 +4134,6 @@ Example: [{"lot":"5","title":"Oakton pH Meter","description":"Portable pH/ORP me
 
     return EventSourceResponse(generate())
 
-
-def get_unmatched_photos():
-    """Get all photos from storage that haven't been matched yet."""
-    try:
-        # Get all files in part-photos bucket
-        res = supabase.storage.from_("part-photos").list()
-        files = [f["name"] for f in (res or []) if f.get("name") and not f["name"].startswith(".")]
-        return {"photos": files, "count": len(files)}
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-class ScanPartsBody(BaseModel):
-    part_numbers: list
-    photo_ids:    list
-    gemini_key:   Optional[str] = None
-
-@app.post("/api/parts/scan")
-async def scan_parts(body: ScanPartsBody):
-    """
-    Scan a batch of photos through Gemini Vision.
-    For each photo, extract any visible part numbers and check against the list.
-    Returns matches with confidence.
-    """
-    import threading
-    gemini_key = body.gemini_key or os.getenv("GEMINI_API_KEY", "")
-    if not gemini_key:
-        raise HTTPException(400, "Gemini API key required")
-    if not body.part_numbers:
-        raise HTTPException(400, "No part numbers provided")
-
-    results = []
-    part_set = [str(p).strip().upper() for p in body.part_numbers if str(p).strip()]
-
-    try:
-        import google.generativeai as genai
-        genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel("gemini-2.5-flash")
-    except Exception:
-        try:
-            from google import genai as genai2
-            from google.genai import types
-            client = genai2.Client(api_key=gemini_key)
-        except Exception as e:
-            raise HTTPException(500, f"Gemini init failed: {e}")
-
-    for photo_id in body.photo_ids[:50]:  # max 50 at a time
-        try:
-            # Download photo from Supabase
-            img_bytes = supabase.storage.from_("part-photos").download(photo_id)
-            if not img_bytes:
-                continue
-
-            # Build prompt
-            parts_list = "\n".join(part_set[:200])
-            prompt = f"""Examine this image carefully. 
-Read ALL visible text including: part numbers, model numbers, serial numbers, labels, stamps, engravings, stickers, tags.
-
-I am looking for matches to this list of part numbers:
-{parts_list}
-
-Return ONLY a JSON object:
-{{
-  "visible_text": ["list", "of", "all", "text", "you", "can", "read"],
-  "part_numbers_found": ["any", "part", "numbers", "you", "see"],
-  "matches": ["part numbers that exactly or closely match the search list"],
-  "confidence": "high/medium/low",
-  "notes": "brief note on what you see"
-}}
-
-If no text visible or no matches, still return the JSON with empty arrays."""
-
-            try:
-                import google.generativeai as genai
-                genai.configure(api_key=gemini_key)
-                model = genai.GenerativeModel("gemini-2.5-flash")
-                import PIL.Image
-                import io
-                img = PIL.Image.open(io.BytesIO(img_bytes))
-                response = model.generate_content([prompt, img])
-                raw = response.text or ""
-            except Exception as search_err:
-                print(f"   Search grounding failed: {search_err}")
-                try:
-                    from google import genai as gc
-                    from google.genai import types as gt
-                    cl = gc.Client(api_key=gemini_key)
-                    models = [m.name for m in cl.models.list()]
-                    best = next((m for m in models if "gemini-2.5" in m or "gemini-2.0" in m), models[0] if models else "models/gemini-1.5-pro")
-                    resp = cl.models.generate_content(
-                        model=best,
-                        contents=[gt.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"), prompt]
-                    )
-                    raw = resp.text or ""
-                except Exception as e2:
-                    results.append({"photo_id": photo_id, "error": str(e2), "matches": []})
-                    continue
-
-            import re, json
-            raw = re.sub(r"^```[a-z]*\n?", "", raw, flags=re.IGNORECASE)
-            raw = re.sub(r"\n?```$", "", raw).strip()
-            jm = re.search(r'\{.*\}', raw, re.DOTALL)
-            if jm:
-                data = json.loads(jm.group())
-                results.append({
-                    "photo_id":        photo_id,
-                    "url":             photo_url(photo_id, thumb=True),
-                    "full_url":        photo_url(photo_id),
-                    "visible_text":    data.get("visible_text", []),
-                    "part_numbers_found": data.get("part_numbers_found", []),
-                    "matches":         data.get("matches", []),
-                    "confidence":      data.get("confidence", ""),
-                    "notes":           data.get("notes", ""),
-                    "has_match":       len(data.get("matches", [])) > 0,
-                })
-            else:
-                results.append({"photo_id": photo_id, "matches": [], "notes": "Could not parse response"})
-
-        except Exception as e:
-            results.append({"photo_id": photo_id, "error": str(e), "matches": []})
-
-    matches    = [r for r in results if r.get("has_match")]
-    no_matches = [r for r in results if not r.get("has_match")]
-    return {
-        "results":     results,
-        "matches":     matches,
-        "no_matches":  no_matches,
-        "match_count": len(matches),
-        "scanned":     len(results),
-    }
 
 # ── EBAY OAUTH ────────────────────────────────────────────────── #
 

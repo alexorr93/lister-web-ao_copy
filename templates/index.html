@@ -69,7 +69,6 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .fastscan-cond { display: flex; gap: 8px; margin-bottom: 16px; }
 .fastscan-cond-btn { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
 .fastscan-cond-btn.active { background: #16a34a; border-color: #16a34a; color: #fff; }
-  .nav-btn[data-tab="parts"].active { background: #7c3aed; }
 .nav-spacer { flex: 1; }
 .nav-download { padding: 6px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; }
 
@@ -240,7 +239,6 @@ select.field-input { background: #fff; color: #0f172a; }
   <button class="nav-btn" data-tab="upload">📸 Upload</button>
   <button class="nav-btn" data-tab="fastscan">⚡ Fast Scan</button>
   {% if is_admin %}<button class="nav-btn" data-tab="auction">🔨 Auctions</button>{% endif %}
-  {% if is_admin %}<button class="nav-btn" data-tab="parts">🔍 Parts Lookup</button>{% endif %}
   <button class="nav-btn" data-tab="settings">⚙️ Settings</button>
   <a class="nav-btn" href="/categories" style="text-decoration:none;display:inline-block;">📂 Categories</a>
   <a class="nav-btn" href="/archive" style="text-decoration:none;display:inline-block;">🗄️ Archive</a>
@@ -438,50 +436,6 @@ select.field-input { background: #fff; color: #0f172a; }
     </div>
   </div>
 
-  <!-- PARTS LOOKUP TAB -->
-  <div class="tab-content" id="tab-parts">
-    <div style="margin-bottom:16px;">
-      <div style="font-size:18px;font-weight:800;color:var(--text);margin-bottom:4px;">🔍 Parts Photo Lookup</div>
-      <div style="font-size:13px;color:var(--muted);">Paste part numbers below, then scan your photos. Gemini Vision will read each photo and flag any matches.</div>
-    </div>
-
-    <div class="settings-section" style="border-left:4px solid #7c3aed;">
-      <div class="settings-title">Part Numbers to Search</div>
-      <div class="settings-sub">One part number per line. Up to 200 numbers.</div>
-      <textarea id="parts-input" class="field-input" rows="8" style="font-family:monospace;font-size:13px;" placeholder="ABC-12345&#10;XYZ-67890&#10;MOD-11111"></textarea>
-      <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <div style="font-size:12px;color:var(--muted);">Scan:</div>
-        <button class="btn btn-primary" onclick="startPartsScan('all')" style="background:#7c3aed;border-color:#7c3aed;">📷 All Photos</button>
-        <button class="btn" onclick="startPartsScan('recent')" style="border-color:#7c3aed;color:#7c3aed;">📅 Last 100 Only</button>
-      </div>
-    </div>
-
-    <div id="parts-progress" style="display:none;margin-bottom:16px;">
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;">
-        <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-          <span style="font-size:13px;font-weight:600;color:var(--text);" id="parts-progress-label">Scanning...</span>
-          <span style="font-size:12px;color:var(--muted);" id="parts-progress-count">0 / 0</span>
-        </div>
-        <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
-          <div id="parts-progress-bar" style="height:100%;background:#7c3aed;width:0%;transition:width 0.3s;"></div>
-        </div>
-        <button class="btn btn-danger" style="margin-top:10px;width:100%;" onclick="stopPartsScan()">Stop Scan</button>
-      </div>
-    </div>
-
-    <div id="parts-matches" style="display:none;margin-bottom:16px;">
-      <div style="font-size:15px;font-weight:700;color:#16a34a;margin-bottom:10px;" id="parts-match-header"></div>
-      <div id="parts-match-list"></div>
-    </div>
-
-    <div id="parts-no-matches" style="display:none;">
-      <div style="font-size:13px;color:var(--muted);margin-bottom:10px;" id="parts-no-match-header"></div>
-      <details>
-        <summary style="font-size:12px;color:var(--muted);cursor:pointer;">Show all scanned (no match)</summary>
-        <div id="parts-no-match-list" style="margin-top:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:6px;"></div>
-      </details>
-    </div>
-  </div>
 
     <!-- SETTINGS TAB -->
   <div class="tab-content" id="tab-settings">
@@ -1861,121 +1815,6 @@ async function syncEbayCategories() {
     statusEl.textContent = '⚠️ Sync failed: ' + e.message;
     toast('Category sync failed', 'error');
   }
-}
-
-// ── PARTS LOOKUP ──────────────────────────────────────────────
-let partsScanStop = false;
-let partsScanRunning = false;
-
-async function startPartsScan(mode) {
-  const raw = document.getElementById('parts-input').value.trim();
-  if (!raw) { toast('Enter part numbers first', 'error'); return; }
-  const partNumbers = raw.split('\n').map(s => s.trim()).filter(Boolean);
-  if (!partNumbers.length) { toast('No valid part numbers found', 'error'); return; }
-
-  // Get photos list
-  const resp = await api('GET', '/api/parts/photos');
-  let photos = resp.photos || [];
-  if (mode === 'recent') photos = photos.slice(-100);
-  if (!photos.length) { toast('No photos found in storage', 'error'); return; }
-
-  // Get gemini key from settings
-  const settingsResp = await api('GET', '/api/settings');
-  const geminiKey = settingsResp.GEMINI_API_KEY || '';
-
-  partsScanStop = false;
-  partsScanRunning = true;
-  document.getElementById('parts-progress').style.display = 'block';
-  document.getElementById('parts-matches').style.display = 'none';
-  document.getElementById('parts-no-matches').style.display = 'none';
-  document.getElementById('parts-match-list').innerHTML = '';
-  document.getElementById('parts-no-match-list').innerHTML = '';
-
-  const allMatches = [];
-  const noMatches  = [];
-  const batchSize  = 5;
-  let scanned = 0;
-
-  for (let i = 0; i < photos.length; i += batchSize) {
-    if (partsScanStop) break;
-    const batch = photos.slice(i, i + batchSize);
-    document.getElementById('parts-progress-label').textContent = `Scanning photos ${i+1}–${Math.min(i+batchSize, photos.length)} of ${photos.length}...`;
-    document.getElementById('parts-progress-count').textContent = `${scanned} / ${photos.length}`;
-    document.getElementById('parts-progress-bar').style.width = `${(i/photos.length)*100}%`;
-
-    try {
-      const r = await api('POST', '/api/parts/scan', {
-        part_numbers: partNumbers,
-        photo_ids:    batch,
-        gemini_key:   geminiKey,
-      });
-
-      for (const result of r.results) {
-        scanned++;
-        if (result.has_match) {
-          allMatches.push(result);
-          renderMatchCard(result);
-        } else {
-          noMatches.push(result);
-          renderNoMatchThumb(result);
-        }
-      }
-
-      // Update match header live
-      if (allMatches.length > 0) {
-        document.getElementById('parts-matches').style.display = 'block';
-        document.getElementById('parts-match-header').textContent = `✅ ${allMatches.length} match${allMatches.length>1?'es':''} found`;
-      }
-    } catch(e) {
-      console.error('Batch error:', e);
-    }
-  }
-
-  document.getElementById('parts-progress').style.display = 'none';
-  document.getElementById('parts-progress-bar').style.width = '100%';
-  partsScanRunning = false;
-
-  if (noMatches.length > 0) {
-    document.getElementById('parts-no-matches').style.display = 'block';
-    document.getElementById('parts-no-match-header').textContent = `${noMatches.length} photos scanned — no match`;
-  }
-
-  if (allMatches.length === 0) toast('Scan complete — no matches found', 'error');
-  else toast(`Scan complete — ${allMatches.length} match${allMatches.length>1?'es':''} found!`);
-}
-
-function stopPartsScan() {
-  partsScanStop = true;
-  document.getElementById('parts-progress').style.display = 'none';
-  toast('Scan stopped');
-}
-
-function renderMatchCard(r) {
-  const list = document.getElementById('parts-match-list');
-  const matchStr = r.matches.join(', ');
-  const div = document.createElement('div');
-  div.style.cssText = 'background:var(--card);border:1.5px solid #16a34a;border-radius:12px;padding:12px;margin-bottom:10px;display:flex;gap:12px;';
-  div.innerHTML = `
-    <img src="${r.url||''}" style="width:90px;height:90px;border-radius:8px;object-fit:cover;flex-shrink:0;background:#161925;" onerror="this.style.display='none'"/>
-    <div style="flex:1;min-width:0;">
-      <div style="font-size:13px;font-weight:700;color:#16a34a;margin-bottom:4px;">✅ Match: ${matchStr}</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Photo: ${r.photo_id}</div>
-      ${r.part_numbers_found.length ? '<div style="font-size:11px;color:var(--text);margin-bottom:4px;">Found on item: ' + r.part_numbers_found.join(', ') + '</div>' : ''}
-      ${r.notes ? '<div style="font-size:11px;color:var(--muted);">' + r.notes + '</div>' : ''}
-      <div style="display:flex;gap:8px;margin-top:8px;">
-        <a href="${r.full_url||r.url||''}" target="_blank" style="font-size:11px;color:var(--accent);font-weight:600;">View full photo ↗</a>
-        <span style="font-size:11px;color:var(--muted);font-weight:600;background:rgba(22,163,74,0.1);padding:2px 8px;border-radius:10px;">${r.confidence||''}</span>
-      </div>
-    </div>`;
-  list.appendChild(div);
-}
-
-function renderNoMatchThumb(r) {
-  const list = document.getElementById('parts-no-match-list');
-  const div = document.createElement('div');
-  div.style.cssText = 'aspect-ratio:1;border-radius:8px;overflow:hidden;background:#161925;';
-  div.innerHTML = r.url ? `<img src="${r.url}" style="width:100%;height:100%;object-fit:cover;" loading="lazy"/>` : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#3d4663;">📷</div>';
-  list.appendChild(div);
 }
 
 // ── PDF AUCTION SCAN ──────────────────────────────────────────
