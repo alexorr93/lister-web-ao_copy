@@ -4543,8 +4543,7 @@ Return ONLY a raw JSON array, no markdown, no backticks:
 [{{"item_name": "...", "item_description": "...", "quantity": "...", "confidence": "high"|"low"}}]
 If you truly cannot identify anything, return []."""
 
-@app.post("/api/auction/capture/lots/{lot_id}/itemize")
-async def itemize_capture_lot(lot_id: str):
+def _itemize_lot(lot: dict) -> list:
     import json, re
     from json_repair import repair_json
     import google.generativeai as genai
@@ -4554,11 +4553,7 @@ async def itemize_capture_lot(lot_id: str):
     if not gemini_key:
         raise HTTPException(400, "GEMINI_API_KEY not set")
 
-    lot_res = supabase.table("auction_lots").select("*").eq("id", lot_id).single().execute()
-    if not lot_res.data:
-        raise HTTPException(404, "Lot not found")
-    lot = lot_res.data
-
+    lot_id = lot["id"]
     genai.configure(api_key=gemini_key)
     model = genai.GenerativeModel("gemini-2.5-flash")
 
@@ -4605,7 +4600,31 @@ async def itemize_capture_lot(lot_id: str):
         inserted.append(ins.data[0])
 
     supabase.table("auction_lots").update({"itemized": True}).eq("id", lot_id).execute()
+    return inserted
+
+@app.post("/api/auction/capture/lots/{lot_id}/itemize")
+async def itemize_capture_lot(lot_id: str):
+    lot_res = supabase.table("auction_lots").select("*").eq("id", lot_id).single().execute()
+    if not lot_res.data:
+        raise HTTPException(404, "Lot not found")
+    inserted = _itemize_lot(lot_res.data)
     return {"lot_id": lot_id, "items": inserted}
+
+@app.post("/api/auction/capture/sessions/{session_id}/itemize-all")
+async def itemize_all_capture_lots(session_id: str):
+    lots_res = (supabase.table("auction_lots")
+                .select("*")
+                .eq("session_id", session_id)
+                .eq("itemized", False)
+                .execute())
+    results = []
+    for lot in lots_res.data:
+        try:
+            items = _itemize_lot(lot)
+            results.append({"lot_id": lot["id"], "lot_number": lot.get("lot_number"), "status": "ok", "item_count": len(items)})
+        except Exception as e:
+            results.append({"lot_id": lot["id"], "lot_number": lot.get("lot_number"), "status": "error", "error": str(e)})
+    return {"session_id": session_id, "results": results}
 
 
 # ── EBAY OAUTH ────────────────────────────────────────────────── #
