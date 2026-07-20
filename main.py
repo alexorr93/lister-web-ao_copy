@@ -4792,9 +4792,8 @@ for fast-moving common items).""",
 }
 
 def _compute_metric_for_lot(lot: dict, items: list, metric: str) -> dict:
-    from google import genai
-    from google.genai import types
     import json, re
+    import requests as _requests
     from json_repair import repair_json
 
     gemini_key = os.getenv("GEMINI_API_KEY", "")
@@ -4821,16 +4820,18 @@ TASK: {spec['instructions']}
 Return ONLY a raw JSON object, no markdown, no backticks:
 {spec['schema']}"""
 
-    client = genai.Client(api_key=gemini_key)
-    resp = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=[prompt],
-        config=types.GenerateContentConfig(
-            tools=[types.Tool(google_search=types.GoogleSearch())],
-            max_output_tokens=1500,
-        ),
+    resp = _requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}",
+        json={
+            "contents": [{"parts": [{"text": prompt}]}],
+            "tools": [{"google_search": {}}],
+            "generationConfig": {"maxOutputTokens": 1500},
+        },
+        timeout=30,
     )
-    raw = (resp.text or "").strip()
+    resp.raise_for_status()
+    resp_data = resp.json()
+    raw = (resp_data["candidates"][0]["content"]["parts"][0].get("text") or "").strip()
     raw = re.sub(r"^```[a-z]*\n?", "", raw, flags=re.IGNORECASE)
     raw = re.sub(r"\n?```$", "", raw).strip()
     start, end = raw.find("{"), raw.rfind("}") + 1
