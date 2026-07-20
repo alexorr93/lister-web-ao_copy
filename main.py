@@ -1311,6 +1311,7 @@ def apply_acquisition_profits(business_id: str) -> dict:
     res = supabase.rpc("recalculate_acquisition_profits", {"biz_id": business_id}).execute()
     updated = res.data if isinstance(res.data, int) else 0
     _apply_cash_to_profit(business_id)
+    _apply_shopify_sales_to_profit(business_id)
     return {"updated": updated}
 
 def _apply_cash_to_profit(business_id: str):
@@ -1338,6 +1339,56 @@ def _apply_cash_to_profit(business_id: str):
         if len(page) < 1000:
             break
         start += 1000
+
+def _apply_shopify_sales_to_profit(business_id: str):
+    """recalculate_acquisition_profits() only sums eBay payouts (the Lots page's
+    "eBay"/Total_Payouts column is exactly that — eBay-specific, per its own name), so
+    Shopify sales never counted toward a lot's Profit/ROI even though every Shopify
+    order is already synced into the same local `orders` table eBay orders use. Adds
+    each lot's matching Shopify orders.final_net (already shipping-cost-adjusted) into
+    Profit here, same layering approach as _apply_cash_to_profit — reads whatever
+    Profit that function just left (baseline + cash), so this always adds Shopify on
+    top of a fresh, not previously-Shopify-corrected, number."""
+    def _lot_prefix(sku: str) -> str:
+        return sku.split("-", 1)[0] if "-" in sku else sku
+
+    acquisitions = []
+    start = 0
+    while True:
+        page = supabase.table("acquisitions").select("id,sku,cost,profit")\
+            .eq("business_id", business_id).range(start, start + 999).execute().data or []
+        acquisitions.extend(page)
+        if len(page) < 1000:
+            break
+        start += 1000
+    if not acquisitions:
+        return
+
+    known_lot_skus = {a["sku"] for a in acquisitions if a.get("sku")}
+    shopify_sales_by_prefix = {}
+    start = 0
+    while True:
+        page = supabase.table("orders").select("sku,final_net").eq("business_id", business_id)\
+            .eq("platform", "Shopify").range(start, start + 999).execute().data or []
+        for row in page:
+            sku = row.get("sku") or ""
+            if not sku:
+                continue
+            prefix = _lot_prefix(sku)
+            if prefix in known_lot_skus:
+                shopify_sales_by_prefix[prefix] = shopify_sales_by_prefix.get(prefix, 0) + (row.get("final_net") or 0)
+        if len(page) < 1000:
+            break
+        start += 1000
+
+    for a in acquisitions:
+        sales = shopify_sales_by_prefix.get(a.get("sku"))
+        if not sales:
+            continue
+        cost = a.get("cost") or 0
+        profit = (a.get("profit") or 0) + sales
+        roi_pct = round(profit / cost * 100, 2) if cost else None
+        supabase.table("acquisitions").update({"profit": profit, "roi_pct": roi_pct}).eq("id", a["id"]).execute()
 
 @app.get("/api/acquisitions/debug-sku/{sku}")
 async def debug_acquisition_sku(sku: str, request: Request):
@@ -2029,6 +2080,18 @@ def fetch_shopify_orders(business_id: str, start_iso: str, end_iso: str) -> list
             order_total = float(order.get("total_price", 0) or 0)
             order_fee_total = (order_total * 0.029 + 0.30) if (used_shopify_payments and order_total > 0) else 0.0
 
+            # Fulfillment tracking numbers — embedded in the order payload already, same as
+            # refunds above. Needed so Shopify orders can be matched against shipping_labels
+            # the same way eBay orders already are (see apply_shipping_matches).
+            trackings = []
+            for f in order.get("fulfillments", []) or []:
+                tn = f.get("tracking_number")
+                if tn:
+                    trackings.append(tn)
+                for tn2 in (f.get("tracking_numbers") or []):
+                    if tn2 and tn2 not in trackings:
+                        trackings.append(tn2)
+
             line_items = order.get("line_items", [])
             order_subtotal = sum(float(li.get("price", 0) or 0) * int(li.get("quantity", 1)) for li in line_items)
 
@@ -2047,6 +2110,7 @@ def fetch_shopify_orders(business_id: str, start_iso: str, end_iso: str) -> list
                     "net": gross - refund_amt - fee_share,
                     "order_date": created[:10] if created else "",
                     "order_id": order.get("name", ""),
+                    "tracking_numbers": trackings,
                 })
         # Shopify cursor pagination via Link header
         link = r.headers.get("Link", "")
@@ -2369,17 +2433,51 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
                 return 0.0
 
         shopify_rows = fetch_shopify_orders(business_id, start_iso, end_iso)
+
+        # Shipping cost matching — same shipping_labels table eBay orders already match
+        # against (Pirate Ship CSV uploads), keyed by tracking number. An order's total
+        # shipping cost gets prorated across its line items the same way the payment
+        # fee already is (by revenue share), since Shopify orders can have multiple lines.
+        shopify_trackings = list({tn for row in shopify_rows for tn in row.get("tracking_numbers", [])})
+        cost_by_tracking_shopify = {}
+        for i in range(0, len(shopify_trackings), 200):
+            chunk = shopify_trackings[i:i+200]
+            try:
+                res = supabase.table("shipping_labels").select("tracking_number,cost")\
+                    .eq("business_id", business_id).in_("tracking_number", chunk).execute()
+                for row in (res.data or []):
+                    cost_by_tracking_shopify[row["tracking_number"]] = row.get("cost") or 0
+            except Exception as e:
+                errors["shopify_shipping_match"] = str(e)
+
+        order_subtotal_by_order = {}
+        order_shipping_cost_by_order = {}
+        for row in shopify_rows:
+            oid = row["order_id"]
+            order_subtotal_by_order[oid] = order_subtotal_by_order.get(oid, 0.0) + row["revenue"]
+            if oid not in order_shipping_cost_by_order:
+                order_shipping_cost_by_order[oid] = sum(
+                    cost_by_tracking_shopify.get(tn, 0) or 0 for tn in row.get("tracking_numbers", [])
+                )
+
         shopify_skipped = 0
         for i, row in enumerate(shopify_rows):
             net = _safe2(row.get("net", row["revenue"]))
+            oid = row["order_id"]
+            order_subtotal = order_subtotal_by_order.get(oid, 0.0)
+            order_shipping_cost = order_shipping_cost_by_order.get(oid, 0.0)
+            shipping_share = _safe2(order_shipping_cost * (row["revenue"] / order_subtotal)) if order_subtotal > 0 else 0.0
+            final_net = _safe2(net - shipping_share)
+            trackings = row.get("tracking_numbers", [])
             record = {
                 "id": f"shopify:{row['order_id']}:{row['sku']}:{i}",
                 "business_id": business_id, "platform": "Shopify", "order_id": row["order_id"],
                 "sku": row["sku"], "title": row["title"], "quantity": row["quantity"],
                 "order_date": row["order_date"], "gross_revenue": _safe2(row["revenue"]),
                 "fee": _safe2(row.get("fee", 0)), "net": net,
-                "tracking_number": None, "shipping_cost": 0,
-                "final_net": net,
+                "tracking_number": ",".join(trackings) if trackings else None,
+                "shipping_cost": shipping_share,
+                "final_net": final_net,
             }
             try:
                 supabase.table("orders").upsert(record).execute()
