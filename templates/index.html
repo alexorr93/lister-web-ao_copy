@@ -500,23 +500,19 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
     </div>
     <div style="border-top:1px solid var(--border);padding-top:16px;margin-bottom:10px;font-size:14px;font-weight:700;color:var(--text);">🔨 Live Lot Capture</div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">Paste an auction catalog or watchlist URL, set how many photos per lot to save, then ask Claude in chat to run the capture for this session.</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">Paste an auction catalog or watchlist URL, optionally note which pages/lots to capture (default: all), then ask Claude in chat to run the capture. Every lot captures instantly with no AI cost — the item is just the title. Later, click "Flag as LOT" on any row that's actually a mixed/bulk lot to pull all its photos and itemize it in detail.</div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
       <input type="url" id="capture-url-input" class="field-input" style="flex:1;min-width:200px;" placeholder="https://bid.rollerauction.com/account/watchlist"/>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
       <input type="text" id="capture-name-input" class="field-input" style="flex:1;min-width:160px;" placeholder="Session name (optional)"/>
-      <select id="capture-photos-mode" class="field-input" style="min-width:170px;">
-        <option value="main_only">Main photo only</option>
-        <option value="all">All photos per lot</option>
-      </select>
+      <input type="text" id="capture-scope-input" class="field-input" style="flex:1;min-width:160px;" placeholder="Pages/lots to capture (default: all)"/>
       <button class="btn btn-primary" onclick="startCaptureSession()">Create Session</button>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
       <select id="auction-session-select" class="field-input" style="flex:1;min-width:200px;" onchange="loadAuctionItems(this.value)">
         <option value="">Select a capture session...</option>
       </select>
-      <button class="btn" onclick="itemizeAllLots()">🧠 Itemize All</button>
     </div>
     <div id="auction-list"></div>
     <div class="empty" id="auction-empty" style="display:none;">
@@ -1667,11 +1663,12 @@ async function startCaptureSession() {
   const url = document.getElementById('capture-url-input').value.trim();
   if (!url) { toast('Enter an auction URL first', 'error'); return; }
   const name = document.getElementById('capture-name-input').value.trim();
-  const mode = document.getElementById('capture-photos-mode').value;
+  const scope = document.getElementById('capture-scope-input').value.trim();
   try {
-    const r = await api('POST', '/api/auction/capture/sessions', {source_url: url, name: name || null, photos_per_lot_mode: mode});
+    const r = await api('POST', '/api/auction/capture/sessions', {source_url: url, name: name || null, capture_scope: scope || null});
     document.getElementById('capture-url-input').value = '';
     document.getElementById('capture-name-input').value = '';
+    document.getElementById('capture-scope-input').value = '';
     toast('Session created — ask Claude in chat to capture it');
     await loadAuctionSessions();
     document.getElementById('auction-session-select').value = r.id;
@@ -2110,8 +2107,7 @@ async function loadAuctionSessions() {
     const sel = document.getElementById('auction-session-select');
     sel.innerHTML = '<option value="">Select a capture session...</option>' +
       auctionSessions.map(s => {
-        const modeLabel = s.photos_per_lot_mode === 'all' ? 'all photos' : 'main photo';
-        return `<option value="${s.id}">${s.name || 'Untitled'} · ${modeLabel} · ${(s.created_at||'').slice(0,10)}</option>`;
+        return `<option value="${s.id}">${s.name || 'Untitled'} · scope: ${s.capture_scope || 'all'} · ${(s.created_at||'').slice(0,10)}</option>`;
       }).join('');
     document.getElementById('auction-empty').style.display = auctionSessions.length ? 'none' : 'block';
     if (auctionSessions.length) {
@@ -2135,14 +2131,18 @@ async function loadAuctionItems(sessionId) {
         : `<div class="auction-img">🔨</div>`;
       const itemsHtml = lot.items && lot.items.length
         ? `<div style="margin-top:8px;">` + lot.items.map(it => `<div style="font-size:12px;color:var(--text);padding:4px 0;border-top:1px solid var(--border);"><b>${it.item_name || 'Unknown item'}</b>${it.quantity ? ' × ' + it.quantity : ''}<div style="color:var(--muted);font-size:11px;">${it.item_description || ''}</div></div>`).join('') + `</div>`
-        : `<button class="btn" style="font-size:11px;padding:4px 12px;margin-top:6px;" onclick="itemizeLot('${lot.id}')">🧠 Itemize this lot</button>`;
+        : '';
+      const bulkBadge = lot.is_bulk_lot
+        ? `<span style="font-size:10px;font-weight:700;color:var(--amber);background:#f59e0b22;border-radius:6px;padding:2px 6px;margin-left:6px;">LOT</span>`
+        : `<button class="btn" style="font-size:11px;padding:3px 10px;margin-top:6px;" onclick="flagLotAsBulk('${lot.id}', this)">🏷️ Flag as LOT</button>`;
       return `<div class="auction-card" style="align-items:flex-start;">
         <div style="display:flex;gap:4px;flex-wrap:wrap;flex-shrink:0;">${imgsHtml}</div>
         <div class="auction-info">
-          <div class="auction-title">Lot ${lot.lot_number || '?'}: ${lot.title || 'Unknown'}</div>
+          <div class="auction-title">Lot ${lot.lot_number || '?'}: ${lot.title || 'Unknown'}${lot.is_bulk_lot ? bulkBadge : ''}</div>
           ${lot.current_bid != null ? `<div style="font-size:11px;color:var(--muted);">Current bid: $${parseFloat(lot.current_bid).toFixed(2)}</div>` : ''}
           ${lot.description ? `<div style="font-size:11px;color:var(--muted);margin-top:4px;">${lot.description}</div>` : ''}
           ${itemsHtml}
+          ${!lot.is_bulk_lot ? bulkBadge : ''}
         </div>
         <div class="auction-actions">
           ${lot.listing_url ? `<a href="${lot.listing_url}" target="_blank" style="font-size:11px;color:var(--accent);font-weight:700;">View ↗</a>` : ''}
@@ -2152,27 +2152,18 @@ async function loadAuctionItems(sessionId) {
   } catch(e) { toast('Failed to load lots', 'error'); }
 }
 
-async function itemizeLot(lotId) {
+async function flagLotAsBulk(lotId, btn) {
+  btn.disabled = true;
+  btn.textContent = '⏳ Pulling photos + itemizing...';
   try {
-    await api('POST', `/api/auction/capture/lots/${lotId}/itemize`);
-    toast('Lot itemized');
+    await api('POST', `/api/auction/capture/lots/${lotId}/flag-as-lot`);
+    toast('Lot flagged and itemized in detail');
     if (activeSession) loadAuctionItems(activeSession);
-  } catch(e) { toast('Itemize failed: ' + e.message, 'error'); }
-}
-
-async function itemizeAllLots() {
-  if (!activeSession) { toast('Select a session first', 'error'); return; }
-  try {
-    const lots = await api('GET', `/api/auction/capture/sessions/${activeSession}/lots`);
-    const todo = lots.filter(l => !l.itemized);
-    if (!todo.length) { toast('All lots already itemized'); return; }
-    toast(`Itemizing ${todo.length} lot(s)...`);
-    for (const lot of todo) {
-      try { await api('POST', `/api/auction/capture/lots/${lot.id}/itemize`); } catch(e) {}
-    }
-    toast('Itemization complete');
-    loadAuctionItems(activeSession);
-  } catch(e) { toast('Failed: ' + e.message, 'error'); }
+  } catch(e) {
+    toast('Flag failed: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.textContent = '🏷️ Flag as LOT';
+  }
 }
 
 // ── SETTINGS ───────────────────────────────────────────────────

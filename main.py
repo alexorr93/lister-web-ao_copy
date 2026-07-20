@@ -4397,20 +4397,18 @@ Example: [{"lot":"5","title":"Oakton pH Meter","description":"Portable pH/ORP me
 class AuctionCaptureSessionCreate(BaseModel):
     source_url: str
     name: Optional[str] = None
-    photos_per_lot_mode: str = "main_only"  # "main_only" | "all"
+    capture_scope: Optional[str] = None  # free-text note for Claude, e.g. "pages 1-2" or "lots 300-1300", default = all
 
 @app.post("/api/auction/capture/sessions")
 async def create_capture_session(request: Request, body: AuctionCaptureSessionCreate):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
-    if body.photos_per_lot_mode not in ("main_only", "all"):
-        raise HTTPException(400, "photos_per_lot_mode must be 'main_only' or 'all'")
     row = {
         "business_id": str(business_id),
         "source_url": body.source_url,
         "name": body.name or body.source_url,
-        "photos_per_lot_mode": body.photos_per_lot_mode,
+        "capture_scope": body.capture_scope or "all",
         "status": "in_progress",
     }
     res = supabase.table("auction_capture_sessions").insert(row).execute()
@@ -4476,6 +4474,7 @@ class AuctionLotCreate(BaseModel):
     listing_url: Optional[str] = None
     current_bid: Optional[float] = None
     photo_urls: List[str] = []  # external URLs found while browsing; server re-hosts them
+    is_bulk_lot: bool = False  # False (default): single item, no AI call, item = title. True: deep multi-photo itemize.
 
 @app.post("/api/auction/capture/lots")
 async def create_capture_lot(body: AuctionLotCreate):
@@ -4492,10 +4491,27 @@ async def create_capture_lot(body: AuctionLotCreate):
         "listing_url": body.listing_url,
         "current_bid": body.current_bid,
         "photo_urls": stored_urls,
+        "is_bulk_lot": body.is_bulk_lot,
         "itemized": False,
     }
     res = supabase.table("auction_lots").insert(row).execute()
-    return res.data[0]
+    lot = res.data[0]
+
+    if not body.is_bulk_lot:
+        # Default case: single item, no Gemini call — the item IS the title.
+        item_row = {
+            "lot_id": lot["id"],
+            "item_name": (body.title or "")[:300],
+            "item_description": (body.description or "")[:1000],
+            "quantity": "1",
+            "confidence": "high",
+        }
+        ins = supabase.table("auction_lot_items").insert(item_row).execute()
+        supabase.table("auction_lots").update({"itemized": True}).eq("id", lot["id"]).execute()
+        lot["itemized"] = True
+        lot["items"] = ins.data
+
+    return lot
 
 @app.get("/api/auction/capture/sessions/{session_id}/lots")
 async def list_capture_lots(session_id: str):
@@ -4543,11 +4559,40 @@ Return ONLY a raw JSON array, no markdown, no backticks:
 [{{"item_name": "...", "item_description": "...", "quantity": "...", "confidence": "high"|"low"}}]
 If you truly cannot identify anything, return []."""
 
-def _itemize_lot(lot: dict) -> list:
+def _gemini_itemize_call(model, prompt: str, photo_url: Optional[str]) -> list:
+    """One Gemini call. If photo_url is given, fetches and attaches that single image."""
     import json, re
     from json_repair import repair_json
-    import google.generativeai as genai
     import requests as _requests
+
+    parts = [prompt]
+    if photo_url:
+        try:
+            img = _requests.get(photo_url, timeout=20)
+            img.raise_for_status()
+            ctype = img.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+            if ctype not in ("image/jpeg", "image/png", "image/webp"):
+                ctype = "image/jpeg"
+            parts.append({"mime_type": ctype, "data": img.content})
+        except Exception as e:
+            print(f"itemize: could not fetch photo {photo_url}: {e}")
+
+    response = model.generate_content(parts, generation_config={"max_output_tokens": 4000})
+    raw = (response.text or "").strip()
+    raw = re.sub(r"^```[a-z]*\n?", "", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\n?```$", "", raw).strip()
+    start, end = raw.find("["), raw.rfind("]") + 1
+    if start >= 0 and end > start:
+        raw = raw[start:end]
+    try:
+        return json.loads(raw) if raw else []
+    except Exception:
+        return json.loads(repair_json(raw))
+
+def _itemize_lot_deep(lot: dict) -> list:
+    """Bulk-lot itemization: one Gemini call PER PHOTO, results merged. Deletes any
+    existing (e.g. title-only) items first."""
+    import google.generativeai as genai
 
     gemini_key = os.getenv("GEMINI_API_KEY", "")
     if not gemini_key:
@@ -4559,36 +4604,24 @@ def _itemize_lot(lot: dict) -> list:
 
     prompt = ITEMIZE_PROMPT.format(title=lot.get("title") or "(no title)",
                                     description=lot.get("description") or "(no description)")
-    parts = [prompt]
-    for url in (lot.get("photo_urls") or []):
-        try:
-            img = _requests.get(url, timeout=20)
-            img.raise_for_status()
-            ctype = img.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
-            if ctype not in ("image/jpeg", "image/png", "image/webp"):
-                ctype = "image/jpeg"
-            parts.append({"mime_type": ctype, "data": img.content})
-        except Exception as e:
-            print(f"itemize: could not fetch photo {url}: {e}")
+    photo_urls = lot.get("photo_urls") or []
 
-    try:
-        response = model.generate_content(parts, generation_config={"max_output_tokens": 4000})
-        raw = (response.text or "").strip()
-        raw = re.sub(r"^```[a-z]*\n?", "", raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\n?```$", "", raw).strip()
-        start, end = raw.find("["), raw.rfind("]") + 1
-        if start >= 0 and end > start:
-            raw = raw[start:end]
+    all_items = []
+    if photo_urls:
+        for url in photo_urls:
+            try:
+                all_items.extend(_gemini_itemize_call(model, prompt, url))
+            except Exception as e:
+                print(f"itemize: skipping photo {url} after Gemini error: {e}")
+    else:
         try:
-            items = json.loads(raw) if raw else []
-        except Exception:
-            items = json.loads(repair_json(raw))
-    except Exception as e:
-        raise HTTPException(500, f"Gemini itemize error: {e}")
+            all_items.extend(_gemini_itemize_call(model, prompt, None))
+        except Exception as e:
+            raise HTTPException(500, f"Gemini itemize error: {e}")
 
     supabase.table("auction_lot_items").delete().eq("lot_id", lot_id).execute()
     inserted = []
-    for it in items:
+    for it in all_items:
         row = {
             "lot_id": lot_id,
             "item_name": (it.get("item_name") or "")[:300],
@@ -4599,16 +4632,115 @@ def _itemize_lot(lot: dict) -> list:
         ins = supabase.table("auction_lot_items").insert(row).execute()
         inserted.append(ins.data[0])
 
-    supabase.table("auction_lots").update({"itemized": True}).eq("id", lot_id).execute()
+    supabase.table("auction_lots").update({"itemized": True, "is_bulk_lot": True}).eq("id", lot_id).execute()
     return inserted
+
+_IMG_SKIP_PATTERNS = ("logo", "icon", "spinner", "favicon", "avatar", "sprite", ".svg")
+
+def _scrape_all_lot_photos(listing_url: str, lot_title: Optional[str] = None) -> List[str]:
+    """Server-side re-fetch of a single lot's detail page to pull every content photo.
+    Best-effort: works for server-rendered pages, may return few/no results on
+    heavily JS-rendered sites. If lot_title is given, tries to scope the search to the
+    DOM container holding that title first (avoids sweeping up unrelated 'related
+    lots'/sidebar thumbnails elsewhere on the page); falls back to whole-page search."""
+    import requests as _requests
+    from bs4 import BeautifulSoup
+    from urllib.parse import urljoin
+
+    urls, seen = [], set()
+
+    def _collect(img_tags):
+        for img in img_tags:
+            src = img.get("src") or img.get("data-src") or img.get("data-lazy-src") or ""
+            if not src:
+                continue
+            if any(p in src.lower() for p in _IMG_SKIP_PATTERNS):
+                continue
+            full = urljoin(listing_url, src)
+            if full in seen:
+                continue
+            seen.add(full)
+            urls.append(full)
+
+    try:
+        resp = _requests.get(listing_url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        }, timeout=20)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        scoped = None
+        if lot_title:
+            title_node = soup.find(string=lambda t: t and lot_title.strip()[:40] in t)
+            if title_node:
+                container = title_node.parent
+                for _ in range(6):
+                    if container is None:
+                        break
+                    if len(container.find_all("img")) >= 1:
+                        scoped = container
+                    container = container.parent
+        if scoped is not None:
+            _collect(scoped.find_all("img"))
+        if not urls:
+            _collect(soup.find_all("img"))
+    except Exception as e:
+        print(f"lot photo re-scrape failed for {listing_url}: {e}")
+    return urls[:10]
 
 @app.post("/api/auction/capture/lots/{lot_id}/itemize")
 async def itemize_capture_lot(lot_id: str):
     lot_res = supabase.table("auction_lots").select("*").eq("id", lot_id).single().execute()
     if not lot_res.data:
         raise HTTPException(404, "Lot not found")
-    inserted = _itemize_lot(lot_res.data)
+    inserted = _itemize_lot_deep(lot_res.data)
     return {"lot_id": lot_id, "items": inserted}
+
+@app.post("/api/auction/capture/lots/{lot_id}/flag-as-lot")
+async def flag_capture_lot_as_bulk(lot_id: str):
+    """Self-serve 'this is actually a mixed lot' action: re-scrapes the listing page
+    for all photos, re-hosts them, then runs the deep per-photo itemization."""
+    lot_res = supabase.table("auction_lots").select("*").eq("id", lot_id).single().execute()
+    if not lot_res.data:
+        raise HTTPException(404, "Lot not found")
+    lot = lot_res.data
+
+    if not lot.get("listing_url"):
+        raise HTTPException(400, "Lot has no listing_url to re-scrape photos from")
+
+    existing_urls = lot.get("photo_urls") or []
+    found_urls = _scrape_all_lot_photos(lot["listing_url"], lot.get("title"))
+
+    # Sanity check: on JS-rendered sites (confirmed on Roller Auctions) the static HTML
+    # doesn't contain the real photo gallery at all, so a "successful" scrape can still
+    # just be page icons/badges near the title. A believable single lot rarely has more
+    # than ~6 real photos — if we got more than that, trust the re-scrape less than the
+    # photo we already know is real (captured live during the initial pass).
+    if not found_urls:
+        found_urls = existing_urls
+    elif len(found_urls) > 6:
+        print(f"flag-as-lot: scrape returned {len(found_urls)} images for {lot['listing_url']} — "
+              f"looks unreliable (likely a JS-rendered gallery not present in static HTML), "
+              f"falling back to the {len(existing_urls)} already-known photo(s)")
+        found_urls = existing_urls or found_urls[:1]
+
+    stored_urls = []
+    for i, url in enumerate(found_urls):
+        stored = _download_and_store_lot_photo(url, lot["session_id"], lot.get("lot_number") or "lot", i)
+        stored_urls.append(stored or url)
+
+    supabase.table("auction_lots").update({
+        "photo_urls": stored_urls,
+        "is_bulk_lot": True,
+    }).eq("id", lot_id).execute()
+    lot["photo_urls"] = stored_urls
+
+    inserted = _itemize_lot_deep(lot)
+    lot["items"] = inserted
+    lot["itemized"] = True
+    lot["is_bulk_lot"] = True
+    return lot
 
 @app.post("/api/auction/capture/sessions/{session_id}/itemize-all")
 async def itemize_all_capture_lots(session_id: str):
@@ -4620,7 +4752,7 @@ async def itemize_all_capture_lots(session_id: str):
     results = []
     for lot in lots_res.data:
         try:
-            items = _itemize_lot(lot)
+            items = _itemize_lot_deep(lot)
             results.append({"lot_id": lot["id"], "lot_number": lot.get("lot_number"), "status": "ok", "item_count": len(items)})
         except Exception as e:
             results.append({"lot_id": lot["id"], "lot_number": lot.get("lot_number"), "status": "error", "error": str(e)})
