@@ -4476,8 +4476,7 @@ class AuctionLotCreate(BaseModel):
     photo_urls: List[str] = []  # external URLs found while browsing; server re-hosts them
     is_bulk_lot: bool = False  # False (default): single item, no AI call, item = title. True: deep multi-photo itemize.
 
-@app.post("/api/auction/capture/lots")
-async def create_capture_lot(body: AuctionLotCreate):
+def _create_one_lot(body: AuctionLotCreate) -> dict:
     stored_urls = []
     for i, url in enumerate(body.photo_urls):
         stored = _download_and_store_lot_photo(url, body.session_id, body.lot_number or "lot", i)
@@ -4512,6 +4511,47 @@ async def create_capture_lot(body: AuctionLotCreate):
         lot["items"] = ins.data
 
     return lot
+
+@app.post("/api/auction/capture/lots")
+async def create_capture_lot(body: AuctionLotCreate):
+    return _create_one_lot(body)
+
+class AuctionLotBulkItem(BaseModel):
+    lot_number: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    listing_url: Optional[str] = None
+    current_bid: Optional[float] = None
+    photo_urls: List[str] = []
+    is_bulk_lot: bool = False
+
+class AuctionLotBulkCreate(BaseModel):
+    session_id: str
+    lots: List[AuctionLotBulkItem]
+
+@app.post("/api/auction/capture/lots/bulk")
+async def create_capture_lots_bulk(body: AuctionLotBulkCreate):
+    """Saves many lots in parallel (photo download + Storage upload is network-bound,
+    so this is the actual bottleneck — worth parallelizing across a small thread pool
+    rather than doing it one lot at a time over N sequential round trips)."""
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    lot_bodies = [AuctionLotCreate(session_id=body.session_id, **item.model_dump()) for item in body.lots]
+
+    loop = asyncio.get_event_loop()
+    executor = ThreadPoolExecutor(max_workers=6)
+
+    async def run_one(lot_body):
+        try:
+            lot = await loop.run_in_executor(executor, _create_one_lot, lot_body)
+            return {"status": "ok", "lot_number": lot_body.lot_number, "lot_id": lot["id"]}
+        except Exception as e:
+            return {"status": "error", "lot_number": lot_body.lot_number, "error": str(e)}
+
+    results = await asyncio.gather(*[run_one(lb) for lb in lot_bodies])
+    ok = sum(1 for r in results if r["status"] == "ok")
+    return {"session_id": body.session_id, "total": len(lot_bodies), "ok": ok, "errors": len(lot_bodies) - ok, "results": results}
 
 @app.get("/api/auction/capture/sessions/{session_id}/lots")
 async def list_capture_lots(session_id: str):
