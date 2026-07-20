@@ -4758,6 +4758,131 @@ async def itemize_all_capture_lots(session_id: str):
             results.append({"lot_id": lot["id"], "lot_number": lot.get("lot_number"), "status": "error", "error": str(e)})
     return {"session_id": session_id, "results": results}
 
+# ── API: AUCTION LOT PRICING METRICS (independent, per-column, opt-in) ── #
+
+METRIC_PROMPTS = {
+    "resale_value": {
+        "instructions": """Estimate the realistic USED RESALE VALUE range (low-high, in USD) if this were
+resold on eBay/marketplaces. Search the web for real comparable sold/active listings and base your
+estimate on them — do not guess without searching. If items are unverified/claimed-only (low
+confidence in the itemization), factor that uncertainty into a wider range.""",
+        "schema": '{"value_low": number, "value_high": number, "notes": "brief reasoning citing what you found"}',
+    },
+    "liquidity": {
+        "instructions": """Rate how easily and quickly this could be resold: "high" (common demand,
+many buyers, sells within days), "medium" (resells within a few weeks), or "low" (niche/specialized,
+may take months or require a specific buyer). Base this on how common the item(s) are and how many
+active/sold listings you find when searching.""",
+        "schema": '{"rating": "high"|"medium"|"low", "notes": "brief reasoning"}',
+    },
+    "weight": {
+        "instructions": """Estimate the combined physical shipping weight in pounds. Use known specs
+for identified items where possible (search if needed); otherwise give a reasonable estimate based on
+item type and size. This matters for whether resale requires freight/local pickup vs. easy parcel
+shipping.""",
+        "schema": '{"weight_lbs": number, "notes": "brief reasoning, note if freight/pickup likely required"}',
+    },
+    "max_bid": {
+        "instructions": """Determine the maximum price a reseller should pay at this auction to still
+make a reasonable profit margin after resale fees, shipping, and time invested. Search for real resale
+value first, then work backward with a sensible margin (bigger margin for slower/riskier items, smaller
+for fast-moving common items).""",
+        "schema": '{"max_bid": number, "notes": "brief reasoning showing the math"}',
+    },
+}
+
+def _compute_metric_for_lot(lot: dict, items: list, metric: str) -> dict:
+    from google import genai
+    from google.genai import types
+    import json, re
+    from json_repair import repair_json
+
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    if not gemini_key:
+        raise HTTPException(400, "GEMINI_API_KEY not set")
+
+    spec = METRIC_PROMPTS[metric]
+    items_desc = "\n".join(
+        f"- {it.get('item_name','?')} (qty {it.get('quantity','?')}, confidence {it.get('confidence','?')}): {it.get('item_description','')}"
+        for it in items
+    ) or f"(not itemized in detail — use the lot title/description) {lot.get('title','')}"
+
+    prompt = f"""You are pricing a single auction lot for a professional reseller.
+
+Lot title: {lot.get('title') or '(no title)'}
+Lot description: {lot.get('description') or '(no description)'}
+Current auction bid: {lot.get('current_bid')}
+
+Itemized contents:
+{items_desc}
+
+TASK: {spec['instructions']}
+
+Return ONLY a raw JSON object, no markdown, no backticks:
+{spec['schema']}"""
+
+    client = genai.Client(api_key=gemini_key)
+    resp = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=[prompt],
+        config=types.GenerateContentConfig(
+            tools=[types.Tool(google_search=types.GoogleSearch())],
+            max_output_tokens=1500,
+        ),
+    )
+    raw = (resp.text or "").strip()
+    raw = re.sub(r"^```[a-z]*\n?", "", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\n?```$", "", raw).strip()
+    start, end = raw.find("{"), raw.rfind("}") + 1
+    if start >= 0 and end > start:
+        raw = raw[start:end]
+    try:
+        data = json.loads(raw) if raw else {}
+    except Exception:
+        data = json.loads(repair_json(raw))
+    return data
+
+class ComputeMetricRequest(BaseModel):
+    metric: str  # "resale_value" | "liquidity" | "weight" | "max_bid"
+    lot_ids: Optional[List[str]] = None  # None/omitted = all lots in the session
+
+@app.post("/api/auction/capture/sessions/{session_id}/compute-metric")
+async def compute_metric_for_session(session_id: str, body: ComputeMetricRequest):
+    if body.metric not in METRIC_PROMPTS:
+        raise HTTPException(400, f"metric must be one of {list(METRIC_PROMPTS.keys())}")
+
+    q = supabase.table("auction_lots").select("*").eq("session_id", session_id)
+    if body.lot_ids:
+        q = q.in_("id", body.lot_ids)
+    lots = q.execute().data
+    if not lots:
+        return {"session_id": session_id, "metric": body.metric, "results": []}
+
+    lot_ids = [l["id"] for l in lots]
+    items_res = supabase.table("auction_lot_items").select("*").in_("lot_id", lot_ids).execute()
+    items_by_lot = {}
+    for it in items_res.data:
+        items_by_lot.setdefault(it["lot_id"], []).append(it)
+
+    results = []
+    for lot in lots:
+        try:
+            data = _compute_metric_for_lot(lot, items_by_lot.get(lot["id"], []), body.metric)
+            if body.metric == "resale_value":
+                patch = {"resale_value_low": data.get("value_low"), "resale_value_high": data.get("value_high"), "resale_value_notes": data.get("notes")}
+            elif body.metric == "liquidity":
+                patch = {"liquidity_rating": data.get("rating"), "liquidity_notes": data.get("notes")}
+            elif body.metric == "weight":
+                patch = {"weight_lbs": data.get("weight_lbs"), "weight_notes": data.get("notes")}
+            elif body.metric == "max_bid":
+                patch = {"max_bid": data.get("max_bid"), "max_bid_notes": data.get("notes")}
+            supabase.table("auction_lots").update(patch).eq("id", lot["id"]).execute()
+            results.append({"lot_id": lot["id"], "lot_number": lot.get("lot_number"), "status": "ok", **patch})
+        except Exception as e:
+            results.append({"lot_id": lot["id"], "lot_number": lot.get("lot_number"), "status": "error", "error": str(e)})
+
+    return {"session_id": session_id, "metric": body.metric, "results": results}
+
 
 # ── EBAY OAUTH ────────────────────────────────────────────────── #
 

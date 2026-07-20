@@ -2119,37 +2119,87 @@ async function loadAuctionSessions() {
   } catch(e) { toast('Failed to load capture sessions', 'error'); }
 }
 
+let auctionLotsCache = [];
+
 async function loadAuctionItems(sessionId) {
   if (!sessionId) { document.getElementById('auction-list').innerHTML = ''; return; }
   activeSession = sessionId;
   try {
     const lots = await api('GET', `/api/auction/capture/sessions/${sessionId}/lots`);
-    document.getElementById('auction-list').innerHTML = lots.length ? lots.map(lot => {
+    auctionLotsCache = lots;
+    if (!lots.length) {
+      document.getElementById('auction-list').innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px;">No lots captured yet for this session.</div>';
+      return;
+    }
+    const money = v => (v === null || v === undefined) ? '' : '$' + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
+    const rows = lots.map(lot => {
       const photos = lot.photo_urls || [];
-      const imgsHtml = photos.length
-        ? photos.map(u => `<img src="${u}" style="width:80px;height:80px;border-radius:10px;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none'"/>`).join('')
-        : `<div class="auction-img">🔨</div>`;
+      const imgHtml = photos.length
+        ? `<img src="${photos[0]}" style="width:56px;height:56px;border-radius:8px;object-fit:cover;" onerror="this.style.display='none'"/>`
+        : `<div class="auction-img" style="width:56px;height:56px;">🔨</div>`;
       const itemsHtml = lot.items && lot.items.length
-        ? `<div style="margin-top:8px;">` + lot.items.map(it => `<div style="font-size:12px;color:var(--text);padding:4px 0;border-top:1px solid var(--border);"><b>${it.item_name || 'Unknown item'}</b>${it.quantity ? ' × ' + it.quantity : ''}<div style="color:var(--muted);font-size:11px;">${it.item_description || ''}</div></div>`).join('') + `</div>`
+        ? lot.items.map(it => `<div><b>${it.item_name || 'Unknown item'}</b>${it.quantity ? ' × ' + it.quantity : ''}</div>`).join('')
         : '';
       const bulkBadge = lot.is_bulk_lot
-        ? `<span style="font-size:10px;font-weight:700;color:var(--amber);background:#f59e0b22;border-radius:6px;padding:2px 6px;margin-left:6px;">LOT</span>`
-        : `<button class="btn" style="font-size:11px;padding:3px 10px;margin-top:6px;" onclick="flagLotAsBulk('${lot.id}', this)">🏷️ Flag as LOT</button>`;
-      return `<div class="auction-card" style="align-items:flex-start;">
-        <div style="display:flex;gap:4px;flex-wrap:wrap;flex-shrink:0;">${imgsHtml}</div>
-        <div class="auction-info">
-          <div class="auction-title">Lot ${lot.lot_number || '?'}: ${lot.title || 'Unknown'}${lot.is_bulk_lot ? bulkBadge : ''}</div>
-          ${lot.current_bid != null ? `<div style="font-size:11px;color:var(--muted);">Current bid: $${parseFloat(lot.current_bid).toFixed(2)}</div>` : ''}
-          ${lot.description ? `<div style="font-size:11px;color:var(--muted);margin-top:4px;">${lot.description}</div>` : ''}
-          ${itemsHtml}
-          ${!lot.is_bulk_lot ? bulkBadge : ''}
-        </div>
-        <div class="auction-actions">
-          ${lot.listing_url ? `<a href="${lot.listing_url}" target="_blank" style="font-size:11px;color:var(--accent);font-weight:700;">View ↗</a>` : ''}
-        </div>
+        ? `<span style="font-size:10px;font-weight:700;color:var(--amber);background:#f59e0b22;border-radius:6px;padding:2px 6px;">LOT</span>`
+        : `<button class="btn" style="font-size:10px;padding:2px 8px;" onclick="flagLotAsBulk('${lot.id}', this)">🏷️ Flag as LOT</button>`;
+      return `<tr>
+        <td>${imgHtml}</td>
+        <td style="max-width:220px;">
+          <div style="font-weight:700;font-size:12px;color:var(--text);">Lot ${lot.lot_number || '?'}: ${lot.title || 'Unknown'}</div>
+          ${lot.current_bid != null ? `<div style="font-size:11px;color:var(--muted);">Bid: $${parseFloat(lot.current_bid).toFixed(2)}</div>` : ''}
+          ${lot.listing_url ? `<a href="${lot.listing_url}" target="_blank" style="font-size:10px;color:var(--accent);">View ↗</a>` : ''}
+          <div style="margin-top:4px;">${bulkBadge}</div>
+        </td>
+        <td style="max-width:200px;font-size:11px;color:var(--text);">${itemsHtml}</td>
+        <td style="font-size:11px;">${lot.resale_value_low != null ? `<b>${money(lot.resale_value_low)}–${money(lot.resale_value_high)}</b><div style="color:var(--muted);">${lot.resale_value_notes||''}</div>` : ''}</td>
+        <td style="font-size:11px;">${lot.liquidity_rating ? `<b style="text-transform:uppercase;">${lot.liquidity_rating}</b><div style="color:var(--muted);">${lot.liquidity_notes||''}</div>` : ''}</td>
+        <td style="font-size:11px;">${lot.weight_lbs != null ? `<b>${Number(lot.weight_lbs).toLocaleString()} lbs</b><div style="color:var(--muted);">${lot.weight_notes||''}</div>` : ''}</td>
+        <td style="font-size:11px;">${lot.max_bid != null ? `<b>${money(lot.max_bid)}</b><div style="color:var(--muted);">${lot.max_bid_notes||''}</div>` : ''}</td>
+      </tr>`;
+    }).join('');
+    document.getElementById('auction-list').innerHTML = `
+      <div style="overflow-x:auto;">
+        <table class="pdf-result-table" style="width:100%;">
+          <thead><tr>
+            <th></th>
+            <th>Lot</th>
+            <th>Itemization</th>
+            <th>Resale Value ${metricRunBtn('resale_value')}</th>
+            <th>Liquidity ${metricRunBtn('liquidity')}</th>
+            <th>Weight ${metricRunBtn('weight')}</th>
+            <th>Max Price to Pay ${metricRunBtn('max_bid')}</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
       </div>`;
-    }).join('') : '<div style="color:var(--muted);font-size:12px;padding:12px;">No lots captured yet for this session.</div>';
   } catch(e) { toast('Failed to load lots', 'error'); }
+}
+
+function metricRunBtn(metric) {
+  return `<button class="btn" style="font-size:10px;padding:2px 6px;margin-left:4px;" onclick="runMetric('${metric}')">▶</button>`;
+}
+
+async function runMetric(metric) {
+  if (!activeSession) { toast('Select a session first', 'error'); return; }
+  const labels = {resale_value: 'Resale Value', liquidity: 'Liquidity', weight: 'Weight', max_bid: 'Max Price to Pay'};
+  const answer = (prompt(`Run "${labels[metric]}" for which lots? Enter lot numbers separated by commas, or leave blank for ALL.`, '') || '').trim();
+  let lotIds = null;
+  if (answer) {
+    const wanted = new Set(answer.split(',').map(s => s.trim()).filter(Boolean));
+    lotIds = auctionLotsCache.filter(l => wanted.has(String(l.lot_number))).map(l => l.id);
+    if (!lotIds.length) { toast('No matching lot numbers found', 'error'); return; }
+  }
+  toast(`Running ${labels[metric]} for ${lotIds ? lotIds.length : 'all'} lot(s)...`);
+  try {
+    const body = lotIds ? {metric, lot_ids: lotIds} : {metric};
+    const r = await api('POST', `/api/auction/capture/sessions/${activeSession}/compute-metric`, body);
+    const errs = (r.results || []).filter(x => x.status === 'error');
+    toast(errs.length ? `Done with ${errs.length} error(s)` : 'Done', errs.length ? 'error' : 'success');
+    loadAuctionItems(activeSession);
+  } catch(e) {
+    toast('Failed: ' + e.message, 'error');
+  }
 }
 
 async function flagLotAsBulk(lotId, btn) {
