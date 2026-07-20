@@ -25,7 +25,16 @@
       "PowerShell(git status*)",
       "PowerShell(git diff*)",
       "PowerShell(git log*)",
-      "PowerShell($env:PATH += \";C:\\Program Files\\GitHub CLI\"; gh *)"
+      "PowerShell($env:PATH += \";C:\\Program Files\\GitHub CLI\"; gh *)",
+      "WebSearch",
+      "WebFetch",
+      "mcp__Claude_Browser__read_page",
+      "mcp__Claude_Browser__get_page_text",
+      "mcp__Claude_Browser__find",
+      "mcp__Claude_Browser__read_console_messages",
+      "mcp__Claude_Browser__read_network_requests",
+      "mcp__Claude_Browser__tabs_context",
+      "mcp__Claude_Browser__preview_logs"
     ],
     "deny": [
       "Bash(git push *--force*)",

@@ -4392,6 +4392,222 @@ Example: [{"lot":"5","title":"Oakton pH Meter","description":"Portable pH/ORP me
     return EventSourceResponse(generate())
 
 
+# ── API: AUCTION LOT CAPTURE (Claude-driven browse -> Supabase -> Gemini itemize) ── #
+
+class AuctionCaptureSessionCreate(BaseModel):
+    source_url: str
+    name: Optional[str] = None
+    photos_per_lot_mode: str = "main_only"  # "main_only" | "all"
+
+@app.post("/api/auction/capture/sessions")
+async def create_capture_session(request: Request, body: AuctionCaptureSessionCreate):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    if body.photos_per_lot_mode not in ("main_only", "all"):
+        raise HTTPException(400, "photos_per_lot_mode must be 'main_only' or 'all'")
+    row = {
+        "business_id": str(business_id),
+        "source_url": body.source_url,
+        "name": body.name or body.source_url,
+        "photos_per_lot_mode": body.photos_per_lot_mode,
+        "status": "in_progress",
+    }
+    res = supabase.table("auction_capture_sessions").insert(row).execute()
+    return res.data[0]
+
+@app.get("/api/auction/capture/sessions")
+async def list_capture_sessions(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    res = (supabase.table("auction_capture_sessions")
+           .select("*")
+           .eq("business_id", str(business_id))
+           .order("created_at", desc=True)
+           .limit(100)
+           .execute())
+    return res.data
+
+@app.patch("/api/auction/capture/sessions/{session_id}")
+async def update_capture_session(session_id: str, body: dict = Body(...)):
+    patch = {}
+    if "status" in body:
+        patch["status"] = body["status"]
+    if "name" in body:
+        patch["name"] = body["name"]
+    if not patch:
+        raise HTTPException(400, "Nothing to update")
+    res = supabase.table("auction_capture_sessions").update(patch).eq("id", session_id).execute()
+    if not res.data:
+        raise HTTPException(404, "Session not found")
+    return res.data[0]
+
+def _download_and_store_lot_photo(url: str, session_id: str, lot_number: str, idx: int) -> Optional[str]:
+    """Downloads an external lot photo and re-uploads it into Supabase Storage so it
+    survives even if the auction listing is later removed. Returns the public URL,
+    or None if the download/upload failed (caller should fall back to the original URL)."""
+    import requests as _requests, uuid as _uuid
+    try:
+        resp = _requests.get(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        }, timeout=20)
+        resp.raise_for_status()
+        content_type = resp.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+        ext = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}.get(content_type, "jpg")
+        safe_lot = "".join(c if c.isalnum() else "_" for c in (lot_number or "lot"))
+        path = f"{session_id}/{safe_lot}_{idx}_{_uuid.uuid4().hex[:8]}.{ext}"
+        supabase.storage.from_("auction-lot-photos").upload(
+            path=path,
+            file=resp.content,
+            file_options={"content-type": content_type, "upsert": "true"}
+        )
+        return supabase.storage.from_("auction-lot-photos").get_public_url(path)
+    except Exception as e:
+        print(f"Lot photo download/store failed for {url}: {e}")
+        return None
+
+class AuctionLotCreate(BaseModel):
+    session_id: str
+    lot_number: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    listing_url: Optional[str] = None
+    current_bid: Optional[float] = None
+    photo_urls: List[str] = []  # external URLs found while browsing; server re-hosts them
+
+@app.post("/api/auction/capture/lots")
+async def create_capture_lot(body: AuctionLotCreate):
+    stored_urls = []
+    for i, url in enumerate(body.photo_urls):
+        stored = _download_and_store_lot_photo(url, body.session_id, body.lot_number or "lot", i)
+        stored_urls.append(stored or url)  # fall back to the original URL if re-hosting failed
+
+    row = {
+        "session_id": body.session_id,
+        "lot_number": body.lot_number,
+        "title": body.title,
+        "description": body.description,
+        "listing_url": body.listing_url,
+        "current_bid": body.current_bid,
+        "photo_urls": stored_urls,
+        "itemized": False,
+    }
+    res = supabase.table("auction_lots").insert(row).execute()
+    return res.data[0]
+
+@app.get("/api/auction/capture/sessions/{session_id}/lots")
+async def list_capture_lots(session_id: str):
+    lots_res = (supabase.table("auction_lots")
+                .select("*")
+                .eq("session_id", session_id)
+                .order("created_at")
+                .execute())
+    lots = lots_res.data
+    if not lots:
+        return []
+    lot_ids = [l["id"] for l in lots]
+    items_res = (supabase.table("auction_lot_items")
+                 .select("*")
+                 .in_("lot_id", lot_ids)
+                 .execute())
+    items_by_lot = {}
+    for it in items_res.data:
+        items_by_lot.setdefault(it["lot_id"], []).append(it)
+    for lot in lots:
+        lot["items"] = items_by_lot.get(lot["id"], [])
+    return lots
+
+ITEMIZE_PROMPT = """You are cataloguing the contents of a single auction lot for a resale buyer.
+
+Lot title: {title}
+Lot description: {description}
+
+Look at the attached photo(s) of this lot AND read the title/description above. Identify EVERY
+distinct item present. Rules:
+- If the lot is clearly one single item, return exactly one entry for it.
+- If the lot is a mixed/bulk lot (shelf, pallet, box, "assorted"), enumerate each distinct item or
+  item group you can actually see or that is explicitly named in the title/description. Do not
+  invent items that aren't shown or named.
+- If you can read a specific brand + model/part number, put it in item_name. If you cannot
+  confidently identify the exact item, describe it generically in item_name (e.g. "unlabeled steel
+  bracket") and set confidence to "low" — do NOT guess a specific brand/model you can't actually
+  read, and do NOT blend two different products into one invented name.
+- If a photo shows only a closed box/case/container and the title/description claims specific
+  contents you cannot see, still list the claimed contents as one entry but set confidence to
+  "low" and note in item_description that contents are unverified from the photo.
+- quantity: a short string like "1", "4", "unknown".
+
+Return ONLY a raw JSON array, no markdown, no backticks:
+[{{"item_name": "...", "item_description": "...", "quantity": "...", "confidence": "high"|"low"}}]
+If you truly cannot identify anything, return []."""
+
+@app.post("/api/auction/capture/lots/{lot_id}/itemize")
+async def itemize_capture_lot(lot_id: str):
+    import json, re
+    from json_repair import repair_json
+    import google.generativeai as genai
+    import requests as _requests
+
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    if not gemini_key:
+        raise HTTPException(400, "GEMINI_API_KEY not set")
+
+    lot_res = supabase.table("auction_lots").select("*").eq("id", lot_id).single().execute()
+    if not lot_res.data:
+        raise HTTPException(404, "Lot not found")
+    lot = lot_res.data
+
+    genai.configure(api_key=gemini_key)
+    model = genai.GenerativeModel("gemini-2.5-flash")
+
+    prompt = ITEMIZE_PROMPT.format(title=lot.get("title") or "(no title)",
+                                    description=lot.get("description") or "(no description)")
+    parts = [prompt]
+    for url in (lot.get("photo_urls") or []):
+        try:
+            img = _requests.get(url, timeout=20)
+            img.raise_for_status()
+            ctype = img.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+            if ctype not in ("image/jpeg", "image/png", "image/webp"):
+                ctype = "image/jpeg"
+            parts.append({"mime_type": ctype, "data": img.content})
+        except Exception as e:
+            print(f"itemize: could not fetch photo {url}: {e}")
+
+    try:
+        response = model.generate_content(parts, generation_config={"max_output_tokens": 4000})
+        raw = (response.text or "").strip()
+        raw = re.sub(r"^```[a-z]*\n?", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"\n?```$", "", raw).strip()
+        start, end = raw.find("["), raw.rfind("]") + 1
+        if start >= 0 and end > start:
+            raw = raw[start:end]
+        try:
+            items = json.loads(raw) if raw else []
+        except Exception:
+            items = json.loads(repair_json(raw))
+    except Exception as e:
+        raise HTTPException(500, f"Gemini itemize error: {e}")
+
+    supabase.table("auction_lot_items").delete().eq("lot_id", lot_id).execute()
+    inserted = []
+    for it in items:
+        row = {
+            "lot_id": lot_id,
+            "item_name": (it.get("item_name") or "")[:300],
+            "item_description": (it.get("item_description") or "")[:1000],
+            "quantity": str(it.get("quantity") or "")[:50],
+            "confidence": it.get("confidence") if it.get("confidence") in ("high", "low") else "low",
+        }
+        ins = supabase.table("auction_lot_items").insert(row).execute()
+        inserted.append(ins.data[0])
+
+    supabase.table("auction_lots").update({"itemized": True}).eq("id", lot_id).execute()
+    return {"lot_id": lot_id, "items": inserted}
+
+
 # ── EBAY OAUTH ────────────────────────────────────────────────── #
 
 @app.get("/api/ebay/oauth/start")

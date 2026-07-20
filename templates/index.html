@@ -499,26 +499,30 @@ select.field-input { background: #fff; color: #0f172a; }
         </div>
       </div>
     </div>
-    <div style="border-top:1px solid var(--border);padding-top:16px;margin-bottom:10px;font-size:14px;font-weight:700;color:var(--text);">🔗 URL Scanner</div>
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
-      <input type="url" id="auction-url-input" class="field-input" style="flex:1;min-width:200px;" placeholder="https://www.bidspotter.com/..."/>
-      <button class="btn btn-primary" onclick="startAuctionScan()">Scan URL</button>
+    <div style="border-top:1px solid var(--border);padding-top:16px;margin-bottom:10px;font-size:14px;font-weight:700;color:var(--text);">🔨 Live Lot Capture</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">Paste an auction catalog or watchlist URL, set how many photos per lot to save, then ask Claude in chat to run the capture for this session.</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+      <input type="url" id="capture-url-input" class="field-input" style="flex:1;min-width:200px;" placeholder="https://bid.rollerauction.com/account/watchlist"/>
     </div>
-    <div id="auction-scan-progress" style="display:none;margin-bottom:10px;">
-      <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;"><div id="auction-scan-bar" style="height:100%;background:var(--amber);width:0%;transition:width 2s;"></div></div>
-      <div id="auction-scan-text" style="font-size:12px;color:var(--muted);margin-top:4px;text-align:center;">Scanning...</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+      <input type="text" id="capture-name-input" class="field-input" style="flex:1;min-width:160px;" placeholder="Session name (optional)"/>
+      <select id="capture-photos-mode" class="field-input" style="min-width:170px;">
+        <option value="main_only">Main photo only</option>
+        <option value="all">All photos per lot</option>
+      </select>
+      <button class="btn btn-primary" onclick="startCaptureSession()">Create Session</button>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
       <select id="auction-session-select" class="field-input" style="flex:1;min-width:200px;" onchange="loadAuctionItems(this.value)">
-        <option value="">Select a scan...</option>
+        <option value="">Select a capture session...</option>
       </select>
-      <button class="btn" onclick="archiveAuctionSession()">📦 Archive</button>
+      <button class="btn" onclick="itemizeAllLots()">🧠 Itemize All</button>
     </div>
     <div id="auction-list"></div>
     <div class="empty" id="auction-empty" style="display:none;">
       <div class="empty-icon">🔨</div>
-      <div class="empty-title">No auction scans</div>
-      <div class="empty-sub">Use the web dashboard to scan auction URLs</div>
+      <div class="empty-title">No capture sessions yet</div>
+      <div class="empty-sub">Create a session above, then ask Claude to capture it</div>
     </div>
   </div>
 
@@ -1659,27 +1663,21 @@ async function deleteItem(id) {
   } catch(e) { toast('Delete failed', 'error'); }
 }
 
-async function startAuctionScan() {
-  const url = document.getElementById('auction-url-input').value.trim();
+async function startCaptureSession() {
+  const url = document.getElementById('capture-url-input').value.trim();
   if (!url) { toast('Enter an auction URL first', 'error'); return; }
-  const prog = document.getElementById('auction-scan-progress');
-  const bar  = document.getElementById('auction-scan-bar');
-  const txt  = document.getElementById('auction-scan-text');
-  prog.style.display = 'block';
-  bar.style.width = '0%';
-  txt.textContent = 'Starting scan...';
-  setTimeout(() => { bar.style.width = '60%'; txt.textContent = 'Scraping auction page...'; }, 300);
+  const name = document.getElementById('capture-name-input').value.trim();
+  const mode = document.getElementById('capture-photos-mode').value;
   try {
-    const r = await api('POST', '/api/auction/scan', {url});
-    bar.style.width = '100%';
-    txt.textContent = 'Found ' + r.count + ' items. Researching values in background...';
-    setTimeout(() => { prog.style.display = 'none'; }, 3000);
-    document.getElementById('auction-url-input').value = '';
+    const r = await api('POST', '/api/auction/capture/sessions', {source_url: url, name: name || null, photos_per_lot_mode: mode});
+    document.getElementById('capture-url-input').value = '';
+    document.getElementById('capture-name-input').value = '';
+    toast('Session created — ask Claude in chat to capture it');
     await loadAuctionSessions();
-    toast('Scanned ' + r.count + ' items');
+    document.getElementById('auction-session-select').value = r.id;
+    loadAuctionItems(r.id);
   } catch(e) {
-    prog.style.display = 'none';
-    toast('Scan failed: ' + e.message, 'error');
+    toast('Failed to create session: ' + e.message, 'error');
   }
 }
 
@@ -2105,85 +2103,76 @@ function endUploadBatch() {
   upBatchId = null; upGroupId = null; upPhotos = []; upItems = [];
 }
 
-// ── AUCTION ────────────────────────────────────────────────────
+// ── AUCTION CAPTURE ────────────────────────────────────────────
 async function loadAuctionSessions() {
   try {
-    auctionSessions = await api('GET', '/api/auction/sessions');
+    auctionSessions = await api('GET', '/api/auction/capture/sessions');
     const sel = document.getElementById('auction-session-select');
-    sel.innerHTML = '<option value="">Select a scan...</option>' +
+    sel.innerHTML = '<option value="">Select a capture session...</option>' +
       auctionSessions.map(s => {
-        const archived = s.status === 'archived' ? ' [Archived]' : '';
-        return `<option value="${s.session_id}">${archived}${s.label || 'Scan'} · ${s.item_count || 0} items · ${(s.created_at||'').slice(0,10)}</option>`;
+        const modeLabel = s.photos_per_lot_mode === 'all' ? 'all photos' : 'main photo';
+        return `<option value="${s.id}">${s.name || 'Untitled'} · ${modeLabel} · ${(s.created_at||'').slice(0,10)}</option>`;
       }).join('');
     document.getElementById('auction-empty').style.display = auctionSessions.length ? 'none' : 'block';
     if (auctionSessions.length) {
-      sel.value = auctionSessions[0].session_id;
-      loadAuctionItems(auctionSessions[0].session_id);
+      sel.value = auctionSessions[0].id;
+      loadAuctionItems(auctionSessions[0].id);
+    } else {
+      document.getElementById('auction-list').innerHTML = '';
     }
-  } catch(e) { toast('Failed to load auctions', 'error'); }
+  } catch(e) { toast('Failed to load capture sessions', 'error'); }
 }
 
 async function loadAuctionItems(sessionId) {
   if (!sessionId) { document.getElementById('auction-list').innerHTML = ''; return; }
   activeSession = sessionId;
   try {
-    const items = await api('GET', `/api/auction/items/${sessionId}`);
-    document.getElementById('auction-list').innerHTML = items.map(item => {
-      const curPrice   = parseFloat(item.current_price || 0);
-      const valUsedLow = parseFloat(item.value_used_low || 0);
-      const valUsedHi  = parseFloat(item.value_used_high || 0);
-      const valNewLow  = parseFloat(item.value_new_low || 0);
-      const valNewHi   = parseFloat(item.value_new_high || 0);
-      const status     = item.value_status || 'pending';
-      const fav        = item.favorited;
-      const isComp     = item.value_source === 'gemini_comparable';
-      const margin     = valUsedHi > 0 ? valUsedHi - curPrice : 0;
-      const marginCol  = margin > 0 ? '#16a34a' : '#dc2626';
-      const imgHtml    = item.image_url
-        ? `<img src="${item.image_url}" style="width:80px;height:80px;border-radius:10px;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none'"/>`
+    const lots = await api('GET', `/api/auction/capture/sessions/${sessionId}/lots`);
+    document.getElementById('auction-list').innerHTML = lots.length ? lots.map(lot => {
+      const photos = lot.photo_urls || [];
+      const imgsHtml = photos.length
+        ? photos.map(u => `<img src="${u}" style="width:80px;height:80px;border-radius:10px;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none'"/>`).join('')
         : `<div class="auction-img">🔨</div>`;
-      const pricesHtml = status === 'done' && valUsedHi > 0
-        ? `<div class="auction-prices">
-            <div><div class="price-block-label">Current Bid</div><div class="price-block-val" style="color:#fff;">${curPrice > 0 ? '$'+curPrice.toFixed(2) : 'No bids'}</div>${item.time_left ? `<div style="font-size:10px;color:var(--muted);">⏱ ${item.time_left}</div>` : ''}</div>
-            <div class="price-divider"></div>
-            <div><div class="price-block-label">Est. Value (Used)</div><div class="price-block-val" style="color:${marginCol};">$${valUsedLow.toFixed(0)}–$${valUsedHi.toFixed(0)}</div><div style="font-size:10px;color:var(--muted);">New: $${valNewLow.toFixed(0)}–$${valNewHi.toFixed(0)}</div></div>
-            ${margin !== 0 ? `<div class="margin-badge" style="background:${marginCol}22;color:${marginCol};">${margin > 0 ? '↑' : '↓'} $${Math.abs(margin).toFixed(0)}</div>` : ''}
-          </div>
-          ${isComp ? `<div class="comparable-badge">⚠️ Comparable items — not exact match</div>` : ''}
-          ${item.ai_description ? `<div style="font-size:11px;color:var(--muted);margin-top:6px;">${item.ai_description}</div>` : ''}`
-        : status === 'pending'
-        ? `<div style="color:var(--muted);font-size:12px;margin-top:6px;">⏳ Researching value...</div>`
-        : `<div style="color:var(--muted);font-size:12px;margin-top:6px;">$${curPrice.toFixed(2)} · Value unavailable</div>`;
-
-      return `<div class="auction-card">
-        ${imgHtml}
+      const itemsHtml = lot.items && lot.items.length
+        ? `<div style="margin-top:8px;">` + lot.items.map(it => `<div style="font-size:12px;color:var(--text);padding:4px 0;border-top:1px solid var(--border);"><b>${it.item_name || 'Unknown item'}</b>${it.quantity ? ' × ' + it.quantity : ''}<div style="color:var(--muted);font-size:11px;">${it.item_description || ''}</div></div>`).join('') + `</div>`
+        : `<button class="btn" style="font-size:11px;padding:4px 12px;margin-top:6px;" onclick="itemizeLot('${lot.id}')">🧠 Itemize this lot</button>`;
+      return `<div class="auction-card" style="align-items:flex-start;">
+        <div style="display:flex;gap:4px;flex-wrap:wrap;flex-shrink:0;">${imgsHtml}</div>
         <div class="auction-info">
-          <div class="auction-title">${item.title || 'Unknown'}</div>
-          ${pricesHtml}
+          <div class="auction-title">Lot ${lot.lot_number || '?'}: ${lot.title || 'Unknown'}</div>
+          ${lot.current_bid != null ? `<div style="font-size:11px;color:var(--muted);">Current bid: $${parseFloat(lot.current_bid).toFixed(2)}</div>` : ''}
+          ${lot.description ? `<div style="font-size:11px;color:var(--muted);margin-top:4px;">${lot.description}</div>` : ''}
+          ${itemsHtml}
         </div>
         <div class="auction-actions">
-          <button class="fav-btn" onclick="toggleFav('${item.id}', this)">${fav ? '❤️' : '🤍'}</button>
-          ${item.listing_url ? `<a href="${item.listing_url}" target="_blank" style="font-size:11px;color:var(--accent);font-weight:700;">View ↗</a>` : ''}
+          ${lot.listing_url ? `<a href="${lot.listing_url}" target="_blank" style="font-size:11px;color:var(--accent);font-weight:700;">View ↗</a>` : ''}
         </div>
       </div>`;
-    }).join('');
-  } catch(e) { toast('Failed to load auction items', 'error'); }
+    }).join('') : '<div style="color:var(--muted);font-size:12px;padding:12px;">No lots captured yet for this session.</div>';
+  } catch(e) { toast('Failed to load lots', 'error'); }
 }
 
-async function toggleFav(id, btn) {
+async function itemizeLot(lotId) {
   try {
-    const r = await api('PATCH', `/api/auction/items/${id}/favorite`);
-    btn.textContent = r.favorited ? '❤️' : '🤍';
-  } catch(e) { toast('Failed', 'error'); }
+    await api('POST', `/api/auction/capture/lots/${lotId}/itemize`);
+    toast('Lot itemized');
+    if (activeSession) loadAuctionItems(activeSession);
+  } catch(e) { toast('Itemize failed: ' + e.message, 'error'); }
 }
 
-async function archiveAuctionSession() {
-  if (!activeSession) return;
+async function itemizeAllLots() {
+  if (!activeSession) { toast('Select a session first', 'error'); return; }
   try {
-    await api('PATCH', `/api/auction/sessions/${activeSession}/archive`);
-    toast('Session archived');
-    loadAuctionSessions();
-  } catch(e) { toast('Failed', 'error'); }
+    const lots = await api('GET', `/api/auction/capture/sessions/${activeSession}/lots`);
+    const todo = lots.filter(l => !l.itemized);
+    if (!todo.length) { toast('All lots already itemized'); return; }
+    toast(`Itemizing ${todo.length} lot(s)...`);
+    for (const lot of todo) {
+      try { await api('POST', `/api/auction/capture/lots/${lot.id}/itemize`); } catch(e) {}
+    }
+    toast('Itemization complete');
+    loadAuctionItems(activeSession);
+  } catch(e) { toast('Failed: ' + e.message, 'error'); }
 }
 
 // ── SETTINGS ───────────────────────────────────────────────────
