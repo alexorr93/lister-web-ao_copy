@@ -2132,11 +2132,13 @@ let auctionLotsCache = [];
 
 async function loadAuctionItems(sessionId) {
   if (!sessionId) { document.getElementById('auction-list').innerHTML = ''; return; }
+  const isNewSession = activeSession !== sessionId;
   activeSession = sessionId;
   try {
     const lots = await api('GET', `/api/auction/capture/sessions/${sessionId}/lots`);
     auctionLotsCache = lots;
     renderAuctionTable();
+    if (isNewSession) resumeMetricJobIfAny();
   } catch(e) { toast('Failed to load lots', 'error'); }
 }
 
@@ -2194,79 +2196,84 @@ function metricRunBtn(metric) {
   return `<button class="btn" style="font-size:10px;padding:2px 6px;margin-left:4px;" onclick="runMetric('${metric}')">▶</button>`;
 }
 
+const METRIC_LABELS = {resale_value: 'Resale Value', liquidity: 'Liquidity', weight: 'Weight', max_bid: 'Max Price to Pay'};
+
 async function runMetric(metric) {
   if (!activeSession) { toast('Select a session first', 'error'); return; }
-  const labels = {resale_value: 'Resale Value', liquidity: 'Liquidity', weight: 'Weight', max_bid: 'Max Price to Pay'};
-  const answer = (prompt(`Run "${labels[metric]}" for which lots? Enter lot numbers separated by commas, or leave blank for ALL.`, '') || '').trim();
+  const answer = (prompt(`Run "${METRIC_LABELS[metric]}" for which lots? Enter lot numbers separated by commas, or leave blank for ALL.`, '') || '').trim();
   let lotIds = null;
   if (answer) {
     const wanted = new Set(answer.split(',').map(s => s.trim()).filter(Boolean));
     lotIds = auctionLotsCache.filter(l => wanted.has(String(l.lot_number))).map(l => l.id);
     if (!lotIds.length) { toast('No matching lot numbers found', 'error'); return; }
   }
+  try {
+    const body = lotIds ? {metric, lot_ids: lotIds} : {metric};
+    const r = await api('POST', `/api/auction/capture/sessions/${activeSession}/compute-metric`, body);
+    toast(`Started ${METRIC_LABELS[metric]} for ${r.total} lot(s) — runs in the background, safe to close this tab`);
+    localStorage.setItem(`auctionMetricJob_${activeSession}`, JSON.stringify({jobId: r.job_id, metric}));
+    pollMetricJob(r.job_id, metric);
+  } catch(e) {
+    toast('Failed to start: ' + e.message, 'error');
+  }
+}
 
+async function pollMetricJob(jobId, metric) {
   const progWrap = document.getElementById('metric-progress');
   const bar = document.getElementById('metric-progress-bar');
   const label = document.getElementById('metric-progress-label');
   const pct = document.getElementById('metric-progress-pct');
   progWrap.style.display = '';
-  bar.style.width = '0%';
-  pct.textContent = '0%';
-  label.textContent = `Starting ${labels[metric]}...`;
 
-  try {
-    const body = lotIds ? {metric, lot_ids: lotIds} : {metric};
-    const r = await fetch(`/api/auction/capture/sessions/${activeSession}/compute-metric`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
-    });
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      toast('Failed: ' + (err.detail || 'Unknown error'), 'error');
+  while (true) {
+    let job;
+    try {
+      job = await api('GET', `/api/auction/capture/metric-jobs/${jobId}`);
+    } catch(e) {
+      // Server likely restarted mid-job (in-memory tracker lost) — the work itself may
+      // still have partially completed and saved; stop polling and just refresh.
+      localStorage.removeItem(`auctionMetricJob_${activeSession}`);
       progWrap.style.display = 'none';
+      if (activeSession) loadAuctionItems(activeSession);
       return;
     }
-    const reader = r.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let okCount = 0, errCount = 0;
-
-    while (true) {
-      const {done, value} = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, {stream: true});
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        let msg;
-        try { msg = JSON.parse(line.slice(6)); } catch(e) { continue; }
-        if (msg.done) {
-          bar.style.width = '100%';
-          pct.textContent = '100%';
-          label.textContent = `Done — ${msg.ok} succeeded${msg.errors ? ', ' + msg.errors + ' failed' : ''}`;
-          setTimeout(() => { progWrap.style.display = 'none'; }, 1500);
-        } else {
-          const p = Math.round((msg.index / msg.total) * 100);
-          bar.style.width = p + '%';
-          pct.textContent = p + '%';
-          label.textContent = `Lot ${msg.lot_number || '?'} (${msg.index}/${msg.total}): ${(msg.title||'').slice(0,40)} — ${msg.status === 'ok' ? 'done' : 'failed'}`;
-          if (msg.status === 'ok') okCount++; else errCount++;
-          // Patch the cached lot in place and re-render just that row's worth of state
-          const lotIdx = auctionLotsCache.findIndex(l => l.id === msg.lot_id);
-          if (lotIdx >= 0) {
-            if (metric === 'resale_value') Object.assign(auctionLotsCache[lotIdx], {resale_value_low: msg.resale_value_low, resale_value_high: msg.resale_value_high, resale_value_notes: msg.resale_value_notes});
-            else if (metric === 'liquidity') Object.assign(auctionLotsCache[lotIdx], {liquidity_rating: msg.liquidity_rating, liquidity_notes: msg.liquidity_notes});
-            else if (metric === 'weight') Object.assign(auctionLotsCache[lotIdx], {weight_lbs: msg.weight_lbs, weight_notes: msg.weight_notes});
-            else if (metric === 'max_bid') Object.assign(auctionLotsCache[lotIdx], {max_bid: msg.max_bid, max_bid_notes: msg.max_bid_notes});
-            renderAuctionTable();
-          }
-        }
+    const p = job.total ? Math.round((job.processed / job.total) * 100) : 100;
+    bar.style.width = p + '%';
+    pct.textContent = p + '%';
+    if (job.last) {
+      label.textContent = `Lot ${job.last.lot_number || '?'} (${job.processed}/${job.total}): ${(job.last.title||'').slice(0,40)} — ${job.last.status === 'ok' ? 'done' : 'failed'}`;
+      const lotIdx = auctionLotsCache.findIndex(l => l.id === job.last.lot_id);
+      if (lotIdx >= 0 && job.last.status === 'ok') {
+        if (metric === 'resale_value') Object.assign(auctionLotsCache[lotIdx], {resale_value_low: job.last.resale_value_low, resale_value_high: job.last.resale_value_high, resale_value_notes: job.last.resale_value_notes});
+        else if (metric === 'liquidity') Object.assign(auctionLotsCache[lotIdx], {liquidity_rating: job.last.liquidity_rating, liquidity_notes: job.last.liquidity_notes});
+        else if (metric === 'weight') Object.assign(auctionLotsCache[lotIdx], {weight_lbs: job.last.weight_lbs, weight_notes: job.last.weight_notes});
+        else if (metric === 'max_bid') Object.assign(auctionLotsCache[lotIdx], {max_bid: job.last.max_bid, max_bid_notes: job.last.max_bid_notes});
+        renderAuctionTable();
       }
+    } else {
+      label.textContent = `Starting ${METRIC_LABELS[metric]}...`;
     }
-  } catch(e) {
-    toast('Failed: ' + e.message, 'error');
-    progWrap.style.display = 'none';
+    if (job.status === 'done') {
+      bar.style.width = '100%';
+      pct.textContent = '100%';
+      label.textContent = `Done — ${job.ok} succeeded${job.errors ? ', ' + job.errors + ' failed' : ''}`;
+      localStorage.removeItem(`auctionMetricJob_${activeSession}`);
+      setTimeout(() => { progWrap.style.display = 'none'; }, 1500);
+      if (activeSession) loadAuctionItems(activeSession); // final refresh to pick up any updates missed between polls
+      return;
+    }
+    await new Promise(res => setTimeout(res, 1500));
   }
+}
+
+function resumeMetricJobIfAny() {
+  if (!activeSession) return;
+  const raw = localStorage.getItem(`auctionMetricJob_${activeSession}`);
+  if (!raw) return;
+  try {
+    const {jobId, metric} = JSON.parse(raw);
+    pollMetricJob(jobId, metric);
+  } catch(e) { localStorage.removeItem(`auctionMetricJob_${activeSession}`); }
 }
 
 async function flagLotAsBulk(lotId, btn) {

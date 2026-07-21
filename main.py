@@ -4887,9 +4887,14 @@ class ComputeMetricRequest(BaseModel):
     metric: str  # "resale_value" | "liquidity" | "weight" | "max_bid"
     lot_ids: Optional[List[str]] = None  # None/omitted = all lots in the session
 
+_metric_jobs: dict = {}  # job_id -> progress state; single-process in-memory tracker, fine for this app's deploy shape
+
 @app.post("/api/auction/capture/sessions/{session_id}/compute-metric")
 async def compute_metric_for_session(session_id: str, body: ComputeMetricRequest):
-    import asyncio, json as _json
+    """Starts a background job and returns immediately — the actual Gemini loop keeps
+    running on the server independent of the client's connection, so closing the
+    browser tab/app does NOT stop it. Poll GET .../metric-jobs/{job_id} for progress."""
+    import asyncio, uuid as _uuid
 
     if body.metric not in METRIC_PROMPTS:
         raise HTTPException(400, f"metric must be one of {list(METRIC_PROMPTS.keys())}")
@@ -4899,51 +4904,61 @@ async def compute_metric_for_session(session_id: str, body: ComputeMetricRequest
         q = q.in_("id", body.lot_ids)
     lots = q.execute().data
 
-    async def generate():
+    job_id = _uuid.uuid4().hex
+    _metric_jobs[job_id] = {
+        "job_id": job_id, "session_id": session_id, "metric": body.metric,
+        "total": len(lots), "processed": 0, "ok": 0, "errors": 0,
+        "status": "running", "last": None,
+    }
+
+    async def run_job():
+        job = _metric_jobs[job_id]
         if not lots:
-            yield {"data": _json.dumps({"done": True, "total": 0, "ok": 0, "errors": 0})}
+            job["status"] = "done"
             return
+        try:
+            lot_ids = [l["id"] for l in lots]
+            items_res = supabase.table("auction_lot_items").select("*").in_("lot_id", lot_ids).execute()
+            items_by_lot = {}
+            for it in items_res.data:
+                items_by_lot.setdefault(it["lot_id"], []).append(it)
 
-        lot_ids = [l["id"] for l in lots]
-        items_res = supabase.table("auction_lot_items").select("*").in_("lot_id", lot_ids).execute()
-        items_by_lot = {}
-        for it in items_res.data:
-            items_by_lot.setdefault(it["lot_id"], []).append(it)
+            loop = asyncio.get_event_loop()
+            from concurrent.futures import ThreadPoolExecutor
+            executor = ThreadPoolExecutor(max_workers=1)
 
-        loop = asyncio.get_event_loop()
-        from concurrent.futures import ThreadPoolExecutor
-        executor = ThreadPoolExecutor(max_workers=1)
+            for lot in lots:
+                try:
+                    def call(l=lot, its=items_by_lot.get(lot["id"], [])):
+                        return _compute_metric_for_lot(l, its, body.metric)
+                    data = await loop.run_in_executor(executor, call)
+                    if body.metric == "resale_value":
+                        patch = {"resale_value_low": data.get("value_low"), "resale_value_high": data.get("value_high"), "resale_value_notes": data.get("notes")}
+                    elif body.metric == "liquidity":
+                        patch = {"liquidity_rating": data.get("rating"), "liquidity_notes": data.get("notes")}
+                    elif body.metric == "weight":
+                        patch = {"weight_lbs": data.get("weight_lbs"), "weight_notes": data.get("notes")}
+                    elif body.metric == "max_bid":
+                        patch = {"max_bid": data.get("max_bid"), "max_bid_notes": data.get("notes")}
+                    supabase.table("auction_lots").update(patch).eq("id", lot["id"]).execute()
+                    job["ok"] += 1
+                    job["last"] = {"lot_id": lot["id"], "lot_number": lot.get("lot_number"), "title": lot.get("title"), "status": "ok", **patch}
+                except Exception as e:
+                    job["errors"] += 1
+                    job["last"] = {"lot_id": lot["id"], "lot_number": lot.get("lot_number"), "title": lot.get("title"), "status": "error", "error": str(e)}
+                job["processed"] += 1
+        finally:
+            job["status"] = "done"
 
-        total = len(lots)
-        ok_count = 0
-        error_count = 0
-        for i, lot in enumerate(lots):
-            event = {"index": i + 1, "total": total, "lot_id": lot["id"], "lot_number": lot.get("lot_number"),
-                      "title": lot.get("title"), "metric": body.metric, "done": False}
-            try:
-                def call(l=lot, its=items_by_lot.get(lot["id"], [])):
-                    return _compute_metric_for_lot(l, its, body.metric)
-                data = await loop.run_in_executor(executor, call)
-                if body.metric == "resale_value":
-                    patch = {"resale_value_low": data.get("value_low"), "resale_value_high": data.get("value_high"), "resale_value_notes": data.get("notes")}
-                elif body.metric == "liquidity":
-                    patch = {"liquidity_rating": data.get("rating"), "liquidity_notes": data.get("notes")}
-                elif body.metric == "weight":
-                    patch = {"weight_lbs": data.get("weight_lbs"), "weight_notes": data.get("notes")}
-                elif body.metric == "max_bid":
-                    patch = {"max_bid": data.get("max_bid"), "max_bid_notes": data.get("notes")}
-                supabase.table("auction_lots").update(patch).eq("id", lot["id"]).execute()
-                ok_count += 1
-                event.update({"status": "ok", **patch})
-            except Exception as e:
-                error_count += 1
-                event.update({"status": "error", "error": str(e)})
-            yield {"data": _json.dumps(event, separators=(',', ':'))}
-            await asyncio.sleep(0.05)
+    asyncio.create_task(run_job())
+    return {"job_id": job_id, "total": len(lots)}
 
-        yield {"data": _json.dumps({"done": True, "total": total, "ok": ok_count, "errors": error_count})}
-
-    return EventSourceResponse(generate())
+@app.get("/api/auction/capture/metric-jobs/{job_id}")
+async def get_metric_job(job_id: str):
+    job = _metric_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found (server may have restarted)")
+    return job
 
 
 # ── EBAY OAUTH ────────────────────────────────────────────────── #
