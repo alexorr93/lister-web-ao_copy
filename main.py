@@ -7,7 +7,7 @@ import csv
 import io
 from datetime import datetime
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, HTTPException, UploadFile, File, Body, Response
+from fastapi import FastAPI, Request, HTTPException, UploadFile, File, Body, Response, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -4647,20 +4647,176 @@ class AuctionCaptureSessionCreate(BaseModel):
     name: Optional[str] = None
     capture_scope: Optional[str] = None  # free-text note for Claude, e.g. "pages 1-2" or "lots 300-1300", default = all
 
+# ── Auction-site auto-detection ──────────────────────────────────────────── #
+# New sites get their own `_fetch_<site>_lots(url, scope) -> list[dict]` function
+# (dict shape must match AuctionLotBulkItem) plus one line in SITE_SCRAPERS below.
+# Anything not recognized falls back to the manual "ask Claude" flow untouched.
+
+def _detect_auction_site(url: str) -> Optional[str]:
+    from urllib.parse import urlparse
+    host = urlparse(url).netloc.lower()
+    if "rollerauction.com" in host:
+        return "roller"
+    return None
+
+def _decode_graphql_crunch(data: list):
+    """Decodes a 'graphql-crunch' response: every value in the tree is interned
+    once into a flat array, and every integer anywhere in the tree (except
+    floats, which are real numeric values) is a back-reference to that array,
+    expanded recursively. The root of the whole tree is the LAST element."""
+    memo = {}
+    def expand(v):
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, int):
+            if v in memo:
+                return memo[v]
+            memo[v] = None
+            result = expand(data[v])
+            memo[v] = result
+            return result
+        if isinstance(v, list):
+            return [expand(x) for x in v]
+        if isinstance(v, dict):
+            return {k: expand(x) for k, x in v.items()}
+        return v
+    return expand(data[-1])
+
+_ROLLER_LOT_FIELDS = """
+  auction_lot_id
+  auction_id
+  quantity
+  lot_number
+  title
+  description
+  lot_location
+  start_time
+  end_time
+  winning_bid_amount
+  bid_count
+  required_bid
+  starting_bid
+  price
+  buy_it_now_active
+  buy_it_now_price
+  category { name }
+  primary_image { large medium }
+  image_count
+"""
+
+def _fetch_roller_lots(source_url: str, capture_scope: Optional[str]) -> list:
+    """Fetches lots for a Roller Auction (bid.rollerauction.com) listing directly
+    via their internal GraphQL API — no browser/Claude involvement needed. Page
+    number comes from capture_scope (e.g. "page 18"); defaults to page 1.
+    NOTE: the exact query/argument names below are reconstructed from a captured
+    browser request, not from official docs — if Roller's schema rejects this
+    (e.g. "Unknown argument"), the error message will name the bad field/arg
+    directly, making it a one-line fix rather than another DevTools session."""
+    import requests as _requests, re as _re
+
+    m = _re.search(r"/auctions/(\d+)", source_url)
+    if not m:
+        raise Exception(f"Could not find an auction ID in URL: {source_url}")
+    auction_id = m.group(1)
+
+    page = 1
+    if capture_scope:
+        pm = _re.search(r"page\s*(\d+)", capture_scope, _re.IGNORECASE)
+        if pm:
+            page = int(pm.group(1))
+
+    query = f"""
+    query LotList($auctionId: ID!, $page: Int, $perPage: Int) {{
+      auction(auction_id: $auctionId) {{
+        auction_id
+        lots(page: $page, per_page: $perPage) {{
+          total
+          lots {{
+{_ROLLER_LOT_FIELDS}
+          }}
+        }}
+      }}
+    }}
+    """
+    resp = _requests.post(
+        "https://bid.rollerauction.com/api",
+        json={
+            "operationName": "LotList",
+            "query": query,
+            "variables": {"auctionId": auction_id, "page": page, "perPage": 100},
+        },
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
+        timeout=30,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    if payload.get("errors"):
+        raise Exception(f"Roller GraphQL error: {payload['errors']}")
+
+    raw = payload.get("data")
+    decoded = _decode_graphql_crunch(raw) if isinstance(raw, list) else raw
+    auction = decoded.get("auction") if isinstance(decoded, dict) else None
+    lots = ((auction or {}).get("lots") or {}).get("lots") or []
+
+    out = []
+    for lot in lots:
+        img = lot.get("primary_image") or {}
+        price = lot.get("winning_bid_amount") or lot.get("price") or lot.get("required_bid") or lot.get("starting_bid")
+        out.append({
+            "lot_number": lot.get("lot_number"),
+            "title": lot.get("title"),
+            "description": lot.get("description"),
+            "listing_url": f"{source_url.split('/auctions/')[0]}/auctions/{auction_id}/lot/{lot.get('auction_lot_id')}",
+            "current_bid": float(price) if price not in (None, "") else None,
+            "photo_urls": [u for u in [img.get("large") or img.get("medium")] if u],
+            "is_bulk_lot": False,
+        })
+    return out
+
+SITE_SCRAPERS = {
+    "roller": _fetch_roller_lots,
+}
+
+def _run_auto_capture(session_id: str, source_url: str, capture_scope: Optional[str], site: str):
+    """Runs in the background right after session creation. Fetches lots via the
+    matching site scraper and saves them the same way the manual bulk-create
+    endpoint does, so this reuses the same photo re-hosting + itemization path."""
+    try:
+        scraper = SITE_SCRAPERS[site]
+        raw_lots = scraper(source_url, capture_scope)
+        lot_bodies = [AuctionLotCreate(session_id=session_id, **item) for item in raw_lots]
+        for lb in lot_bodies:
+            try:
+                _create_one_lot(lb)
+            except Exception as e:
+                print(f"[auto-capture] failed to save lot {lb.lot_number}: {e}")
+        supabase.table("auction_capture_sessions").update({"status": "done"}).eq("id", session_id).execute()
+    except Exception as e:
+        print(f"[auto-capture] session {session_id} failed: {e}")
+        supabase.table("auction_capture_sessions").update({"status": "auto_capture_failed", "capture_scope": f"{capture_scope or ''} (auto-capture error: {e})"}).eq("id", session_id).execute()
+
 @app.post("/api/auction/capture/sessions")
-async def create_capture_session(request: Request, body: AuctionCaptureSessionCreate):
+async def create_capture_session(request: Request, body: AuctionCaptureSessionCreate, background_tasks: BackgroundTasks):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
+    site = _detect_auction_site(body.source_url)
     row = {
         "business_id": str(business_id),
         "source_url": body.source_url,
         "name": body.name or body.source_url,
         "capture_scope": body.capture_scope or "all",
-        "status": "in_progress",
+        "status": "capturing" if site else "in_progress",
     }
     res = supabase.table("auction_capture_sessions").insert(row).execute()
-    return res.data[0]
+    session = res.data[0]
+    if site:
+        background_tasks.add_task(_run_auto_capture, session["id"], body.source_url, body.capture_scope, site)
+    return session
 
 @app.get("/api/auction/capture/sessions")
 async def list_capture_sessions(request: Request):
