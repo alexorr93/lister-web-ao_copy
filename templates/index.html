@@ -338,6 +338,7 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
       <button class="btn btn-primary" id="submit-ebay-btn" style="display:none" onclick="submitSelected()">⏰ Schedule to eBay</button>
       <button class="btn btn-primary" id="publish-now-btn" style="display:none;background:#ea580c;border-color:#ea580c;" onclick="submitSelectedNow()">⚡ Publish Immediately</button>
+      <button class="btn btn-primary" id="publish-now-v2-btn" style="display:none;background:#7c3aed;border-color:#7c3aed;" onclick="submitSelectedNowV2()" title="Uses the classic eBay API — SKU stays editable after publishing">🧪 Publish (v2) Immediately</button>
       <button class="btn btn-primary" id="submit-shopify-btn" style="display:none;background:#95bf47;border-color:#95bf47;" onclick="submitSelectedToShopify()">🛍️ Publish to Shopify</button>
       <button class="btn" id="archive-selected-btn" style="display:none;color:var(--red);border-color:#991b1b;" onclick="archiveSelected()">🗄️ Archive Selected</button>
       <div class="spacer"></div>
@@ -913,85 +914,6 @@ function selectLotSku(sku) {
   document.getElementById('lot-picker-overlay').classList.remove('open');
 }
 
-// Polls a just-submitted group until mantle-scanner finishes it into a listing, then
-// stamps the lot that was active when it was scanned onto that listing (same
-// ebay_sku = "{lot}-{listingId}" convention as the Dashboard's Lot SKU field). No-op
-// if no lot was active at scan time — that item just falls back to the existing
-// manual Lot SKU entry on the Dashboard, same as before this feature existed.
-//
-// The live setInterval below is only the FAST path, good while the tab stays open.
-// AI scanning can take a while, and this runs on phones — backgrounding the browser
-// (checking another app, screen lock, the tab getting reclaimed) can throttle or kill
-// a page's timers well before mantle-scanner finishes, silently dropping the
-// assignment with nothing left to retry. So every pending assignment is also written
-// to localStorage the moment scanning starts, and resolvePendingLotAssignments() below
-// re-checks every still-pending one on every page load / Dashboard visit — a durable
-// slow path that survives the tab dying mid-scan.
-const PENDING_LOT_KEY = 'lister_pending_lot_assignments';
-const PENDING_LOT_MAX_AGE_MS = 24 * 60 * 60 * 1000; // stop retrying after a day
-
-function getPendingLotAssignments() {
-  try { return JSON.parse(localStorage.getItem(PENDING_LOT_KEY) || '{}'); } catch(e) { return {}; }
-}
-function setPendingLotAssignment(groupId, lotSku) {
-  const m = getPendingLotAssignments();
-  m[groupId] = {lotSku: lotSku, ts: Date.now()};
-  localStorage.setItem(PENDING_LOT_KEY, JSON.stringify(m));
-}
-function clearPendingLotAssignment(groupId) {
-  const m = getPendingLotAssignments();
-  delete m[groupId];
-  localStorage.setItem(PENDING_LOT_KEY, JSON.stringify(m));
-}
-
-async function tryResolveLotAssignment(groupId, lotSku) {
-  const r = await fetch('/api/groups/' + groupId + '/listing', {credentials:'include'});
-  if (!r.ok) return false;
-  const d = await r.json();
-  if (!(d.listing && d.listing.status === 'scanned')) return false;
-  const id = d.listing.id;
-  await api('POST', '/api/listings/' + id + '/assign-lot', {lot_sku: lotSku});
-  return true;
-}
-
-// Slow-path sweep — safe to call anytime (page load, tab switch, periodic timer);
-// it's just a handful of idempotent GETs against already-pending groups.
-async function resolvePendingLotAssignments() {
-  const m = getPendingLotAssignments();
-  const entries = Object.entries(m);
-  if (!entries.length) return;
-  let changed = false;
-  for (const [groupId, info] of entries) {
-    if (Date.now() - (info.ts || 0) > PENDING_LOT_MAX_AGE_MS) { delete m[groupId]; changed = true; continue; }
-    try {
-      if (await tryResolveLotAssignment(groupId, info.lotSku)) { delete m[groupId]; changed = true; }
-    } catch(e) {}
-  }
-  if (changed) localStorage.setItem(PENDING_LOT_KEY, JSON.stringify(m));
-  if (typeof loadListings === 'function') loadListings();
-}
-
-function pollForListingAndAssignLot(groupId, lotSku, opts) {
-  opts = opts || {};
-  if (lotSku) setPendingLotAssignment(groupId, lotSku);
-  let pollCount = 0;
-  const poll = setInterval(async () => {
-    pollCount++;
-    if (pollCount > 40) { clearInterval(poll); return; } // slow-path sweep still owns retrying past this
-    try {
-      const r = await fetch('/api/groups/' + groupId + '/listing', {credentials:'include'});
-      if (!r.ok) return;
-      const d = await r.json();
-      if (d.listing && d.listing.status === 'scanned') {
-        clearInterval(poll);
-        const id = d.listing.id;
-        if (lotSku) { await api('POST', '/api/listings/' + id + '/assign-lot', {lot_sku: lotSku}); clearPendingLotAssignment(groupId); }
-        if (typeof opts.onDone === 'function') opts.onDone();
-      }
-    } catch(e) {}
-  }, 3000);
-}
-
 function fieldKey(id, field) { return id + '_' + field; }
 function fieldClassFor(id, field) {
   const key = fieldKey(id, field);
@@ -1027,7 +949,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.classList.add('active');
     document.getElementById('tab-' + tab).classList.add('active');
     activeTab = tab;
-    if (tab === 'intake') { loadListings(); resolvePendingLotAssignments(); }
+    if (tab === 'intake') { loadListings(); }
     if (tab === 'auction')   loadAuctionSessions();
     if (tab === 'settings')  loadSettings();
   });
@@ -1512,15 +1434,11 @@ function toggleSelect(id) {
 function selectAll()   { listings.forEach(l => selected.add(String(l.id))); renderTiles(); }
 function deselectAll() { selected.clear(); renderTiles(); }
 
-// Manual, on-demand replacement for the old "poll for 2 minutes after scan" auto-assign —
-// that poll gives up if a scan takes longer than 2 minutes (which it often does now), so
-// this button just applies the currently-active lot directly, whenever you're ready, to
-// whichever selected items (or all items, if nothing's selected) don't have one yet. First
-// resolves any items still tracked as pending from a recent scan (correct per-item lot,
-// same as the old poll would've done), then fills the current active lot into anything
-// still missing one.
+// Replaces the old scan-time auto-assign entirely (it polled for up to 2 minutes after
+// each scan and gave up if the scan took longer, which it now often does) — Lot SKU
+// assignment lives ONLY here now. Applies the currently-active lot to whichever selected
+// items (or all items, if nothing's selected) don't have one yet, whenever you click it.
 async function autofillLotSku() {
-  await resolvePendingLotAssignments();
   if (!activeLotSku) { toast('No active lot selected — pick one in Fast Scan/Upload first', 'error'); return; }
   const targets = selected.size ? listings.filter(l => selected.has(String(l.id))) : listings;
   const todo = targets.filter(l => !lotSkuFor(l));
@@ -1543,6 +1461,9 @@ function updateSubmitBtn() {
   const nowBtn = document.getElementById('publish-now-btn');
   nowBtn.style.display = selected.size > 0 ? 'inline-block' : 'none';
   nowBtn.textContent = `⚡ Publish ${selected.size} Immediately`;
+  const nowBtnV2 = document.getElementById('publish-now-v2-btn');
+  nowBtnV2.style.display = selected.size > 0 ? 'inline-block' : 'none';
+  nowBtnV2.textContent = `🧪 Publish ${selected.size} (v2)`;
   const shopBtn = document.getElementById('submit-shopify-btn');
   shopBtn.style.display = selected.size > 0 ? 'inline-block' : 'none';
   shopBtn.textContent = `🛍️ Publish ${selected.size} to Shopify`;
@@ -1666,6 +1587,30 @@ async function submitSelectedNow() {
   }
   hideBatchProgress();
   toast(`Published ${success} item(s) immediately${failed ? ', ' + failed + ' failed' : ''} ✓`);
+  selected.clear();
+  renderTiles();
+}
+
+async function submitSelectedNowV2() {
+  if (!selected.size) return;
+  const ids = Array.from(selected);
+  if (!validateLotSkusForPublish(ids)) return;
+  const ok = confirm(`Publish ${ids.length} item(s) LIVE to eBay immediately via the new system (v2)?\n\nUses the classic eBay API — SKU stays editable after publishing, unlike the original push.`);
+  if (!ok) return;
+  let success = 0, failed = 0;
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    showBatchProgress(i + 1, ids.length, 'Publishing to eBay (v2)');
+    try {
+      const r = await api('POST', `/api/listings/${id}/ebay-v2`, {mode: 'now'});
+      const l = listings.find(x => String(x.id) === id);
+      if (l) { l.ebay_status = r.status; l.ebay_item_id = r.item_id; l.ebay_sku = r.sku; }
+      success++;
+    } catch(e) { failed++; }
+    renderTiles();
+  }
+  hideBatchProgress();
+  toast(`Published ${success} item(s) via v2${failed ? ', ' + failed + ' failed' : ''} ✓`);
   selected.clear();
   renderTiles();
 }
@@ -2170,9 +2115,6 @@ async function submitUploadItem() {
     await fetch('/api/photos/upload', {method:'POST', body:fd});
   }
   await api('POST', '/api/groups/submit', {group_id:upGroupId, condition:upCondition, quantity:upQtyVal});
-  pollForListingAndAssignLot(groupForThis, lotForThis, {onDone: function() {
-    if (typeof loadListings === 'function') loadListings();
-  }});
   upItems.push({count: upPhotos.length, qty: upQtyVal});
   prog.style.display = 'none';
   toast(`✅ Item ${upItems.length} sent to scanner`);
@@ -2754,11 +2696,6 @@ async function runFastScanGroups(groups) {
       await api('POST', '/api/groups/submit', {group_id: gid, condition: fsCond, quantity: 1});
       el.dataset.gid = gid;
       el.innerHTML = fastScanQueueItemHtml(groupUrls[i], _existingCount+i+1, 'success');
-      pollForListingAndAssignLot(gid, lotForThis, {onDone: function() {
-        var statusDiv = el.querySelector('.fastscan-item-status');
-        if (statusDiv) { statusDiv.textContent = 'Complete'; statusDiv.style.color = '#4ade80'; }
-        if (typeof loadListings === 'function') loadListings();
-      }});
     } catch(e) {
       el.innerHTML = fastScanQueueItemHtml(groupUrls[i], _existingCount+i+1, 'fail');
     }
@@ -2819,7 +2756,6 @@ loadListings();
 initTileListeners();
 loadShippingPolicyOptions();
 loadLotSkus();
-resolvePendingLotAssignments(); // catch up any lot assignments left pending from a scan whose tab got backgrounded/killed
 
 // Allow linking directly to a tab from other pages, e.g. /?tab=upload
 (function() {
@@ -2832,7 +2768,7 @@ resolvePendingLotAssignments(); // catch up any lot assignments left pending fro
 })();
 
 // Auto-refresh Intake every 30s when on that tab
-setInterval(() => { if (activeTab === 'intake') { loadListings(); resolvePendingLotAssignments(); } }, 30000);
+setInterval(() => { if (activeTab === 'intake') { loadListings(); } }, 30000);
 setInterval(() => { if (activeTab === 'auction' && activeSession) loadAuctionItems(activeSession); }, 30000);
 
 async function rotatePhoto(dir) {

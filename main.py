@@ -490,11 +490,15 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
     return_policy        = settings.get("EBAY_RETURN_POLICY_ID", "")
     fulfillment_policy   = listing.get("ebay_fulfillment_policy_id") or settings.get("EBAY_FULFILLMENT_POLICY_ID", "")
     category_id          = listing.get("ebay_category_id") or settings.get("EBAY_DEFAULT_CATEGORY_ID", "")
+    location_zip        = settings.get("EBAY_LOCATION_ZIP", "")
+    location_country     = settings.get("EBAY_LOCATION_COUNTRY", "US")
 
     if not (payment_policy and return_policy and fulfillment_policy):
         raise Exception("Missing eBay business policy IDs — set these in Settings first")
     if not category_id:
         raise Exception("This item has no eBay category set")
+    if not location_zip:
+        raise Exception("Missing EBAY_LOCATION_ZIP — set this in Settings first")
 
     sku = listing.get("ebay_sku") or f"lister-{listing['id']}"
     title = (listing.get("title") or "Untitled item")[:80]
@@ -557,7 +561,8 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
         f'<StartPrice>{price:.2f}</StartPrice>'
         '<CategoryMappingAllowed>true</CategoryMappingAllowed>'
         f'<ConditionID>{condition_id}</ConditionID>'
-        '<Country>US</Country><Currency>USD</Currency>'
+        f'<Country>{_xesc(location_country)}</Country><Currency>USD</Currency>'
+        f'<PostalCode>{_xesc(location_zip)}</PostalCode>'
         '<DispatchTimeMax>3</DispatchTimeMax>'
         '<ListingDuration>GTC</ListingDuration>'
         '<ListingType>FixedPriceItem</ListingType>'
