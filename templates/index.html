@@ -2149,6 +2149,7 @@ function renderAuctionTable() {
     return;
   }
   const money = v => (v === null || v === undefined) ? '' : '$' + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
+  const searchQueryFor = lot => (lot.items && lot.items.length && lot.items[0].item_name) ? lot.items[0].item_name : (lot.title || '');
   const rows = lots.map(lot => {
     const photos = lot.photo_urls || [];
     const imgHtml = photos.length
@@ -2160,6 +2161,12 @@ function renderAuctionTable() {
     const bulkBadge = lot.is_bulk_lot
       ? `<span style="font-size:10px;font-weight:700;color:var(--amber);background:#f59e0b22;border-radius:6px;padding:2px 6px;">LOT</span>`
       : `<button class="btn" style="font-size:10px;padding:2px 8px;" onclick="flagLotAsBulk('${lot.id}', this)">🏷️ Flag as LOT</button>`;
+    const q = encodeURIComponent(searchQueryFor(lot));
+    const searchBtns = `<div style="display:flex;gap:4px;margin-top:6px;">
+      <a href="https://www.google.com/search?q=${q}" target="_blank" style="flex:1;text-align:center;font-size:10px;font-weight:700;padding:4px 0;border-radius:6px;background:#4285F4;color:#fff;text-decoration:none;">Google</a>
+      <a href="https://www.ebay.com/sch/i.html?_nkw=${q}" target="_blank" style="flex:1;text-align:center;font-size:10px;font-weight:700;padding:4px 0;border-radius:6px;background:#e53238;color:#fff;text-decoration:none;">eBay Active</a>
+      <a href="https://www.ebay.com/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1" target="_blank" style="flex:1;text-align:center;font-size:10px;font-weight:700;padding:4px 0;border-radius:6px;background:#2e8b57;color:#fff;text-decoration:none;">eBay Sold</a>
+    </div>`;
     return `<tr id="lot-row-${lot.id}">
       <td>${imgHtml}</td>
       <td style="max-width:220px;">
@@ -2167,12 +2174,17 @@ function renderAuctionTable() {
         ${lot.current_bid != null ? `<div style="font-size:11px;color:var(--muted);">Bid: $${parseFloat(lot.current_bid).toFixed(2)}</div>` : ''}
         ${lot.listing_url ? `<a href="${lot.listing_url}" target="_blank" style="font-size:10px;color:var(--accent);">View ↗</a>` : ''}
         <div style="margin-top:4px;">${bulkBadge}</div>
+        ${searchBtns}
       </td>
       <td style="max-width:200px;font-size:11px;color:var(--text);">${itemsHtml}</td>
       <td style="font-size:11px;">${lot.resale_value_low != null ? `<b>${money(lot.resale_value_low)}–${money(lot.resale_value_high)}</b><div style="color:var(--muted);">${lot.resale_value_notes||''}</div>` : ''}</td>
       <td style="font-size:11px;">${lot.liquidity_rating ? `<b style="text-transform:uppercase;">${lot.liquidity_rating}</b><div style="color:var(--muted);">${lot.liquidity_notes||''}</div>` : ''}</td>
       <td style="font-size:11px;">${lot.weight_lbs != null ? `<b>${Number(lot.weight_lbs).toLocaleString()} lbs</b><div style="color:var(--muted);">${lot.weight_notes||''}</div>` : ''}</td>
       <td style="font-size:11px;">${lot.max_bid != null ? `<b>${money(lot.max_bid)}</b><div style="color:var(--muted);">${lot.max_bid_notes||''}</div>` : ''}</td>
+      <td style="min-width:160px;">
+        <textarea onblur="saveLotNotes('${lot.id}', this)" placeholder="Notes..." style="width:100%;min-height:50px;font-size:11px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px;resize:vertical;">${lot.notes || ''}</textarea>
+        <div id="notes-saved-${lot.id}" style="font-size:9px;color:var(--muted);height:11px;"></div>
+      </td>
     </tr>`;
   }).join('');
   document.getElementById('auction-list').innerHTML = `
@@ -2186,6 +2198,7 @@ function renderAuctionTable() {
           <th>Liquidity ${metricRunBtn('liquidity')}</th>
           <th>Weight ${metricRunBtn('weight')}</th>
           <th>Max Price to Pay ${metricRunBtn('max_bid')}</th>
+          <th>Notes</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
@@ -2287,6 +2300,22 @@ async function flagLotAsBulk(lotId, btn) {
     toast('Flag failed: ' + e.message, 'error');
     btn.disabled = false;
     btn.textContent = '🏷️ Flag as LOT';
+  }
+}
+
+async function saveLotNotes(lotId, textarea) {
+  const indicator = document.getElementById(`notes-saved-${lotId}`);
+  try {
+    await api('PATCH', `/api/auction/capture/lots/${lotId}/notes`, {notes: textarea.value});
+    const lot = auctionLotsCache.find(l => l.id === lotId);
+    if (lot) lot.notes = textarea.value;
+    if (indicator) {
+      indicator.textContent = 'Saved';
+      setTimeout(() => { if (indicator) indicator.textContent = ''; }, 1500);
+    }
+  } catch(e) {
+    if (indicator) indicator.textContent = 'Save failed';
+    toast('Failed to save notes: ' + e.message, 'error');
   }
 }
 

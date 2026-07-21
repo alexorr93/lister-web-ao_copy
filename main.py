@@ -4575,6 +4575,16 @@ async def list_capture_lots(session_id: str):
         lot["items"] = items_by_lot.get(lot["id"], [])
     return lots
 
+@app.patch("/api/auction/capture/lots/{lot_id}/notes")
+async def update_capture_lot_notes(lot_id: str, body: dict = Body(...)):
+    res = (supabase.table("auction_lots")
+           .update({"notes": body.get("notes", "")})
+           .eq("id", lot_id)
+           .execute())
+    if not res.data:
+        raise HTTPException(404, "Lot not found")
+    return res.data[0]
+
 ITEMIZE_PROMPT = """You are cataloguing the contents of a single auction lot for a resale buyer.
 
 Lot title: {title}
