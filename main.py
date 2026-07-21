@@ -872,7 +872,7 @@ async def get_stuck_groups(request: Request):
         raise HTTPException(401, "Unauthorized")
     try:
         groups = supabase.table("listing_groups").select("id,status,created_at")\
-            .eq("business_id", business_id).in_("status", ["pending", "processing"]).execute()
+            .eq("business_id", business_id).in_("status", ["pending", "processing", "error"]).execute()
         out = []
         for g in (groups.data or []):
             gp = supabase.table("group_photos").select("photo_id").eq("group_id", g["id"]).limit(1).execute()
@@ -897,7 +897,7 @@ async def get_stats(request: Request):
         items = res.data or []
         total = len(items)
         value = sum(float(i.get("price") or 0) for i in items)
-        pending = supabase.table("listing_groups").select("id").eq("business_id", business_id).in_("status", ["pending", "processing"]).execute()
+        pending = supabase.table("listing_groups").select("id").eq("business_id", business_id).in_("status", ["pending", "processing", "error"]).execute()
         processing = len(pending.data or [])
         return {"total": total, "processing": processing, "value": round(value, 2)}
     except Exception as e:
@@ -2909,6 +2909,7 @@ async def create_group(body: CreateGroup, request: Request):
             "quantity":   1,
             "condition":  body.condition,
             "business_id": business_id,
+            "created_at": datetime.utcnow().isoformat(),
         }).execute()
         import traceback
         print(f"Group insert result: {res}")
