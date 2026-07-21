@@ -216,7 +216,7 @@ EBAY_ENV_KEYS = [
     "EBAY_USER_TOKEN", "EBAY_APP_ID", "EBAY_DEV_ID", "EBAY_CERT_ID", "EBAY_RUNAME",
     "EBAY_PAYMENT_POLICY_ID", "EBAY_RETURN_POLICY_ID", "EBAY_FULFILLMENT_POLICY_ID",
     "EBAY_MERCHANT_LOCATION_KEY", "EBAY_LOCATION_ZIP", "EBAY_LOCATION_COUNTRY",
-    "EBAY_DEFAULT_CATEGORY_ID",
+    "EBAY_LOCATION_CITY_STATE", "EBAY_DEFAULT_CATEGORY_ID",
 ]
 
 EBAY_OAUTH_SCOPES = (
@@ -307,10 +307,9 @@ def ensure_ebay_location(token: str, location_key: str, zip_code: str, country: 
         raise Exception(f"Failed to create eBay inventory location: {r.status_code} {r.text}")
 
 def get_ebay_item_location_text(token: str, location_key: str) -> str:
-    """Reads the merchant's existing eBay inventory location resource and returns a
-    'City, State' style string for the Trading API's Item.Location field (required by
-    AddFixedPriceItem error code 71). Pulls from whatever address is already saved on
-    that location resource rather than a separately-entered setting."""
+    """Unused for now — v2's Item.Location field turned out to be plain free text
+    (see EBAY_LOCATION_CITY_STATE setting), not something stored on the v1 merchant
+    location resource. Left here in case a future path needs to read that resource."""
     import requests as _req
     if not location_key:
         return ""
@@ -509,7 +508,7 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
     category_id          = listing.get("ebay_category_id") or settings.get("EBAY_DEFAULT_CATEGORY_ID", "")
     location_zip        = settings.get("EBAY_LOCATION_ZIP", "")
     location_country     = settings.get("EBAY_LOCATION_COUNTRY", "US")
-    location_key         = settings.get("EBAY_MERCHANT_LOCATION_KEY", "")
+    location_city_state = settings.get("EBAY_LOCATION_CITY_STATE", "")
 
     if not (payment_policy and return_policy and fulfillment_policy):
         raise Exception("Missing eBay business policy IDs — set these in Settings first")
@@ -517,10 +516,8 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
         raise Exception("This item has no eBay category set")
     if not location_zip:
         raise Exception("Missing EBAY_LOCATION_ZIP — set this in Settings first")
-
-    location_city_state = get_ebay_item_location_text(token, location_key)
     if not location_city_state:
-        raise Exception("Could not read a City/State address off the saved eBay merchant location — check EBAY_MERCHANT_LOCATION_KEY in Settings")
+        raise Exception("Missing EBAY_LOCATION_CITY_STATE — set this in Settings first (e.g. 'Loveland, CO'). This is separate from Merchant Location Key, which only the older v1 publish path uses.")
 
     sku = listing.get("ebay_sku") or f"lister-{listing['id']}"
     title = (listing.get("title") or "Untitled item")[:80]

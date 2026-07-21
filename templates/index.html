@@ -574,6 +574,7 @@ select.field-input { background: #fff; color: #0f172a; }
         <div><div class="field-label">Location ZIP</div><input type="text" class="field-input" id="set-ebay-location-zip"/></div>
         <div><div class="field-label">Location Country</div><input type="text" class="field-input" id="set-ebay-location-country" value="US"/></div>
       </div>
+      <div class="field-label">Location City, State <span style="opacity:.6;font-weight:400;">(used by the v2/Trading API publish path only)</span></div><input type="text" class="field-input" id="set-ebay-location-city-state" placeholder="e.g. Loveland, CO" style="margin-bottom:8px;"/>
       <div class="field-label">Default eBay Category ID (fallback)</div><input type="text" class="field-input" id="set-ebay-default-category" style="margin-bottom:10px;"/>
       <button class="btn btn-primary" style="width:100%;" onclick="saveEbayListingSettings()">Save Listing Setup</button>
       <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:14px;">
@@ -2371,6 +2372,7 @@ async function loadSettings() {
     document.getElementById('set-ebay-location-key').value       = s.EBAY_MERCHANT_LOCATION_KEY || '';
     document.getElementById('set-ebay-location-zip').value       = s.EBAY_LOCATION_ZIP || '';
     document.getElementById('set-ebay-location-country').value   = s.EBAY_LOCATION_COUNTRY || 'US';
+    document.getElementById('set-ebay-location-city-state').value = s.EBAY_LOCATION_CITY_STATE || '';
     document.getElementById('set-ebay-default-category').value   = s.EBAY_DEFAULT_CATEGORY_ID || '';
   } catch(e) {}
 }
@@ -2419,6 +2421,7 @@ async function saveEbayListingSettings() {
     ['EBAY_MERCHANT_LOCATION_KEY', 'set-ebay-location-key'],
     ['EBAY_LOCATION_ZIP', 'set-ebay-location-zip'],
     ['EBAY_LOCATION_COUNTRY', 'set-ebay-location-country'],
+    ['EBAY_LOCATION_CITY_STATE', 'set-ebay-location-city-state'],
     ['EBAY_DEFAULT_CATEGORY_ID', 'set-ebay-default-category'],
   ];
   for (const [k, id] of pairs) {
