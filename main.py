@@ -1138,41 +1138,20 @@ class AssignLot(BaseModel):
 
 @app.post("/api/listings/{item_id}/assign-lot")
 async def assign_lot_sku(item_id: str, body: AssignLot, request: Request):
-    """Sets ebay_sku to bare '{lot}-' (e.g. "AM1-") — that's the whole SKU, no number
-    appended. Only exception: eBay's SKU is the identifier it uses to know which
-    inventory item to update, so if a second item in the same lot reused the exact
-    same bare SKU as an existing DIFFERENT listing, pushing it to eBay would silently
-    overwrite the first item's live listing data under that SKU. So bare "{lot}-" is
-    used whenever it's free; only on an actual collision with another listing does a
-    number get appended, purely as a last-resort tiebreaker to avoid clobbering data —
-    not as a general numbering scheme."""
+    """Sets ebay_sku to bare '{lot}-' (e.g. "AM1-") for every item in the lot — no number
+    appended, ever. This endpoint is only called from the v2/Trading-API intake page,
+    where SKU/Custom Label is plain free text with no account-wide uniqueness requirement
+    (unlike the old v1 Inventory API, where SKU is the resource's own identifier and a
+    collision would silently overwrite another item's live listing data). If this
+    endpoint is ever reused from a v1-publishing page, the old per-lot numbering (see
+    git history) needs to come back for that case."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     lot = (body.lot_sku or "").strip()
     if not lot:
         raise HTTPException(400, "lot_sku is required")
-    prefix = f"{lot}-"
-    bare_taken = supabase.table("listings").select("id").eq("business_id", business_id)\
-        .eq("ebay_sku", prefix).neq("id", item_id).limit(1).execute().data
-    if not bare_taken:
-        new_sku = prefix
-    else:
-        all_rows = []
-        start = 0
-        while True:
-            page = supabase.table("listings").select("ebay_sku").eq("business_id", business_id)\
-                .ilike("ebay_sku", f"{prefix}%").range(start, start + 999).execute().data or []
-            all_rows.extend(page)
-            if len(page) < 1000:
-                break
-            start += 1000
-        max_n = 0
-        for row in all_rows:
-            suffix = (row.get("ebay_sku") or "")[len(prefix):]
-            if suffix.isdigit():
-                max_n = max(max_n, int(suffix))
-        new_sku = f"{prefix}{max_n + 1}"
+    new_sku = f"{lot}-"
     try:
         supabase.table("listings").update({"ebay_sku": new_sku}).eq("id", item_id).execute()
         return {"ok": True, "ebay_sku": new_sku}
