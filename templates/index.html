@@ -676,6 +676,18 @@ select.field-input { background: #fff; color: #0f172a; }
           <span style="font-size:12px;color:var(--muted);">hours from now (for Schedule)</span>
         </div>
       </div>
+      <div style="border:1px solid #7c3aed;border-radius:10px;margin-top:14px;padding:12px;background:rgba(124,58,237,0.08);">
+        <div class="field-label" style="margin-bottom:8px;color:#a78bfa;">🧪 New eBay System (Testing)</div>
+        <div id="modal-ebayv2-status" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></div>
+        <div style="display:flex;gap:8px;margin-bottom:8px;">
+          <input type="text" class="field-input" id="modal-ebayv2-sku-input" placeholder="SKU / Custom Label"/>
+          <button class="btn" onclick="updateSkuV2()">Update SKU</button>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn" style="flex:1;background:#7c3aed;color:#fff;border-color:#7c3aed;" onclick="submitToEbayV2('now')">🧪 Publish (v2)</button>
+          <button class="btn" style="flex:1;" onclick="submitToEbayV2('schedule')">🧪 Schedule (v2)</button>
+        </div>
+      </div>
       <div id="modal-shopify-status" style="font-size:12px;color:var(--muted);margin-top:14px;"></div>
       <div class="modal-actions">
         <button class="modal-action-btn modal-action-save" onclick="saveModal()">💾 Save</button>
@@ -1769,7 +1781,56 @@ function openModal(id) {
       ebayStatusEl.textContent = 'Not yet sent to eBay';
     }
   }
+  const v2StatusEl = document.getElementById('modal-ebayv2-status');
+  const v2SkuInput = document.getElementById('modal-ebayv2-sku-input');
+  if (v2StatusEl && v2SkuInput) {
+    v2SkuInput.value = l.ebay_sku || '';
+    if (l.ebay_offer_id) {
+      v2StatusEl.textContent = '⚠️ Published via the OLD system — SKU can never be changed on this item, on any system.';
+      v2StatusEl.style.color = 'var(--red)';
+    } else if (l.ebay_item_id) {
+      v2StatusEl.innerHTML = `✅ Live via new system — <a href="https://www.ebay.com/itm/${l.ebay_item_id}" target="_blank" style="color:#a78bfa;">View listing ↗</a>. SKU is freely editable above.`;
+      v2StatusEl.style.color = '';
+    } else {
+      v2StatusEl.textContent = 'Not yet published via the new system.';
+      v2StatusEl.style.color = '';
+    }
+  }
   document.getElementById('modal').classList.add('open');
+}
+
+async function submitToEbayV2(mode) {
+  if (!modalItemId) return;
+  const hours = mode === 'schedule' ? parseFloat(document.getElementById('modal-ebay-hours').value) || 24 : null;
+  const brand = document.getElementById('modal-brand-input').value.trim() || null;
+  const mpn = document.getElementById('modal-mpn-input').value.trim() || null;
+  toast((mode === 'schedule' ? 'Scheduling' : 'Publishing') + ' (v2)...', 'success');
+  try {
+    const r = await api('POST', `/api/listings/${modalItemId}/ebay-v2`, {mode, hours_from_now: hours, brand, mpn});
+    const l = listings.find(x => x.id === modalItemId);
+    if (l) {
+      l.ebay_status = r.status;
+      l.ebay_item_id = r.item_id;
+      l.ebay_scheduled_at = r.scheduled_at;
+      l.ebay_sku = r.sku;
+      l.brand = r.brand;
+    }
+    toast(mode === 'schedule' ? 'Scheduled (v2) ✓' : 'Published (v2) ✓');
+    openModal(modalItemId);
+    renderTiles();
+  } catch(e) { toast('v2 push failed: ' + e.message, 'error'); }
+}
+
+async function updateSkuV2() {
+  if (!modalItemId) return;
+  const newSku = document.getElementById('modal-ebayv2-sku-input').value.trim();
+  if (!newSku) { toast('Enter a SKU first', 'error'); return; }
+  try {
+    const r = await api('POST', `/api/listings/${modalItemId}/ebay-v2/sku`, {new_sku: newSku});
+    const l = listings.find(x => x.id === modalItemId);
+    if (l) l.ebay_sku = r.ebay_sku;
+    toast('SKU updated ✓');
+  } catch(e) { toast('SKU update failed: ' + e.message, 'error'); }
 }
 
 async function saveModal() {

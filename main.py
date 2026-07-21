@@ -464,6 +464,241 @@ def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None,
     result["scheduled_at"] = scheduled_at_iso
     return result
 
+def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = None, brand_override: str = None, mpn_override: str = None) -> dict:
+    """Creates a listing via eBay's classic Trading API (AddFixedPriceItem) instead of
+    the Sell Inventory API used by push_listing_to_ebay. On the Trading API, SKU/Custom
+    Label is a plain free-text field on the item with no account-wide uniqueness
+    requirement — unlike the Inventory API, where SKU IS the resource's identifier and
+    a colliding SKU silently overwrites another item's data. This is the "Intake 2"
+    parallel push path; existing Inventory-API listings are untouched and keep using
+    push_listing_to_ebay. No offer_id in the result — that's an Inventory API concept
+    that doesn't exist here; ebay_offer_id is left null for v2 listings on purpose, so
+    other code can tell the two systems' listings apart (offer_id set = old system,
+    offer_id null + item_id set = this one)."""
+    import requests as _req
+    import xml.etree.ElementTree as ET
+    from xml.sax.saxutils import escape as _xesc
+    from datetime import timedelta
+
+    biz_id = listing.get("business_id")
+    if not biz_id:
+        raise Exception("Listing has no business_id — cannot look up eBay settings safely")
+    settings = get_ebay_settings(biz_id)
+    token = get_ebay_access_token(biz_id)
+
+    payment_policy      = settings.get("EBAY_PAYMENT_POLICY_ID", "")
+    return_policy        = settings.get("EBAY_RETURN_POLICY_ID", "")
+    fulfillment_policy   = listing.get("ebay_fulfillment_policy_id") or settings.get("EBAY_FULFILLMENT_POLICY_ID", "")
+    category_id          = listing.get("ebay_category_id") or settings.get("EBAY_DEFAULT_CATEGORY_ID", "")
+
+    if not (payment_policy and return_policy and fulfillment_policy):
+        raise Exception("Missing eBay business policy IDs — set these in Settings first")
+    if not category_id:
+        raise Exception("This item has no eBay category set")
+
+    sku = listing.get("ebay_sku") or f"lister-{listing['id']}"
+    title = (listing.get("title") or "Untitled item")[:80]
+    desc  = listing.get("description") or EBAY_DESCRIPTION
+    qty   = int(listing.get("quantity") or 1)
+    price = float(listing.get("price") or 0)
+    pid   = str(listing.get("photo_id") or "")
+    images = [photo_url(p) for p in get_all_photo_ids(pid) if photo_url(p)] if pid else []
+
+    brand = (brand_override or listing.get("brand") or "").strip()
+    if not brand:
+        first_word = title.split()[0].strip(",.;:-") if title else ""
+        brand = first_word if first_word else "Unbranded"
+
+    mpn = (mpn_override or "").strip() or None
+    mpn_is_fallback = False
+    if not mpn:
+        alnum_tokens = [
+            w.strip(",.;:-") for w in title.split()
+            if w.lower().strip(",.;:-") != brand.lower()
+            and any(c.isdigit() for c in w) and any(c.isalpha() for c in w)
+        ]
+        if alnum_tokens:
+            mpn = max(alnum_tokens, key=len)
+    if not mpn:
+        mpn = "Does Not Apply"
+        mpn_is_fallback = True
+
+    condition_id = "1000" if ebay_condition(listing.get("condition")) == "NEW" else "3000"
+
+    picture_xml = "".join(f"<PictureURL>{_xesc(u)}</PictureURL>" for u in images[:12])
+    item_specifics_xml = (
+        f"<NameValueList><Name>Brand</Name><Value>{_xesc(brand)}</Value></NameValueList>"
+        f"<NameValueList><Name>MPN</Name><Value>{_xesc(mpn)}</Value></NameValueList>"
+    )
+
+    result = {"offer_id": None, "sku": sku, "item_id": None, "status": "draft", "scheduled_at": None, "brand": brand, "mpn": mpn, "mpn_is_fallback": mpn_is_fallback}
+
+    if mode == "draft":
+        # No real draft concept on the Trading API — nothing is sent to eBay yet, this
+        # is purely a local "not published" marker until you choose Publish/Schedule.
+        return result
+
+    schedule_xml = ""
+    scheduled_at_iso = None
+    if mode == "schedule":
+        hrs = float(hours_from_now or 1)
+        scheduled_dt = datetime.utcnow() + timedelta(hours=hrs)
+        scheduled_at_iso = scheduled_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        schedule_xml = f"<ScheduleTime>{scheduled_at_iso}</ScheduleTime>"
+
+    xml_body = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+        f'<RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>'
+        '<Item>'
+        f'<Title>{_xesc(title)}</Title>'
+        f'<Description><![CDATA[{desc}]]></Description>'
+        f'<PrimaryCategory><CategoryID>{_xesc(str(category_id))}</CategoryID></PrimaryCategory>'
+        f'<StartPrice>{price:.2f}</StartPrice>'
+        '<CategoryMappingAllowed>true</CategoryMappingAllowed>'
+        f'<ConditionID>{condition_id}</ConditionID>'
+        '<Country>US</Country><Currency>USD</Currency>'
+        '<DispatchTimeMax>3</DispatchTimeMax>'
+        '<ListingDuration>GTC</ListingDuration>'
+        '<ListingType>FixedPriceItem</ListingType>'
+        f'<Quantity>{qty}</Quantity>'
+        f'<SKU>{_xesc(sku)}</SKU>'
+        f'<PictureDetails>{picture_xml}</PictureDetails>'
+        f'<ItemSpecifics>{item_specifics_xml}</ItemSpecifics>'
+        '<SellerProfiles>'
+        f'<SellerPaymentProfile><PaymentProfileID>{_xesc(payment_policy)}</PaymentProfileID></SellerPaymentProfile>'
+        f'<SellerReturnProfile><ReturnProfileID>{_xesc(return_policy)}</ReturnProfileID></SellerReturnProfile>'
+        f'<SellerShippingProfile><ShippingProfileID>{_xesc(fulfillment_policy)}</ShippingProfileID></SellerShippingProfile>'
+        '</SellerProfiles>'
+        f'{schedule_xml}'
+        '</Item>'
+        '</AddFixedPriceItemRequest>'
+    )
+    headers = {
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "1193",
+        "X-EBAY-API-CALL-NAME": "AddFixedPriceItem",
+        "X-EBAY-API-SITEID": "0",
+        "Content-Type": "text/xml",
+    }
+    r = _req.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_body.encode("utf-8"), timeout=30)
+    resp = _ebay_xml_to_dict(ET.fromstring(r.content))
+    ack = resp.get("Ack")
+    if ack not in ("Success", "Warning"):
+        raise Exception(f"AddFixedPriceItem failed (Ack={ack}): {resp.get('Errors')}")
+
+    result["item_id"] = resp.get("ItemID")
+    result["status"] = "scheduled" if mode == "schedule" else "published"
+    result["scheduled_at"] = scheduled_at_iso
+    return result
+
+def _ebay_revise_sku_only(business_id: str, ebay_item_id: str, new_sku: str):
+    """Trading API ReviseItem, sending ONLY ItemID + SKU — deliberately nothing else.
+    eBay's classic Revise calls only change fields present in the request, so leaving
+    out PictureDetails/ItemSpecifics/price/etc. here means they're left completely
+    alone. Never expand this call to include other fields for that same reason — the
+    whole point is a relabel that can't touch anything else on a live listing."""
+    import requests as _req
+    import xml.etree.ElementTree as ET
+    from xml.sax.saxutils import escape as _xesc
+
+    token = get_ebay_access_token(business_id)
+    xml_body = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+        f'<RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>'
+        '<Item>'
+        f'<ItemID>{_xesc(ebay_item_id)}</ItemID>'
+        f'<SKU>{_xesc(new_sku)}</SKU>'
+        '</Item>'
+        '</ReviseItemRequest>'
+    )
+    headers = {
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "1193",
+        "X-EBAY-API-CALL-NAME": "ReviseItem",
+        "X-EBAY-API-SITEID": "0",
+        "Content-Type": "text/xml",
+    }
+    r = _req.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_body.encode("utf-8"), timeout=20)
+    resp = _ebay_xml_to_dict(ET.fromstring(r.content))
+    ack = resp.get("Ack")
+    if ack not in ("Success", "Warning"):
+        raise Exception(f"ReviseItem (SKU only) failed (Ack={ack}): {resp.get('Errors')}")
+    return resp
+
+@app.post("/api/listings/{item_id}/ebay-v2")
+async def submit_to_ebay_v2(item_id: str, body: EbaySubmit, request: Request):
+    """Intake 2's push button — same shape as /api/listings/{id}/ebay, but goes through
+    push_listing_to_ebay_v2 (Trading API) instead. Kept fully separate from the original
+    endpoint so nothing about the existing Inventory-API flow changes underneath it."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    try:
+        res = supabase.table("listings").select("*").eq("id", item_id).limit(1).execute()
+        if not res.data:
+            raise HTTPException(404, "Listing not found")
+        listing = res.data[0]
+        if listing.get("ebay_item_id") and not listing.get("ebay_offer_id") and body.mode != "draft":
+            raise HTTPException(400, "Already published — re-submitting isn't supported yet. Use the SKU field to relabel it instead.")
+        result = push_listing_to_ebay_v2(listing, body.mode, body.hours_from_now, body.brand, body.mpn)
+        update = {
+            "ebay_sku": result["sku"],
+            "ebay_status": result["status"],
+            "ebay_error": None,
+            "brand": result.get("brand"),
+        }
+        if result["item_id"]:
+            update["ebay_item_id"] = result["item_id"]
+        if result["scheduled_at"]:
+            update["ebay_scheduled_at"] = result["scheduled_at"]
+        try:
+            update["ebay_mpn"] = result.get("mpn")
+            update["ebay_mpn_is_fallback"] = result.get("mpn_is_fallback", False)
+            supabase.table("listings").update(update).eq("id", item_id).execute()
+        except Exception:
+            update.pop("ebay_mpn", None)
+            update.pop("ebay_mpn_is_fallback", None)
+            supabase.table("listings").update(update).eq("id", item_id).execute()
+        return {"ok": True, **result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        supabase.table("listings").update({"ebay_status": "failed", "ebay_error": str(e)}).eq("id", item_id).execute()
+        raise HTTPException(500, str(e))
+
+class UpdateSkuV2(BaseModel):
+    new_sku: str
+
+@app.post("/api/listings/{item_id}/ebay-v2/sku")
+async def update_ebay_v2_sku(item_id: str, body: UpdateSkuV2, request: Request):
+    """Relabels the SKU on a live Intake-2/Trading-API listing without touching
+    anything else — the actual point of switching to this system. Refuses items that
+    went through the old Inventory-API flow, since their SKU can never be changed via
+    any API call, full stop (that's an eBay platform restriction, not a gap here)."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    new_sku = (body.new_sku or "").strip()
+    if not new_sku:
+        raise HTTPException(400, "new_sku is required")
+    try:
+        res = supabase.table("listings").select("id,ebay_item_id,ebay_offer_id,business_id").eq("id", item_id).limit(1).execute()
+        if not res.data:
+            raise HTTPException(404, "Listing not found")
+        listing = res.data[0]
+        if listing.get("ebay_offer_id"):
+            raise HTTPException(400, "This item was published via the old eBay system — its SKU can't be changed via any API call, on eBay's side.")
+        ebay_item_id = listing.get("ebay_item_id")
+        if not ebay_item_id:
+            raise HTTPException(400, "This item hasn't been published to eBay yet")
+        _ebay_revise_sku_only(business_id, ebay_item_id, new_sku)
+        supabase.table("listings").update({"ebay_sku": new_sku}).eq("id", item_id).execute()
+        return {"ok": True, "ebay_sku": new_sku}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 # ── PAGES ─────────────────────────────────────────────────────── #
 
 @app.get("/auction/research", response_class=HTMLResponse)
@@ -919,11 +1154,14 @@ class AssignLot(BaseModel):
 
 @app.post("/api/listings/{item_id}/assign-lot")
 async def assign_lot_sku(item_id: str, body: AssignLot, request: Request):
-    """Sets ebay_sku to '{lot}-{n}' where n is the next sequential number for that lot
-    (AM1-1, AM1-2, AM1-3...) — NOT the item's raw internal listing id. eBay still
-    requires every SKU/Custom Label to be unique per account, so some suffix is
-    unavoidable, but a small per-lot counter is what a human skimming the Lots page
-    actually expects, unlike an arbitrary large internal id."""
+    """Sets ebay_sku to bare '{lot}-' (e.g. "AM1-") — that's the whole SKU, no number
+    appended. Only exception: eBay's SKU is the identifier it uses to know which
+    inventory item to update, so if a second item in the same lot reused the exact
+    same bare SKU as an existing DIFFERENT listing, pushing it to eBay would silently
+    overwrite the first item's live listing data under that SKU. So bare "{lot}-" is
+    used whenever it's free; only on an actual collision with another listing does a
+    number get appended, purely as a last-resort tiebreaker to avoid clobbering data —
+    not as a general numbering scheme."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
@@ -931,21 +1169,26 @@ async def assign_lot_sku(item_id: str, body: AssignLot, request: Request):
     if not lot:
         raise HTTPException(400, "lot_sku is required")
     prefix = f"{lot}-"
-    all_rows = []
-    start = 0
-    while True:
-        page = supabase.table("listings").select("ebay_sku").eq("business_id", business_id)\
-            .ilike("ebay_sku", f"{prefix}%").range(start, start + 999).execute().data or []
-        all_rows.extend(page)
-        if len(page) < 1000:
-            break
-        start += 1000
-    max_n = 0
-    for row in all_rows:
-        suffix = (row.get("ebay_sku") or "")[len(prefix):]
-        if suffix.isdigit():
-            max_n = max(max_n, int(suffix))
-    new_sku = f"{prefix}{max_n + 1}"
+    bare_taken = supabase.table("listings").select("id").eq("business_id", business_id)\
+        .eq("ebay_sku", prefix).neq("id", item_id).limit(1).execute().data
+    if not bare_taken:
+        new_sku = prefix
+    else:
+        all_rows = []
+        start = 0
+        while True:
+            page = supabase.table("listings").select("ebay_sku").eq("business_id", business_id)\
+                .ilike("ebay_sku", f"{prefix}%").range(start, start + 999).execute().data or []
+            all_rows.extend(page)
+            if len(page) < 1000:
+                break
+            start += 1000
+        max_n = 0
+        for row in all_rows:
+            suffix = (row.get("ebay_sku") or "")[len(prefix):]
+            if suffix.isdigit():
+                max_n = max(max_n, int(suffix))
+        new_sku = f"{prefix}{max_n + 1}"
     try:
         supabase.table("listings").update({"ebay_sku": new_sku}).eq("id", item_id).execute()
         return {"ok": True, "ebay_sku": new_sku}
