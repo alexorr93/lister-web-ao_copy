@@ -331,6 +331,7 @@ select.field-input { background: #fff; color: #0f172a; }
     <div class="action-bar">
       <button class="btn" onclick="selectAll()">☑ Select All</button>
       <button class="btn" onclick="deselectAll()">☐ Deselect</button>
+      <button class="btn" style="color:#a78bfa;border-color:#7c3aed;" onclick="autofillLotSku()" title="Fills in the Lot SKU for selected items using the lot that was active when each was scanned — no waiting on scan completion">🏷️ Autofill Lot SKU</button>
       <div style="display:flex;align-items:center;gap:6px;" id="batch-hours-wrap" title="Hours from now for batch eBay scheduling">
         <input type="number" class="field-input" id="batch-ebay-hours" value="2" min="0.5" step="0.5" style="width:64px;padding:6px 8px;"/>
         <span style="font-size:12px;color:var(--muted);">hrs</span>
@@ -647,11 +648,11 @@ select.field-input { background: #fff; color: #0f172a; }
         <div id="modal-ebay-status" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></div>
         <div style="margin-bottom:8px;">
           <div class="field-label">Brand (for eBay item specifics)</div>
-          <input type="text" class="field-input" id="modal-brand-input" placeholder="e.g. SURSUM"/>
+          <input type="text" class="field-input" id="modal-brand-input" placeholder="e.g. SURSUM" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="modal-brand-nofill"/>
         </div>
         <div style="margin-bottom:8px;">
           <div class="field-label">MPN (for eBay item specifics)</div>
-          <input type="text" class="field-input" id="modal-mpn-input" placeholder="e.g. 2CDS271337R0217 — leave blank to auto-guess"/>
+          <input type="text" class="field-input" id="modal-mpn-input" placeholder="e.g. 2CDS271337R0217 — leave blank to auto-guess" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="modal-mpn-nofill"/>
           <div id="modal-mpn-warn" style="display:none;font-size:11px;color:var(--red,#dc2626);margin-top:4px;">⚠️ Last submitted as "Does Not Apply" — eBay may want a real MPN here</div>
         </div>
         <div style="margin-bottom:8px;">
@@ -1174,7 +1175,7 @@ function renderTiles() {
         </div>
         <textarea class="tile-cat-input${fieldClassFor(l.id,'category')}${l.ebay_category_is_default ? ' default-warn' : ''}" rows="2" data-id="${l.id}" data-catid="${l.ebay_category_id||''}" placeholder="eBay category" title="Click to edit — type a phrase to re-match, or a number to set the ID directly. Double-click to open full editor." ondblclick="openModal('${l.id}')">${(dirtyCats[l.id] ?? (l.ebay_category_path||'No category yet')).replace(/</g,'&lt;')}</textarea>
         ${l.ebay_category_is_default ? '<div class="tile-cat-warn-label">⚠️ Generic fallback — needs a real match</div>' : ''}
-        <input class="tile-brand-input${fieldClassFor(l.id,'brand')}" type="text" value="${(dirtyBrands[l.id] ?? (l.brand||'')).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Brand" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="brand-${l.id}">
+        <input class="tile-brand-input${fieldClassFor(l.id,'brand')}" type="text" value="${(dirtyBrands[l.id] ?? (l.brand || guessBrand(l.title||''))).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Brand" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="brand-${l.id}">
       </div>
       <div class="tile-controls">
         <div class="tile-check${isSel?' checked':''}" onclick="event.stopPropagation();toggleSelect('${l.id}')"></div>
@@ -1510,6 +1511,31 @@ function toggleSelect(id) {
 }
 function selectAll()   { listings.forEach(l => selected.add(String(l.id))); renderTiles(); }
 function deselectAll() { selected.clear(); renderTiles(); }
+
+// Manual, on-demand replacement for the old "poll for 2 minutes after scan" auto-assign —
+// that poll gives up if a scan takes longer than 2 minutes (which it often does now), so
+// this button just applies the currently-active lot directly, whenever you're ready, to
+// whichever selected items (or all items, if nothing's selected) don't have one yet. First
+// resolves any items still tracked as pending from a recent scan (correct per-item lot,
+// same as the old poll would've done), then fills the current active lot into anything
+// still missing one.
+async function autofillLotSku() {
+  await resolvePendingLotAssignments();
+  if (!activeLotSku) { toast('No active lot selected — pick one in Fast Scan/Upload first', 'error'); return; }
+  const targets = selected.size ? listings.filter(l => selected.has(String(l.id))) : listings;
+  const todo = targets.filter(l => !lotSkuFor(l));
+  if (!todo.length) { toast('Nothing needs a Lot SKU ✓'); return; }
+  let ok = 0, failed = 0;
+  for (const l of todo) {
+    try {
+      const r = await api('POST', `/api/listings/${l.id}/assign-lot`, {lot_sku: activeLotSku});
+      l.ebay_sku = r.ebay_sku;
+      ok++;
+    } catch(e) { failed++; }
+  }
+  renderTiles();
+  toast(`Lot SKU filled on ${ok} item(s)${failed ? ', ' + failed + ' failed' : ''} ✓`);
+}
 function updateSubmitBtn() {
   const btn = document.getElementById('submit-ebay-btn');
   btn.style.display = selected.size > 0 ? 'inline-block' : 'none';
