@@ -625,47 +625,6 @@ def _ebay_revise_sku_only(business_id: str, ebay_item_id: str, new_sku: str):
         raise Exception(f"ReviseItem (SKU only) failed (Ack={ack}): {resp.get('Errors')}")
     return resp
 
-@app.post("/api/listings/{item_id}/ebay-v2")
-async def submit_to_ebay_v2(item_id: str, body: EbaySubmit, request: Request):
-    """Intake 2's push button — same shape as /api/listings/{id}/ebay, but goes through
-    push_listing_to_ebay_v2 (Trading API) instead. Kept fully separate from the original
-    endpoint so nothing about the existing Inventory-API flow changes underneath it."""
-    business_id = require_auth(request)
-    if not business_id:
-        raise HTTPException(401, "Unauthorized")
-    try:
-        res = supabase.table("listings").select("*").eq("id", item_id).limit(1).execute()
-        if not res.data:
-            raise HTTPException(404, "Listing not found")
-        listing = res.data[0]
-        if listing.get("ebay_item_id") and not listing.get("ebay_offer_id") and body.mode != "draft":
-            raise HTTPException(400, "Already published — re-submitting isn't supported yet. Use the SKU field to relabel it instead.")
-        result = push_listing_to_ebay_v2(listing, body.mode, body.hours_from_now, body.brand, body.mpn)
-        update = {
-            "ebay_sku": result["sku"],
-            "ebay_status": result["status"],
-            "ebay_error": None,
-            "brand": result.get("brand"),
-        }
-        if result["item_id"]:
-            update["ebay_item_id"] = result["item_id"]
-        if result["scheduled_at"]:
-            update["ebay_scheduled_at"] = result["scheduled_at"]
-        try:
-            update["ebay_mpn"] = result.get("mpn")
-            update["ebay_mpn_is_fallback"] = result.get("mpn_is_fallback", False)
-            supabase.table("listings").update(update).eq("id", item_id).execute()
-        except Exception:
-            update.pop("ebay_mpn", None)
-            update.pop("ebay_mpn_is_fallback", None)
-            supabase.table("listings").update(update).eq("id", item_id).execute()
-        return {"ok": True, **result}
-    except HTTPException:
-        raise
-    except Exception as e:
-        supabase.table("listings").update({"ebay_status": "failed", "ebay_error": str(e)}).eq("id", item_id).execute()
-        raise HTTPException(500, str(e))
-
 class UpdateSkuV2(BaseModel):
     new_sku: str
 
@@ -1230,6 +1189,47 @@ async def submit_to_ebay(item_id: str, body: EbaySubmit, request: Request):
         except Exception:
             # ebay_mpn / ebay_mpn_is_fallback columns may not exist on this Supabase project yet —
             # retry without them so the actual eBay submission still gets saved
+            update.pop("ebay_mpn", None)
+            update.pop("ebay_mpn_is_fallback", None)
+            supabase.table("listings").update(update).eq("id", item_id).execute()
+        return {"ok": True, **result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        supabase.table("listings").update({"ebay_status": "failed", "ebay_error": str(e)}).eq("id", item_id).execute()
+        raise HTTPException(500, str(e))
+
+@app.post("/api/listings/{item_id}/ebay-v2")
+async def submit_to_ebay_v2(item_id: str, body: EbaySubmit, request: Request):
+    """Intake 2's push button — same shape as /api/listings/{id}/ebay, but goes through
+    push_listing_to_ebay_v2 (Trading API) instead. Kept fully separate from the original
+    endpoint so nothing about the existing Inventory-API flow changes underneath it."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    try:
+        res = supabase.table("listings").select("*").eq("id", item_id).limit(1).execute()
+        if not res.data:
+            raise HTTPException(404, "Listing not found")
+        listing = res.data[0]
+        if listing.get("ebay_item_id") and not listing.get("ebay_offer_id") and body.mode != "draft":
+            raise HTTPException(400, "Already published — re-submitting isn't supported yet. Use the SKU field to relabel it instead.")
+        result = push_listing_to_ebay_v2(listing, body.mode, body.hours_from_now, body.brand, body.mpn)
+        update = {
+            "ebay_sku": result["sku"],
+            "ebay_status": result["status"],
+            "ebay_error": None,
+            "brand": result.get("brand"),
+        }
+        if result["item_id"]:
+            update["ebay_item_id"] = result["item_id"]
+        if result["scheduled_at"]:
+            update["ebay_scheduled_at"] = result["scheduled_at"]
+        try:
+            update["ebay_mpn"] = result.get("mpn")
+            update["ebay_mpn_is_fallback"] = result.get("mpn_is_fallback", False)
+            supabase.table("listings").update(update).eq("id", item_id).execute()
+        except Exception:
             update.pop("ebay_mpn", None)
             update.pop("ebay_mpn_is_fallback", None)
             supabase.table("listings").update(update).eq("id", item_id).execute()
