@@ -1981,9 +1981,13 @@ async def list_acquisitions(request: Request):
         sku = row.get("sku") or ""
         value = (row.get("price") or 0) * (row.get("quantity_available") or 0)
         prefix = _lot_prefix(sku) if sku else None
-        # Blank SKU can never match a real lot — falls straight into uncategorized,
-        # same as any SKU whose prefix just doesn't correspond to a known lot.
-        if sku and prefix in known_lot_skus:
+        # A bare 'PREFIX-' SKU (nothing after the dash) hasn't actually been assigned
+        # to a specific item yet — it's a placeholder from the v2 eBay push path,
+        # which allows duplicate bare SKUs on purpose (see /assign-lot). Even though
+        # its prefix matches a real lot, it still needs an individual SKU, so it
+        # belongs here alongside blank SKUs — not silently counted as "matched."
+        needs_sku = (not sku) or sku.endswith("-")
+        if sku and not needs_sku and prefix in known_lot_skus:
             value_by_prefix[prefix] = value_by_prefix.get(prefix, 0) + value
             count_by_prefix[prefix] = count_by_prefix.get(prefix, 0) + 1
         else:
@@ -1992,7 +1996,7 @@ async def list_acquisitions(request: Request):
             uncategorized_items.append({
                 "item_id": row.get("item_id"), "sku": sku, "title": row.get("title"),
                 "price": row.get("price"), "quantity_available": row.get("quantity_available"),
-                "value": round(value, 2),
+                "value": round(value, 2), "needs_sku": needs_sku,
             })
     uncategorized_items.sort(key=lambda r: r["value"], reverse=True)
     active_synced_at = max((r.get("updated_at") for r in active_rows if r.get("updated_at")), default=None)
