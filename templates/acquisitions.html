@@ -158,8 +158,15 @@ function setView(view) {
   if (view === 'uncategorized') renderUncategorizedTable();
 }
 
+let uncatSortKey = 'value', uncatSortDir = -1;
+
+function setUncatSort(key) {
+  if (uncatSortKey === key) uncatSortDir *= -1; else { uncatSortKey = key; uncatSortDir = key === 'title' || key === 'sku' ? 1 : -1; }
+  renderUncategorizedTable();
+}
+
 function renderUncategorizedTable() {
-  const items = uncategorized.items || [];
+  const items = [...(uncategorized.items || [])];
   const needsSkuCount = items.filter(it => it.needs_sku).length;
   document.getElementById('uncategorized-status').textContent =
     `${items.length} active listing(s) need attention (${needsSkuCount} need a real SKU assigned, ${items.length - needsSkuCount} don't match any lot) — ${fmtMoney(uncategorized.active_listings_value)} in active-listing value, ${fmtMoney(uncategorized.sales_total)} in unmatched sales.`;
@@ -167,8 +174,17 @@ function renderUncategorizedTable() {
     document.getElementById('uncategorized-table-area').innerHTML = '<div class="empty">Nothing uncategorized — every active listing matches a lot and has a real SKU.</div>';
     return;
   }
+  items.sort((a, b) => {
+    let av = a[uncatSortKey], bv = b[uncatSortKey];
+    if (typeof av === 'string') av = av.toLowerCase();
+    if (typeof bv === 'string') bv = bv.toLowerCase();
+    av = av ?? ''; bv = bv ?? '';
+    const v = av > bv ? 1 : (av < bv ? -1 : 0);
+    return v * uncatSortDir;
+  });
+  const th = (key, label) => `<th onclick="setUncatSort('${key}')" style="cursor:pointer;">${label}${uncatSortKey===key ? (uncatSortDir===1?' ▲':' ▼') : ''}</th>`;
   let html = `<table><thead><tr>
-    <th>SKU</th><th>Reason</th><th>eBay Item</th><th>Price</th><th>Qty Available</th><th>Value</th><th>Edit SKU</th>
+    ${th('sku','SKU')}<th>Reason</th>${th('title','eBay Item')}${th('price','Price')}${th('quantity_available','Qty Available')}${th('value','Value')}<th>Edit SKU</th>
   </tr></thead><tbody>`;
   for (const it of items) {
     const reason = it.needs_sku
