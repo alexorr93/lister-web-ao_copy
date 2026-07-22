@@ -1950,6 +1950,30 @@ async def recalculate_acquisitions(request: Request):
     except Exception as e:
         raise HTTPException(500, str(e))
 
+class SkuOverrideUpdate(BaseModel):
+    item_id: str
+    new_sku: str
+
+@app.post("/api/acquisitions/sku-override")
+async def set_sku_override(body: SkuOverrideUpdate, request: Request):
+    """Sets a LOCAL-ONLY SKU correction for a listing whose real eBay SKU can never
+    be changed (v1/Inventory-API listings — see update_ebay_v2_sku for why). Stored
+    in its own column so the active-listings sync (which upserts only item_id, sku,
+    title, price, quantity_available, etc.) never touches it and can't stomp a
+    correction on the next refresh, unlike editing the plain 'sku' column directly."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    new_sku = (body.new_sku or "").strip()
+    if not new_sku:
+        raise HTTPException(400, "new_sku is required")
+    res = (supabase.table("ebay_listing_status")
+           .update({"sku_override": new_sku})
+           .eq("business_id", business_id).eq("item_id", body.item_id).execute())
+    if not res.data:
+        raise HTTPException(404, "Listing not found")
+    return {"ok": True, "item_id": body.item_id, "sku_override": new_sku}
+
 @app.get("/api/acquisitions")
 async def list_acquisitions(request: Request):
     business_id = require_auth(request)
@@ -1972,7 +1996,7 @@ async def list_acquisitions(request: Request):
     active_rows = []
     start = 0
     while True:
-        page = supabase.table("ebay_listing_status").select("item_id,sku,title,price,quantity_available,updated_at")\
+        page = supabase.table("ebay_listing_status").select("item_id,sku,sku_override,title,price,quantity_available,updated_at")\
             .eq("business_id", business_id).eq("listing_status", "Active")\
             .range(start, start + 999).execute().data or []
         active_rows.extend(page)
@@ -2004,7 +2028,11 @@ async def list_acquisitions(request: Request):
         start += 1000
 
     for row in active_rows:
-        sku = row.get("sku") or ""
+        raw_sku = row.get("sku") or ""
+        override_sku = row.get("sku_override") or ""
+        sku = override_sku or raw_sku  # a manual override always wins — it exists
+                                        # specifically because the real eBay SKU can
+                                        # never be corrected for locked v1 listings
         value = (row.get("price") or 0) * (row.get("quantity_available") or 0)
         prefix = _lot_prefix(sku) if sku else None
         # A bare 'PREFIX-' SKU (nothing after the dash) hasn't actually been assigned
@@ -2022,11 +2050,11 @@ async def list_acquisitions(request: Request):
             matched_listing = listing_by_item_id.get(row.get("item_id"))
             sku_editable = bool(matched_listing) and not matched_listing.get("ebay_offer_id")
             uncategorized_items.append({
-                "item_id": row.get("item_id"), "sku": sku, "title": row.get("title"),
+                "item_id": row.get("item_id"), "sku": sku, "raw_sku": raw_sku, "title": row.get("title"),
                 "price": row.get("price"), "quantity_available": row.get("quantity_available"),
                 "value": round(value, 2), "needs_sku": needs_sku,
                 "listing_id": matched_listing.get("id") if matched_listing else None,
-                "sku_editable": sku_editable,
+                "sku_editable": sku_editable, "has_override": bool(override_sku),
             })
     uncategorized_items.sort(key=lambda r: r["value"], reverse=True)
     active_synced_at = max((r.get("updated_at") for r in active_rows if r.get("updated_at")), default=None)

@@ -174,10 +174,18 @@ function renderUncategorizedTable() {
     const reason = it.needs_sku
       ? `<span style="color:var(--amber);font-weight:600;">Needs SKU</span>`
       : `<span style="color:var(--muted);">No matching lot</span>`;
-    const editCell = it.sku_editable
-      ? `<input type="text" class="field-input uncat-sku-input" data-listing-id="${it.listing_id}" value="${escapeHtml(it.sku)}" style="width:110px;font-size:12px;padding:4px 6px;"/>
-         <button class="btn" style="font-size:11px;padding:2px 8px;" onclick="saveUncatSku(this, '${it.listing_id}')">Save</button>`
-      : `<span class="muted" title="This listing was published via the old eBay Inventory API — eBay does not allow changing its SKU via any API call, on their side, not ours.">🔒 locked (old API)</span>`;
+    let editCell;
+    if (it.sku_editable) {
+      editCell = `<input type="text" class="field-input uncat-sku-input" data-item-id="${it.item_id}" value="${escapeHtml(it.sku)}" style="width:110px;font-size:12px;padding:4px 6px;"/>
+         <button class="btn" style="font-size:11px;padding:2px 8px;" onclick="saveUncatSku(this, '${it.listing_id}', '${it.item_id}')">Save</button>`;
+    } else {
+      const overrideNote = it.has_override
+        ? `<div style="font-size:10px;color:var(--muted);">local override — eBay still shows: ${escapeHtml(it.raw_sku || '(blank)')}</div>`
+        : `<div style="font-size:10px;color:var(--muted);" title="This listing was published via the old eBay Inventory API — eBay does not allow changing its SKU via any API call, on their side, not ours. This only corrects it in Lister's own records.">🔒 local-only (eBay's copy can't change)</div>`;
+      editCell = `<input type="text" class="field-input uncat-sku-input" data-item-id="${it.item_id}" value="${escapeHtml(it.sku)}" style="width:110px;font-size:12px;padding:4px 6px;"/>
+         <button class="btn" style="font-size:11px;padding:2px 8px;" onclick="saveUncatSkuOverride(this, '${it.item_id}')">Save</button>
+         ${overrideNote}`;
+    }
     html += `<tr>
       <td class="sku muted">${escapeHtml(it.sku || '(blank)')}</td>
       <td>${reason}</td>
@@ -192,8 +200,8 @@ function renderUncategorizedTable() {
   document.getElementById('uncategorized-table-area').innerHTML = html;
 }
 
-async function saveUncatSku(btn, listingId) {
-  const input = document.querySelector(`.uncat-sku-input[data-listing-id="${listingId}"]`);
+async function saveUncatSku(btn, listingId, itemId) {
+  const input = document.querySelector(`.uncat-sku-input[data-item-id="${itemId}"]`);
   const newSku = input.value.trim();
   if (!newSku) { alert('SKU cannot be blank'); return; }
   btn.disabled = true;
@@ -202,6 +210,28 @@ async function saveUncatSku(btn, listingId) {
     const r = await fetch(`/api/listings/${listingId}/ebay-v2/sku`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({new_sku: newSku}),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed to update SKU');
+    await loadAcquisitions();
+    setView('uncategorized');
+  } catch(e) {
+    alert(`Failed to update SKU: ${e.message}`);
+    btn.disabled = false;
+    btn.textContent = 'Save';
+  }
+}
+
+async function saveUncatSkuOverride(btn, itemId) {
+  const input = document.querySelector(`.uncat-sku-input[data-item-id="${itemId}"]`);
+  const newSku = input.value.trim();
+  if (!newSku) { alert('SKU cannot be blank'); return; }
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+  try {
+    const r = await fetch('/api/acquisitions/sku-override', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({item_id: itemId, new_sku: newSku}),
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed to update SKU');
