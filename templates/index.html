@@ -364,7 +364,10 @@ select.field-input { background: #fff; color: #0f172a; }
         <div class="active-lot-label">Assigning to lot</div>
         <div class="active-lot-value" id="upload-lot-value">—</div>
       </div>
-      <button class="active-lot-change-btn" onclick="openLotPicker()">Change</button>
+      <select class="active-lot-select" id="upload-lot-select" onchange="setActiveLotSku(this.value)" style="margin-right:8px;">
+        <option value="">Select lot...</option>
+      </select>
+      <button class="active-lot-change-btn" onclick="openLotPicker()" title="Search/filter picker">Change</button>
     </div>
     <div id="upload-start">
       <div style="text-align:center;padding:2rem 0 1.5rem;">
@@ -418,7 +421,10 @@ select.field-input { background: #fff; color: #0f172a; }
         <div class="active-lot-label">Assigning to lot</div>
         <div class="active-lot-value" id="fastscan-lot-value">—</div>
       </div>
-      <button class="active-lot-change-btn" onclick="openLotPicker()">Change</button>
+      <select class="active-lot-select" id="fastscan-lot-select" onchange="setActiveLotSku(this.value)" style="margin-right:8px;">
+        <option value="">Select lot...</option>
+      </select>
+      <button class="active-lot-change-btn" onclick="openLotPicker()" title="Search/filter picker">Change</button>
     </div>
     <div class="fastscan-cond">
       <button class="fastscan-cond-btn" id="fs-cond-new" onclick="setFsCond('new')">✓ New</button>
@@ -837,8 +843,8 @@ function setActiveLotSku(sku) {
 }
 
 function renderActiveLotBars() {
-  [['fastscan-lot-bar', 'fastscan-lot-value'], ['upload-lot-bar', 'upload-lot-value']].forEach(([barId, valId]) => {
-    const bar = document.getElementById(barId), val = document.getElementById(valId);
+  [['fastscan-lot-bar', 'fastscan-lot-value', 'fastscan-lot-select'], ['upload-lot-bar', 'upload-lot-value', 'upload-lot-select']].forEach(([barId, valId, selId]) => {
+    const bar = document.getElementById(barId), val = document.getElementById(valId), sel = document.getElementById(selId);
     if (!bar || !val) return;
     if (activeLotSku) {
       bar.classList.remove('unset'); val.classList.remove('unset');
@@ -846,6 +852,10 @@ function renderActiveLotBars() {
     } else {
       bar.classList.add('unset'); val.classList.add('unset');
       val.textContent = 'None selected';
+    }
+    if (sel) {
+      sel.innerHTML = '<option value="">Select lot...</option>' +
+        lotSkusByRecency.map(s => `<option value="${s}"${s===activeLotSku?' selected':''}>${s}</option>`).join('');
     }
   });
 }
