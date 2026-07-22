@@ -385,7 +385,16 @@ async function saveOrderSku(btn, rowId) {
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed to update SKU');
-    await loadFinancials();
+
+    // Update in place rather than a full reload, which would reset the view back
+    // to "all orders" and lose your spot in the Uncategorized filter.
+    const lineRow = allOrderLines.find(r => r.id === rowId);
+    if (lineRow) lineRow.sku = newSku;
+    uncategorizedItems = uncategorizedItems.filter(r => r.id !== rowId);
+    document.getElementById('sum-uncat').textContent =
+      fmtNum(uncategorizedItems.length) + ' (' + fmtMoney(uncategorizedItems.reduce((n, r) => n + (r.net || 0), 0)) + ')';
+    currentData = showingUncategorized ? uncategorizedItems : allOrderLines;
+    renderTable();
   } catch(e) {
     alert(`Failed to update SKU: ${e.message}`);
     btn.disabled = false;
