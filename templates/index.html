@@ -750,13 +750,14 @@ async function loadLotSkus() {
     const skus = acqs.map(a => a.sku).filter(Boolean);
     knownLotSkus = new Set(skus);
     // A lot SKU can appear on more than one acquisition row (e.g. a second purchase
-    // added into the same lot later) — take the latest manually-entered purchase
-    // Date seen for that SKU (the "Date" field on the Lots page), not when the row
-    // was created in the system.
+    // added into the same lot later) — take the latest actual creation timestamp
+    // seen for that SKU, so the picker lists lots in the order they were actually
+    // added to Lister, not by the manually-entered purchase Date field (which can
+    // be backdated/edited and drift from the real creation order).
     const newestByLot = {};
     for (const a of acqs) {
       if (!a.sku) continue;
-      const ts = a.date || '';
+      const ts = a.created_at || a.date || '';
       if (!newestByLot[a.sku] || ts > newestByLot[a.sku]) newestByLot[a.sku] = ts;
     }
     lotSkusByRecency = Array.from(knownLotSkus).sort((x, y) => (newestByLot[y] || '').localeCompare(newestByLot[x] || ''));
