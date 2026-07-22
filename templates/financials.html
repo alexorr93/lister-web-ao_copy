@@ -136,6 +136,9 @@ tr:last-child td { border-bottom: none; }
     <div class="summary-card"><div class="num" id="sum-orders">0</div><div class="label">Order Lines</div></div>
     <div class="summary-card"><div class="num" id="sum-qty">0</div><div class="label">Units Sold</div></div>
     <div class="summary-card"><div class="num" id="sum-revenue">$0</div><div class="label" id="sum-revenue-label">Total Net</div></div>
+    <div class="summary-card" id="sum-uncat-card" style="cursor:pointer;border:1px solid #f59e0b;" onclick="toggleUncategorizedView()" title="Click to show only these orders">
+      <div class="num" id="sum-uncat" style="color:#f59e0b;">0</div><div class="label">Uncategorized SKUs</div>
+    </div>
   </div>
 
   <div id="table-area"><div class="empty">Pick a date range and click Apply.</div></div>
@@ -170,6 +173,17 @@ function setLastMonth() {
 
 let sortKey = 'total_amount', sortDir = -1;
 let currentData = [];
+let allOrderLines = [];
+let uncategorizedItems = [];
+let showingUncategorized = false;
+
+function toggleUncategorizedView() {
+  showingUncategorized = !showingUncategorized;
+  currentData = showingUncategorized ? uncategorizedItems : allOrderLines;
+  document.getElementById('sum-uncat-card').style.background = showingUncategorized ? '#f59e0b22' : '';
+  populateLotFilter();
+  renderTable();
+}
 
 async function uploadShippingFile() {
   const input = document.getElementById('shipping-file-input');
@@ -328,13 +342,18 @@ function renderTable() {
   }
   const th = (key, label) => `<th onclick="setSort('${key}')">${label}${sortKey===key ? (sortDir===1?' ▲':' ▼') : ''}</th>`;
   const amtLabel = netMode ? 'Net $' : 'Gross $';
+  const reasonHeader = showingUncategorized ? '<th>Reason</th>' : '';
   let html = `<table><thead><tr>
-    ${th('sku','SKU')}${th('order_id','Order #')}${th('order_date','Date')}${th('platform','Platform')}${th('quantity','Qty')}${th('buyer_shipping','Buyer Paid Ship $')}${th('shipping_cost','Label Cost $')}${th('total_amount',amtLabel)}${th('title','Item')}
+    ${th('sku','SKU')}${reasonHeader}${th('order_id','Order #')}${th('order_date','Date')}${th('platform','Platform')}${th('quantity','Qty')}${th('buyer_shipping','Buyer Paid Ship $')}${th('shipping_cost','Label Cost $')}${th('total_amount',amtLabel)}${th('title','Item')}
   </tr></thead><tbody>`;
   for (const r of rows) {
     const tag = r.platform === 'eBay' ? '<span class="platform-tag ebay">eBay</span>' : '<span class="platform-tag shopify">Shopify</span>';
+    const reasonCell = showingUncategorized
+      ? `<td>${r.needs_sku ? '<span style="color:#f59e0b;font-weight:600;">Needs SKU</span>' : '<span class="muted">No matching lot</span>'}</td>`
+      : '';
     html += `<tr>
       <td class="sku">${escapeHtml(r.sku)}</td>
+      ${reasonCell}
       <td class="muted">${escapeHtml(r.order_id)}</td>
       <td class="muted">${escapeHtml(r.order_date)}</td>
       <td>${tag}</td>
@@ -382,8 +401,14 @@ async function loadFinancials() {
     document.getElementById('sum-orders').textContent = fmtNum(data.totals.orders);
     document.getElementById('sum-qty').textContent = fmtNum(data.totals.quantity);
     document.getElementById('sum-revenue').textContent = fmtMoney(data.totals.net);
+    document.getElementById('sum-uncat').textContent =
+      fmtNum(data.uncategorized?.count || 0) + ' (' + fmtMoney(data.uncategorized?.net || 0) + ')';
 
-    currentData = data.order_lines;
+    allOrderLines = data.order_lines;
+    uncategorizedItems = data.uncategorized?.items || [];
+    showingUncategorized = false;
+    document.getElementById('sum-uncat-card').style.background = '';
+    currentData = allOrderLines;
     if (data.last_synced_at) {
       const d = new Date(data.last_synced_at);
       document.getElementById('last-synced').textContent = 'Last synced: ' + d.toLocaleString();

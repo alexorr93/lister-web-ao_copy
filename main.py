@@ -319,6 +319,20 @@ EBAY_OAUTH_SCOPES = (
     "https://api.ebay.com/oauth/api_scope/sell.finances"
 )
 
+def _lot_prefix(sku: str) -> str:
+    """Transposes a SKU to its lot: 'RJ-123' belongs to lot 'RJ' (prefix before the
+    first '-'); a bare SKU with no '-' at all belongs to that same lot directly.
+    Shared across acquisitions, financials, and Shopify-profit code so the rule
+    can't drift between them."""
+    return sku.split("-", 1)[0] if "-" in sku else sku
+
+def _sku_needs_assignment(sku: str) -> bool:
+    """True for a blank SKU or a bare 'PREFIX-' placeholder (nothing after the dash)
+    — the v2 eBay push path allows duplicate bare SKUs like 'AM1-' on purpose (see
+    /assign-lot), so these haven't actually been assigned to a specific item yet,
+    even though their prefix matches a real lot."""
+    return (not sku) or sku.endswith("-")
+
 def get_ebay_settings(business_id: str) -> dict:
     res = supabase.table("app_settings").select("*").eq("business_id", business_id).execute()
     settings = {row["key"]: row["value"] for row in (res.data or [])}
@@ -1689,9 +1703,6 @@ def _apply_shopify_sales_to_profit(business_id: str):
     Profit here, same layering approach as _apply_cash_to_profit — reads whatever
     Profit that function just left (baseline + cash), so this always adds Shopify on
     top of a fresh, not previously-Shopify-corrected, number."""
-    def _lot_prefix(sku: str) -> str:
-        return sku.split("-", 1)[0] if "-" in sku else sku
-
     acquisitions = []
     start = 0
     while True:
@@ -1954,9 +1965,6 @@ async def list_acquisitions(request: Request):
     # one (e.g. 'RJ-123' belongs to lot 'RJ'); a bare SKU with no '-' at all
     # (e.g. just 'RJ') belongs to that same lot directly — both forms transpose to
     # the same lot SKU. quantity_available is eBay's own real remaining-count field.
-    def _lot_prefix(sku: str) -> str:
-        return sku.split("-", 1)[0] if "-" in sku else sku
-
     # Paginated fetch — a single unpaginated .execute() silently caps at Supabase's
     # default row limit (1000), which was quietly truncating this business's ~4,700
     # active rows down to a fraction of the real total (confirmed: direct SQL on the
@@ -1986,7 +1994,7 @@ async def list_acquisitions(request: Request):
         # which allows duplicate bare SKUs on purpose (see /assign-lot). Even though
         # its prefix matches a real lot, it still needs an individual SKU, so it
         # belongs here alongside blank SKUs — not silently counted as "matched."
-        needs_sku = (not sku) or sku.endswith("-")
+        needs_sku = _sku_needs_assignment(sku)
         if sku and not needs_sku and prefix in known_lot_skus:
             value_by_prefix[prefix] = value_by_prefix.get(prefix, 0) + value
             count_by_prefix[prefix] = count_by_prefix.get(prefix, 0) + 1
@@ -3191,6 +3199,31 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
         .order("synced_at", desc=True).limit(1).execute()
     last_synced_at = (last_sync_res.data or [{}])[0].get("synced_at")
 
+    # Same "needs SKU / no matching lot" breakdown as the Lots page's Uncategorized
+    # tab, but for actual ORDERS in this date range rather than active listings —
+    # a separate view on purpose, since a SKU can be fine on the listing but still
+    # show up here if it was sold before ever getting assigned.
+    known_lot_skus = {a["sku"] for a in (supabase.table("acquisitions").select("sku")
+                       .eq("business_id", business_id).execute().data or []) if a.get("sku")}
+    uncategorized_order_items = []
+    uncategorized_order_net = 0
+    for r in rows:
+        sku = r.get("sku") or ""
+        needs_sku = _sku_needs_assignment(sku)
+        prefix = _lot_prefix(sku) if sku else None
+        is_uncategorized = needs_sku or (sku and prefix not in known_lot_skus)
+        if not is_uncategorized:
+            continue
+        uncategorized_order_net += r.get("final_net") or 0
+        uncategorized_order_items.append({
+            "sku": sku, "title": r.get("title"), "platform": r.get("platform"),
+            "order_id": r.get("order_id"), "order_date": r.get("order_date", ""),
+            "quantity": r.get("quantity"), "revenue": r.get("gross_revenue"),
+            "net": r.get("final_net"), "buyer_shipping": r.get("buyer_shipping") or 0,
+            "shipping_cost": r.get("shipping_cost") or 0, "needs_sku": needs_sku,
+        })
+    uncategorized_order_items.sort(key=lambda r: r.get("order_date", ""), reverse=True)
+
     return {
         "start": start_date_str,
         "end": end_date_str,
@@ -3201,6 +3234,11 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
             "quantity": sum(r["quantity"] for r in rows),
             "revenue": round(sum(r["gross_revenue"] for r in rows), 2),
             "net": round(sum(r["final_net"] for r in rows), 2),
+        },
+        "uncategorized": {
+            "count": len(uncategorized_order_items),
+            "net": round(uncategorized_order_net, 2),
+            "items": uncategorized_order_items,
         },
         "errors": {},
     }
