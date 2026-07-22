@@ -4965,17 +4965,32 @@ async def debug_roller_schema(request: Request):
 
 def _run_auto_capture(session_id: str, source_url: str, capture_scope: Optional[str], site: str):
     """Runs in the background right after session creation. Fetches lots via the
-    matching site scraper and saves them the same way the manual bulk-create
-    endpoint does, so this reuses the same photo re-hosting + itemization path."""
+    matching site scraper and saves them one at a time (not bulk) so progress can
+    be tracked and the capture can be stopped mid-way. Progress and stop requests
+    are both stored in the same 'status' column to avoid a schema migration:
+    status becomes 'capturing:<done>/<total>' while running, and the frontend
+    can request a stop by PATCHing status to 'stop_requested', which this loop
+    checks for between every lot save."""
     try:
         scraper = SITE_SCRAPERS[site]
         raw_lots = scraper(source_url, capture_scope)
-        lot_bodies = [AuctionLotCreate(session_id=session_id, **item) for item in raw_lots]
-        for lb in lot_bodies:
+        total = len(raw_lots)
+        supabase.table("auction_capture_sessions").update({"status": f"capturing:0/{total}"}).eq("id", session_id).execute()
+
+        done = 0
+        for item in raw_lots:
+            current = (supabase.table("auction_capture_sessions").select("status")
+                       .eq("id", session_id).execute().data or [{}])
+            if current and current[0].get("status") == "stop_requested":
+                supabase.table("auction_capture_sessions").update({"status": f"stopped:{done}/{total}"}).eq("id", session_id).execute()
+                return
             try:
-                _create_one_lot(lb)
+                _create_one_lot(AuctionLotCreate(session_id=session_id, **item))
             except Exception as e:
-                print(f"[auto-capture] failed to save lot {lb.lot_number}: {e}")
+                print(f"[auto-capture] failed to save lot {item.get('lot_number')}: {e}")
+            done += 1
+            supabase.table("auction_capture_sessions").update({"status": f"capturing:{done}/{total}"}).eq("id", session_id).execute()
+
         supabase.table("auction_capture_sessions").update({"status": "done"}).eq("id", session_id).execute()
     except Exception as e:
         print(f"[auto-capture] session {session_id} failed: {e}")

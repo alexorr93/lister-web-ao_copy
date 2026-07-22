@@ -515,6 +515,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <select id="auction-session-select" class="field-input" style="flex:1;min-width:200px;" onchange="loadAuctionItems(this.value)">
         <option value="">Select a capture session...</option>
       </select>
+      <button class="btn" onclick="stopSelectedCapture()">⏸️ Stop Capture</button>
       <button class="btn" style="background:#7a2020;color:#fff;" onclick="deleteSelectedCaptureSession()">🗑️ Delete Session</button>
     </div>
     <div id="metric-progress" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px;">
@@ -530,7 +531,7 @@ select.field-input { background: #fff; color: #0f172a; }
     <div class="empty" id="auction-empty" style="display:none;">
       <div class="empty-icon">🔨</div>
       <div class="empty-title">No capture sessions yet</div>
-      <div class="empty-sub">Create a session above, then ask Claude to capture it</div>
+      <div class="empty-sub">Create a session above — Dickensheet, BidSpotter, and (once fixed) Roller links capture automatically; other sites need Claude in chat</div>
     </div>
   </div>
 
@@ -1663,7 +1664,11 @@ async function startCaptureSession() {
     document.getElementById('capture-url-input').value = '';
     document.getElementById('capture-name-input').value = '';
     document.getElementById('capture-scope-input').value = '';
-    toast('Session created — ask Claude in chat to capture it');
+    if (r.status === 'capturing') {
+      toast('Capturing automatically in the background...');
+    } else {
+      toast('Session created — ask Claude in chat to capture it');
+    }
     await loadAuctionSessions();
     document.getElementById('auction-session-select').value = r.id;
     loadAuctionItems(r.id);
@@ -2141,22 +2146,56 @@ function endUploadBatch() {
 }
 
 // ── AUCTION CAPTURE ────────────────────────────────────────────
+function _captureStatusLabel(s) {
+  if (!s) return 'all';
+  if (s.startsWith('capturing:')) return `capturing ${s.split(':')[1]}...`;
+  if (s.startsWith('stopped:')) return `stopped at ${s.split(':')[1]}`;
+  if (s === 'stop_requested') return 'stopping...';
+  if (s === 'done') return 'done';
+  if (s === 'auto_capture_failed') return 'capture failed';
+  return s;
+}
+
 async function loadAuctionSessions() {
   try {
-    auctionSessions = await api('GET', '/api/auction/capture/sessions');
     const sel = document.getElementById('auction-session-select');
+    const keepId = sel.value; // preserve selection across refreshes (e.g. during progress polling)
+    auctionSessions = await api('GET', '/api/auction/capture/sessions');
     sel.innerHTML = '<option value="">Select a capture session...</option>' +
       auctionSessions.map(s => {
-        return `<option value="${s.id}">${s.name || 'Untitled'} · scope: ${s.capture_scope || 'all'} · ${(s.created_at||'').slice(0,10)}</option>`;
+        return `<option value="${s.id}">${s.name || 'Untitled'} · scope: ${s.capture_scope || 'all'} · ${_captureStatusLabel(s.status)} · ${(s.created_at||'').slice(0,10)}</option>`;
       }).join('');
     document.getElementById('auction-empty').style.display = auctionSessions.length ? 'none' : 'block';
     if (auctionSessions.length) {
-      sel.value = auctionSessions[0].id;
-      loadAuctionItems(auctionSessions[0].id);
+      const stillExists = auctionSessions.some(s => s.id === keepId);
+      const targetId = stillExists ? keepId : auctionSessions[0].id;
+      sel.value = targetId;
+      loadAuctionItems(targetId);
     } else {
       document.getElementById('auction-list').innerHTML = '';
     }
+    _pollCaptureProgress();
   } catch(e) { toast('Failed to load capture sessions', 'error'); }
+}
+
+function _pollCaptureProgress() {
+  clearTimeout(window._capturePollTimer);
+  const sel = document.getElementById('auction-session-select');
+  const current = auctionSessions.find(s => s.id === sel.value);
+  if (current && (current.status || '').startsWith('capturing')) {
+    window._capturePollTimer = setTimeout(loadAuctionSessions, 2500);
+  }
+}
+
+async function stopSelectedCapture() {
+  const sel = document.getElementById('auction-session-select');
+  const id = sel.value;
+  if (!id) { toast('Select a session first', 'error'); return; }
+  try {
+    await api('PATCH', `/api/auction/capture/sessions/${id}`, {status: 'stop_requested'});
+    toast('Stop requested — will halt after the current lot');
+    loadAuctionSessions();
+  } catch(e) { toast('Failed to stop capture', 'error'); }
 }
 
 async function deleteSelectedCaptureSession() {
