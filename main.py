@@ -4892,6 +4892,25 @@ async def update_capture_session(session_id: str, body: dict = Body(...)):
         raise HTTPException(404, "Session not found")
     return res.data[0]
 
+@app.delete("/api/auction/capture/sessions/{session_id}")
+async def delete_capture_session(session_id: str, request: Request):
+    """Deletes a capture session and everything under it (lots + their itemized
+    contents). Does not delete re-hosted photos from Storage — cheap to leave
+    orphaned, not worth the extra round trips here."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    owned = (supabase.table("auction_capture_sessions").select("id")
+             .eq("id", session_id).eq("business_id", str(business_id)).execute().data)
+    if not owned:
+        raise HTTPException(404, "Session not found")
+    lot_ids = [l["id"] for l in supabase.table("auction_lots").select("id").eq("session_id", session_id).execute().data]
+    if lot_ids:
+        supabase.table("auction_lot_items").delete().in_("lot_id", lot_ids).execute()
+        supabase.table("auction_lots").delete().eq("session_id", session_id).execute()
+    supabase.table("auction_capture_sessions").delete().eq("id", session_id).execute()
+    return {"ok": True, "deleted_session": session_id, "deleted_lots": len(lot_ids)}
+
 def _download_and_store_lot_photo(url: str, session_id: str, lot_number: str, idx: int) -> Optional[str]:
     """Downloads an external lot photo and re-uploads it into Supabase Storage so it
     survives even if the auction listing is later removed. Returns the public URL,
