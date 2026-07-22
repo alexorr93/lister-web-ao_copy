@@ -504,11 +504,11 @@ select.field-input { background: #fff; color: #0f172a; }
     <div style="border-top:1px solid var(--border);padding-top:16px;margin-bottom:10px;font-size:14px;font-weight:700;color:var(--text);">🔨 Live Lot Capture</div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">Paste an auction catalog or watchlist URL. BidSpotter links (bidspotter.com) capture automatically — first batch of lots only for now, multi-page catalogues not yet supported. Roller Auction links are wired up but currently broken (their query format doesn't match what we guessed). Other auction sites aren't wired up yet and still need Claude in chat to run the capture. Every lot captures instantly with no AI cost — the item is just the title. Later, click "Flag as LOT" on any row that's actually a mixed/bulk lot to pull all its photos and itemize it in detail.</div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
-      <input type="url" id="capture-url-input" class="field-input" style="flex:1;min-width:200px;" placeholder="https://bid.rollerauction.com/account/watchlist"/>
+      <input type="url" id="capture-url-input" class="field-input" style="flex:1;min-width:200px;" placeholder="https://bid.rollerauction.com/account/watchlist" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="capture-url-nofill"/>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
-      <input type="text" id="capture-name-input" class="field-input" style="flex:1;min-width:160px;" placeholder="Session name (optional)"/>
-      <input type="text" id="capture-scope-input" class="field-input" style="flex:1;min-width:160px;" placeholder="Pages/lots to capture (default: all)"/>
+      <input type="text" id="capture-name-input" class="field-input" style="flex:1;min-width:160px;" placeholder="Session name (optional)" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="capture-name-nofill"/>
+      <input type="text" id="capture-scope-input" class="field-input" style="flex:1;min-width:160px;" placeholder="Pages/lots to capture (default: all)" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="capture-scope-nofill"/>
       <button class="btn btn-primary" onclick="startCaptureSession()">Create Session</button>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
