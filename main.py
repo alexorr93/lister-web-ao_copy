@@ -4719,17 +4719,19 @@ def _fetch_roller_lots(source_url: str, capture_scope: Optional[str]) -> list:
         raise Exception(f"Could not find an auction ID in URL: {source_url}")
     auction_id = m.group(1)
 
-    page = 1
+    page = 1  # parsed but not yet sent — Roller rejected our guessed page/per_page args
+              # and their errors don't name the real ones, so this only fetches whatever
+              # their default (unpaginated) response returns until we learn the real names
     if capture_scope:
         pm = _re.search(r"page\s*(\d+)", capture_scope, _re.IGNORECASE)
         if pm:
             page = int(pm.group(1))
 
     query = f"""
-    query LotList($auctionId: ID!, $page: Int, $perPage: Int) {{
+    query LotList($auctionId: ID!) {{
       auction(auction_id: $auctionId) {{
         auction_id
-        lots(page: $page, per_page: $perPage) {{
+        lots {{
           total
           lots {{
 {_ROLLER_LOT_FIELDS}
@@ -4743,7 +4745,7 @@ def _fetch_roller_lots(source_url: str, capture_scope: Optional[str]) -> list:
         json={
             "operationName": "LotList",
             "query": query,
-            "variables": {"auctionId": auction_id, "page": page, "perPage": 100},
+            "variables": {"auctionId": auction_id},
         },
         headers={
             "Content-Type": "application/json",
