@@ -4735,11 +4735,6 @@ def _fetch_bidspotter_lots(source_url: str, capture_scope: Optional[str]) -> lis
         })
     return out
 
-SITE_SCRAPERS = {
-    "roller": _fetch_roller_lots,
-    "bidspotter": _fetch_bidspotter_lots,
-}
-
 def _decode_graphql_crunch(data: list):
     """Decodes a 'graphql-crunch' response: every value in the tree is interned
     once into a flat array, and every integer anywhere in the tree (except
@@ -4864,6 +4859,11 @@ def _fetch_roller_lots(source_url: str, capture_scope: Optional[str]) -> list:
             "is_bulk_lot": False,
         })
     return out
+
+SITE_SCRAPERS = {
+    "roller": _fetch_roller_lots,
+    "bidspotter": _fetch_bidspotter_lots,
+}
 
 @app.get("/api/auction/capture/_debug/roller-schema")
 async def debug_roller_schema(request: Request):
