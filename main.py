@@ -4788,6 +4788,46 @@ SITE_SCRAPERS = {
     "roller": _fetch_roller_lots,
 }
 
+@app.get("/api/auction/capture/_debug/roller-schema")
+async def debug_roller_schema(request: Request):
+    """One-time diagnostic: asks Roller's own GraphQL API what its real 'lots' field
+    arguments are (via GraphQL introspection), instead of guessing. Visit this URL
+    directly in the browser while logged into Lister — no DevTools needed. Once the
+    real argument names are known, _fetch_roller_lots gets fixed once, for good."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import requests as _requests
+
+    introspect_query = """
+    query IntrospectAuctionLots {
+      auctionType: __type(name: "Auction") {
+        fields { name args { name type { name kind ofType { name kind ofType { name } } } } }
+      }
+      queryType: __type(name: "Query") {
+        fields(includeDeprecated: false) {
+          name
+          args { name type { name kind ofType { name } } }
+        }
+      }
+    }
+    """
+    resp = _requests.post(
+        "https://bid.rollerauction.com/api",
+        json={"operationName": "IntrospectAuctionLots", "query": introspect_query},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
+        timeout=30,
+    )
+    try:
+        payload = resp.json()
+    except Exception:
+        return {"status_code": resp.status_code, "raw_text": resp.text[:2000]}
+    return {"status_code": resp.status_code, "payload": payload}
+
 def _run_auto_capture(session_id: str, source_url: str, capture_scope: Optional[str], site: str):
     """Runs in the background right after session creation. Fetches lots via the
     matching site scraper and saves them the same way the manual bulk-create
