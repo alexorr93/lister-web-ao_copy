@@ -4659,6 +4659,8 @@ def _detect_auction_site(url: str) -> Optional[str]:
         return "roller"
     if "bidspotter.com" in host:
         return "bidspotter"
+    if "dickensheet.com" in host:
+        return "dickensheet"
     return None
 
 def _fetch_bidspotter_lots(source_url: str, capture_scope: Optional[str]) -> list:
@@ -4860,9 +4862,65 @@ def _fetch_roller_lots(source_url: str, capture_scope: Optional[str]) -> list:
         })
     return out
 
+def _fetch_dickensheet_lots(source_url: str, capture_scope: Optional[str]) -> list:
+    """Fetches lots from a Dickensheet auction using their items-search API. This
+    endpoint (and field shape) was already confirmed working against live data in
+    an earlier session (used to build dickens_scrape.py) — not guessed here."""
+    import requests as _requests, re as _re
+
+    m = _re.search(r"(\d{4,})", source_url)
+    if not m:
+        raise Exception(f"Could not find an auction ID in URL: {source_url}")
+    auction_id = m.group(1)
+
+    page = 1
+    if capture_scope:
+        pm = _re.search(r"page\s*(\d+)", capture_scope, _re.IGNORECASE)
+        if pm:
+            page = int(pm.group(1))
+
+    resp = _requests.get(
+        "https://bid.dickensheet.com/api/items/search",
+        params={
+            "auction_id": auction_id,
+            "query": "",
+            "category": "All",
+            "per_page": 50,
+            "exact_category_match": "true",
+            "page": page,
+        },
+        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    items = payload.get("items") if isinstance(payload, dict) else payload
+    items = items or []
+
+    out = []
+    for item in items:
+        images = item.get("images") or []
+        photo_urls = []
+        for img in images:
+            url = img.get("xl") or img.get("lg") or img.get("sm") or img.get("xs")
+            if url:
+                photo_urls.append(url)
+        out.append({
+            "lot_number": item.get("lot_identifier"),
+            "title": item.get("name"),
+            "description": item.get("simple_description") or item.get("description_without_html"),
+            "listing_url": f"https://bid.dickensheet.com/auctions/{auction_id}",
+            "current_bid": None,
+            "photo_urls": photo_urls,
+            "is_bulk_lot": False,
+        })
+    return out
+
 SITE_SCRAPERS = {
     "roller": _fetch_roller_lots,
     "bidspotter": _fetch_bidspotter_lots,
+    "dickensheet": _fetch_dickensheet_lots,
 }
 
 @app.get("/api/auction/capture/_debug/roller-schema")
