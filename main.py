@@ -4679,8 +4679,13 @@ def _fetch_bidspotter_lots(source_url: str, capture_scope: Optional[str]) -> lis
     resp = _requests.get(source_url, headers={
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.bidspotter.com/en-us/auction-catalogues",
+        "Upgrade-Insecure-Requests": "1",
     }, timeout=30)
-    resp.raise_for_status()
+    if resp.status_code >= 400:
+        raise Exception(f"BidSpotter returned {resp.status_code}: {resp.text[:300]}")
     soup = BeautifulSoup(resp.text, "html.parser")
 
     lot_link_re = _re.compile(r"/lot-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
