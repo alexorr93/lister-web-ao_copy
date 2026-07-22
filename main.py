@@ -333,6 +333,13 @@ def _sku_needs_assignment(sku: str) -> bool:
     even though their prefix matches a real lot."""
     return (not sku) or sku.endswith("-")
 
+def _is_blank_sku(s):
+    """True for blank, '(no SKU)', or the 'lister-{id}' fallback — the set of values
+    that count as 'not a real SKU yet' for order-sync SKU-preservation purposes.
+    Shared so eBay and Shopify order sync can't drift on what counts as blank."""
+    s = (s or "").strip().lower()
+    return s in ("", "(no sku)") or s.startswith("lister-")
+
 def get_ebay_settings(business_id: str) -> dict:
     res = supabase.table("app_settings").select("*").eq("business_id", business_id).execute()
     settings = {row["key"]: row["value"] for row in (res.data or [])}
@@ -2764,11 +2771,10 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
 
         # Preserve any real SKU already stored (manually backfilled, or otherwise better
         # than what eBay's API returns) — a routine re-sync should never downgrade a
-        # good SKU back to blank/"(no SKU)"/the lister-{id} fallback.
-        def _is_blank_sku(s):
-            s = (s or "").strip().lower()
-            return s in ("", "(no sku)") or s.startswith("lister-")
-
+        # good SKU back to blank/"(no SKU)"/the lister-{id} fallback, and should never
+        # overwrite a deliberate manual correction with eBay's raw value either, even
+        # if that raw value also happens to be non-blank — a manual correction is meant
+        # to be final, one-and-done, not silently re-derived on every future sync.
         candidate_ids = [f"ebay:{row['order_id']}:{row['line_item_id']}" for row in ebay_rows]
         existing_sku_by_id = {}
         for i in range(0, len(candidate_ids), 200):
@@ -2798,7 +2804,7 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
             shipping_cost = _safe(pirate_ship_cost if pirate_ship_cost > 0 else ebay_labels_by_order.get(row["order_id"], 0))
             record_id = f"ebay:{row['order_id']}:{row['line_item_id']}"
             existing_sku = existing_sku_by_id.get(record_id)
-            final_sku = existing_sku if (existing_sku and not _is_blank_sku(existing_sku) and _is_blank_sku(row["sku"])) else row["sku"]
+            final_sku = existing_sku if (existing_sku and not _is_blank_sku(existing_sku)) else row["sku"]
             record = {
                 "id": record_id,
                 "business_id": business_id, "platform": "eBay", "order_id": row["order_id"],
@@ -2862,6 +2868,28 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
                     cost_by_tracking_shopify.get(tn, 0) or 0 for tn in row.get("tracking_numbers", [])
                 )
 
+        # Preserve any real SKU already stored for this order+title, same rule and
+        # reasoning as the eBay side above — Shopify's own variant SKU is often just
+        # a storage-location code, not what actually got manually corrected here, and
+        # a manual correction is meant to be final. Matched by (order_id, title) rather
+        # than the row's own id, since this table's Shopify record id embeds the SKU
+        # itself (see 'record' below) — matching by id would miss exactly the rows
+        # whose SKU was corrected, since a differing SKU means a differing id.
+        shopify_order_ids = list({row["order_id"] for row in shopify_rows})
+        existing_shopify_sku = {}
+        for i in range(0, len(shopify_order_ids), 200):
+            chunk = shopify_order_ids[i:i+200]
+            try:
+                res = (supabase.table("orders").select("order_id,title,sku")
+                       .eq("business_id", business_id).eq("platform", "Shopify")
+                       .in_("order_id", chunk).execute())
+                for r in (res.data or []):
+                    key = (r["order_id"], r.get("title") or "")
+                    if key not in existing_shopify_sku and r.get("sku") and not _is_blank_sku(r["sku"]):
+                        existing_shopify_sku[key] = r["sku"]
+            except Exception:
+                pass
+
         shopify_skipped = 0
         for i, row in enumerate(shopify_rows):
             net = _safe2(row.get("net", row["revenue"]))
@@ -2871,10 +2899,11 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
             shipping_share = _safe2(order_shipping_cost * (row["revenue"] / order_subtotal)) if order_subtotal > 0 else 0.0
             final_net = _safe2(net - shipping_share)
             trackings = row.get("tracking_numbers", [])
+            final_sku = existing_shopify_sku.get((oid, row.get("title") or "")) or row["sku"]
             record = {
-                "id": f"shopify:{row['order_id']}:{row['sku']}:{i}",
+                "id": f"shopify:{row['order_id']}:{final_sku}:{i}",
                 "business_id": business_id, "platform": "Shopify", "order_id": row["order_id"],
-                "sku": row["sku"], "title": row["title"], "quantity": row["quantity"],
+                "sku": final_sku, "title": row["title"], "quantity": row["quantity"],
                 "order_date": row["order_date"], "gross_revenue": _safe2(row["revenue"]),
                 "fee": _safe2(row.get("fee", 0)), "net": net,
                 "tracking_number": ",".join(trackings) if trackings else None,
@@ -3047,9 +3076,6 @@ def backfill_legacy_item_ids(business_id: str) -> dict:
             break
         start += page_size
 
-    def _is_blank_sku(s):
-        s = (s or "").strip().lower()
-        return s in ("", "(no sku)") or s.startswith("lister-")
     rows = [r for r in rows if _is_blank_sku(r.get("sku"))]
 
     order_ids = list(set(r["order_id"] for r in rows if r.get("order_id")))
