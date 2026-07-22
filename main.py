@@ -4752,10 +4752,15 @@ def _fetch_roller_lots(source_url: str, capture_scope: Optional[str]) -> list:
         },
         timeout=30,
     )
-    resp.raise_for_status()
-    payload = resp.json()
+    try:
+        payload = resp.json()
+    except Exception:
+        resp.raise_for_status()
+        raise Exception(f"Roller returned non-JSON response (status {resp.status_code}): {resp.text[:500]}")
     if payload.get("errors"):
-        raise Exception(f"Roller GraphQL error: {payload['errors']}")
+        raise Exception(f"Roller GraphQL error (status {resp.status_code}): {payload['errors']}")
+    if resp.status_code >= 400:
+        raise Exception(f"Roller returned {resp.status_code} with no GraphQL errors field: {resp.text[:500]}")
 
     raw = payload.get("data")
     decoded = _decode_graphql_crunch(raw) if isinstance(raw, list) else raw
