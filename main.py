@@ -3253,6 +3253,29 @@ async def sync_status(request: Request):
         raise HTTPException(401, "Unauthorized")
     return _sync_status.get(business_id, {"running": False, "result": None, "started_at": None, "finished_at": None})
 
+class OrderSkuUpdate(BaseModel):
+    order_row_id: str
+    new_sku: str
+
+@app.post("/api/orders/sku")
+async def update_order_sku(body: OrderSkuUpdate, request: Request):
+    """Manually sets an order line's SKU directly — used by the Financials
+    Uncategorized view's inline edit. Writes straight to the same column every
+    sync's preservation check reads from, so once set here, it's protected by
+    that same 'always keep an existing good SKU' rule — no different from a
+    correction made via bulk SQL or the CSV backfill tools."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    new_sku = (body.new_sku or "").strip()
+    if not new_sku:
+        raise HTTPException(400, "new_sku is required")
+    res = (supabase.table("orders").update({"sku": new_sku})
+           .eq("business_id", business_id).eq("id", body.order_row_id).execute())
+    if not res.data:
+        raise HTTPException(404, "Order line not found")
+    return {"ok": True, "id": body.order_row_id, "sku": new_sku}
+
 @app.get("/api/financials")
 async def api_financials(request: Request, start: str = None, end: str = None, include_shopify: bool = True):
     business_id = require_auth(request)
@@ -3277,7 +3300,7 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
     rows.sort(key=lambda r: r.get("order_date", ""), reverse=True)
 
     order_lines = [{
-        "sku": r["sku"], "title": r["title"], "platform": r["platform"], "order_id": r["order_id"],
+        "id": r["id"], "sku": r["sku"], "title": r["title"], "platform": r["platform"], "order_id": r["order_id"],
         "quantity": r["quantity"], "revenue": r["gross_revenue"], "net": r["final_net"],
         "buyer_shipping": r.get("buyer_shipping") or 0,
         "shipping_cost": r.get("shipping_cost") or 0, "order_date": r.get("order_date", ""),
@@ -3304,7 +3327,7 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
             continue
         uncategorized_order_net += r.get("final_net") or 0
         uncategorized_order_items.append({
-            "sku": sku, "title": r.get("title"), "platform": r.get("platform"),
+            "id": r["id"], "sku": sku, "title": r.get("title"), "platform": r.get("platform"),
             "order_id": r.get("order_id"), "order_date": r.get("order_date", ""),
             "quantity": r.get("quantity"), "revenue": r.get("gross_revenue"),
             "net": r.get("final_net"), "buyer_shipping": r.get("buyer_shipping") or 0,

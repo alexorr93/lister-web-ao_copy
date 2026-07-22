@@ -351,8 +351,12 @@ function renderTable() {
     const reasonCell = showingUncategorized
       ? `<td>${r.needs_sku ? '<span style="color:#f59e0b;font-weight:600;">Needs SKU</span>' : '<span class="muted">No matching lot</span>'}</td>`
       : '';
+    const skuCell = showingUncategorized
+      ? `<input type="text" class="field-input order-sku-input" data-row-id="${r.id}" value="${escapeHtml(r.sku)}" style="width:100px;font-size:12px;padding:4px 6px;"/>
+         <button class="btn" style="font-size:11px;padding:2px 8px;" onclick="saveOrderSku(this, '${r.id}')">Save</button>`
+      : `<span class="sku">${escapeHtml(r.sku)}</span>`;
     html += `<tr>
-      <td class="sku">${escapeHtml(r.sku)}</td>
+      <td>${skuCell}</td>
       ${reasonCell}
       <td class="muted">${escapeHtml(r.order_id)}</td>
       <td class="muted">${escapeHtml(r.order_date)}</td>
@@ -366,6 +370,27 @@ function renderTable() {
   }
   html += '</tbody></table>';
   document.getElementById('table-area').innerHTML = html;
+}
+
+async function saveOrderSku(btn, rowId) {
+  const input = document.querySelector(`.order-sku-input[data-row-id="${rowId}"]`);
+  const newSku = input.value.trim();
+  if (!newSku) { alert('SKU cannot be blank'); return; }
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+  try {
+    const r = await fetch('/api/orders/sku', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({order_row_id: rowId, new_sku: newSku}),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed to update SKU');
+    await loadFinancials();
+  } catch(e) {
+    alert(`Failed to update SKU: ${e.message}`);
+    btn.disabled = false;
+    btn.textContent = 'Save';
+  }
 }
 
 function setSort(key) {
