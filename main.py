@@ -126,6 +126,99 @@ async def start_background_jobs():
     import asyncio
     asyncio.create_task(auto_fill_worker())
     asyncio.create_task(order_sync_worker())
+    asyncio.create_task(shopify_sync_worker())
+
+async def shopify_sync_worker():
+    """Runs the eBay-live-qty -> Shopify-qty sync automatically once per hour, at
+    the top of the hour. Computes 'today' server-side in Mountain time (not UTC,
+    not a browser's local clock) so it stays correct regardless of when this
+    process happens to be running. Sleeps until the next :00 rather than a flat
+    3600s interval so it doesn't drift off the hour over time."""
+    import asyncio, datetime as _dt
+    while True:
+        now = _dt.datetime.now(_dt.timezone.utc)
+        next_hour = (now.replace(minute=0, second=0, microsecond=0) + _dt.timedelta(hours=1))
+        await asyncio.sleep(max((next_hour - now).total_seconds(), 5))
+        try:
+            res = supabase.table("app_settings").select("business_id").eq("key", "SHOPIFY_STORE_DOMAIN").execute()
+            business_ids = list(set(r["business_id"] for r in (res.data or [])))
+            for biz_id in business_ids:
+                try:
+                    result = await asyncio.to_thread(run_hourly_shopify_sync_for_business, biz_id)
+                    print(f"shopify_sync_worker: business {biz_id} -> {result}")
+                except Exception as e:
+                    print(f"shopify_sync_worker: business {biz_id} failed: {e}")
+        except Exception as e:
+            print(f"shopify_sync_worker error: {e}")
+
+def run_hourly_shopify_sync_for_business(business_id: str) -> dict:
+    """The actual per-business work for one hourly cycle: pull today's eBay sales,
+    refresh the eBay/Shopify snapshot for just those titles, then push a Shopify
+    qty update only for items whose Shopify qty doesn't already match eBay's live
+    qty — never re-pushes an already-correct value."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    settings = get_ebay_settings(business_id)
+    if not (settings.get("SHOPIFY_STORE_DOMAIN") or "").strip():
+        return {"skipped": "no_shopify_connected"}
+
+    mt_today = _dt.datetime.now(ZoneInfo("America/Denver")).strftime("%Y-%m-%d")
+    sold_by_title = _shopify_sync_sold_by_title(business_id, mt_today, mt_today)
+    if not sold_by_title:
+        return {"sold_today": 0}
+
+    items = [{"title": v["title"], "sku": v["sku"], "legacy_item_id": v.get("legacy_item_id", "")}
+             for v in sold_by_title.values()]
+    refresh_result = _shopify_sync_refresh_work(business_id, items)
+    if refresh_result.get("error"):
+        return {"sold_today": len(sold_by_title), "refresh_error": refresh_result["error"]}
+
+    norm_titles = set(sold_by_title.keys())
+    snap_res = supabase.table("shopify_sync_snapshot").select("*").eq("business_id", business_id).execute()
+    snapshots = {row["norm_title"]: row for row in (snap_res.data or []) if row["norm_title"] in norm_titles}
+
+    push_items = []
+    for norm_title, snap in snapshots.items():
+        if not snap.get("shopify_inventory_item_id"):
+            continue
+        if snap.get("ebay_live_qty") is None:
+            continue
+        if snap.get("shopify_live_qty") == snap.get("ebay_live_qty"):
+            continue  # already correct — don't re-push an unchanged value every hour
+        sold_entry = sold_by_title.get(norm_title, {})
+        push_items.append({
+            "title": snap.get("title"), "sku": snap.get("sku"),
+            "shopify_inventory_item_id": snap.get("shopify_inventory_item_id"),
+            "ebay_live_qty": snap.get("ebay_live_qty"),
+            "qty_sold_today": sold_entry.get("qty_sold_today", 0),
+            "order_ids": sold_entry.get("order_ids", []),
+        })
+
+    push_result = {"pushed": 0}
+    if push_items:
+        try:
+            push_result = _push_shopify_qty_updates(business_id, push_items)
+        except Exception as e:
+            push_result = {"error": str(e)}
+
+    return {
+        "sold_today": len(sold_by_title), "refreshed": refresh_result.get("checked", 0),
+        "ebay_checked": refresh_result.get("ebay_checked", 0), "ebay_reused": refresh_result.get("ebay_reused", 0),
+        "skipped_recent_failures": refresh_result.get("skipped_recent_failures", 0),
+        "push_candidates": len(push_items), "push_result": push_result,
+    }
+
+@app.post("/api/shopify-sync/run-now")
+async def shopify_sync_run_now(request: Request):
+    """Manual trigger for the exact same hourly job — useful for testing without
+    waiting for the next top of the hour."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio
+    result = await asyncio.to_thread(run_hourly_shopify_sync_for_business, business_id)
+    return result
 
 async def order_sync_worker():
     """Keeps the local `orders` table fresh automatically, so Financials never has to
@@ -6437,12 +6530,26 @@ def _shopify_sync_refresh_work(business_id: str, items: list) -> dict:
     # .in_() filter here — real titles can contain commas/quotes that corrupt
     # PostgREST's in.() syntax (confirmed elsewhere on this page) — fetch
     # everything for the business and match locally instead.
-    existing_res = supabase.table("shopify_sync_snapshot").select("norm_title,ebay_live_qty,ebay_ended")\
+    existing_res = supabase.table("shopify_sync_snapshot").select("norm_title,ebay_live_qty,ebay_ended,updated_at")\
         .eq("business_id", business_id).execute()
-    known_ebay = {
-        row["norm_title"]: {"ebay_live_qty": row.get("ebay_live_qty"), "ebay_ended": bool(row.get("ebay_ended"))}
-        for row in (existing_res.data or []) if row.get("ebay_live_qty") is not None
-    }
+    now_check = _dt.datetime.utcnow()
+    known_ebay = {}
+    recent_failures = set()  # titles whose eBay lookup failed within the last 4h — skip
+                              # entirely this run (don't touch/re-upsert them) so their
+                              # timestamp keeps aging naturally toward the retry window,
+                              # instead of being refreshed every run and never retried.
+    for row in (existing_res.data or []):
+        if row.get("ebay_live_qty") is not None:
+            known_ebay[row["norm_title"]] = {"ebay_live_qty": row.get("ebay_live_qty"), "ebay_ended": bool(row.get("ebay_ended"))}
+            continue
+        updated_at = row.get("updated_at")
+        if updated_at:
+            try:
+                age = now_check - _dt.datetime.fromisoformat(updated_at.replace("Z", "+00:00")).replace(tzinfo=None)
+                if age.total_seconds() < 4 * 3600:
+                    recent_failures.add(row["norm_title"])
+            except Exception:
+                pass
 
     ebay_token = get_ebay_access_token(business_id)
     settings = get_ebay_settings(business_id)
@@ -6465,8 +6572,9 @@ def _shopify_sync_refresh_work(business_id: str, items: list) -> dict:
                                   f"{catalog_pages} page(s) ({len(shopify_catalog)} products) before giving up. "
                                   f"Nothing was changed — try Sync Now again in a minute."}
 
-    need_ebay_check = {k: v for k, v in sold_by_title.items() if k not in known_ebay}
+    need_ebay_check = {k: v for k, v in sold_by_title.items() if k not in known_ebay and k not in recent_failures}
     already_known = {k: v for k, v in sold_by_title.items() if k in known_ebay}
+    skipped_recent_failures = {k: v for k, v in sold_by_title.items() if k in recent_failures}
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         checked_results = list(pool.map(
@@ -6504,6 +6612,7 @@ def _shopify_sync_refresh_work(business_id: str, items: list) -> dict:
 
     return {
         "checked": len(rows), "ebay_checked": len(checked_results), "ebay_reused": len(reused_results),
+        "skipped_recent_failures": len(skipped_recent_failures),
         "synced_at": now_iso, "catalog_products": len(shopify_catalog),
     }
 
@@ -7290,29 +7399,24 @@ def _get_shopify_primary_location_id(domain: str, headers: dict) -> str:
     edges = (r.json().get("data", {}) or {}).get("locations", {}).get("edges", []) if r.status_code == 200 else []
     return edges[0]["node"]["id"] if edges else None
 
-@app.post("/api/shopify-sync/push")
-async def shopify_sync_push(request: Request, items: List[dict] = Body(...)):
-    """Step 2: takes the exact rows the user selected from Step 1 (already carrying
-    the Shopify inventoryItem id from that live check) and SETS Shopify's quantity to
-    match eBay's live quantity exactly — not a relative decrement. A decrement compounds
-    drift whenever the two platforms are already out of sync (confirmed: found a listing
-    at -1 in Shopify that no push ever touched — a relative delta would have made that
-    worse, not fixed it). Setting to eBay's live number is self-correcting instead.
-    Logs every attempt for audit/undo."""
-    business_id = require_auth(request)
-    if not business_id:
-        raise HTTPException(401, "Unauthorized")
+def _push_shopify_qty_updates(business_id: str, items: list) -> dict:
+    """Takes rows carrying a Shopify inventoryItem id (from a live check) and SETS
+    Shopify's quantity to match eBay's live quantity exactly — not a relative
+    decrement. A decrement compounds drift whenever the two platforms are already
+    out of sync (confirmed: found a listing at -1 in Shopify that no push ever
+    touched — a relative delta would have made that worse, not fixed it). Setting
+    to eBay's live number is self-correcting instead. Logs every attempt for audit/undo."""
     import requests as _req, datetime as _dt
 
     settings = get_ebay_settings(business_id)
     domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
     if not domain:
-        raise HTTPException(400, "Shopify not connected")
+        raise Exception("Shopify not connected")
     token = get_shopify_access_token(business_id)
     headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
     location_id = _get_shopify_primary_location_id(domain, headers)
     if not location_id:
-        raise HTTPException(400, "Could not determine Shopify location")
+        raise Exception("Could not determine Shopify location")
 
     results = []
     for it in items:
@@ -7351,16 +7455,10 @@ async def shopify_sync_push(request: Request, items: List[dict] = Body(...)):
                 gql_errors = resp.get("errors") or []
                 errors = (resp.get("data", {}) or {}).get("inventorySetQuantities", {}).get("userErrors", []) if not gql_errors else gql_errors
                 if r.status_code == 200 and not gql_errors and not errors:
-                    # This is a "set", not an "adjust" — we already know exactly what we
-                    # set it to, so use that directly rather than trusting Shopify's
-                    # quantityAfterChange field (it comes back null for set operations,
-                    # unlike for adjustQuantities where it's reliable).
                     new_qty = target_qty
                     log_row["status"] = "success"
                     log_row["new_quantity"] = new_qty
                     results.append({"title": it.get("title"), "status": "success", "new_quantity": new_qty})
-                    # Keep the snapshot in sync immediately so the row reflects the push
-                    # right away, without waiting on the next full Sync Now.
                     try:
                         supabase.table("shopify_sync_snapshot")\
                             .update({"shopify_live_qty": new_qty, "updated_at": _dt.datetime.utcnow().isoformat()})\
@@ -7383,6 +7481,19 @@ async def shopify_sync_push(request: Request, items: List[dict] = Body(...)):
             print(f"shopify_push_log insert failed: {e}")
 
     return {"ok": True, "results": results}
+
+@app.post("/api/shopify-sync/push")
+async def shopify_sync_push(request: Request, items: List[dict] = Body(...)):
+    """Step 2: takes the exact rows the user selected from Step 1 — thin wrapper
+    around _push_shopify_qty_updates, which is also used by the hourly automated
+    sync (see shopify_sync_worker)."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    try:
+        return _push_shopify_qty_updates(business_id, items)
+    except Exception as e:
+        raise HTTPException(400, str(e))
 
 @app.get("/api/inventory")
 async def list_inventory(request: Request):
