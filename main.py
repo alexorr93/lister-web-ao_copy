@@ -1985,6 +1985,24 @@ async def list_acquisitions(request: Request):
     count_by_prefix = {}
     uncategorized_value, uncategorized_count = 0, 0
     uncategorized_items = []
+
+    # Join against the internal listings table by eBay item ID so the frontend knows
+    # which of these can actually have their SKU edited. Only Trading-API (v2) listings
+    # support that — Inventory-API (v1) listings can never have their SKU changed via
+    # any API call, an eBay platform restriction (see update_ebay_v2_sku). Paginated
+    # for the same reason as everything else here — thousands of rows possible.
+    listing_by_item_id = {}
+    start = 0
+    while True:
+        page = supabase.table("listings").select("id,ebay_item_id,ebay_offer_id")\
+            .eq("business_id", business_id).not_.is_("ebay_item_id", "null")\
+            .range(start, start + 999).execute().data or []
+        for l in page:
+            listing_by_item_id[l["ebay_item_id"]] = l
+        if len(page) < 1000:
+            break
+        start += 1000
+
     for row in active_rows:
         sku = row.get("sku") or ""
         value = (row.get("price") or 0) * (row.get("quantity_available") or 0)
@@ -2001,10 +2019,14 @@ async def list_acquisitions(request: Request):
         else:
             uncategorized_value += value
             uncategorized_count += 1
+            matched_listing = listing_by_item_id.get(row.get("item_id"))
+            sku_editable = bool(matched_listing) and not matched_listing.get("ebay_offer_id")
             uncategorized_items.append({
                 "item_id": row.get("item_id"), "sku": sku, "title": row.get("title"),
                 "price": row.get("price"), "quantity_available": row.get("quantity_available"),
                 "value": round(value, 2), "needs_sku": needs_sku,
+                "listing_id": matched_listing.get("id") if matched_listing else None,
+                "sku_editable": sku_editable,
             })
     uncategorized_items.sort(key=lambda r: r["value"], reverse=True)
     active_synced_at = max((r.get("updated_at") for r in active_rows if r.get("updated_at")), default=None)

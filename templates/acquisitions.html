@@ -168,12 +168,16 @@ function renderUncategorizedTable() {
     return;
   }
   let html = `<table><thead><tr>
-    <th>SKU</th><th>Reason</th><th>eBay Item</th><th>Price</th><th>Qty Available</th><th>Value</th>
+    <th>SKU</th><th>Reason</th><th>eBay Item</th><th>Price</th><th>Qty Available</th><th>Value</th><th>Edit SKU</th>
   </tr></thead><tbody>`;
   for (const it of items) {
     const reason = it.needs_sku
       ? `<span style="color:var(--amber);font-weight:600;">Needs SKU</span>`
       : `<span style="color:var(--muted);">No matching lot</span>`;
+    const editCell = it.sku_editable
+      ? `<input type="text" class="field-input uncat-sku-input" data-listing-id="${it.listing_id}" value="${escapeHtml(it.sku)}" style="width:110px;font-size:12px;padding:4px 6px;"/>
+         <button class="btn" style="font-size:11px;padding:2px 8px;" onclick="saveUncatSku(this, '${it.listing_id}')">Save</button>`
+      : `<span class="muted" title="This listing was published via the old eBay Inventory API — eBay does not allow changing its SKU via any API call, on their side, not ours.">🔒 locked (old API)</span>`;
     html += `<tr>
       <td class="sku muted">${escapeHtml(it.sku || '(blank)')}</td>
       <td>${reason}</td>
@@ -181,10 +185,33 @@ function renderUncategorizedTable() {
       <td>${fmtMoney(it.price)}</td>
       <td>${it.quantity_available ?? '—'}</td>
       <td>${fmtMoney(it.value)}</td>
+      <td>${editCell}</td>
     </tr>`;
   }
   html += '</tbody></table>';
   document.getElementById('uncategorized-table-area').innerHTML = html;
+}
+
+async function saveUncatSku(btn, listingId) {
+  const input = document.querySelector(`.uncat-sku-input[data-listing-id="${listingId}"]`);
+  const newSku = input.value.trim();
+  if (!newSku) { alert('SKU cannot be blank'); return; }
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+  try {
+    const r = await fetch(`/api/listings/${listingId}/ebay-v2/sku`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({new_sku: newSku}),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed to update SKU');
+    await loadAcquisitions();
+    setView('uncategorized');
+  } catch(e) {
+    alert(`Failed to update SKU: ${e.message}`);
+    btn.disabled = false;
+    btn.textContent = 'Save';
+  }
 }
 
 function fmtMoney(n) {
