@@ -6136,10 +6136,18 @@ async def resync_one_order(order_id: str, request: Request):
         line_item_id = li.get("lineItemId", "")
         fee = fees_by_line.get((order_id, line_item_id), 0.0)
         net = (order_total_due_seller * (revenue / order_gross_subtotal)) if order_gross_subtotal > 0 else order_total_due_seller
+        record_id = f"ebay:{order_id}:{line_item_id}"
+        # Same SKU-preservation rule as the bulk sync (sync_orders_for_business) —
+        # this endpoint used to have none at all, so a single-order resync would
+        # silently wipe a manual correction that the bulk sync would have protected.
+        existing = supabase.table("orders").select("sku").eq("id", record_id).limit(1).execute().data
+        existing_sku = existing[0].get("sku") if existing else None
+        fresh_sku = li.get("sku") or "(no SKU)"
+        final_sku = existing_sku if (existing_sku and not _is_blank_sku(existing_sku)) else fresh_sku
         record = {
-            "id": f"ebay:{order_id}:{line_item_id}",
+            "id": record_id,
             "business_id": business_id, "platform": "eBay", "order_id": order_id,
-            "sku": li.get("sku") or "(no SKU)", "title": li.get("title", ""), "quantity": int(li.get("quantity", 1)),
+            "sku": final_sku, "title": li.get("title", ""), "quantity": int(li.get("quantity", 1)),
             "order_date": created[:10] if created else "",
             "gross_revenue": round(revenue, 2), "buyer_shipping": round(buyer_shipping, 2),
             "refund": round(refund, 2),
