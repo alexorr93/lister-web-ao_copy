@@ -4657,7 +4657,88 @@ def _detect_auction_site(url: str) -> Optional[str]:
     host = urlparse(url).netloc.lower()
     if "rollerauction.com" in host:
         return "roller"
+    if "bidspotter.com" in host:
+        return "bidspotter"
     return None
+
+def _fetch_bidspotter_lots(source_url: str, capture_scope: Optional[str]) -> list:
+    """Fetches lots from a BidSpotter auction-catalogue page. Unlike Roller, this
+    page is plain server-rendered HTML (confirmed via direct fetch) — no API/GraphQL
+    guessing needed. Uses each lot's detail-page URL (a stable /lot-<uuid> pattern)
+    as the anchor for finding lot blocks, rather than guessing CSS class names,
+    since exact HTML structure wasn't directly inspected before writing this.
+    LIMITATION: pagination is client-side JS (confirmed ?page=2 returns identical
+    content to page 1), so this only captures the first batch of lots shown on
+    load (60 by default) — good for smaller catalogues, not verified yet for
+    multi-page ones like large 1000+ lot catalogues."""
+    import requests as _requests, re as _re
+    from bs4 import BeautifulSoup
+
+    resp = _requests.get(source_url, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    }, timeout=30)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    lot_link_re = _re.compile(r"/lot-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+    seen_hrefs = set()
+    out = []
+
+    for a in soup.find_all("a", href=lot_link_re):
+        href = a["href"]
+        if href in seen_hrefs:
+            continue
+        seen_hrefs.add(href)
+
+        # Walk up to a parent block that also contains this lot's price/location text
+        block = a
+        block_text = ""
+        for _ in range(8):
+            block = block.parent
+            if block is None:
+                break
+            block_text = block.get_text(" ", strip=True)
+            if "Opening price" in block_text or "Location:" in block_text:
+                break
+
+        title = a.get_text(strip=True)
+        if not title:
+            img = a.find("img")
+            title = (img.get("alt") or "").strip() if img else ""
+
+        lot_num_m = _re.search(r"\bLot\s+([A-Za-z0-9-]+)\b", block_text)
+        price_m = _re.search(r"Opening price\s*\$?([\d,]+\.?\d*)", block_text)
+        bid_m = _re.search(r"Current bid\s*\$?([\d,]+\.?\d*)", block_text)
+        loc_m = _re.search(r"Location:\s*([^$]+?)(?:\s{2,}|$)", block_text)
+
+        price = None
+        for m in (bid_m, price_m):
+            if m:
+                try:
+                    price = float(m.group(1).replace(",", ""))
+                    break
+                except ValueError:
+                    pass
+
+        img_tag = block.find("img", src=True) if block else None
+        photo = img_tag["src"] if img_tag and "ajax-loader" not in img_tag["src"] and "blank-image" not in img_tag["src"] else None
+
+        out.append({
+            "lot_number": lot_num_m.group(1) if lot_num_m else None,
+            "title": title[:300] if title else None,
+            "description": (loc_m.group(1).strip() if loc_m else None),
+            "listing_url": href if href.startswith("http") else f"https://www.bidspotter.com{href}",
+            "current_bid": price,
+            "photo_urls": [photo] if photo else [],
+            "is_bulk_lot": False,
+        })
+    return out
+
+SITE_SCRAPERS = {
+    "roller": _fetch_roller_lots,
+    "bidspotter": _fetch_bidspotter_lots,
+}
 
 def _decode_graphql_crunch(data: list):
     """Decodes a 'graphql-crunch' response: every value in the tree is interned
@@ -4783,10 +4864,6 @@ def _fetch_roller_lots(source_url: str, capture_scope: Optional[str]) -> list:
             "is_bulk_lot": False,
         })
     return out
-
-SITE_SCRAPERS = {
-    "roller": _fetch_roller_lots,
-}
 
 @app.get("/api/auction/capture/_debug/roller-schema")
 async def debug_roller_schema(request: Request):
