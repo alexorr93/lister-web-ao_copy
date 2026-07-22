@@ -102,6 +102,7 @@ tr.ignored:hover td { opacity: 0.85; }
       </div>
       <button class="btn btn-primary" onclick="syncNow()" title="Refreshes live eBay/Shopify quantities into the local snapshot — this is the only action that calls out to eBay/Shopify">🔄 Sync Now</button>
       <button class="btn btn-orange" onclick="pushAllFound()" title="Pushes every row that's found in Shopify but not yet matching eBay — sets each to eBay's live quantity">⚡ Push All Found</button>
+      <button class="btn" onclick="testHourlySync()" title="Runs the same job the hourly automation runs (sync + push), right now, for today's sales only">🧪 Test Hourly Job</button>
       <span id="last-synced" style="font-size:11px;color:var(--muted);align-self:center;"></span>
     </div>
 
@@ -233,6 +234,20 @@ async function syncNow() {
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed to start');
     pollRefreshStatus();
+  } catch(e) {
+    document.getElementById('status').textContent = `❌ ${e.message}`;
+  }
+}
+
+async function testHourlySync() {
+  document.getElementById('status').textContent = 'Running the hourly job now (sync + push for today)...';
+  try {
+    const r = await fetch('/api/shopify-sync/run-now', { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed to run');
+    document.getElementById('status').textContent =
+      `✅ Hourly job result: ${JSON.stringify(data)}`;
+    loadToday();
   } catch(e) {
     document.getElementById('status').textContent = `❌ ${e.message}`;
   }
