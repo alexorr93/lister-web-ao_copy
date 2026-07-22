@@ -2513,6 +2513,7 @@ def fetch_shopify_orders(business_id: str, start_iso: str, end_iso: str) -> list
                     "sku": li.get("sku") or "(no SKU)",
                     "title": li.get("title", ""),
                     "quantity": int(li.get("quantity", 1)),
+                    "line_item_id": li.get("id"),
                     "revenue": gross,
                     "refund": refund_amt,
                     "fee": fee_share,
@@ -2900,8 +2901,19 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
             final_net = _safe2(net - shipping_share)
             trackings = row.get("tracking_numbers", [])
             final_sku = existing_shopify_sku.get((oid, row.get("title") or "")) or row["sku"]
+            # Stable ID uses Shopify's own real line-item ID, not a positional index —
+            # a positional 'i' shifts whenever the fetched list's order or length
+            # changes between runs (a new order appearing earlier, pagination
+            # differences, date-window edges moving), silently minting a NEW id for
+            # the SAME logical line item every sync cycle and leaving the old row
+            # behind forever. That was the actual cause of orders appearing
+            # duplicated many times over — not something introduced today, a
+            # pre-existing bug this line_item_id fixes at the root.
+            line_item_id = row.get("line_item_id") or f"noid-{i}"  # fallback only for
+            # rows Shopify somehow returned without a line item id at all (shouldn't
+            # normally happen) — keeps behavior no worse than before for that edge case
             record = {
-                "id": f"shopify:{row['order_id']}:{final_sku}:{i}",
+                "id": f"shopify:{row['order_id']}:{line_item_id}",
                 "business_id": business_id, "platform": "Shopify", "order_id": row["order_id"],
                 "sku": final_sku, "title": row["title"], "quantity": row["quantity"],
                 "order_date": row["order_date"], "gross_revenue": _safe2(row["revenue"]),
