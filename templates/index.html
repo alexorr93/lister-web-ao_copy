@@ -2559,7 +2559,8 @@ async function syncEbayCategories() {
   statusEl.textContent = 'Downloading eBay category tree... this can take a minute.';
   try {
     const r = await api('POST', '/api/ebay/sync-categories');
-    statusEl.textContent = `✅ Synced ${r.count} categories.`;
+    statusEl.textContent =
+      `✅ Synced ${r.count} categories. Top-level branches eBay returned (${(r.top_level_names || []).length}): ${(r.top_level_names || []).join(', ')}`;
     toast('eBay categories synced ✓');
   } catch(e) {
     statusEl.textContent = '⚠️ Sync failed: ' + e.message;

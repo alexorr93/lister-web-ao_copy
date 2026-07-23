@@ -1408,7 +1408,7 @@ def sync_ebay_categories(token: str) -> int:
     is_leaf marks which ones are actually valid for listing an item (eBay requires a leaf category)."""
     import requests as _req
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-    r = _req.get("https://api.ebay.com/commerce/taxonomy/v1/category_tree/0", headers=headers, timeout=60)
+    r = _req.get("https://api.ebay.com/commerce/taxonomy/v1/category_tree/0", headers=headers, timeout=120)
     if r.status_code != 200:
         raise Exception(f"getCategoryTree failed: {r.status_code} {r.text}")
     tree = r.json()
@@ -1429,14 +1429,23 @@ def sync_ebay_categories(token: str) -> int:
             walk(child, new_path)
 
     root = tree.get("rootCategoryNode", {})
-    for child in root.get("childCategoryTreeNodes", []):
+    top_level_children = root.get("childCategoryTreeNodes", [])
+    # Diagnostic: print exactly what eBay's API actually returned at the top level,
+    # before assuming the walk itself is at fault — a low total (1700 vs the tens of
+    # thousands a full tree should have) points at a truncated/incomplete API
+    # response, not a bug in this recursive walk.
+    top_level_names = [c.get("category", {}).get("categoryName", "") for c in top_level_children]
+    print(f"sync_ebay_categories: raw response {len(r.content)} bytes, "
+          f"{len(top_level_children)} top-level branches: {top_level_names}")
+
+    for child in top_level_children:
         walk(child, [])
 
     # Upsert in batches so we don't blow request size limits
     for i in range(0, len(all_nodes), 500):
         batch = all_nodes[i:i+500]
         supabase.table("ebay_categories").upsert(batch, on_conflict="category_id").execute()
-    return len(all_nodes)
+    return {"count": len(all_nodes), "top_level_names": top_level_names, "raw_bytes": len(r.content)}
 
 def suggest_ebay_category(title: str, business_id: str, restrict: bool = True, exclude_id: str = None) -> dict:
     """Match an item title to the best eBay leaf category using eBay's OWN live category-suggestion
@@ -1497,8 +1506,8 @@ async def api_sync_categories(request: Request):
     except Exception as e:
         raise HTTPException(400, str(e))
     try:
-        count = sync_ebay_categories(token)
-        return {"ok": True, "count": count}
+        result = sync_ebay_categories(token)
+        return {"ok": True, **result}
     except Exception as e:
         raise HTTPException(500, str(e))
 
