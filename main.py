@@ -6280,34 +6280,25 @@ async def debug_shopify_product_metadata(request: Request, limit: int = 5):
     return {"products_checked": len(results), "products": results}
 
 def fetch_ebay_inventory_items(business_id: str) -> list:
-    """Lists every eBay inventory item (SKU/title/qty/condition). Price/offer-status
-    live on a separate Offer object that needs one call PER sku to fetch — deliberately
-    left out of v1 to avoid the same N+1 trap other parts of this app hit before."""
-    import requests as _req
-    token = get_ebay_access_token(business_id)
-    items = []
-    offset = 0
-    max_pages = 100  # 100 * 100 = 10,000 items safety cap
-    for _ in range(max_pages):
-        r = _req.get(f"{EBAY_API_BASE}/sell/inventory/v1/inventory_item",
-                      headers=ebay_headers(token, content_language=False),
-                      params={"limit": 100, "offset": offset}, timeout=20)
-        if r.status_code != 200:
-            raise Exception(f"eBay inventory_item list failed ({r.status_code}): {r.text[:300]}")
-        data = r.json()
-        for it in data.get("inventoryItems", []):
-            product = it.get("product", {}) or {}
-            items.append({
-                "sku": it.get("sku", ""),
-                "title": product.get("title", ""),
-                "quantity": (it.get("availability", {}) or {}).get("shipToLocationAvailability", {}).get("quantity", 0),
-                "condition": it.get("condition", ""),
-            })
-        total = data.get("total", 0)
-        offset += 100
-        if offset >= total or not data.get("inventoryItems"):
-            break
-    return items
+    """Reads eBay listing data from `ebay_listing_status` — populated by the Lots
+    page's "Sync Active Listings" (Trading API GetMyeBaySelling), which correctly
+    covers ALL real active listings regardless of which publish path created them.
+    Does NOT call /sell/inventory/v1/inventory_item directly (the original
+    implementation here) — that REST endpoint only lists items created through
+    that specific API, which turned out to be a small fraction (134 of ~4,500) of
+    real inventory, since most listings here were published via the classic
+    Trading API instead. This means eBay-side freshness for the Inventory Match
+    tab depends on when Active Listings was last synced on the Lots page, not a
+    fresh live pull at the moment "Sync Inventory" is clicked — a real trade-off,
+    but far safer than re-implementing the Trading API pagination/XML parsing a
+    second time here when a correct, checkpointed version already exists."""
+    res = (supabase.table("ebay_listing_status").select("item_id,sku,title,quantity_available")
+           .eq("business_id", business_id).eq("listing_status", "Active").execute())
+    return [{
+        "sku": r.get("sku") or "", "title": r.get("title") or "",
+        "quantity": r.get("quantity_available") or 0, "condition": "",
+        "item_id": r.get("item_id"),
+    } for r in (res.data or []) if r.get("sku")]
 
 def fetch_shopify_inventory_items(business_id: str) -> list:
     """Lists every Shopify product/variant with price and quantity — all in the
@@ -6375,10 +6366,10 @@ def sync_inventory(business_id: str) -> dict:
         errors["shopify"] = str(e)
 
     ebay_records = [{
-        "id": it["sku"], "business_id": business_id, "sku": it["sku"], "title": it["title"],
+        "id": it["item_id"], "business_id": business_id, "sku": it["sku"], "title": it["title"],
         "quantity": it["quantity"], "condition": it["condition"], "price": None,
-        "category_id": None, "offer_id": None, "listing_status": None, "item_id": None,
-    } for it in ebay_items if it.get("sku")]
+        "category_id": None, "offer_id": None, "listing_status": None, "item_id": it["item_id"],
+    } for it in ebay_items if it.get("item_id")]
     shopify_records = [{
         "id": it["variant_id"], "business_id": business_id, "product_id": it["product_id"],
         "sku": it["sku"], "title": it["title"], "price": it["price"], "quantity": it["quantity"],
