@@ -1375,50 +1375,60 @@ def get_gemini_key(business_id: str) -> str:
     settings = get_ebay_settings(business_id)
     return settings.get("GEMINI_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
 
-def sync_ebay_categories(token: str) -> int:
-    """Download eBay's full category tree once and save it locally — EVERY node, not just leaves,
-    so parent/grouping categories show their real IDs too, not just listable leaf categories.
-    is_leaf marks which ones are actually valid for listing an item (eBay requires a leaf category)."""
+def sync_ebay_categories(token: str) -> dict:
+    """Download eBay's full category tree(s) and save them locally — EVERY node, not
+    just leaves, so parent/grouping categories show their real IDs too. is_leaf marks
+    which ones are actually valid for listing an item (eBay requires a leaf category).
+    Fetches BOTH tree_id 0 (the standard US marketplace — Business & Industrial,
+    Electronics, etc.) AND tree_id 100 (eBay Motors — a genuinely SEPARATE category
+    tree, confirmed directly: syncing tree 0 alone returned 34 real top-level
+    branches with zero 'Motors' among them, which is why every real auto part kept
+    defaulting to the generic Business & Industrial fallback)."""
     import requests as _req
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-    r = _req.get("https://api.ebay.com/commerce/taxonomy/v1/category_tree/0", headers=headers, timeout=120)
-    if r.status_code != 200:
-        raise Exception(f"getCategoryTree failed: {r.status_code} {r.text}")
-    tree = r.json()
 
     all_nodes = []
-    def walk(node, path):
-        cat = node.get("category", {})
-        name = cat.get("categoryName", "")
-        cid = cat.get("categoryId", "")
-        new_path = path + [name] if name else path
-        children = node.get("childCategoryTreeNodes", [])
-        if cid:
-            all_nodes.append({
-                "category_id": str(cid), "name": name, "path": " > ".join(new_path),
-                "is_leaf": not bool(children),
-            })
-        for child in children:
-            walk(child, new_path)
+    all_top_level_names = []
+    total_raw_bytes = 0
 
-    root = tree.get("rootCategoryNode", {})
-    top_level_children = root.get("childCategoryTreeNodes", [])
-    # Diagnostic: print exactly what eBay's API actually returned at the top level,
-    # before assuming the walk itself is at fault — a low total (1700 vs the tens of
-    # thousands a full tree should have) points at a truncated/incomplete API
-    # response, not a bug in this recursive walk.
-    top_level_names = [c.get("category", {}).get("categoryName", "") for c in top_level_children]
-    print(f"sync_ebay_categories: raw response {len(r.content)} bytes, "
-          f"{len(top_level_children)} top-level branches: {top_level_names}")
+    for tree_id, tree_label in [("0", "US"), ("100", "Motors")]:
+        r = _req.get(f"https://api.ebay.com/commerce/taxonomy/v1/category_tree/{tree_id}",
+                      headers=headers, timeout=120)
+        if r.status_code != 200:
+            print(f"sync_ebay_categories: tree {tree_id} ({tree_label}) failed: {r.status_code} {r.text[:300]}")
+            continue
+        tree = r.json()
+        total_raw_bytes += len(r.content)
 
-    for child in top_level_children:
-        walk(child, [])
+        def walk(node, path):
+            cat = node.get("category", {})
+            name = cat.get("categoryName", "")
+            cid = cat.get("categoryId", "")
+            new_path = path + [name] if name else path
+            children = node.get("childCategoryTreeNodes", [])
+            if cid:
+                all_nodes.append({
+                    "category_id": str(cid), "name": name, "path": " > ".join(new_path),
+                    "is_leaf": not bool(children),
+                })
+            for child in children:
+                walk(child, new_path)
+
+        root = tree.get("rootCategoryNode", {})
+        top_level_children = root.get("childCategoryTreeNodes", [])
+        top_level_names = [c.get("category", {}).get("categoryName", "") for c in top_level_children]
+        all_top_level_names.extend(f"{n} (tree {tree_id})" for n in top_level_names)
+        print(f"sync_ebay_categories: tree {tree_id} ({tree_label}) raw response {len(r.content)} bytes, "
+              f"{len(top_level_children)} top-level branches: {top_level_names}")
+
+        for child in top_level_children:
+            walk(child, [])
 
     # Upsert in batches so we don't blow request size limits
     for i in range(0, len(all_nodes), 500):
         batch = all_nodes[i:i+500]
         supabase.table("ebay_categories").upsert(batch, on_conflict="category_id").execute()
-    return {"count": len(all_nodes), "top_level_names": top_level_names, "raw_bytes": len(r.content)}
+    return {"count": len(all_nodes), "top_level_names": all_top_level_names, "raw_bytes": total_raw_bytes}
 
 def suggest_ebay_category(title: str, business_id: str, restrict: bool = True, exclude_id: str = None) -> dict:
     """Match an item title to the best eBay leaf category using eBay's OWN live category-suggestion
@@ -1434,22 +1444,26 @@ def suggest_ebay_category(title: str, business_id: str, restrict: bool = True, e
         return {}
 
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-    r = _req.get(
-        "https://api.ebay.com/commerce/taxonomy/v1/category_tree/0/get_category_suggestions",
-        headers=headers, params={"q": title}, timeout=15
-    )
-    if r.status_code != 200:
-        print(f"suggest_ebay_category: eBay API returned {r.status_code}: {r.text[:500]}")
-        return {}
-    data = r.json()
-
     results = []
-    for s in data.get("categorySuggestions", []):
-        cat = s.get("category", {})
-        ancestors = s.get("categoryTreeNodeAncestors", [])
-        path = " > ".join(a.get("categoryName", "") for a in ancestors[::-1])
-        full_path = f"{path} > {cat.get('categoryName','')}" if path else cat.get("categoryName", "")
-        results.append({"category_id": cat.get("categoryId"), "name": cat.get("categoryName"), "path": full_path})
+    # Query BOTH trees — tree 0 (standard US marketplace) and tree 100 (eBay Motors,
+    # confirmed to be a genuinely separate category tree, not a branch of tree 0 at
+    # all — syncing tree 0 alone returned 34 real top-level categories with zero
+    # "Motors" among them). Auto parts need tree 100's suggestions specifically.
+    for tree_id in ("0", "100"):
+        r = _req.get(
+            f"https://api.ebay.com/commerce/taxonomy/v1/category_tree/{tree_id}/get_category_suggestions",
+            headers=headers, params={"q": title}, timeout=15
+        )
+        if r.status_code != 200:
+            print(f"suggest_ebay_category: tree {tree_id} returned {r.status_code}: {r.text[:300]}")
+            continue
+        data = r.json()
+        for s in data.get("categorySuggestions", []):
+            cat = s.get("category", {})
+            ancestors = s.get("categoryTreeNodeAncestors", [])
+            path = " > ".join(a.get("categoryName", "") for a in ancestors[::-1])
+            full_path = f"{path} > {cat.get('categoryName','')}" if path else cat.get("categoryName", "")
+            results.append({"category_id": cat.get("categoryId"), "name": cat.get("categoryName"), "path": full_path})
 
     if restrict:
         # A single exact-substring match against "eBay Motors" was likely the actual
