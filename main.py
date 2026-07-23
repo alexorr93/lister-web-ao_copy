@@ -6540,13 +6540,25 @@ def sync_inventory(business_id: str) -> dict:
                 "matched_by": "title_exact" if (i < len(ebay_ids) and i < len(shopify_ids)) else None,
             })
 
+    newly_confirmed = 0
     try:
         # Only delete/recreate rows that were NOT already confirmed — confirmed
         # rows (hd_id set) are left completely untouched by this delete.
         supabase.table("inventory_match").delete().eq("business_id", business_id)\
             .is_("hd_id", "null").execute()
+
+        import uuid as _uuid
         for i in range(0, len(inventory_rows), 500):
-            supabase.table("inventory_match").insert(inventory_rows[i:i+500]).execute()
+            chunk = inventory_rows[i:i+500]
+            # Every genuine match (both ids present) gets confirmed immediately,
+            # right here, as part of the sync itself — not a separate manual step.
+            # Batched (fast, ~instant even for thousands of rows), NOT the old
+            # one-row-at-a-time approach that caused a multi-minute hang earlier.
+            for row in chunk:
+                if row["ebay_id"] and row["shopify_id"]:
+                    row["hd_id"] = str(_uuid.uuid4())
+                    newly_confirmed += 1
+            supabase.table("inventory_match").insert(chunk).execute()
     except Exception as e:
         errors["inventory_write"] = str(e)
 
@@ -6556,6 +6568,7 @@ def sync_inventory(business_id: str) -> dict:
         "ebay_only": sum(1 for r in inventory_rows if r["ebay_id"] and not r["shopify_id"]),
         "shopify_only": sum(1 for r in inventory_rows if r["shopify_id"] and not r["ebay_id"]),
         "confirmed_preserved": len(confirmed_rows),
+        "newly_confirmed": newly_confirmed,
         "errors": errors,
     }
 
@@ -7838,11 +7851,14 @@ async def backfill_hd_id(request: Request):
             break
         start += 1000
     to_update = [r for r in rows if r.get("ebay_id") and r.get("shopify_id") and not r.get("hd_id")]
+
+    updates = [{"id": r["id"], "hd_id": str(_uuid.uuid4())} for r in to_update]
     updated = 0
-    for r in to_update:
+    for i in range(0, len(updates), 500):
+        chunk = updates[i:i+500]
         try:
-            supabase.table("inventory_match").update({"hd_id": str(_uuid.uuid4())}).eq("id", r["id"]).execute()
-            updated += 1
+            supabase.table("inventory_match").upsert(chunk, on_conflict="id").execute()
+            updated += len(chunk)
         except Exception:
             pass
     return {"ok": True, "confirmed": updated, "already_confirmed": len(rows) - len(to_update)}
