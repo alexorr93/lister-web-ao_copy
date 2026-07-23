@@ -7828,8 +7828,15 @@ async def backfill_hd_id(request: Request):
         raise HTTPException(401, "Unauthorized")
     import uuid as _uuid
 
-    rows = (supabase.table("inventory_match").select("id,ebay_id,shopify_id,hd_id")
-            .eq("business_id", business_id).execute().data or [])
+    rows = []
+    start = 0
+    while True:
+        page = (supabase.table("inventory_match").select("id,ebay_id,shopify_id,hd_id")
+                .eq("business_id", business_id).range(start, start + 999).execute().data or [])
+        rows.extend(page)
+        if len(page) < 1000:
+            break
+        start += 1000
     to_update = [r for r in rows if r.get("ebay_id") and r.get("shopify_id") and not r.get("hd_id")]
     updated = 0
     for r in to_update:
