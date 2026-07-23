@@ -6512,42 +6512,31 @@ def _rematch_inventory_from_cache(business_id: str) -> dict:
         shopify_ids = shopify_by_title.get(norm_title, [])
         pair_count = max(len(ebay_ids), len(shopify_ids), 1)
         for i in range(pair_count):
-            # Every row gets an id we generate ourselves (uniform shape, no hd_id
-            # key here at all — see below for why) so it can be referenced again
-            # in the follow-up confirmation pass without needing to read it back.
+            e_id = ebay_ids[i] if i < len(ebay_ids) else None
+            s_id = shopify_ids[i] if i < len(shopify_ids) else None
+            # Every row gets the SAME set of keys, including hd_id (null for
+            # non-matches, a real id for matches) -- PostgREST's bulk insert
+            # rejects a batch where different rows have different KEY SETS
+            # (error PGRST102), but a shared key with a null value on some rows
+            # is fine. This confirms matches inline, in the same insert, with no
+            # separate update/upsert step needed at all -- and no risk of that
+            # step ever creating a garbage NULL row, since there isn't one.
             inventory_rows.append({
                 "id": str(_uuid.uuid4()),
                 "business_id": business_id,
                 "title": ebay_ids and norm_title or norm_title,
-                "ebay_id": ebay_ids[i] if i < len(ebay_ids) else None,
-                "shopify_id": shopify_ids[i] if i < len(shopify_ids) else None,
-                "matched_by": "title_exact" if (i < len(ebay_ids) and i < len(shopify_ids)) else None,
+                "ebay_id": e_id,
+                "shopify_id": s_id,
+                "matched_by": "title_exact" if (e_id and s_id) else None,
+                "hd_id": str(_uuid.uuid4()) if (e_id and s_id) else None,
             })
 
-    newly_confirmed = 0
+    newly_confirmed = sum(1 for r in inventory_rows if r["hd_id"])
     try:
         supabase.table("inventory_match").delete().eq("business_id", business_id)\
             .is_("hd_id", "null").execute()
-        # Insert step: every row here has the IDENTICAL set of keys — PostgREST's
-        # bulk insert rejects a batch where different rows have different keys
-        # (error PGRST102, 'All object keys must match') — that's exactly what
-        # broke this last time, from conditionally adding an 'hd_id' key only on
-        # matched rows within the same insert() call. Confirmation is now a fully
-        # separate step below instead of being mixed into this one.
         for i in range(0, len(inventory_rows), 500):
             supabase.table("inventory_match").insert(inventory_rows[i:i+500]).execute()
-
-        # Confirmation step: a separate, uniformly-shaped batched update for just
-        # the rows that are genuine matches — same fast batched approach as the
-        # standalone backfill endpoint, not the old one-row-at-a-time version.
-        confirm_updates = []
-        for row in inventory_rows:
-            if row["ebay_id"] and row["shopify_id"]:
-                confirm_updates.append({"id": row["id"], "hd_id": str(_uuid.uuid4())})
-        for i in range(0, len(confirm_updates), 500):
-            chunk = confirm_updates[i:i+500]
-            supabase.table("inventory_match").upsert(chunk, on_conflict="id").execute()
-            newly_confirmed += len(chunk)
     except Exception as e:
         errors["inventory_write"] = str(e)
 
