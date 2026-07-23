@@ -1277,33 +1277,6 @@ async def assign_lot_sku(item_id: str, body: AssignLot, request: Request):
     except Exception as e:
         raise HTTPException(500, str(e))
 
-class BulkSetSku(BaseModel):
-    item_ids: List[str]
-    sku: str
-
-@app.post("/api/listings/bulk-set-sku")
-async def bulk_set_sku(body: BulkSetSku, request: Request):
-    """Sets ebay_sku VERBATIM (exactly what's typed, no lot-prefix validation) across
-    every selected item at once — full manual control, for when someone wants a
-    literal custom SKU rather than the usual {lot}-{suffix} pattern that assign-lot
-    produces."""
-    business_id = require_auth(request)
-    if not business_id:
-        raise HTTPException(401, "Unauthorized")
-    new_sku = (body.sku or "").strip()
-    if not new_sku:
-        raise HTTPException(400, "sku is required")
-    if not body.item_ids:
-        raise HTTPException(400, "item_ids is required")
-    ok, failed = 0, 0
-    for item_id in body.item_ids:
-        try:
-            supabase.table("listings").update({"ebay_sku": new_sku}).eq("id", item_id).execute()
-            ok += 1
-        except Exception:
-            failed += 1
-    return {"ok": True, "updated": ok, "failed": failed, "ebay_sku": new_sku}
-
 class EbaySubmit(BaseModel):
     mode: str  # 'draft' | 'now' | 'schedule'
     hours_from_now: Optional[float] = None

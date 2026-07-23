@@ -342,10 +342,6 @@ select.field-input { background: #fff; color: #0f172a; }
         <span style="font-size:11px;color:var(--muted);white-space:nowrap;">2nd half:</span>
         <input type="text" class="field-input" id="actionbar-suffix-input" placeholder="optional" oninput="setActiveLotSuffix(this.value)" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="actionbar-suffix-nofill" style="font-size:12px;padding:5px 8px;width:90px;"/>
       </div>
-      <div style="display:flex;align-items:center;gap:4px;" title="Sets the SKU to exactly what you type, on every currently-selected item — no lot-matching required.">
-        <input type="text" class="field-input" id="actionbar-custom-sku-input" placeholder="custom SKU..." autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="actionbar-customsku-nofill" style="font-size:12px;padding:5px 8px;width:110px;"/>
-        <button class="btn" onclick="applyCustomSkuToSelected()" title="Set the SKU above on every selected item">✏️ Set SKU</button>
-      </div>
       <button class="btn btn-primary" id="submit-ebay-btn" style="display:none" onclick="submitSelected()">⏰ Schedule to eBay</button>
       <button class="btn btn-primary" id="publish-now-btn" style="display:none;background:#ea580c;border-color:#ea580c;" onclick="submitSelectedNow()">⚡ Publish Immediately</button>
       <button class="btn btn-primary" id="publish-now-v2-btn" style="display:none;background:#7c3aed;border-color:#7c3aed;" onclick="submitSelectedNowV2()" title="Uses the classic eBay API — SKU stays editable after publishing">🧪 Publish (v2) Immediately</button>
@@ -1490,25 +1486,6 @@ function deselectAll() { selected.clear(); renderTiles(); }
 // each scan and gave up if the scan took longer, which it now often does) — Lot SKU
 // assignment lives ONLY here now. Applies the currently-active lot to whichever selected
 // items (or all items, if nothing's selected) don't have one yet, whenever you click it.
-async function applyCustomSkuToSelected() {
-  const input = document.getElementById('actionbar-custom-sku-input');
-  const sku = input.value.trim();
-  if (!sku) { toast('Type a SKU first', 'error'); return; }
-  if (!selected.size) { toast('Select at least one item first', 'error'); return; }
-  const ids = Array.from(selected);
-  try {
-    const r = await api('POST', '/api/listings/bulk-set-sku', {item_ids: ids, sku});
-    for (const id of ids) {
-      const l = listings.find(x => String(x.id) === id);
-      if (l) l.ebay_sku = sku;
-    }
-    renderTiles();
-    toast(`SKU set to "${sku}" on ${r.updated} item(s)${r.failed ? ', ' + r.failed + ' failed' : ''} ✓`);
-  } catch(e) {
-    toast('Failed to set SKU', 'error');
-  }
-}
-
 async function autofillLotSku() {
   if (!activeLotSku) { toast('No active lot selected — pick one in Fast Scan/Upload first', 'error'); return; }
   const targets = selected.size ? listings.filter(l => selected.has(String(l.id))) : listings;
