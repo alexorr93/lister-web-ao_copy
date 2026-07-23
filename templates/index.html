@@ -340,7 +340,8 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
       <div style="display:flex;align-items:center;gap:4px;" title="Optional 2nd half of the SKU used by Autofill Lot SKU — e.g. '14R-custom' instead of the default '14R-'. Leave blank for default.">
         <span style="font-size:11px;color:var(--muted);white-space:nowrap;">2nd half:</span>
-        <input type="text" class="field-input" id="actionbar-suffix-input" placeholder="optional" oninput="setActiveLotSuffix(this.value)" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="actionbar-suffix-nofill" style="font-size:12px;padding:5px 8px;width:90px;"/>
+        <input type="text" class="field-input" id="actionbar-suffix-input" placeholder="optional" oninput="setActiveLotSuffix(this.value)" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="actionbar-suffix-nofill" disabled style="font-size:12px;padding:5px 8px;width:70px;"/>
+        <button class="btn" style="font-size:11px;padding:5px 6px;" onclick="unlockSuffixInput(this)" title="Click to type a custom 2nd half">✏️</button>
       </div>
       <button class="btn btn-primary" id="submit-ebay-btn" style="display:none" onclick="submitSelected()">⏰ Schedule to eBay</button>
       <button class="btn btn-primary" id="publish-now-btn" style="display:none;background:#ea580c;border-color:#ea580c;" onclick="submitSelectedNow()">⚡ Publish Immediately</button>
@@ -377,7 +378,8 @@ select.field-input { background: #fff; color: #0f172a; }
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin:-8px 0 12px;">
       <span style="font-size:11px;color:var(--muted);white-space:nowrap;">2nd half (optional)</span>
-      <input type="text" class="field-input" id="upload-suffix-input" placeholder="leave blank for default" value="" oninput="setActiveLotSuffix(this.value)" autocomplete="off" style="font-size:12px;padding:4px 8px;"/>
+      <input type="text" class="field-input" id="upload-suffix-input" placeholder="leave blank for default" value="" oninput="setActiveLotSuffix(this.value)" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="upload-suffix-nofill" disabled style="font-size:12px;padding:4px 8px;"/>
+      <button class="btn" style="font-size:11px;padding:4px 8px;margin-left:6px;" onclick="unlockSuffixInput(this)" title="Click to type a custom 2nd half">✏️ Enable</button>
     </div>
     <div id="upload-start">
       <div style="text-align:center;padding:2rem 0 1.5rem;">
@@ -438,7 +440,8 @@ select.field-input { background: #fff; color: #0f172a; }
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin:-8px 0 12px;">
       <span style="font-size:11px;color:var(--muted);white-space:nowrap;">2nd half (optional)</span>
-      <input type="text" class="field-input" id="fastscan-suffix-input" placeholder="leave blank for default" value="" oninput="setActiveLotSuffix(this.value)" autocomplete="off" style="font-size:12px;padding:4px 8px;"/>
+      <input type="text" class="field-input" id="fastscan-suffix-input" placeholder="leave blank for default" value="" oninput="setActiveLotSuffix(this.value)" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="fastscan-suffix-nofill" disabled style="font-size:12px;padding:4px 8px;"/>
+      <button class="btn" style="font-size:11px;padding:4px 8px;margin-left:6px;" onclick="unlockSuffixInput(this)" title="Click to type a custom 2nd half">✏️ Enable</button>
     </div>
     <div class="fastscan-cond">
       <button class="fastscan-cond-btn" id="fs-cond-new" onclick="setFsCond('new')">✓ New</button>
@@ -860,6 +863,17 @@ function setActiveLotSuffix(suffix) {
     const el = document.getElementById(id);
     if (el && el.value !== suffix) el.value = suffix;
   });
+}
+
+function unlockSuffixInput(btn) {
+  // The suffix field starts disabled specifically so the browser can never
+  // autofill it on page load — a disabled input isn't a target for autofill at
+  // all, unlike autocomplete="off" alone, which Chrome has kept ignoring here.
+  // Only becomes typeable after this explicit click.
+  const input = btn.previousElementSibling;
+  input.disabled = false;
+  input.focus();
+  btn.style.display = 'none';
 }
 
 function setActiveLotSku(sku) {
