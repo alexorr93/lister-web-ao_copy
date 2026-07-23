@@ -70,6 +70,7 @@ tr:last-child td { border-bottom: none; }
 
   <div class="filter-bar">
     <button class="btn btn-primary" onclick="syncInventory()">🔄 Sync Inventory</button>
+    <button class="btn" onclick="backfillHdId()" title="One-time: gives every currently-matched pair a permanent ID, so it survives future syncs and title edits">🔒 Confirm Existing Matches</button>
     <input type="text" class="field-input" id="search-input" placeholder="Search title/SKU..." oninput="renderTable()" style="width:260px;"/>
     <select class="field-input" id="filter-select" onchange="renderTable()">
       <option value="">All</option>
@@ -103,6 +104,19 @@ async function loadInventory() {
   const data = await r.json();
   inventory = data.inventory || [];
   renderTable();
+}
+
+async function backfillHdId() {
+  if (!confirm('Give every currently-matched pair a permanent ID? This only needs to run once — safe to run again later, it only touches pairs that don\'t already have one.')) return;
+  try {
+    const r = await fetch('/api/inventory/backfill-hd-id', {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    alert(`Confirmed ${data.confirmed} pair(s) permanently. ${data.already_confirmed} were already confirmed.`);
+    syncInventory();
+  } catch(e) {
+    alert(`Failed: ${e.message}`);
+  }
 }
 
 async function syncInventory() {
@@ -181,7 +195,7 @@ function renderTable() {
     return;
   }
   let html = `<table><thead><tr>
-    <th>Title</th><th>eBay Item ID</th><th>eBay SKU</th><th>eBay Qty</th><th>Shopify Product ID</th><th>Shopify SKU</th><th>Shopify Qty</th><th>Shopify Price</th><th>Status</th><th>Matched By</th>
+    <th>Title</th><th>eBay Item ID</th><th>eBay SKU</th><th>eBay Qty</th><th>Shopify Product ID</th><th>Shopify SKU</th><th>Shopify Qty</th><th>Shopify Price</th><th>Status</th><th>Matched By</th><th>Confirmed</th>
   </tr></thead><tbody>`;
   for (const r of filtered) {
     const status = !r.ebay_item_id ? '<span class="missing">Shopify only</span>'
@@ -199,6 +213,7 @@ function renderTable() {
       <td class="muted">${r.shopify_price != null ? '$' + Number(r.shopify_price).toFixed(2) : '—'}</td>
       <td>${status}</td>
       <td class="muted">${escapeHtml(r.matched_by || '—')}</td>
+      <td>${r.hd_id ? '🔒' : ''}</td>
     </tr>`;
   }
   html += '</tbody></table>';

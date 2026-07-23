@@ -1342,6 +1342,10 @@ async def submit_to_ebay(item_id: str, body: EbaySubmit, request: Request):
             update.pop("ebay_mpn", None)
             update.pop("ebay_mpn_is_fallback", None)
             supabase.table("listings").update(update).eq("id", item_id).execute()
+        try:
+            _maybe_confirm_inventory_match(business_id, item_id)
+        except Exception:
+            pass
         return {"ok": True, **result}
     except HTTPException:
         raise
@@ -1383,6 +1387,10 @@ async def submit_to_ebay_v2(item_id: str, body: EbaySubmit, request: Request):
             update.pop("ebay_mpn", None)
             update.pop("ebay_mpn_is_fallback", None)
             supabase.table("listings").update(update).eq("id", item_id).execute()
+        try:
+            _maybe_confirm_inventory_match(business_id, item_id)
+        except Exception:
+            pass
         return {"ok": True, **result}
     except HTTPException:
         raise
@@ -6417,14 +6425,53 @@ def fetch_shopify_inventory_items(business_id: str) -> list:
 def _normalize_title(t: str) -> str:
     return " ".join((t or "").strip().lower().split())
 
+def _maybe_confirm_inventory_match(business_id: str, listing_id: str):
+    """Call this right after EITHER platform's publish writes ebay_item_id or
+    shopify_product_id onto a listings row. If the row now has BOTH, this is a
+    known-certain pairing — no title-matching needed at all, since Lister itself
+    is the one that published both sides. Creates (or upgrades) the
+    inventory_match row with hd_id = listings.id, so it's confirmed/permanent
+    from the moment it exists, same guarantee as a backfilled old pairing."""
+    try:
+        res = supabase.table("listings").select("id,ebay_item_id,shopify_product_id,title")\
+            .eq("id", listing_id).limit(1).execute()
+        if not res.data:
+            return
+        listing = res.data[0]
+        ebay_id = listing.get("ebay_item_id")
+        shopify_id = listing.get("shopify_product_id")
+        if not (ebay_id and shopify_id):
+            return  # only one side published so far — nothing to confirm yet
+
+        existing = (supabase.table("inventory_match").select("id,hd_id")
+                    .eq("business_id", business_id)
+                    .or_(f"ebay_id.eq.{ebay_id},shopify_id.eq.{shopify_id}")
+                    .execute().data or [])
+        if existing:
+            row = existing[0]
+            if not row.get("hd_id"):
+                supabase.table("inventory_match").update({
+                    "ebay_id": ebay_id, "shopify_id": shopify_id,
+                    "hd_id": listing_id, "matched_by": "lister_dual_publish",
+                }).eq("id", row["id"]).execute()
+        else:
+            supabase.table("inventory_match").insert({
+                "business_id": business_id, "title": listing.get("title"),
+                "ebay_id": ebay_id, "shopify_id": shopify_id,
+                "hd_id": listing_id, "matched_by": "lister_dual_publish",
+            }).execute()
+    except Exception as e:
+        print(f"_maybe_confirm_inventory_match failed for listing {listing_id}: {e}")
+
 def sync_inventory(business_id: str) -> dict:
-    """Pulls fresh eBay + Shopify inventory, stores each raw, then matches them by
-    normalized exact title into the `inventory_match` table (NOT the pre-existing
-    `inventory` table, which is an unrelated barcode/location-tracking feature that
-    happened to share a name — writing/reading against it silently failed every
-    time until this was caught and fixed) with a brand new key we create
-    ourselves — not either platform's ID. Non-matches just sit as eBay-only or
-    Shopify-only rows for you to track down manually."""
+    """Pulls fresh eBay + Shopify inventory, stores each raw, then matches whatever
+    ISN'T already permanently confirmed by normalized exact title into the
+    `inventory_match` table. Rows with hd_id already set are a PERMANENT match —
+    excluded from title-matching entirely and never deleted/recreated by this
+    function, so a later title edit on either platform can't silently break a
+    pairing that was already confirmed (the whole reason hd_id exists — see the
+    backfill/auto-fill-on-publish logic). Only rows still lacking hd_id get
+    recomputed fresh each run."""
     errors = {}
     ebay_items, shopify_items = [], []
     try:
@@ -6458,13 +6505,25 @@ def sync_inventory(business_id: str) -> dict:
         except Exception as e:
             errors["shopify_write"] = str(e)
 
+    # Load already-confirmed pairs first — these are permanent and excluded from
+    # title-matching below entirely, regardless of what their titles look like now.
+    confirmed_rows = (supabase.table("inventory_match").select("ebay_id,shopify_id")
+                      .eq("business_id", business_id).not_.is_("hd_id", "null").execute().data or [])
+    confirmed_ebay_ids = {r["ebay_id"] for r in confirmed_rows if r.get("ebay_id")}
+    confirmed_shopify_ids = {r["shopify_id"] for r in confirmed_rows if r.get("shopify_id")}
+
     # Match by normalized title. One eBay SKU and one Shopify variant can each only
     # be used once — first-come-first-matched, same principle as the order backfill.
+    # Anything already confirmed is skipped here — it keeps its permanent pairing.
     ebay_by_title = {}
     for r in ebay_records:
+        if r["id"] in confirmed_ebay_ids:
+            continue
         ebay_by_title.setdefault(_normalize_title(r["title"]), []).append(r["id"])
     shopify_by_title = {}
     for r in shopify_records:
+        if r["id"] in confirmed_shopify_ids:
+            continue
         shopify_by_title.setdefault(_normalize_title(r["title"]), []).append(r["id"])
 
     all_titles = set(ebay_by_title) | set(shopify_by_title)
@@ -6483,7 +6542,10 @@ def sync_inventory(business_id: str) -> dict:
             })
 
     try:
-        supabase.table("inventory_match").delete().eq("business_id", business_id).execute()
+        # Only delete/recreate rows that were NOT already confirmed — confirmed
+        # rows (hd_id set) are left completely untouched by this delete.
+        supabase.table("inventory_match").delete().eq("business_id", business_id)\
+            .is_("hd_id", "null").execute()
         for i in range(0, len(inventory_rows), 500):
             supabase.table("inventory_match").insert(inventory_rows[i:i+500]).execute()
     except Exception as e:
@@ -6491,9 +6553,10 @@ def sync_inventory(business_id: str) -> dict:
 
     return {
         "ebay_synced": len(ebay_records), "shopify_synced": len(shopify_records),
-        "matched": sum(1 for r in inventory_rows if r["matched_by"]),
+        "matched": sum(1 for r in inventory_rows if r["matched_by"]) + len(confirmed_rows),
         "ebay_only": sum(1 for r in inventory_rows if r["ebay_id"] and not r["shopify_id"]),
         "shopify_only": sum(1 for r in inventory_rows if r["shopify_id"] and not r["ebay_id"]),
+        "confirmed_preserved": len(confirmed_rows),
         "errors": errors,
     }
 
@@ -7753,6 +7816,31 @@ async def shopify_sync_push(request: Request, items: List[dict] = Body(...)):
     except Exception as e:
         raise HTTPException(400, str(e))
 
+@app.post("/api/inventory/backfill-hd-id")
+async def backfill_hd_id(request: Request):
+    """One-time action: gives every currently-matched (ebay_id AND shopify_id both
+    set) row a permanent hd_id, if it doesn't already have one. Once set, that
+    pairing is confirmed forever — sync_inventory excludes it from title-matching
+    entirely and never deletes/recreates it, so a later title edit on either
+    platform can't silently break a pairing that was already confirmed. Safe to
+    run repeatedly — only touches rows still missing hd_id."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import uuid as _uuid
+
+    rows = (supabase.table("inventory_match").select("id,ebay_id,shopify_id,hd_id")
+            .eq("business_id", business_id).execute().data or [])
+    to_update = [r for r in rows if r.get("ebay_id") and r.get("shopify_id") and not r.get("hd_id")]
+    updated = 0
+    for r in to_update:
+        try:
+            supabase.table("inventory_match").update({"hd_id": str(_uuid.uuid4())}).eq("id", r["id"]).execute()
+            updated += 1
+        except Exception:
+            pass
+    return {"ok": True, "confirmed": updated, "already_confirmed": len(rows) - len(to_update)}
+
 @app.get("/api/inventory")
 async def list_inventory(request: Request):
     business_id = require_auth(request)
@@ -7781,6 +7869,7 @@ async def list_inventory(request: Request):
         s = shopify_by_id.get(row.get("shopify_id")) or {}
         results.append({
             "id": row["id"], "title": row["title"], "matched_by": row.get("matched_by"),
+            "hd_id": row.get("hd_id"),
             "ebay_sku": e.get("sku"), "ebay_qty": e.get("quantity"), "ebay_condition": e.get("condition"),
             "ebay_item_id": e.get("item_id"),
             "shopify_sku": s.get("sku"), "shopify_qty": s.get("quantity"), "shopify_price": s.get("price"), "shopify_status": s.get("status"),
@@ -7863,6 +7952,10 @@ async def api_shopify_publish(item_id: str, request: Request):
         except Exception as col_err:
             # shopify_* columns may not exist yet on this Supabase project
             print(f"shopify-publish: product created ({result}) but failed to save status columns: {col_err}")
+        try:
+            _maybe_confirm_inventory_match(business_id, item_id)
+        except Exception:
+            pass
         return {"ok": True, **result}
     except HTTPException:
         raise
