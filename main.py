@@ -6469,8 +6469,24 @@ def _rematch_inventory_from_cache(business_id: str) -> dict:
     matches never requires a fresh eBay/Shopify pull — there was no reason those
     had to be coupled together."""
     errors = {}
-    ebay_records = (supabase.table("ebay_inventory").select("*").eq("business_id", business_id).execute().data or [])
-    shopify_records = (supabase.table("shopify_inventory").select("*").eq("business_id", business_id).execute().data or [])
+
+    def _fetch_paginated(table):
+        # Same 1000-row Supabase cap hit repeatedly today elsewhere — a plain
+        # .execute() here was silently truncating both tables to 1000 rows each,
+        # which is exactly why the summary showed 'eBay: 1000, Shopify: 1000'
+        # regardless of the real totals.
+        rows, start = [], 0
+        while True:
+            page = (supabase.table(table).select("*").eq("business_id", business_id)
+                    .range(start, start + 999).execute().data or [])
+            rows.extend(page)
+            if len(page) < 1000:
+                break
+            start += 1000
+        return rows
+
+    ebay_records = _fetch_paginated("ebay_inventory")
+    shopify_records = _fetch_paginated("shopify_inventory")
 
     confirmed_rows = (supabase.table("inventory_match").select("ebay_id,shopify_id")
                       .eq("business_id", business_id).not_.is_("hd_id", "null").execute().data or [])
@@ -6489,13 +6505,18 @@ def _rematch_inventory_from_cache(business_id: str) -> dict:
         shopify_by_title.setdefault(_normalize_title(r["title"]), []).append(r["id"])
 
     all_titles = set(ebay_by_title) | set(shopify_by_title)
+    import uuid as _uuid
     inventory_rows = []
     for norm_title in all_titles:
         ebay_ids = ebay_by_title.get(norm_title, [])
         shopify_ids = shopify_by_title.get(norm_title, [])
         pair_count = max(len(ebay_ids), len(shopify_ids), 1)
         for i in range(pair_count):
+            # Every row gets an id we generate ourselves (uniform shape, no hd_id
+            # key here at all — see below for why) so it can be referenced again
+            # in the follow-up confirmation pass without needing to read it back.
             inventory_rows.append({
+                "id": str(_uuid.uuid4()),
                 "business_id": business_id,
                 "title": ebay_ids and norm_title or norm_title,
                 "ebay_id": ebay_ids[i] if i < len(ebay_ids) else None,
@@ -6507,14 +6528,26 @@ def _rematch_inventory_from_cache(business_id: str) -> dict:
     try:
         supabase.table("inventory_match").delete().eq("business_id", business_id)\
             .is_("hd_id", "null").execute()
-        import uuid as _uuid
+        # Insert step: every row here has the IDENTICAL set of keys — PostgREST's
+        # bulk insert rejects a batch where different rows have different keys
+        # (error PGRST102, 'All object keys must match') — that's exactly what
+        # broke this last time, from conditionally adding an 'hd_id' key only on
+        # matched rows within the same insert() call. Confirmation is now a fully
+        # separate step below instead of being mixed into this one.
         for i in range(0, len(inventory_rows), 500):
-            chunk = inventory_rows[i:i+500]
-            for row in chunk:
-                if row["ebay_id"] and row["shopify_id"]:
-                    row["hd_id"] = str(_uuid.uuid4())
-                    newly_confirmed += 1
-            supabase.table("inventory_match").insert(chunk).execute()
+            supabase.table("inventory_match").insert(inventory_rows[i:i+500]).execute()
+
+        # Confirmation step: a separate, uniformly-shaped batched update for just
+        # the rows that are genuine matches — same fast batched approach as the
+        # standalone backfill endpoint, not the old one-row-at-a-time version.
+        confirm_updates = []
+        for row in inventory_rows:
+            if row["ebay_id"] and row["shopify_id"]:
+                confirm_updates.append({"id": row["id"], "hd_id": str(_uuid.uuid4())})
+        for i in range(0, len(confirm_updates), 500):
+            chunk = confirm_updates[i:i+500]
+            supabase.table("inventory_match").upsert(chunk, on_conflict="id").execute()
+            newly_confirmed += len(chunk)
     except Exception as e:
         errors["inventory_write"] = str(e)
 
