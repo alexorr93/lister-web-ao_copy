@@ -332,6 +332,12 @@ select.field-input { background: #fff; color: #0f172a; }
       <button class="btn" onclick="selectAll()">☑ Select All</button>
       <button class="btn" onclick="deselectAll()">☐ Deselect</button>
       <button class="btn" style="color:#a78bfa;border-color:#7c3aed;" onclick="autofillLotSku()" title="Fills in the Lot SKU for selected items using the lot that was active when each was scanned — no waiting on scan completion">🏷️ Autofill Lot SKU</button>
+      <div style="display:flex;align-items:center;gap:4px;" title="Sets the active lot — same as the dropdown on the Fast Scan/Upload tabs.">
+        <span style="font-size:11px;color:var(--muted);white-space:nowrap;">SKU:</span>
+        <select class="field-input" id="actionbar-lot-select" onchange="setActiveLotSku(this.value)" style="font-size:12px;padding:5px 8px;width:100px;">
+          <option value="">Select lot...</option>
+        </select>
+      </div>
       <div style="display:flex;align-items:center;gap:4px;" title="Optional 2nd half of the SKU used by Autofill Lot SKU — e.g. '14R-custom' instead of the default '14R-'. Leave blank for default.">
         <span style="font-size:11px;color:var(--muted);white-space:nowrap;">2nd half:</span>
         <input type="text" class="field-input" id="actionbar-suffix-input" placeholder="optional" oninput="setActiveLotSuffix(this.value)" autocomplete="off" style="font-size:12px;padding:5px 8px;width:90px;"/>
@@ -882,6 +888,11 @@ function renderActiveLotBars() {
         lotSkusByRecency.map(s => `<option value="${s}"${s===activeLotSku?' selected':''}>${s}</option>`).join('');
     }
   });
+  const actionbarSel = document.getElementById('actionbar-lot-select');
+  if (actionbarSel) {
+    actionbarSel.innerHTML = '<option value="">Select lot...</option>' +
+      lotSkusByRecency.map(s => `<option value="${s}"${s===activeLotSku?' selected':''}>${s}</option>`).join('');
+  }
   ['fastscan-suffix-input', 'upload-suffix-input', 'actionbar-suffix-input'].forEach(id => {
     const el = document.getElementById(id);
     if (el && el.value !== activeLotSuffix) el.value = activeLotSuffix;
