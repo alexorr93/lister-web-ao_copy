@@ -1945,6 +1945,69 @@ async def edit_acquisitions_batch(request: Request, edits: List[AcquisitionEdit]
 
     return {"ok": True, "updated": updated, "batch_id": batch_id, "recalc_error": recalc_error}
 
+@app.get("/api/acquisitions/cash-history")
+async def get_cash_history(request: Request, start: Optional[str] = None, end: Optional[str] = None):
+    """Every acquisitions_history row is a snapshot of a lot's fields right BEFORE
+    an edit was made — this reconstructs the actual change events (old cash -> new
+    cash, with a timestamp) by comparing each snapshot against whatever came next
+    for that same lot (either a later edit, or its current live value if that was
+    the last edit). Lets you see cash changes over a period even though the
+    underlying table was originally built as an undo buffer, not an audit log."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+
+    hist_rows = []
+    start_i = 0
+    while True:
+        page = (supabase.table("acquisitions_history").select("*")
+                .eq("business_id", business_id)
+                .order("acquisition_id").order("created_at")
+                .range(start_i, start_i + 999).execute().data or [])
+        hist_rows.extend(page)
+        if len(page) < 1000:
+            break
+        start_i += 1000
+
+    current_by_id = {}
+    if hist_rows:
+        acq_ids = list({r["acquisition_id"] for r in hist_rows})
+        for i in range(0, len(acq_ids), 200):
+            chunk = acq_ids[i:i+200]
+            res = supabase.table("acquisitions").select("id,cash,sku,name").in_("id", chunk).execute()
+            for a in (res.data or []):
+                current_by_id[a["id"]] = a
+
+    # Group by acquisition_id, walk chronologically, pair each snapshot's cash with
+    # whatever the NEXT snapshot (or current live value) shows.
+    by_acq = {}
+    for r in hist_rows:
+        by_acq.setdefault(r["acquisition_id"], []).append(r)
+
+    events = []
+    for acq_id, rows in by_acq.items():
+        rows.sort(key=lambda r: r["created_at"])
+        current = current_by_id.get(acq_id, {})
+        for i, r in enumerate(rows):
+            old_cash = r.get("cash")
+            new_cash = rows[i + 1].get("cash") if i + 1 < len(rows) else current.get("cash")
+            if old_cash == new_cash:
+                continue  # this edit didn't actually touch cash — skip it
+            events.append({
+                "acquisition_id": acq_id, "sku": r.get("sku"), "name": r.get("name"),
+                "old_cash": old_cash, "new_cash": new_cash,
+                "delta": round((new_cash or 0) - (old_cash or 0), 2),
+                "changed_at": rows[i + 1]["created_at"] if i + 1 < len(rows) else r["created_at"],
+            })
+
+    if start:
+        events = [e for e in events if e["changed_at"] >= start]
+    if end:
+        events = [e for e in events if e["changed_at"] <= end + "T23:59:59"]
+    events.sort(key=lambda e: e["changed_at"], reverse=True)
+
+    return {"events": events, "total_delta": round(sum(e["delta"] for e in events), 2)}
+
 @app.post("/api/acquisitions/undo")
 async def undo_acquisitions_edit(request: Request):
     business_id = require_auth(request)

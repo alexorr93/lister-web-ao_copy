@@ -64,6 +64,9 @@ tr:last-child td { border-bottom: none; }
 .view-tabs { display: flex; align-items: center; gap: 6px; margin-bottom: 16px; }
 .view-tab { padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; }
 .view-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ch-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 200; display: none; align-items: center; justify-content: center; padding: 16px; }
+.ch-modal-overlay.open { display: flex; }
+.ch-modal { background: var(--card); border: 1px solid var(--border); border-radius: 18px; max-width: 900px; width: 100%; max-height: 85vh; overflow-y: auto; padding: 24px; }
 </style>
 </head>
 <body>
@@ -112,6 +115,7 @@ tr:last-child td { border-bottom: none; }
       <button class="btn" onclick="recalculate()" title="Refreshes eBay/Total_Payouts/Profit for every row using the latest synced orders">🔄 Recalculate</button>
       <button class="btn" id="edit-mode-btn" onclick="toggleEditMode()">✏️ Edit</button>
       <button class="btn btn-danger" onclick="undoLastEdit()" title="Restores the values from right before your last edit">↩️ Undo Last Edit</button>
+      <button class="btn" onclick="openCashHistory()" title="See every recorded change to the Cash field over time">📜 Cash History</button>
       <button class="btn" onclick="syncActiveListings()" title="Pulls your real eBay ActiveList via the Trading API and recounts each lot's active listings">🔄 Sync Active Listings</button>
       <span id="active-listings-synced" class="status-msg" style="margin:0;"></span>
     </div>
@@ -145,7 +149,75 @@ tr:last-child td { border-bottom: none; }
   </div>
 </div>
 
+<div class="ch-modal-overlay" id="cash-history-overlay" onclick="closeCashHistory(event)">
+  <div class="ch-modal" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <div style="font-size:18px;font-weight:800;">📜 Cash Field Change History</div>
+      <button class="btn" onclick="closeCashHistory()">✕ Close</button>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+      <input type="date" class="field-input" id="ch-start-date" style="width:auto;"/>
+      <span class="muted">to</span>
+      <input type="date" class="field-input" id="ch-end-date" style="width:auto;"/>
+      <button class="btn btn-primary" onclick="loadCashHistory()">Filter</button>
+      <button class="btn" onclick="document.getElementById('ch-start-date').value='';document.getElementById('ch-end-date').value='';loadCashHistory();">Clear</button>
+    </div>
+    <div id="ch-status" class="status-msg"></div>
+    <div id="ch-table-area"><div class="empty">Loading...</div></div>
+  </div>
+</div>
+
 <script>
+function openCashHistory() {
+  document.getElementById('cash-history-overlay').classList.add('open');
+  loadCashHistory();
+}
+
+function closeCashHistory(e) {
+  if (e && e.target !== e.currentTarget) return;
+  document.getElementById('cash-history-overlay').classList.remove('open');
+}
+
+async function loadCashHistory() {
+  const start = document.getElementById('ch-start-date').value;
+  const end = document.getElementById('ch-end-date').value;
+  document.getElementById('ch-status').textContent = 'Loading...';
+  document.getElementById('ch-table-area').innerHTML = '';
+  try {
+    const params = new URLSearchParams();
+    if (start) params.set('start', start);
+    if (end) params.set('end', end);
+    const r = await fetch('/api/acquisitions/cash-history?' + params.toString());
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed to load');
+    const events = data.events || [];
+    document.getElementById('ch-status').textContent =
+      `${events.length} change(s) in this range — net cash change: ${fmtMoney(data.total_delta)}`;
+    if (!events.length) {
+      document.getElementById('ch-table-area').innerHTML = '<div class="empty">No cash changes recorded in this range.</div>';
+      return;
+    }
+    let html = `<table><thead><tr>
+      <th>When</th><th>SKU</th><th>Lot Name</th><th>Old Cash</th><th>New Cash</th><th>Change</th>
+    </tr></thead><tbody>`;
+    for (const e of events) {
+      const deltaClass = e.delta > 0 ? 'pos' : (e.delta < 0 ? 'neg' : '');
+      html += `<tr>
+        <td class="muted">${escapeHtml((e.changed_at || '').replace('T', ' ').slice(0, 16))}</td>
+        <td class="sku">${escapeHtml(e.sku || '')}</td>
+        <td>${escapeHtml(e.name || '')}</td>
+        <td class="muted">${e.old_cash != null ? fmtMoney(e.old_cash) : '—'}</td>
+        <td class="muted">${e.new_cash != null ? fmtMoney(e.new_cash) : '—'}</td>
+        <td class="${deltaClass}">${e.delta > 0 ? '+' : ''}${fmtMoney(e.delta)}</td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    document.getElementById('ch-table-area').innerHTML = html;
+  } catch(e) {
+    document.getElementById('ch-status').textContent = `❌ ${e.message}`;
+  }
+}
+
 let acquisitions = [];
 let editMode = false;
 let uncategorized = {active_listings_value: 0, active_listings_count: 0, sales_total: 0, items: []};
