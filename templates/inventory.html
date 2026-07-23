@@ -70,6 +70,7 @@ tr:last-child td { border-bottom: none; }
 
   <div class="filter-bar">
     <button class="btn btn-primary" onclick="syncInventory()" title="Shopify: live API call, pulls fresh right now. eBay: reads from the local cache last filled by 'Sync Active Listings' on the Lots page — does NOT call eBay itself.">🔄 Sync Inventory <span style="font-size:10px;opacity:.8;">(Shopify: live · eBay: cached — sync on Lots page first)</span></button>
+    <button class="btn" onclick="rematchInventory()" title="Re-runs matching/confirming against whatever's already stored locally — no eBay/Shopify API calls at all, just fast">🔗 Rematch (no API call)</button>
     <button class="btn" onclick="backfillHdId()" title="One-time: gives every currently-matched pair a permanent ID, so it survives future syncs and title edits">🔒 Confirm Existing Matches</button>
     <input type="text" class="field-input" id="search-input" placeholder="Search title/SKU..." oninput="renderTable()" style="width:260px;"/>
     <select class="field-input" id="filter-select" onchange="renderTable()">
@@ -104,6 +105,21 @@ async function loadInventory() {
   const data = await r.json();
   inventory = data.inventory || [];
   renderTable();
+}
+
+async function rematchInventory() {
+  document.getElementById('sync-status').textContent = 'Rematching from local data (no API calls)...';
+  try {
+    const r = await fetch('/api/inventory/rematch', {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    const res = data.result;
+    document.getElementById('sync-status').textContent =
+      `✅ Matched: ${res.matched} (${res.newly_confirmed || 0} newly locked in, ${res.confirmed_preserved || 0} already permanent), eBay-only: ${res.ebay_only}, Shopify-only: ${res.shopify_only}`;
+    loadInventory();
+  } catch(e) {
+    document.getElementById('sync-status').textContent = `❌ ${e.message}`;
+  }
 }
 
 async function backfillHdId() {

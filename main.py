@@ -6462,15 +6462,78 @@ def _maybe_confirm_inventory_match(business_id: str, listing_id: str):
     except Exception as e:
         print(f"_maybe_confirm_inventory_match failed for listing {listing_id}: {e}")
 
+def _rematch_inventory_from_cache(business_id: str) -> dict:
+    """The matching/confirming logic only — reads whatever's already stored in
+    ebay_inventory/shopify_inventory (from the last time a real sync ran), makes
+    ZERO live API calls. Split out from sync_inventory specifically so confirming
+    matches never requires a fresh eBay/Shopify pull — there was no reason those
+    had to be coupled together."""
+    errors = {}
+    ebay_records = (supabase.table("ebay_inventory").select("*").eq("business_id", business_id).execute().data or [])
+    shopify_records = (supabase.table("shopify_inventory").select("*").eq("business_id", business_id).execute().data or [])
+
+    confirmed_rows = (supabase.table("inventory_match").select("ebay_id,shopify_id")
+                      .eq("business_id", business_id).not_.is_("hd_id", "null").execute().data or [])
+    confirmed_ebay_ids = {r["ebay_id"] for r in confirmed_rows if r.get("ebay_id")}
+    confirmed_shopify_ids = {r["shopify_id"] for r in confirmed_rows if r.get("shopify_id")}
+
+    ebay_by_title = {}
+    for r in ebay_records:
+        if r["id"] in confirmed_ebay_ids:
+            continue
+        ebay_by_title.setdefault(_normalize_title(r["title"]), []).append(r["id"])
+    shopify_by_title = {}
+    for r in shopify_records:
+        if r["id"] in confirmed_shopify_ids:
+            continue
+        shopify_by_title.setdefault(_normalize_title(r["title"]), []).append(r["id"])
+
+    all_titles = set(ebay_by_title) | set(shopify_by_title)
+    inventory_rows = []
+    for norm_title in all_titles:
+        ebay_ids = ebay_by_title.get(norm_title, [])
+        shopify_ids = shopify_by_title.get(norm_title, [])
+        pair_count = max(len(ebay_ids), len(shopify_ids), 1)
+        for i in range(pair_count):
+            inventory_rows.append({
+                "business_id": business_id,
+                "title": ebay_ids and norm_title or norm_title,
+                "ebay_id": ebay_ids[i] if i < len(ebay_ids) else None,
+                "shopify_id": shopify_ids[i] if i < len(shopify_ids) else None,
+                "matched_by": "title_exact" if (i < len(ebay_ids) and i < len(shopify_ids)) else None,
+            })
+
+    newly_confirmed = 0
+    try:
+        supabase.table("inventory_match").delete().eq("business_id", business_id)\
+            .is_("hd_id", "null").execute()
+        import uuid as _uuid
+        for i in range(0, len(inventory_rows), 500):
+            chunk = inventory_rows[i:i+500]
+            for row in chunk:
+                if row["ebay_id"] and row["shopify_id"]:
+                    row["hd_id"] = str(_uuid.uuid4())
+                    newly_confirmed += 1
+            supabase.table("inventory_match").insert(chunk).execute()
+    except Exception as e:
+        errors["inventory_write"] = str(e)
+
+    return {
+        "ebay_synced": len(ebay_records), "shopify_synced": len(shopify_records),
+        "matched": sum(1 for r in inventory_rows if r["matched_by"]) + len(confirmed_rows),
+        "ebay_only": sum(1 for r in inventory_rows if r["ebay_id"] and not r["shopify_id"]),
+        "shopify_only": sum(1 for r in inventory_rows if r["shopify_id"] and not r["ebay_id"]),
+        "confirmed_preserved": len(confirmed_rows),
+        "newly_confirmed": newly_confirmed,
+        "errors": errors,
+    }
+
 def sync_inventory(business_id: str) -> dict:
-    """Pulls fresh eBay + Shopify inventory, stores each raw, then matches whatever
-    ISN'T already permanently confirmed by normalized exact title into the
-    `inventory_match` table. Rows with hd_id already set are a PERMANENT match —
-    excluded from title-matching entirely and never deleted/recreated by this
-    function, so a later title edit on either platform can't silently break a
-    pairing that was already confirmed (the whole reason hd_id exists — see the
-    backfill/auto-fill-on-publish logic). Only rows still lacking hd_id get
-    recomputed fresh each run."""
+    """Pulls fresh eBay + Shopify inventory (live API calls), stores each raw, then
+    calls _rematch_inventory_from_cache for the matching/confirming step. Use this
+    when you actually need fresh data from the platforms; use the rematch-only
+    endpoint instead when you just want to re-run matching against what's already
+    stored locally."""
     errors = {}
     ebay_items, shopify_items = [], []
     try:
@@ -6504,73 +6567,9 @@ def sync_inventory(business_id: str) -> dict:
         except Exception as e:
             errors["shopify_write"] = str(e)
 
-    # Load already-confirmed pairs first — these are permanent and excluded from
-    # title-matching below entirely, regardless of what their titles look like now.
-    confirmed_rows = (supabase.table("inventory_match").select("ebay_id,shopify_id")
-                      .eq("business_id", business_id).not_.is_("hd_id", "null").execute().data or [])
-    confirmed_ebay_ids = {r["ebay_id"] for r in confirmed_rows if r.get("ebay_id")}
-    confirmed_shopify_ids = {r["shopify_id"] for r in confirmed_rows if r.get("shopify_id")}
-
-    # Match by normalized title. One eBay SKU and one Shopify variant can each only
-    # be used once — first-come-first-matched, same principle as the order backfill.
-    # Anything already confirmed is skipped here — it keeps its permanent pairing.
-    ebay_by_title = {}
-    for r in ebay_records:
-        if r["id"] in confirmed_ebay_ids:
-            continue
-        ebay_by_title.setdefault(_normalize_title(r["title"]), []).append(r["id"])
-    shopify_by_title = {}
-    for r in shopify_records:
-        if r["id"] in confirmed_shopify_ids:
-            continue
-        shopify_by_title.setdefault(_normalize_title(r["title"]), []).append(r["id"])
-
-    all_titles = set(ebay_by_title) | set(shopify_by_title)
-    inventory_rows = []
-    for norm_title in all_titles:
-        ebay_ids = ebay_by_title.get(norm_title, [])
-        shopify_ids = shopify_by_title.get(norm_title, [])
-        pair_count = max(len(ebay_ids), len(shopify_ids), 1)
-        for i in range(pair_count):
-            inventory_rows.append({
-                "business_id": business_id,
-                "title": ebay_ids and norm_title or norm_title,
-                "ebay_id": ebay_ids[i] if i < len(ebay_ids) else None,
-                "shopify_id": shopify_ids[i] if i < len(shopify_ids) else None,
-                "matched_by": "title_exact" if (i < len(ebay_ids) and i < len(shopify_ids)) else None,
-            })
-
-    newly_confirmed = 0
-    try:
-        # Only delete/recreate rows that were NOT already confirmed — confirmed
-        # rows (hd_id set) are left completely untouched by this delete.
-        supabase.table("inventory_match").delete().eq("business_id", business_id)\
-            .is_("hd_id", "null").execute()
-
-        import uuid as _uuid
-        for i in range(0, len(inventory_rows), 500):
-            chunk = inventory_rows[i:i+500]
-            # Every genuine match (both ids present) gets confirmed immediately,
-            # right here, as part of the sync itself — not a separate manual step.
-            # Batched (fast, ~instant even for thousands of rows), NOT the old
-            # one-row-at-a-time approach that caused a multi-minute hang earlier.
-            for row in chunk:
-                if row["ebay_id"] and row["shopify_id"]:
-                    row["hd_id"] = str(_uuid.uuid4())
-                    newly_confirmed += 1
-            supabase.table("inventory_match").insert(chunk).execute()
-    except Exception as e:
-        errors["inventory_write"] = str(e)
-
-    return {
-        "ebay_synced": len(ebay_records), "shopify_synced": len(shopify_records),
-        "matched": sum(1 for r in inventory_rows if r["matched_by"]) + len(confirmed_rows),
-        "ebay_only": sum(1 for r in inventory_rows if r["ebay_id"] and not r["shopify_id"]),
-        "shopify_only": sum(1 for r in inventory_rows if r["shopify_id"] and not r["ebay_id"]),
-        "confirmed_preserved": len(confirmed_rows),
-        "newly_confirmed": newly_confirmed,
-        "errors": errors,
-    }
+    result = _rematch_inventory_from_cache(business_id)
+    result["errors"] = {**errors, **result.get("errors", {})}
+    return result
 
 @app.post("/api/inventory/sync")
 async def sync_inventory_now(request: Request):
@@ -6590,6 +6589,18 @@ async def sync_inventory_now(request: Request):
             _sync_status[business_id] = {"running": False, "result": {"error": str(e)}, "started_at": _sync_status.get(business_id, {}).get("started_at"), "finished_at": _dt.datetime.utcnow().isoformat()}
     asyncio.create_task(_run())
     return {"ok": True, "started": True}
+
+@app.post("/api/inventory/rematch")
+async def rematch_inventory_now(request: Request):
+    """Re-runs matching/confirming against whatever's already stored locally —
+    makes ZERO calls to eBay or Shopify. Fast enough (batched writes, no live API
+    round-trips) to run synchronously, no background job/polling needed."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio
+    result = await asyncio.to_thread(_rematch_inventory_from_cache, business_id)
+    return {"ok": True, "result": result}
 
 # Invisible in any renderer — but real characters to a string comparison. Confirmed
 # root cause of a title that would never exact-match no matter how many times it was
