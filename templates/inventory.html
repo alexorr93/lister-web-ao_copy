@@ -195,13 +195,16 @@ function renderTable() {
     return;
   }
   let html = `<table><thead><tr>
-    <th>Title</th><th>eBay Item ID</th><th>eBay SKU</th><th>eBay Qty</th><th>Shopify Product ID</th><th>Shopify SKU</th><th>Shopify Qty</th><th>Shopify Price</th><th>Status</th><th>Matched By</th><th>Confirmed</th>
+    <th>Title</th><th>eBay Item ID</th><th>eBay SKU</th><th>eBay Qty</th><th>Shopify Product ID</th><th>Shopify SKU</th><th>Shopify Qty</th><th>Shopify Price</th><th>Status</th><th>Matched By</th><th>HD_ID</th>
   </tr></thead><tbody>`;
   for (const r of filtered) {
     const status = !r.ebay_item_id ? '<span class="missing">Shopify only</span>'
       : !r.shopify_product_id ? '<span class="missing">eBay only</span>'
       : r.qty_variance ? '<span class="warn">Qty mismatch</span>'
       : 'Matched';
+    const hdCell = r.hd_id
+      ? `<span class="muted" style="font-family:monospace;font-size:11px;" title="${escapeHtml(r.hd_id)}">🔒 ${escapeHtml(r.hd_id.slice(0, 8))}...</span>`
+      : '<span class="muted">—</span>';
     html += `<tr>
       <td>${escapeHtml(r.title)}</td>
       <td class="muted">${escapeHtml(r.ebay_item_id || '—')}</td>
@@ -213,7 +216,7 @@ function renderTable() {
       <td class="muted">${r.shopify_price != null ? '$' + Number(r.shopify_price).toFixed(2) : '—'}</td>
       <td>${status}</td>
       <td class="muted">${escapeHtml(r.matched_by || '—')}</td>
-      <td>${r.hd_id ? '🔒' : ''}</td>
+      <td>${hdCell}</td>
     </tr>`;
   }
   html += '</tbody></table>';
