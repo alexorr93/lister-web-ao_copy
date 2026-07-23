@@ -332,10 +332,6 @@ select.field-input { background: #fff; color: #0f172a; }
       <button class="btn" onclick="selectAll()">☑ Select All</button>
       <button class="btn" onclick="deselectAll()">☐ Deselect</button>
       <button class="btn" style="color:#a78bfa;border-color:#7c3aed;" onclick="autofillLotSku()" title="Fills in the Lot SKU for selected items using the lot that was active when each was scanned — no waiting on scan completion">🏷️ Autofill Lot SKU</button>
-      <div style="display:flex;align-items:center;gap:6px;" id="batch-hours-wrap" title="Hours from now for batch eBay scheduling">
-        <input type="number" class="field-input" id="batch-ebay-hours" value="2" min="0.5" step="0.5" style="width:64px;padding:6px 8px;"/>
-        <span style="font-size:12px;color:var(--muted);">hrs</span>
-      </div>
       <button class="btn btn-primary" id="submit-ebay-btn" style="display:none" onclick="submitSelected()">⏰ Schedule to eBay</button>
       <button class="btn btn-primary" id="publish-now-btn" style="display:none;background:#ea580c;border-color:#ea580c;" onclick="submitSelectedNow()">⚡ Publish Immediately</button>
       <button class="btn btn-primary" id="publish-now-v2-btn" style="display:none;background:#7c3aed;border-color:#7c3aed;" onclick="submitSelectedNowV2()" title="Uses the classic eBay API — SKU stays editable after publishing">🧪 Publish (v2) Immediately</button>
@@ -1585,7 +1581,7 @@ async function submitSelected() {
   if (!selected.size) return;
   const ids = Array.from(selected);
   if (!validateLotSkusForPublish(ids)) return;
-  const hours = parseFloat(document.getElementById('batch-ebay-hours').value) || 2;
+  const hours = 2; // fixed default now that the editable hours box was removed from the page
   const ok = confirm(`Schedule ${ids.length} item(s) to go live on eBay in ${hours} hour(s)?\n\nSchedule is the only bulk action here — nothing publishes immediately. You can still adjust or cancel any item individually before it goes live.`);
   if (!ok) return;
   let success = 0, failed = 0;
