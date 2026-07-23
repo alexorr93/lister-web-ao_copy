@@ -1470,7 +1470,17 @@ def suggest_ebay_category(title: str, business_id: str, restrict: bool = True, e
         results.append({"category_id": cat.get("categoryId"), "name": cat.get("categoryName"), "path": full_path})
 
     if restrict:
-        results = [r for r in results if "Business & Industrial" in r["path"] or "eBay Motors" in r["path"]]
+        # A single exact-substring match against "eBay Motors" was likely the actual
+        # bug here — eBay's public browse UI calls that top-level category "eBay
+        # Motors", but the Taxonomy API (a different system) may return a different
+        # literal categoryName for that node (e.g. just "Motors", or "Parts &
+        # Accessories" without the "eBay Motors" prefix). That single fragile match
+        # would silently exclude every genuine automotive-parts suggestion, forcing
+        # the generic Business & Industrial fallback on every real auto part.
+        # Broadened to accept any plausible naming variant instead of guessing one.
+        motors_terms = ("Business & Industrial", "eBay Motors", "Motors",
+                         "Parts & Accessories", "Auto Parts", "Car & Truck", "Automotive")
+        results = [r for r in results if any(t in r["path"] for t in motors_terms)]
     if exclude_id:
         results = [r for r in results if r["category_id"] != exclude_id]
 
