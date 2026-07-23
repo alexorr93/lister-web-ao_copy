@@ -340,10 +340,10 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
       <div style="display:flex;align-items:center;gap:4px;" title="Optional 2nd half of the SKU used by Autofill Lot SKU — e.g. '14R-custom' instead of the default '14R-'. Leave blank for default.">
         <span style="font-size:11px;color:var(--muted);white-space:nowrap;">2nd half:</span>
-        <input type="text" class="field-input" id="actionbar-suffix-input" placeholder="optional" oninput="setActiveLotSuffix(this.value)" autocomplete="off" style="font-size:12px;padding:5px 8px;width:90px;"/>
+        <input type="text" class="field-input" id="actionbar-suffix-input" placeholder="optional" oninput="setActiveLotSuffix(this.value)" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="actionbar-suffix-nofill" style="font-size:12px;padding:5px 8px;width:90px;"/>
       </div>
       <div style="display:flex;align-items:center;gap:4px;" title="Sets the SKU to exactly what you type, on every currently-selected item — no lot-matching required.">
-        <input type="text" class="field-input" id="actionbar-custom-sku-input" placeholder="custom SKU..." autocomplete="off" style="font-size:12px;padding:5px 8px;width:110px;"/>
+        <input type="text" class="field-input" id="actionbar-custom-sku-input" placeholder="custom SKU..." autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="actionbar-customsku-nofill" style="font-size:12px;padding:5px 8px;width:110px;"/>
         <button class="btn" onclick="applyCustomSkuToSelected()" title="Set the SKU above on every selected item">✏️ Set SKU</button>
       </div>
       <button class="btn btn-primary" id="submit-ebay-btn" style="display:none" onclick="submitSelected()">⏰ Schedule to eBay</button>
