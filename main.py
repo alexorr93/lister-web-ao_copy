@@ -6357,7 +6357,10 @@ def _normalize_title(t: str) -> str:
 
 def sync_inventory(business_id: str) -> dict:
     """Pulls fresh eBay + Shopify inventory, stores each raw, then matches them by
-    normalized exact title into the `inventory` table with a brand new key we create
+    normalized exact title into the `inventory_match` table (NOT the pre-existing
+    `inventory` table, which is an unrelated barcode/location-tracking feature that
+    happened to share a name — writing/reading against it silently failed every
+    time until this was caught and fixed) with a brand new key we create
     ourselves — not either platform's ID. Non-matches just sit as eBay-only or
     Shopify-only rows for you to track down manually."""
     errors = {}
@@ -6418,9 +6421,9 @@ def sync_inventory(business_id: str) -> dict:
             })
 
     try:
-        supabase.table("inventory").delete().eq("business_id", business_id).execute()
+        supabase.table("inventory_match").delete().eq("business_id", business_id).execute()
         for i in range(0, len(inventory_rows), 500):
-            supabase.table("inventory").insert(inventory_rows[i:i+500]).execute()
+            supabase.table("inventory_match").insert(inventory_rows[i:i+500]).execute()
     except Exception as e:
         errors["inventory_write"] = str(e)
 
@@ -7706,7 +7709,7 @@ async def list_inventory(request: Request):
             start += page_size
         return all_rows
 
-    inv_rows = _fetch_all("inventory", "*")
+    inv_rows = _fetch_all("inventory_match", "*")
     ebay_by_id = {r["id"]: r for r in _fetch_all("ebay_inventory", "*")}
     shopify_by_id = {r["id"]: r for r in _fetch_all("shopify_inventory", "*")}
 
