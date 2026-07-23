@@ -113,7 +113,7 @@ tr:last-child td { border-bottom: none; }
       <div class="field-label">Pirate Ship Export</div>
       <input type="file" id="shipping-file-input" accept=".csv,.xlsx" style="font-size:12px;" onchange="uploadShippingFile()"/>
     </div>
-    <button class="btn btn-primary" onclick="syncNow()" title="Pulls fresh orders, fees, and shipping matches into the local database — this is what keeps Financials accurate">🔄 Sync Now</button>
+    <button class="btn btn-primary" onclick="syncNow()" title="Pulls fresh orders, fees, and shipping matches into the local database — this is what keeps Financials accurate">🔄 Sync Now <span style="font-size:10px;opacity:.8;">(live API)</span></button>
     <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer;padding-bottom:8px;" title="Normally resumes from where the last run left off. Check this to ignore that and re-walk everything from the start (needed after a code change that affects already-completed months).">
       <input type="checkbox" id="force-restart-toggle"/> Force full restart
     </label>
@@ -127,7 +127,7 @@ tr:last-child td { border-bottom: none; }
       <div class="field-label">Resync One Order (fast, seconds)</div>
       <input type="text" class="field-input" id="resync-order-id" placeholder="e.g. 08-14824-55634" style="width:220px;"/>
     </div>
-    <button class="btn" onclick="resyncOneOrder()">🔁 Resync This Order</button>
+    <button class="btn" onclick="resyncOneOrder()" title="Pulls this one order fresh from eBay">🔁 Resync This Order <span style="font-size:10px;opacity:.8;">(live API)</span></button>
   </div>
 
   <div id="error-area"></div>

@@ -116,7 +116,7 @@ tr:last-child td { border-bottom: none; }
       <button class="btn" id="edit-mode-btn" onclick="toggleEditMode()">✏️ Edit</button>
       <button class="btn btn-danger" onclick="undoLastEdit()" title="Restores the values from right before your last edit">↩️ Undo Last Edit</button>
       <button class="btn" onclick="openCashHistory()" title="See every recorded change to the Cash field over time">📜 Cash History</button>
-      <button class="btn" onclick="syncActiveListings()" title="Pulls your real eBay ActiveList via the Trading API and recounts each lot's active listings">🔄 Sync Active Listings</button>
+      <button class="btn" onclick="syncActiveListings()" title="Pulls your real eBay ActiveList via the Trading API and recounts each lot's active listings">🔄 Sync Active Listings <span style="font-size:10px;opacity:.8;">(live API)</span></button>
       <span id="active-listings-synced" class="status-msg" style="margin:0;"></span>
     </div>
     <div style="margin-top:12px;display:flex;align-items:center;gap:10px;">

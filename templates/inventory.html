@@ -69,7 +69,7 @@ tr:last-child td { border-bottom: none; }
   <div class="sub">eBay + Shopify inventory, matched by title. Non-matches show up as one-sided rows for manual review.</div>
 
   <div class="filter-bar">
-    <button class="btn btn-primary" onclick="syncInventory()">🔄 Sync Inventory</button>
+    <button class="btn btn-primary" onclick="syncInventory()" title="Shopify: live API call, pulls fresh right now. eBay: reads from the local cache last filled by 'Sync Active Listings' on the Lots page — does NOT call eBay itself.">🔄 Sync Inventory <span style="font-size:10px;opacity:.8;">(Shopify: live · eBay: cached — sync on Lots page first)</span></button>
     <button class="btn" onclick="backfillHdId()" title="One-time: gives every currently-matched pair a permanent ID, so it survives future syncs and title edits">🔒 Confirm Existing Matches</button>
     <input type="text" class="field-input" id="search-input" placeholder="Search title/SKU..." oninput="renderTable()" style="width:260px;"/>
     <select class="field-input" id="filter-select" onchange="renderTable()">

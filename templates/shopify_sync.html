@@ -100,9 +100,9 @@ tr.ignored:hover td { opacity: 0.85; }
         <button class="btn" onclick="setThisMonth()">This Month</button>
         <button class="btn" onclick="setLastMonth()">Last Month</button>
       </div>
-      <button class="btn btn-primary" onclick="syncNow()" title="Refreshes live eBay/Shopify quantities into the local snapshot — this is the only action that calls out to eBay/Shopify">🔄 Sync Now</button>
-      <button class="btn btn-orange" onclick="pushAllFound()" title="Pushes every row that's found in Shopify but not yet matching eBay — sets each to eBay's live quantity">⚡ Push All Found</button>
-      <button class="btn" onclick="testHourlySync()" title="Runs the same job the hourly automation runs (sync + push), right now, for today's sales only">🧪 Test Hourly Job</button>
+      <button class="btn btn-primary" onclick="syncNow()" title="Refreshes live eBay/Shopify quantities into the local snapshot — this is the only action that calls out to eBay/Shopify">🔄 Sync Now <span style="font-size:10px;opacity:.8;">(live API)</span></button>
+      <button class="btn btn-orange" onclick="pushAllFound()" title="Pushes every row that's found in Shopify but not yet matching eBay — sets each to eBay's live quantity">⚡ Push All Found <span style="font-size:10px;opacity:.8;">(live API — writes to Shopify)</span></button>
+      <button class="btn" onclick="testHourlySync()" title="Runs the same job the hourly automation runs (sync + push), right now, for today's sales only">🧪 Test Hourly Job <span style="font-size:10px;opacity:.8;">(live API)</span></button>
       <span id="last-synced" style="font-size:11px;color:var(--muted);align-self:center;"></span>
     </div>
 
@@ -118,7 +118,7 @@ tr.ignored:hover td { opacity: 0.85; }
         <input type="number" class="field-input" id="inactive-limit" value="15" min="1" max="500" style="width:80px;"/>
       </div>
       <button class="btn btn-primary" onclick="loadInactive()">Load</button>
-      <button class="btn" onclick="syncEbayListings()" title="Pulls your real eBay Unsold-listings bucket via the Trading API — this is what actually populates this tab">🔄 Sync eBay Listings</button>
+      <button class="btn" onclick="syncEbayListings()" title="Pulls your real eBay Unsold-listings bucket via the Trading API — this is what actually populates this tab">🔄 Sync eBay Listings <span style="font-size:10px;opacity:.8;">(live API)</span></button>
       <button class="btn btn-orange" onclick="checkInactiveInShopify()" title="Checks exactly the items currently shown below against your live Shopify catalog">🔍 Check in Shopify</button>
       <span id="inactive-last-synced" style="font-size:11px;color:var(--muted);align-self:center;"></span>
     </div>
