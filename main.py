@@ -1716,25 +1716,26 @@ def apply_acquisition_profits(business_id: str) -> dict:
     return {"updated": updated}
 
 def _apply_cash_to_profit(business_id: str):
-    """recalculate_acquisition_profits() (a Postgres function that lives only in
-    Supabase — there's no SQL source for it in this repo, and no DB credentials
-    available to edit it directly) computes Profit/ROI purely from cost vs. synced
-    eBay payouts; it has no notion of the manually-entered Cash field. Cash is value
-    already recovered outside eBay (e.g. selling part of a lot for cash), so it should
-    count toward profit exactly like a payout would. Layered on here in Python
-    immediately after every recalculation instead, using whatever baseline Profit the
-    SQL function just wrote — safe to re-run every time since each cycle starts from
-    that fresh (cash-less) baseline rather than a previously-corrected value."""
+    """FIXED: previously read the current `profit` column and added cash on top of
+    it — which compounds forever (a second Recalculate re-adds cash again) if
+    recalculate_acquisition_profits() (a Postgres function with no SQL source in
+    this repo) doesn't reset `profit` for every row unconditionally. Confirmed via
+    real data: a lot with $0 eBay activity showed Profit jump by exactly one more
+    Cash amount between two Recalculate runs — proof `profit` wasn't being reset
+    for that row, so cash kept stacking. Now computes profit as an absolute value
+    from total_payouts (assumed to be a genuine fresh SUM each time, defaulting to
+    0 for no-match rows rather than being conditionally skipped) minus cost, plus
+    cash — never reads or depends on the previous `profit` value at all, so this
+    is safe to run any number of times."""
     start = 0
     while True:
-        page = supabase.table("acquisitions").select("id,cost,cash,profit")\
+        page = supabase.table("acquisitions").select("id,cost,cash,total_payouts")\
             .eq("business_id", business_id).range(start, start + 999).execute().data or []
         for row in page:
-            cash = row.get("cash") or 0
-            if not cash:
-                continue
             cost = row.get("cost") or 0
-            profit = (row.get("profit") or 0) + cash
+            cash = row.get("cash") or 0
+            total_payouts = row.get("total_payouts") or 0
+            profit = total_payouts - cost + cash
             roi_pct = round(profit / cost * 100, 2) if cost else None
             supabase.table("acquisitions").update({"profit": profit, "roi_pct": roi_pct}).eq("id", row["id"]).execute()
         if len(page) < 1000:
@@ -1780,9 +1781,7 @@ def _apply_shopify_sales_to_profit(business_id: str):
         start += 1000
 
     for a in acquisitions:
-        sales = shopify_sales_by_prefix.get(a.get("sku"))
-        if not sales:
-            continue
+        sales = shopify_sales_by_prefix.get(a.get("sku")) or 0
         cost = a.get("cost") or 0
         profit = (a.get("profit") or 0) + sales
         roi_pct = round(profit / cost * 100, 2) if cost else None
