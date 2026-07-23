@@ -2533,15 +2533,44 @@ async function saveEbayListingSettings() {
 
 async function syncEbayCategories() {
   const statusEl = document.getElementById('sync-cat-status');
-  statusEl.textContent = 'Downloading eBay category tree... this can take a minute.';
+  statusEl.textContent = 'Starting category sync (background, can take a couple minutes for both trees)...';
   try {
-    const r = await api('POST', '/api/ebay/sync-categories');
+    const start = await api('POST', '/api/ebay/sync-categories');
+    if (start.already_running) {
+      statusEl.textContent = 'A sync is already running — polling for it to finish...';
+    }
+    pollCategorySyncStatus();
+  } catch(e) {
+    statusEl.textContent = '⚠️ Failed to start: ' + e.message;
+    toast('Category sync failed to start', 'error');
+  }
+}
+
+async function pollCategorySyncStatus() {
+  const statusEl = document.getElementById('sync-cat-status');
+  try {
+    const r = await fetch('/api/ebay/sync-categories-status');
+    const data = await r.json();
+    if (data.running) {
+      statusEl.textContent = 'Syncing category trees (0 = standard, 100 = eBay Motors) — safe to leave this page open...';
+      setTimeout(pollCategorySyncStatus, 3000);
+      return;
+    }
+    const result = data.result;
+    if (!result) {
+      statusEl.textContent = 'No sync has run yet.';
+      return;
+    }
+    if (result.error) {
+      statusEl.textContent = '⚠️ Sync failed: ' + result.error;
+      toast('Category sync failed', 'error');
+      return;
+    }
     statusEl.textContent =
-      `✅ Synced ${r.count} categories. Top-level branches eBay returned (${(r.top_level_names || []).length}): ${(r.top_level_names || []).join(', ')}`;
+      `✅ Synced ${result.count} categories. Top-level branches eBay returned (${(result.top_level_names || []).length}): ${(result.top_level_names || []).join(', ')}`;
     toast('eBay categories synced ✓');
   } catch(e) {
-    statusEl.textContent = '⚠️ Sync failed: ' + e.message;
-    toast('Category sync failed', 'error');
+    statusEl.textContent = '⚠️ ' + e.message;
   }
 }
 

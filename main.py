@@ -1482,21 +1482,56 @@ def suggest_ebay_category(title: str, business_id: str, restrict: bool = True, e
 
     return results[0] if results else {}
 
+_category_sync_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
+
+async def _run_category_sync_background(business_id: str, token: str):
+    import asyncio, datetime as _dt
+    try:
+        result = await asyncio.to_thread(sync_ebay_categories, token)
+        _category_sync_job_status[business_id] = {
+            "running": False, "result": result,
+            "started_at": _category_sync_job_status.get(business_id, {}).get("started_at"),
+            "finished_at": _dt.datetime.utcnow().isoformat(),
+        }
+    except Exception as e:
+        _category_sync_job_status[business_id] = {
+            "running": False, "result": {"error": str(e)},
+            "started_at": _category_sync_job_status.get(business_id, {}).get("started_at"),
+            "finished_at": _dt.datetime.utcnow().isoformat(),
+        }
+
 @app.post("/api/ebay/sync-categories")
 async def api_sync_categories(request: Request):
+    """Kicks off the category tree pull (both tree 0 and tree 100 — see
+    sync_ebay_categories) as a background job instead of one long blocking request.
+    Pulling two full category trees synchronously was slow enough to hit read
+    timeouts depending on how eBay's API responded that moment — same fix pattern
+    already used for the similarly slow active-listings sync."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
+    if _category_sync_job_status.get(business_id, {}).get("running"):
+        return {"started": False, "already_running": True}
     settings = get_ebay_settings(business_id)
     try:
         token = get_ebay_access_token(business_id)
     except Exception as e:
         raise HTTPException(400, str(e))
-    try:
-        result = sync_ebay_categories(token)
-        return {"ok": True, **result}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+    import asyncio, datetime as _dt
+    _category_sync_job_status[business_id] = {
+        "running": True, "result": None,
+        "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None,
+    }
+    asyncio.create_task(_run_category_sync_background(business_id, token))
+    return {"started": True}
+
+@app.get("/api/ebay/sync-categories-status")
+async def api_sync_categories_status(request: Request, response: Response):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    response.headers["Cache-Control"] = "no-store"
+    return _category_sync_job_status.get(business_id, {"running": False, "result": None, "started_at": None, "finished_at": None})
 
 @app.post("/api/listings/{item_id}/auto-category")
 async def api_auto_category(item_id: str, request: Request, broad: bool = False, exclude: str = None, query: str = None):
