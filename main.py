@@ -6501,8 +6501,16 @@ def _rematch_inventory_from_cache_inner(business_id: str) -> dict:
     ebay_records = _fetch_paginated("ebay_inventory")
     shopify_records = _fetch_paginated("shopify_inventory")
 
-    confirmed_rows = (supabase.table("inventory_match").select("ebay_id,shopify_id")
-                      .eq("business_id", business_id).not_.is_("hd_id", "null").execute().data or [])
+    confirmed_rows = []
+    start_cf = 0
+    while True:
+        page = (supabase.table("inventory_match").select("ebay_id,shopify_id")
+                .eq("business_id", business_id).not_.is_("hd_id", "null")
+                .range(start_cf, start_cf + 999).execute().data or [])
+        confirmed_rows.extend(page)
+        if len(page) < 1000:
+            break
+        start_cf += 1000
     confirmed_ebay_ids = {r["ebay_id"] for r in confirmed_rows if r.get("ebay_id")}
     confirmed_shopify_ids = {r["shopify_id"] for r in confirmed_rows if r.get("shopify_id")}
 
