@@ -155,35 +155,39 @@ function renderTable() {
     filtered = filtered.filter(r =>
       (r.title || '').toLowerCase().includes(search) ||
       (r.ebay_sku || '').toLowerCase().includes(search) ||
-      (r.shopify_sku || '').toLowerCase().includes(search));
+      (r.shopify_sku || '').toLowerCase().includes(search) ||
+      (r.ebay_item_id || '').toLowerCase().includes(search) ||
+      (r.shopify_product_id || '').toLowerCase().includes(search));
   }
-  if (filter === 'matched') filtered = filtered.filter(r => r.ebay_sku && r.shopify_sku);
-  if (filter === 'ebay_only') filtered = filtered.filter(r => r.ebay_sku && !r.shopify_sku);
-  if (filter === 'shopify_only') filtered = filtered.filter(r => r.shopify_sku && !r.ebay_sku);
+  if (filter === 'matched') filtered = filtered.filter(r => r.ebay_item_id && r.shopify_product_id);
+  if (filter === 'ebay_only') filtered = filtered.filter(r => r.ebay_item_id && !r.shopify_product_id);
+  if (filter === 'shopify_only') filtered = filtered.filter(r => r.shopify_product_id && !r.ebay_item_id);
   if (filter === 'qty_variance') filtered = filtered.filter(r => r.qty_variance);
 
   document.getElementById('summary-row').style.display = 'grid';
   document.getElementById('stat-total').textContent = inventory.length;
-  document.getElementById('stat-matched').textContent = inventory.filter(r => r.ebay_sku && r.shopify_sku).length;
-  document.getElementById('stat-ebay-only').textContent = inventory.filter(r => r.ebay_sku && !r.shopify_sku).length;
-  document.getElementById('stat-shopify-only').textContent = inventory.filter(r => r.shopify_sku && !r.ebay_sku).length;
+  document.getElementById('stat-matched').textContent = inventory.filter(r => r.ebay_item_id && r.shopify_product_id).length;
+  document.getElementById('stat-ebay-only').textContent = inventory.filter(r => r.ebay_item_id && !r.shopify_product_id).length;
+  document.getElementById('stat-shopify-only').textContent = inventory.filter(r => r.shopify_product_id && !r.ebay_item_id).length;
 
   if (!filtered.length) {
     document.getElementById('table-area').innerHTML = '<div class="empty">No rows match this filter.</div>';
     return;
   }
   let html = `<table><thead><tr>
-    <th>Title</th><th>eBay SKU</th><th>eBay Qty</th><th>Shopify SKU</th><th>Shopify Qty</th><th>Shopify Price</th><th>Status</th>
+    <th>Title</th><th>eBay Item ID</th><th>eBay SKU</th><th>eBay Qty</th><th>Shopify Product ID</th><th>Shopify SKU</th><th>Shopify Qty</th><th>Shopify Price</th><th>Status</th>
   </tr></thead><tbody>`;
   for (const r of filtered) {
-    const status = !r.ebay_sku ? '<span class="missing">Shopify only</span>'
-      : !r.shopify_sku ? '<span class="missing">eBay only</span>'
+    const status = !r.ebay_item_id ? '<span class="missing">Shopify only</span>'
+      : !r.shopify_product_id ? '<span class="missing">eBay only</span>'
       : r.qty_variance ? '<span class="warn">Qty mismatch</span>'
       : 'Matched';
     html += `<tr>
       <td>${escapeHtml(r.title)}</td>
+      <td class="muted">${escapeHtml(r.ebay_item_id || '—')}</td>
       <td class="muted">${escapeHtml(r.ebay_sku || '—')}</td>
       <td class="muted">${r.ebay_qty ?? '—'}</td>
+      <td class="muted">${escapeHtml(r.shopify_product_id || '—')}</td>
       <td class="muted">${escapeHtml(r.shopify_sku || '—')}</td>
       <td class="muted">${r.shopify_qty ?? '—'}</td>
       <td class="muted">${r.shopify_price != null ? '$' + Number(r.shopify_price).toFixed(2) : '—'}</td>

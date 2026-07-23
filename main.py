@@ -7711,7 +7711,9 @@ async def list_inventory(request: Request):
         results.append({
             "id": row["id"], "title": row["title"], "matched_by": row.get("matched_by"),
             "ebay_sku": e.get("sku"), "ebay_qty": e.get("quantity"), "ebay_condition": e.get("condition"),
+            "ebay_item_id": e.get("item_id"),
             "shopify_sku": s.get("sku"), "shopify_qty": s.get("quantity"), "shopify_price": s.get("price"), "shopify_status": s.get("status"),
+            "shopify_product_id": s.get("product_id"),
             "qty_variance": (e.get("quantity") is not None and s.get("quantity") is not None and e.get("quantity") != s.get("quantity")),
         })
     return {"inventory": results}
