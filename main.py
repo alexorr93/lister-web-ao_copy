@@ -6462,12 +6462,25 @@ def _maybe_confirm_inventory_match(business_id: str, listing_id: str):
     except Exception as e:
         print(f"_maybe_confirm_inventory_match failed for listing {listing_id}: {e}")
 
+_rematch_inventory_lock = {}  # business_id -> True while a rematch is in progress
+
 def _rematch_inventory_from_cache(business_id: str) -> dict:
     """The matching/confirming logic only — reads whatever's already stored in
     ebay_inventory/shopify_inventory (from the last time a real sync ran), makes
     ZERO live API calls. Split out from sync_inventory specifically so confirming
     matches never requires a fresh eBay/Shopify pull — there was no reason those
     had to be coupled together."""
+    if _rematch_inventory_lock.get(business_id):
+        raise Exception("A rematch is already running for this account — wait for it to finish "
+                         "before starting another (two overlapping runs were exactly what caused "
+                         "the duplicate-row explosion earlier).")
+    _rematch_inventory_lock[business_id] = True
+    try:
+        return _rematch_inventory_from_cache_inner(business_id)
+    finally:
+        _rematch_inventory_lock[business_id] = False
+
+def _rematch_inventory_from_cache_inner(business_id: str) -> dict:
     errors = {}
 
     def _fetch_paginated(table):
