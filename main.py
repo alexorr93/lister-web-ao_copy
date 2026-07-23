@@ -6292,13 +6292,21 @@ def fetch_ebay_inventory_items(business_id: str) -> list:
     fresh live pull at the moment "Sync Inventory" is clicked — a real trade-off,
     but far safer than re-implementing the Trading API pagination/XML parsing a
     second time here when a correct, checkpointed version already exists."""
-    res = (supabase.table("ebay_listing_status").select("item_id,sku,title,quantity_available")
-           .eq("business_id", business_id).eq("listing_status", "Active").execute())
+    res_rows = []
+    start = 0
+    while True:
+        page = (supabase.table("ebay_listing_status").select("item_id,sku,title,quantity_available")
+                .eq("business_id", business_id).eq("listing_status", "Active")
+                .range(start, start + 999).execute().data or [])
+        res_rows.extend(page)
+        if len(page) < 1000:
+            break
+        start += 1000
     return [{
         "sku": r.get("sku") or "", "title": r.get("title") or "",
         "quantity": r.get("quantity_available") or 0, "condition": "",
         "item_id": r.get("item_id"),
-    } for r in (res.data or []) if r.get("sku")]
+    } for r in res_rows if r.get("item_id")]
 
 def fetch_shopify_inventory_items(business_id: str) -> list:
     """Lists every Shopify product/variant with price and quantity — all in the
