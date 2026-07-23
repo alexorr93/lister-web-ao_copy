@@ -1249,23 +1249,28 @@ async def update_listing(item_id: str, body: UpdateField, request: Request):
 
 class AssignLot(BaseModel):
     lot_sku: str
+    suffix: Optional[str] = None
 
 @app.post("/api/listings/{item_id}/assign-lot")
 async def assign_lot_sku(item_id: str, body: AssignLot, request: Request):
-    """Sets ebay_sku to bare '{lot}-' (e.g. "AM1-") for every item in the lot — no number
-    appended, ever. This endpoint is only called from the v2/Trading-API intake page,
-    where SKU/Custom Label is plain free text with no account-wide uniqueness requirement
-    (unlike the old v1 Inventory API, where SKU is the resource's own identifier and a
-    collision would silently overwrite another item's live listing data). If this
-    endpoint is ever reused from a v1-publishing page, the old per-lot numbering (see
-    git history) needs to come back for that case."""
+    """Sets ebay_sku to '{lot}-' (e.g. "AM1-") by default — no number appended. If a
+    suffix is supplied (fully optional, from the intake page's Active Suffix field),
+    uses '{lot}-{suffix}' instead for that call — lets someone key in a custom second
+    half (e.g. a batch/day code) that applies to everything being intaked in that
+    session, without requiring one. This endpoint is only called from the v2/Trading-
+    API intake page, where SKU/Custom Label is plain free text with no account-wide
+    uniqueness requirement (unlike the old v1 Inventory API, where SKU is the
+    resource's own identifier and a collision would silently overwrite another item's
+    live listing data). If this endpoint is ever reused from a v1-publishing page, the
+    old per-lot numbering (see git history) needs to come back for that case."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     lot = (body.lot_sku or "").strip()
     if not lot:
         raise HTTPException(400, "lot_sku is required")
-    new_sku = f"{lot}-"
+    suffix = (body.suffix or "").strip()
+    new_sku = f"{lot}-{suffix}" if suffix else f"{lot}-"
     try:
         supabase.table("listings").update({"ebay_sku": new_sku}).eq("id", item_id).execute()
         return {"ok": True, "ebay_sku": new_sku}

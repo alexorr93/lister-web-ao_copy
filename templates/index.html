@@ -369,6 +369,10 @@ select.field-input { background: #fff; color: #0f172a; }
       </select>
       <button class="active-lot-change-btn" onclick="openLotPicker()" title="Search/filter picker">Change</button>
     </div>
+    <div style="display:flex;align-items:center;gap:8px;margin:-8px 0 12px;">
+      <span style="font-size:11px;color:var(--muted);white-space:nowrap;">2nd half (optional)</span>
+      <input type="text" class="field-input" id="upload-suffix-input" placeholder="leave blank for default" value="" oninput="setActiveLotSuffix(this.value)" autocomplete="off" style="font-size:12px;padding:4px 8px;"/>
+    </div>
     <div id="upload-start">
       <div style="text-align:center;padding:2rem 0 1.5rem;">
         <div style="font-size:3.5rem;margin-bottom:12px;">🗂️</div>
@@ -425,6 +429,10 @@ select.field-input { background: #fff; color: #0f172a; }
         <option value="">Select lot...</option>
       </select>
       <button class="active-lot-change-btn" onclick="openLotPicker()" title="Search/filter picker">Change</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin:-8px 0 12px;">
+      <span style="font-size:11px;color:var(--muted);white-space:nowrap;">2nd half (optional)</span>
+      <input type="text" class="field-input" id="fastscan-suffix-input" placeholder="leave blank for default" value="" oninput="setActiveLotSuffix(this.value)" autocomplete="off" style="font-size:12px;padding:4px 8px;"/>
     </div>
     <div class="fastscan-cond">
       <button class="fastscan-cond-btn" id="fs-cond-new" onclick="setFsCond('new')">✓ New</button>
@@ -836,6 +844,17 @@ function validateLotSkusForPublish(ids) {
 // ebay_sku = "{lot}-{listingId}" as soon as its listing exists — the same convention
 // the Dashboard's Lot SKU field already uses, so nothing downstream needed to change.
 let activeLotSku = localStorage.getItem('lister_active_lot_sku') || '';
+let activeLotSuffix = localStorage.getItem('lister_active_lot_suffix') || '';
+
+function setActiveLotSuffix(suffix) {
+  activeLotSuffix = suffix;
+  localStorage.setItem('lister_active_lot_suffix', suffix);
+  // Keep both tabs' suffix inputs in sync with each other, same as the lot itself.
+  ['fastscan-suffix-input', 'upload-suffix-input'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.value !== suffix) el.value = suffix;
+  });
+}
 
 function setActiveLotSku(sku) {
   activeLotSku = sku;
@@ -858,6 +877,10 @@ function renderActiveLotBars() {
       sel.innerHTML = '<option value="">Select lot...</option>' +
         lotSkusByRecency.map(s => `<option value="${s}"${s===activeLotSku?' selected':''}>${s}</option>`).join('');
     }
+  });
+  ['fastscan-suffix-input', 'upload-suffix-input'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.value !== activeLotSuffix) el.value = activeLotSuffix;
   });
 }
 renderActiveLotBars();
@@ -1460,7 +1483,9 @@ async function autofillLotSku() {
   let ok = 0, failed = 0;
   for (const l of todo) {
     try {
-      const r = await api('POST', `/api/listings/${l.id}/assign-lot`, {lot_sku: activeLotSku});
+      const body = {lot_sku: activeLotSku};
+      if (activeLotSuffix) body.suffix = activeLotSuffix;
+      const r = await api('POST', `/api/listings/${l.id}/assign-lot`, body);
       l.ebay_sku = r.ebay_sku;
       ok++;
     } catch(e) { failed++; }
