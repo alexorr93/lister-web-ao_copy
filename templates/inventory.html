@@ -150,7 +150,13 @@ function renderTable() {
   }
   const search = document.getElementById('search-input').value.trim().toLowerCase();
   const filter = document.getElementById('filter-select').value;
-  let filtered = inventory;
+
+  // Always exclude dead Shopify stock (0 or negative qty) from everything on this
+  // page, stats included — a row with no eBay side at all (shopify_qty null) is
+  // left alone, only an actual 0/-1 hides it.
+  const activeInventory = inventory.filter(r => !(r.shopify_product_id && r.shopify_qty != null && r.shopify_qty <= 0));
+
+  let filtered = activeInventory;
   if (search) {
     filtered = filtered.filter(r =>
       (r.title || '').toLowerCase().includes(search) ||
@@ -165,17 +171,17 @@ function renderTable() {
   if (filter === 'qty_variance') filtered = filtered.filter(r => r.qty_variance);
 
   document.getElementById('summary-row').style.display = 'grid';
-  document.getElementById('stat-total').textContent = inventory.length;
-  document.getElementById('stat-matched').textContent = inventory.filter(r => r.ebay_item_id && r.shopify_product_id).length;
-  document.getElementById('stat-ebay-only').textContent = inventory.filter(r => r.ebay_item_id && !r.shopify_product_id).length;
-  document.getElementById('stat-shopify-only').textContent = inventory.filter(r => r.shopify_product_id && !r.ebay_item_id).length;
+  document.getElementById('stat-total').textContent = activeInventory.length;
+  document.getElementById('stat-matched').textContent = activeInventory.filter(r => r.ebay_item_id && r.shopify_product_id).length;
+  document.getElementById('stat-ebay-only').textContent = activeInventory.filter(r => r.ebay_item_id && !r.shopify_product_id).length;
+  document.getElementById('stat-shopify-only').textContent = activeInventory.filter(r => r.shopify_product_id && !r.ebay_item_id).length;
 
   if (!filtered.length) {
     document.getElementById('table-area').innerHTML = '<div class="empty">No rows match this filter.</div>';
     return;
   }
   let html = `<table><thead><tr>
-    <th>Title</th><th>eBay Item ID</th><th>eBay SKU</th><th>eBay Qty</th><th>Shopify Product ID</th><th>Shopify SKU</th><th>Shopify Qty</th><th>Shopify Price</th><th>Status</th>
+    <th>Title</th><th>eBay Item ID</th><th>eBay SKU</th><th>eBay Qty</th><th>Shopify Product ID</th><th>Shopify SKU</th><th>Shopify Qty</th><th>Shopify Price</th><th>Status</th><th>Matched By</th>
   </tr></thead><tbody>`;
   for (const r of filtered) {
     const status = !r.ebay_item_id ? '<span class="missing">Shopify only</span>'
@@ -192,6 +198,7 @@ function renderTable() {
       <td class="muted">${r.shopify_qty ?? '—'}</td>
       <td class="muted">${r.shopify_price != null ? '$' + Number(r.shopify_price).toFixed(2) : '—'}</td>
       <td>${status}</td>
+      <td class="muted">${escapeHtml(r.matched_by || '—')}</td>
     </tr>`;
   }
   html += '</tbody></table>';
