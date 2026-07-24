@@ -172,6 +172,7 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tile-search-btns { display:flex; gap:5px; margin-bottom:6px; }
 .tile-search-btn { flex:1; font-size:10px; padding:4px 6px; border-radius:5px; border:1px solid var(--border); background:transparent; color:var(--muted); cursor:pointer; font-family:inherit; font-weight:600; }
 .tile-search-btn:hover { background:var(--border); color:var(--text); }
+.tile-search-btn.active { background:var(--accent); color:#fff; border-color:var(--accent); }
 .tile-price-cond-row { display:flex; align-items:center; gap:6px; }
 .tile-price-input { width:70px; background:transparent; border:none; border-bottom:1px solid var(--border); color:#f8fafc; font-size:14px; font-weight:800; font-family:inherit; outline:none; padding:0 0 2px; }
 .tile-price-input:focus { border-bottom-color:var(--accent); }
@@ -1070,6 +1071,18 @@ function updateStats() {
   if (lbl) lbl.textContent = inSelectMode ? 'Selected Value' : 'Batch Value';
 }
 
+// Tracks whether Google/eBay Active/eBay Sold has been clicked for a given
+// listing, per button — persisted in localStorage so it survives closing and
+// reopening the page (this is just a personal "have I checked this" marker,
+// not core listing data, so it doesn't need a database column).
+function isResearched(listingId, type) {
+  return localStorage.getItem(`lister_researched_${listingId}_${type}`) === '1';
+}
+function markResearched(listingId, type, btn) {
+  localStorage.setItem(`lister_researched_${listingId}_${type}`, '1');
+  if (btn) btn.classList.add('active');
+}
+
 function renderTiles() {
   const grid = document.getElementById('tile-grid');
   const empty = document.getElementById('dash-empty');
@@ -1144,9 +1157,9 @@ function renderTiles() {
       <div class="tile-body">
         <textarea class="tile-title-input${fieldClassFor(l.id,'title')}" rows="1" data-id="${l.id}" placeholder="Title">${(dirtyTitles[l.id] ?? (l.title||'')).replace(/</g,'&lt;')}</textarea>
         <div class="tile-search-btns">
-          <button class="tile-search-btn" onclick="window.open('https://www.google.com/search?q='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value),'popupwin','noopener,width=1200,height=800')">Google</button>
-          <button class="tile-search-btn" onclick="window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value)+'&LH_Sold=0&LH_Complete=0','popupwin','noopener,width=1200,height=800')">eBay Active</button>
-          <button class="tile-search-btn" onclick="window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value)+'&LH_Sold=1&LH_Complete=1','popupwin','noopener,width=1200,height=800')">eBay Sold</button>
+          <button class="tile-search-btn${isResearched(l.id,'google')?' active':''}" onclick="markResearched('${l.id}','google',this); window.open('https://www.google.com/search?q='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value),'popupwin','noopener,width=1200,height=800')">Google</button>
+          <button class="tile-search-btn${isResearched(l.id,'ebay_active')?' active':''}" onclick="markResearched('${l.id}','ebay_active',this); window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value)+'&LH_Sold=0&LH_Complete=0','popupwin','noopener,width=1200,height=800')">eBay Active</button>
+          <button class="tile-search-btn${isResearched(l.id,'ebay_sold')?' active':''}" onclick="markResearched('${l.id}','ebay_sold',this); window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value)+'&LH_Sold=1&LH_Complete=1','popupwin','noopener,width=1200,height=800')">eBay Sold</button>
         </div>
         <div class="tile-price-cond-row">
           <span style="color:var(--muted);font-size:11px;">$</span>
