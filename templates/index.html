@@ -758,7 +758,10 @@ function lotSkuFor(l) {
   const sku = (l && l.ebay_sku) || '';
   if (!sku) return '';
   const prefix = sku.includes('-') ? sku.split('-')[0] : sku;
-  return knownLotSkus.has(prefix) ? prefix : '';
+  // Show the FULL sku (prefix + whatever custom 2nd half was set), not just the
+  // bare prefix — this used to silently strip everything after the dash, making
+  // a correctly-saved custom suffix look like it never got applied at all.
+  return knownLotSkus.has(prefix) ? sku : '';
 }
 
 async function loadLotSkus() {
@@ -1284,15 +1287,23 @@ function initTileListeners() {
       var id = el.dataset.id, val = el.value.trim();
       var l = listings.find(function(x) { return String(x.id) === id; });
       if (!val) { el.classList.add('missing'); el.classList.remove('invalid'); delete dirtyLotSkus[id]; return; }
-      if (!knownLotSkus.has(val)) {
+      // Only the prefix (before the first '-') has to match a real Lot SKU from
+      // the Lots page — the 2nd half can be anything, same rule the Autofill
+      // button's backend already follows. Was previously requiring an EXACT full
+      // match, which rejected any custom suffix typed in here directly.
+      var valPrefix = val.includes('-') ? val.split('-')[0] : val;
+      if (!knownLotSkus.has(valPrefix)) {
         el.classList.add('invalid');
-        toast('"' + val + '" doesn\'t match any Lot SKU from the Lots page', 'error');
+        toast('"' + valPrefix + '" doesn\'t match any Lot SKU from the Lots page', 'error');
         el.value = l ? lotSkuFor(l) : '';
         delete dirtyLotSkus[id];
         return;
       }
       el.classList.remove('invalid', 'missing');
-      api('POST', '/api/listings/' + id + '/assign-lot', {lot_sku: val}).then(function(r) {
+      var valSuffix = val.includes('-') ? val.split('-').slice(1).join('-') : '';
+      var assignBody = {lot_sku: valPrefix};
+      if (valSuffix) assignBody.suffix = valSuffix;
+      api('POST', '/api/listings/' + id + '/assign-lot', assignBody).then(function(r) {
         delete dirtyLotSkus[id];
         if (l) l.ebay_sku = r.ebay_sku;
         toast('Lot SKU set to ' + val + ' ✓');
