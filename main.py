@@ -6712,18 +6712,6 @@ async def sync_inventory_now(request: Request):
     asyncio.create_task(_run())
     return {"ok": True, "started": True}
 
-@app.post("/api/inventory/rematch")
-async def rematch_inventory_now(request: Request):
-    """Re-runs matching/confirming against whatever's already stored locally —
-    makes ZERO calls to eBay or Shopify. Fast enough (batched writes, no live API
-    round-trips) to run synchronously, no background job/polling needed."""
-    business_id = require_auth(request)
-    if not business_id:
-        raise HTTPException(401, "Unauthorized")
-    import asyncio
-    result = await asyncio.to_thread(_rematch_inventory_from_cache, business_id)
-    return {"ok": True, "result": result}
-
 # Invisible in any renderer — but real characters to a string comparison. Confirmed
 # root cause of a title that would never exact-match no matter how many times it was
 # synced: the eBay-sourced title had a leading U+200B (zero-width space) that Python's
@@ -7960,41 +7948,6 @@ async def shopify_sync_push(request: Request, items: List[dict] = Body(...)):
         return _push_shopify_qty_updates(business_id, items)
     except Exception as e:
         raise HTTPException(400, str(e))
-
-@app.post("/api/inventory/backfill-hd-id")
-async def backfill_hd_id(request: Request):
-    """One-time action: gives every currently-matched (ebay_id AND shopify_id both
-    set) row a permanent hd_id, if it doesn't already have one. Once set, that
-    pairing is confirmed forever — sync_inventory excludes it from title-matching
-    entirely and never deletes/recreates it, so a later title edit on either
-    platform can't silently break a pairing that was already confirmed. Safe to
-    run repeatedly — only touches rows still missing hd_id."""
-    business_id = require_auth(request)
-    if not business_id:
-        raise HTTPException(401, "Unauthorized")
-    import uuid as _uuid
-
-    rows = []
-    start = 0
-    while True:
-        page = (supabase.table("inventory_match").select("id,ebay_id,shopify_id,hd_id")
-                .eq("business_id", business_id).range(start, start + 999).execute().data or [])
-        rows.extend(page)
-        if len(page) < 1000:
-            break
-        start += 1000
-    to_update = [r for r in rows if r.get("ebay_id") and r.get("shopify_id") and not r.get("hd_id")]
-
-    updates = [{"id": r["id"], "hd_id": str(_uuid.uuid4())} for r in to_update]
-    updated = 0
-    for i in range(0, len(updates), 500):
-        chunk = updates[i:i+500]
-        try:
-            supabase.table("inventory_match").upsert(chunk, on_conflict="id").execute()
-            updated += len(chunk)
-        except Exception:
-            pass
-    return {"ok": True, "confirmed": updated, "already_confirmed": len(rows) - len(to_update)}
 
 @app.get("/api/inventory")
 async def list_inventory(request: Request):
