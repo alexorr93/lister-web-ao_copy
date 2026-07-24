@@ -702,6 +702,7 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
         '<ListingType>FixedPriceItem</ListingType>'
         f'<Quantity>{qty}</Quantity>'
         f'<SKU>{_xesc(sku)}</SKU>'
+        '<BestOfferDetails><BestOfferEnabled>true</BestOfferEnabled></BestOfferDetails>'
         f'<PictureDetails>{picture_xml}</PictureDetails>'
         f'<ItemSpecifics>{item_specifics_xml}</ItemSpecifics>'
         '<SellerProfiles>'
