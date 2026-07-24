@@ -111,6 +111,17 @@ tr:last-child td { border-bottom: none; }
 <script>
 let inventory = [];
 
+function toast(msg) {
+  // This file never had its own toast() -- other pages define one, this one
+  // didn't, so a couple of newer buttons here were silently crashing on click
+  // with 'toast is not defined' instead of showing their success message.
+  const el = document.getElementById('sync-status');
+  if (el) {
+    el.textContent = msg;
+    setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 4000);
+  }
+}
+
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
