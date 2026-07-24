@@ -7969,6 +7969,41 @@ async def shopify_sync_push(request: Request, items: List[dict] = Body(...)):
     except Exception as e:
         raise HTTPException(400, str(e))
 
+class ManualMatch(BaseModel):
+    ebay_row_id: str    # inventory_match.id of the eBay-only row
+    shopify_row_id: str  # inventory_match.id of the Shopify-only row
+
+@app.post("/api/inventory/manual-match")
+async def manual_match_inventory(body: ManualMatch, request: Request):
+    """Manually links an eBay-only row to a Shopify-only row when they're really
+    the same item but title-matching missed it (e.g. eBay truncated the title).
+    Merges both into a single permanently confirmed row — same guarantee as an
+    automatic match, just human-confirmed instead of title-derived."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import uuid as _uuid
+
+    ebay_row = (supabase.table("inventory_match").select("*").eq("id", body.ebay_row_id)
+                .eq("business_id", business_id).limit(1).execute().data or [None])[0]
+    shopify_row = (supabase.table("inventory_match").select("*").eq("id", body.shopify_row_id)
+                   .eq("business_id", business_id).limit(1).execute().data or [None])[0]
+    if not ebay_row or not shopify_row:
+        raise HTTPException(404, "One or both rows not found")
+    if not ebay_row.get("ebay_id") or not shopify_row.get("shopify_id"):
+        raise HTTPException(400, "First row must be eBay-only, second must be Shopify-only")
+
+    new_hd_id = str(_uuid.uuid4())
+    supabase.table("inventory_match").insert({
+        "business_id": business_id, "title": ebay_row.get("title") or shopify_row.get("title"),
+        "ebay_id": ebay_row["ebay_id"], "shopify_id": shopify_row["shopify_id"],
+        "hd_id": new_hd_id, "matched_by": "manual",
+    }).execute()
+    # Remove the two now-superseded one-sided rows.
+    supabase.table("inventory_match").delete().eq("id", body.ebay_row_id).execute()
+    supabase.table("inventory_match").delete().eq("id", body.shopify_row_id).execute()
+    return {"ok": True, "hd_id": new_hd_id}
+
 @app.get("/api/inventory")
 async def list_inventory(request: Request):
     business_id = require_auth(request)

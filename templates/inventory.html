@@ -58,6 +58,11 @@ tr:last-child td { border-bottom: none; }
 .missing { color: var(--red); }
 .status-msg { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
 .empty { text-align: center; padding: 40px; color: var(--muted); }
+.mm-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 200; display: none; align-items: center; justify-content: center; padding: 16px; }
+.mm-modal-overlay.open { display: flex; }
+.mm-modal { background: var(--card); border: 1px solid var(--border); border-radius: 14px; max-width: 600px; width: 100%; max-height: 80vh; overflow-y: auto; padding: 20px; }
+.mm-candidate { padding: 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
+.mm-candidate:hover { background: rgba(37,99,235,0.15); border-color: var(--accent); }
 </style>
 </head>
 <body>
@@ -89,6 +94,18 @@ tr:last-child td { border-bottom: none; }
   </div>
 
   <div id="table-area"><div class="empty">Click Sync Inventory to pull your current eBay and Shopify listings.</div></div>
+</div>
+
+<div class="mm-modal-overlay" id="mm-overlay" onclick="closeManualMatch(event)">
+  <div class="mm-modal" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <div style="font-size:16px;font-weight:800;">🔗 Manual Match</div>
+      <button class="btn" onclick="closeManualMatch()">✕ Close</button>
+    </div>
+    <div class="sub" id="mm-source-title" style="margin-bottom:10px;"></div>
+    <input type="text" class="field-input" id="mm-search-input" placeholder="Search by title..." oninput="renderMmCandidates()" style="width:100%;margin-bottom:12px;"/>
+    <div id="mm-candidates"></div>
+  </div>
 </div>
 
 <script>
@@ -181,7 +198,7 @@ function renderTable() {
     return;
   }
   let html = `<table><thead><tr>
-    <th>Title</th><th>eBay Item ID</th><th>eBay SKU</th><th>eBay Qty</th><th>Shopify Product ID</th><th>Shopify SKU</th><th>Shopify Qty</th><th>Shopify Price</th><th>Status</th><th>Matched By</th><th>HD_ID</th><th>Action</th>
+    <th>Title</th><th>eBay Item ID</th><th>eBay SKU</th><th>eBay Qty</th><th>Shopify Product ID</th><th>Shopify SKU</th><th>Shopify Qty</th><th>Shopify Price</th><th>Status</th><th>Matched By</th><th>HD_ID</th><th>Action</th><th>Match</th>
   </tr></thead><tbody>`;
   for (const r of filtered) {
     const status = !r.ebay_item_id ? '<span class="missing">Shopify only</span>'
@@ -199,6 +216,9 @@ function renderTable() {
     const actionCell = (!r.shopify_product_id && r.listing_id)
       ? `<button class="btn" style="font-size:11px;padding:4px 8px;" onclick="publishRowToShopify(this, '${r.listing_id}')">🛍️ Publish to Shopify</button>`
       : '<span class="muted">—</span>';
+    const matchCell = (!r.ebay_item_id || !r.shopify_product_id)
+      ? `<button class="btn" style="font-size:11px;padding:4px 8px;" onclick="openManualMatch('${r.id}', ${r.ebay_item_id ? 'true' : 'false'})">🔗 Manual Match</button>`
+      : '<span class="muted">—</span>';
     html += `<tr>
       <td>${escapeHtml(r.title)}</td>
       <td class="muted">${escapeHtml(r.ebay_item_id || '—')}</td>
@@ -212,6 +232,7 @@ function renderTable() {
       <td class="muted">${escapeHtml(r.matched_by || '—')}</td>
       <td>${hdCell}</td>
       <td>${actionCell}</td>
+      <td>${matchCell}</td>
     </tr>`;
   }
   html += '</tbody></table>';
@@ -232,6 +253,66 @@ async function publishRowToShopify(btn, listingId) {
     alert(`Failed to publish: ${e.message}`);
     btn.disabled = false;
     btn.textContent = '🛍️ Publish to Shopify';
+  }
+}
+
+let mmSourceRowId = null;
+let mmSourceIsEbay = false;
+
+function openManualMatch(rowId, isEbay) {
+  mmSourceRowId = rowId;
+  mmSourceIsEbay = isEbay;
+  const src = inventory.find(r => r.id === rowId);
+  document.getElementById('mm-source-title').textContent =
+    `Matching: "${src ? src.title : ''}" — pick its real counterpart on ${isEbay ? 'Shopify' : 'eBay'} below.`;
+  document.getElementById('mm-search-input').value = '';
+  document.getElementById('mm-overlay').classList.add('open');
+  renderMmCandidates();
+}
+
+function closeManualMatch(e) {
+  if (e && e.target !== e.currentTarget) return;
+  document.getElementById('mm-overlay').classList.remove('open');
+}
+
+function renderMmCandidates() {
+  const q = document.getElementById('mm-search-input').value.trim().toLowerCase();
+  // Candidates are rows on the OPPOSITE side that are still unmatched (one-sided).
+  const candidates = inventory.filter(r => {
+    const isOneSided = mmSourceIsEbay ? (r.shopify_product_id && !r.ebay_item_id) : (r.ebay_item_id && !r.shopify_product_id);
+    if (!isOneSided) return false;
+    if (q && !(r.title || '').toLowerCase().includes(q)) return false;
+    return true;
+  }).slice(0, 50);
+  const area = document.getElementById('mm-candidates');
+  if (!candidates.length) {
+    area.innerHTML = '<div class="empty">No matching candidates found — try a different search term.</div>';
+    return;
+  }
+  area.innerHTML = candidates.map(c => `
+    <div class="mm-candidate" onclick="confirmManualMatch('${c.id}')">
+      <div style="font-weight:600;">${escapeHtml(c.title || '')}</div>
+      <div class="muted" style="font-size:11px;">${mmSourceIsEbay ? 'Shopify Product ID' : 'eBay Item ID'}: ${escapeHtml(mmSourceIsEbay ? (c.shopify_product_id || '') : (c.ebay_item_id || ''))}</div>
+    </div>
+  `).join('');
+}
+
+async function confirmManualMatch(candidateRowId) {
+  if (!confirm('Link these two as the same item permanently?')) return;
+  const body = mmSourceIsEbay
+    ? {ebay_row_id: mmSourceRowId, shopify_row_id: candidateRowId}
+    : {ebay_row_id: candidateRowId, shopify_row_id: mmSourceRowId};
+  try {
+    const r = await fetch('/api/inventory/manual-match', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    toast('Manually matched and locked in ✓');
+    closeManualMatch();
+    loadInventory();
+  } catch(e) {
+    alert(`Failed to match: ${e.message}`);
   }
 }
 
