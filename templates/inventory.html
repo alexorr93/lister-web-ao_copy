@@ -181,7 +181,7 @@ function renderTable() {
     return;
   }
   let html = `<table><thead><tr>
-    <th>Title</th><th>eBay Item ID</th><th>eBay SKU</th><th>eBay Qty</th><th>Shopify Product ID</th><th>Shopify SKU</th><th>Shopify Qty</th><th>Shopify Price</th><th>Status</th><th>Matched By</th><th>HD_ID</th>
+    <th>Title</th><th>eBay Item ID</th><th>eBay SKU</th><th>eBay Qty</th><th>Shopify Product ID</th><th>Shopify SKU</th><th>Shopify Qty</th><th>Shopify Price</th><th>Status</th><th>Matched By</th><th>HD_ID</th><th>Action</th>
   </tr></thead><tbody>`;
   for (const r of filtered) {
     const status = !r.ebay_item_id ? '<span class="missing">Shopify only</span>'
@@ -190,6 +190,14 @@ function renderTable() {
       : 'Matched';
     const hdCell = r.hd_id
       ? `<span class="muted" style="font-family:monospace;font-size:11px;" title="${escapeHtml(r.hd_id)}">🔒 ${escapeHtml(r.hd_id.slice(0, 8))}...</span>`
+      : '<span class="muted">—</span>';
+    // Only offer this for eBay-only rows with a real Lister listing behind them —
+    // title/price/photos/description all live on that listings row, so this is
+    // the same publish path the main intake page uses, just triggered from here.
+    // A genuinely eBay-native item Lister never touched has nothing to publish
+    // from (no saved photos locally), so no button shows for those at all.
+    const actionCell = (!r.shopify_product_id && r.listing_id)
+      ? `<button class="btn" style="font-size:11px;padding:4px 8px;" onclick="publishRowToShopify(this, '${r.listing_id}')">🛍️ Publish to Shopify</button>`
       : '<span class="muted">—</span>';
     html += `<tr>
       <td>${escapeHtml(r.title)}</td>
@@ -203,10 +211,28 @@ function renderTable() {
       <td>${status}</td>
       <td class="muted">${escapeHtml(r.matched_by || '—')}</td>
       <td>${hdCell}</td>
+      <td>${actionCell}</td>
     </tr>`;
   }
   html += '</tbody></table>';
   document.getElementById('table-area').innerHTML = html;
+}
+
+async function publishRowToShopify(btn, listingId) {
+  if (!confirm('Publish this item to Shopify now, using its saved title/price/photos from Lister?')) return;
+  btn.disabled = true;
+  btn.textContent = 'Publishing...';
+  try {
+    const r = await fetch(`/api/listings/${listingId}/shopify-publish`, {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    toast('Published to Shopify ✓');
+    syncInventory();
+  } catch(e) {
+    alert(`Failed to publish: ${e.message}`);
+    btn.disabled = false;
+    btn.textContent = '🛍️ Publish to Shopify';
+  }
 }
 
 loadInventory();

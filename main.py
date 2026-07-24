@@ -8001,10 +8001,23 @@ async def list_inventory(request: Request):
     shopify_by_id = {r["id"]: r for r in shopify_records_all}
     shopify_by_product_id = {r["product_id"]: r for r in shopify_records_all if r.get("product_id")}
 
+    # For the "Publish to Shopify from here" button: only actually possible for
+    # eBay-only items that have a real listings row behind them (title, price,
+    # photos, description all live there — a plain eBay-native item Lister never
+    # touched has none of that saved locally, so there's nothing to publish from).
+    all_ebay_ids = [row.get("ebay_id") for row in inv_rows if row.get("ebay_id")]
+    listing_by_ebay_id = {}
+    for i in range(0, len(all_ebay_ids), 200):
+        chunk = all_ebay_ids[i:i+200]
+        lres = supabase.table("listings").select("id,ebay_item_id,shopify_product_id").in_("ebay_item_id", chunk).execute()
+        for l in (lres.data or []):
+            listing_by_ebay_id[l["ebay_item_id"]] = l
+
     results = []
     for row in inv_rows:
         e = ebay_by_id.get(row.get("ebay_id")) or {}
         s = shopify_by_id.get(row.get("shopify_id")) or shopify_by_product_id.get(row.get("shopify_id")) or {}
+        matching_listing = listing_by_ebay_id.get(row.get("ebay_id"))
         results.append({
             "id": row["id"], "title": row["title"], "matched_by": row.get("matched_by"),
             "hd_id": row.get("hd_id"),
@@ -8012,6 +8025,7 @@ async def list_inventory(request: Request):
             "ebay_item_id": e.get("item_id") or (row.get("ebay_id") if row.get("ebay_id") else None),
             "shopify_sku": s.get("sku"), "shopify_qty": s.get("quantity"), "shopify_price": s.get("price"), "shopify_status": s.get("status"),
             "shopify_product_id": s.get("product_id") or (row.get("shopify_id") if row.get("shopify_id") else None),
+            "listing_id": (matching_listing.get("id") if matching_listing and not matching_listing.get("shopify_product_id") else None),
             "qty_variance": (e.get("quantity") is not None and s.get("quantity") is not None and e.get("quantity") != s.get("quantity")),
         })
     return {"inventory": results}
