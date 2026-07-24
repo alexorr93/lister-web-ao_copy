@@ -982,6 +982,37 @@ async def get_listings(request: Request, archived: bool = False):
         res = q.order("created_at", desc=True).execute()
         listings = res.data or []
 
+        # Re-sort by the listing's originating group's created_at (true, strictly
+        # sequential submission order) instead of the listing's own created_at.
+        # A listing's own created_at is set by the external scanner service
+        # whenever ITS processing happens to finish — and since photos of
+        # different complexity take different amounts of time to analyze, that
+        # can complete out of order even though photos were submitted in a
+        # strict sequence. This was very likely the actual cause of items
+        # appearing to land at the top, bottom, or middle unpredictably.
+        all_pids = [str(l.get("photo_id") or "") for l in listings if l.get("photo_id")]
+        group_created_at = {}
+        if all_pids:
+            try:
+                pid_to_gid_full = {}
+                for i in range(0, len(all_pids), 200):
+                    chunk = all_pids[i:i+200]
+                    gp_all = supabase.table("group_photos").select("group_id, photo_id").in_("photo_id", chunk).execute()
+                    pid_to_gid_full.update({row["photo_id"]: row["group_id"] for row in (gp_all.data or [])})
+                all_group_ids = list(set(pid_to_gid_full.values()))
+                gid_to_created = {}
+                for i in range(0, len(all_group_ids), 200):
+                    chunk = all_group_ids[i:i+200]
+                    lg_res = supabase.table("listing_groups").select("id,created_at").in_("id", chunk).execute()
+                    gid_to_created.update({row["id"]: row["created_at"] for row in (lg_res.data or [])})
+                for pid, gid in pid_to_gid_full.items():
+                    if gid in gid_to_created:
+                        group_created_at[pid] = gid_to_created[gid]
+            except Exception as e:
+                print(f"group-based listing sort failed, falling back to listings.created_at: {e}")
+
+        listings.sort(key=lambda l: group_created_at.get(str(l.get("photo_id") or ""), l.get("created_at") or ""), reverse=True)
+
         # Batch fetch all group photos for these listings
         primary_pids = [str(l.get("photo_id") or "") for l in listings if l.get("photo_id")]
         group_photo_map = {}  # photo_id -> [all photo_ids in same group]
