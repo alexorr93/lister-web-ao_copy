@@ -28,6 +28,14 @@ if _os.path.isdir("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
+# Railway restarts this process on every deploy, so process-start time is a
+# reliable proxy for "last deployed at" -- no dependency on any Railway-specific
+# env var that may or may not exist. Registered as a Jinja2 global (not passed
+# per-route) so it shows up on every page automatically, including any route
+# added later, without needing to remember to wire it in each time.
+_deploy_time = datetime.utcnow()
+templates.env.globals["deploy_time"] = _deploy_time
+
 def guess_brand_from_title(title: str) -> str:
     first_word = (title or "").split()[0].strip(",.;:-") if title else ""
     return first_word if first_word else "Unbranded"
