@@ -1495,20 +1495,26 @@ def suggest_ebay_category(title: str, business_id: str, restrict: bool = True, e
             ancestors = s.get("categoryTreeNodeAncestors", [])
             path = " > ".join(a.get("categoryName", "") for a in ancestors[::-1])
             full_path = f"{path} > {cat.get('categoryName','')}" if path else cat.get("categoryName", "")
-            results.append({"category_id": cat.get("categoryId"), "name": cat.get("categoryName"), "path": full_path})
+            results.append({"category_id": cat.get("categoryId"), "name": cat.get("categoryName"),
+                             "path": full_path, "tree_id": tree_id})
 
     if restrict:
-        # A single exact-substring match against "eBay Motors" was likely the actual
-        # bug here — eBay's public browse UI calls that top-level category "eBay
-        # Motors", but the Taxonomy API (a different system) may return a different
-        # literal categoryName for that node (e.g. just "Motors", or "Parts &
-        # Accessories" without the "eBay Motors" prefix). That single fragile match
-        # would silently exclude every genuine automotive-parts suggestion, forcing
-        # the generic Business & Industrial fallback on every real auto part.
-        # Broadened to accept any plausible naming variant instead of guessing one.
-        motors_terms = ("Business & Industrial", "eBay Motors", "Motors",
-                         "Parts & Accessories", "Auto Parts", "Car & Truck", "Automotive")
-        results = [r for r in results if any(t in r["path"] for t in motors_terms)]
+        # FIXED: the previous version checked whether generic words like "Motors" or
+        # "Parts & Accessories" appeared ANYWHERE in the path — but those words can
+        # legitimately appear inside totally unrelated categories too (e.g. "Home &
+        # Garden > Outdoor Power Equipment > ... Motors" for a lawnmower part), which
+        # is almost certainly how a real Home & Garden result slipped through. Now
+        # filters by which TREE each result actually came from instead of guessing
+        # from path text: tree 100 is eBay Motors by definition (every result from it
+        # is valid, no text check needed), and tree 0 results are only kept if their
+        # literal TOP-LEVEL segment is exactly "Business & Industrial" — not just a
+        # substring match anywhere in the path.
+        def _is_allowed(r):
+            if r["tree_id"] == "100":
+                return True
+            top_level = r["path"].split(" > ")[0].strip()
+            return top_level == "Business & Industrial"
+        results = [r for r in results if _is_allowed(r)]
     if exclude_id:
         results = [r for r in results if r["category_id"] != exclude_id]
 
