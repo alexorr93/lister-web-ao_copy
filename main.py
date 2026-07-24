@@ -6503,13 +6503,18 @@ def fetch_shopify_inventory_items(business_id: str) -> list:
 def _normalize_title(t: str) -> str:
     return " ".join((t or "").strip().lower().split())
 
-def _maybe_confirm_inventory_match(business_id: str, listing_id: str):
+def _maybe_confirm_inventory_match(business_id: str, listing_id):
     """Call this right after EITHER platform's publish writes ebay_item_id or
     shopify_product_id onto a listings row. If the row now has BOTH, this is a
     known-certain pairing — no title-matching needed at all, since Lister itself
     is the one that published both sides. Creates (or upgrades) the
     inventory_match row with hd_id = listings.id, so it's confirmed/permanent
-    from the moment it exists, same guarantee as a backfilled old pairing."""
+    from the moment it exists, same guarantee as a backfilled old pairing.
+    BUG FIXED: listings.id is a plain integer, but hd_id was originally a uuid-
+    typed column — writing an integer into it threw a Postgres type error every
+    single time, silently caught by the except block below, meaning this
+    function has never actually succeeded once since it was written. hd_id is
+    now a text column, and this always casts to str() to be safe regardless."""
     try:
         res = supabase.table("listings").select("id,ebay_item_id,shopify_product_id,title")\
             .eq("id", listing_id).limit(1).execute()
@@ -6521,6 +6526,7 @@ def _maybe_confirm_inventory_match(business_id: str, listing_id: str):
         if not (ebay_id and shopify_id):
             return  # only one side published so far — nothing to confirm yet
 
+        hd_id_value = str(listing["id"])
         existing = (supabase.table("inventory_match").select("id,hd_id")
                     .eq("business_id", business_id)
                     .or_(f"ebay_id.eq.{ebay_id},shopify_id.eq.{shopify_id}")
@@ -6530,16 +6536,16 @@ def _maybe_confirm_inventory_match(business_id: str, listing_id: str):
             if not row.get("hd_id"):
                 supabase.table("inventory_match").update({
                     "ebay_id": ebay_id, "shopify_id": shopify_id,
-                    "hd_id": listing_id, "matched_by": "lister_dual_publish",
+                    "hd_id": hd_id_value, "matched_by": "lister_dual_publish",
                 }).eq("id", row["id"]).execute()
         else:
             supabase.table("inventory_match").insert({
                 "business_id": business_id, "title": listing.get("title"),
                 "ebay_id": ebay_id, "shopify_id": shopify_id,
-                "hd_id": listing_id, "matched_by": "lister_dual_publish",
+                "hd_id": hd_id_value, "matched_by": "lister_dual_publish",
             }).execute()
     except Exception as e:
-        print(f"_maybe_confirm_inventory_match failed for listing {listing_id}: {e}")
+        print(f"_maybe_confirm_inventory_match FAILED for listing {listing_id}: {type(e).__name__}: {e}")
 
 _rematch_inventory_lock = {}  # business_id -> True while a rematch is in progress
 
