@@ -28,7 +28,7 @@
     {% endif %}
   {% endif %}
   <div class="nav-spacer"></div>
-  <span class="nav-account" style="opacity:.6;" title="When this server process last started — Railway restarts it on every deploy, so this is effectively 'last deployed at'">🚀 {{ deploy_time.strftime('%b %d, %I:%M %p UTC') }}</span>
+  <span class="nav-account" style="opacity:.6;" title="When this server process last started (Mountain time) — Railway restarts it on every deploy, so this is effectively 'last deployed at'">🚀 {{ deploy_time_mt.strftime('%b %d, %I:%M %p') }} MT</span>
   {% if on_index %}
   <button class="nav-btn nav-settings{{ ' active' if active_tab == 'settings' else '' }}" data-tab="settings">⚙️ Settings</button>
   {% else %}

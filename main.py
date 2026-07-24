@@ -32,9 +32,15 @@ templates = Jinja2Templates(directory="templates")
 # reliable proxy for "last deployed at" -- no dependency on any Railway-specific
 # env var that may or may not exist. Registered as a Jinja2 global (not passed
 # per-route) so it shows up on every page automatically, including any route
-# added later, without needing to remember to wire it in each time.
+# added later, without needing to remember to wire it in each time. Converted to
+# Mountain time for display since that's where this business is based.
 _deploy_time = datetime.utcnow()
-templates.env.globals["deploy_time"] = _deploy_time
+try:
+    from zoneinfo import ZoneInfo as _ZoneInfo
+    _deploy_time_mt = _deploy_time.replace(tzinfo=_ZoneInfo("UTC")).astimezone(_ZoneInfo("America/Denver"))
+except Exception:
+    _deploy_time_mt = _deploy_time  # fall back to UTC if zoneinfo/tzdata isn't available for some reason
+templates.env.globals["deploy_time_mt"] = _deploy_time_mt
 
 def guess_brand_from_title(title: str) -> str:
     first_word = (title or "").split()[0].strip(",.;:-") if title else ""
