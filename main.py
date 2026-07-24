@@ -6154,6 +6154,18 @@ def push_listing_to_shopify(listing: dict) -> dict:
     sku   = listing.get("ebay_sku") or f"lister-{listing['id']}"
     pid   = str(listing.get("photo_id") or "")
     images = [{"src": photo_url(p)} for p in get_all_photo_ids(pid) if photo_url(p)] if pid else []
+    if not images and listing.get("ebay_item_id"):
+        # Lister's own storage has nothing for this listing (e.g. it was published
+        # under an old business account whose photos live in a different, never-
+        # copied-over storage instance) -- fall back to pulling the real, currently-
+        # live photos straight off the eBay listing itself, since it's already
+        # published there and eBay's image CDN is always publicly reachable.
+        try:
+            ebay_token = get_ebay_access_token(biz_id)
+            ebay_urls = fetch_ebay_listing_photo_urls(ebay_token, listing["ebay_item_id"])
+            images = [{"src": u} for u in ebay_urls]
+        except Exception as e:
+            print(f"push_listing_to_shopify: eBay photo fallback failed: {e}")
 
     body = {
         "product": {
@@ -6879,6 +6891,24 @@ def _ebay_xml_to_dict(elem):
         else:
             result[tag] = val
     return result
+
+def fetch_ebay_listing_photo_urls(token: str, item_id: str) -> list:
+    """Pulls the real, currently-live photo URLs straight off an active eBay
+    listing via GetItem -- eBay's own image CDN is always publicly reachable
+    (that's how buyers see them), so this works as a fallback source of photos
+    for anything Lister's own storage doesn't have (e.g. items published before
+    a business-account migration, whose original photos live in a different,
+    never-copied-over storage instance)."""
+    try:
+        data = _ebay_get_item_status(token, item_id)
+        item = data.get("Item", data)
+        pics = (item.get("PictureDetails", {}) or {}).get("PictureURL")
+        if not pics:
+            return []
+        return pics if isinstance(pics, list) else [pics]
+    except Exception as e:
+        print(f"fetch_ebay_listing_photo_urls failed for {item_id}: {e}")
+        return []
 
 def _ebay_get_item_status(token: str, item_id: str) -> dict:
     """Trading API GetItem — the genuine SELLER-facing endpoint for 'what's the
