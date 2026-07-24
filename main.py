@@ -7989,19 +7989,29 @@ async def list_inventory(request: Request):
 
     inv_rows = _fetch_all("inventory_match", "*")
     ebay_by_id = {r["id"]: r for r in _fetch_all("ebay_inventory", "*")}
-    shopify_by_id = {r["id"]: r for r in _fetch_all("shopify_inventory", "*")}
+    shopify_records_all = _fetch_all("shopify_inventory", "*")
+    # shopify_inventory.id is a VARIANT id (that's what fetch_shopify_inventory_items
+    # keys it by), but inventory_match.shopify_id can hold either that same variant
+    # id (rows from ordinary title-matching) OR a plain PRODUCT id (rows from the
+    # Lister dual-publish confirm/backfill, which only ever has listings.shopify_
+    # product_id available, not a variant id) -- two different ID spaces that were
+    # incorrectly treated as interchangeable. Confirmed root cause: backfilled rows
+    # showed correct data in inventory_match itself but blank on this page, because
+    # the lookup only ever tried the variant-id dict. Try both now.
+    shopify_by_id = {r["id"]: r for r in shopify_records_all}
+    shopify_by_product_id = {r["product_id"]: r for r in shopify_records_all if r.get("product_id")}
 
     results = []
     for row in inv_rows:
         e = ebay_by_id.get(row.get("ebay_id")) or {}
-        s = shopify_by_id.get(row.get("shopify_id")) or {}
+        s = shopify_by_id.get(row.get("shopify_id")) or shopify_by_product_id.get(row.get("shopify_id")) or {}
         results.append({
             "id": row["id"], "title": row["title"], "matched_by": row.get("matched_by"),
             "hd_id": row.get("hd_id"),
             "ebay_sku": e.get("sku"), "ebay_qty": e.get("quantity"), "ebay_condition": e.get("condition"),
-            "ebay_item_id": e.get("item_id"),
+            "ebay_item_id": e.get("item_id") or (row.get("ebay_id") if row.get("ebay_id") else None),
             "shopify_sku": s.get("sku"), "shopify_qty": s.get("quantity"), "shopify_price": s.get("price"), "shopify_status": s.get("status"),
-            "shopify_product_id": s.get("product_id"),
+            "shopify_product_id": s.get("product_id") or (row.get("shopify_id") if row.get("shopify_id") else None),
             "qty_variance": (e.get("quantity") is not None and s.get("quantity") is not None and e.get("quantity") != s.get("quantity")),
         })
     return {"inventory": results}
