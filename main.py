@@ -5462,10 +5462,16 @@ _BIDSPOTTER_HEADERS = {
 }
 
 def _scan_bidspotter_catalogs(max_pages: int = 40) -> dict:
-    """Walks BidSpotter's US catalog list (search-filter?countryName=United States),
-    page by page, extracting one summary row per catalog: title, url, auctioneer,
-    end date, and location. Uses the same headers already confirmed to work against
-    this site (see _fetch_bidspotter_lots below) rather than a generic fetch.
+    """Walks BidSpotter's plain catalog list (/en-us/auction-catalogues), page by
+    page. NOTE: the original version of this hit /search-filter?countryName=United
+    States instead -- confirmed blocked (405) from BOTH this chat's own fetch tool
+    (robots.txt disallow) AND from production/Railway (live 405 in the scan
+    diagnostics) -- two independent environments, same wall, so that whole URL
+    pattern is out. This plain listing page is the one directly confirmed fetchable
+    (a real successful fetch pulled real catalog content from it). It is NOT
+    country-filtered server-side like the old URL was -- it mixes US, UK, and other
+    countries. state/location is still parsed per-catalog so US ones can be told
+    apart in the UI, but there is no server-side "US only" filter on this path.
 
     lot_count here is the SUM of each catalog's category-tag counts shown on this
     list page (e.g. "Cars (56)", "Forklifts (147)") -- a real number, but an
@@ -5486,7 +5492,7 @@ def _scan_bidspotter_catalogs(max_pages: int = 40) -> dict:
     seen_urls = set()
     page_diagnostics = []
     for page in range(1, max_pages + 1):
-        url = f"https://www.bidspotter.com/en-us/auction-catalogues/search-filter?countryName=United%20States&page={page}"
+        url = f"https://www.bidspotter.com/en-us/auction-catalogues?page={page}"
         resp = _requests.get(url, headers=_BIDSPOTTER_HEADERS, timeout=30)
         if resp.status_code >= 400:
             page_diagnostics.append({"page": page, "status": resp.status_code, "cards_found": 0, "parsed": 0})
