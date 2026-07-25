@@ -34,6 +34,7 @@ nixPkgs = [
 
 [phases.install]
 cmds = [
+  "pip install --only-binary=:all: greenlet==3.0.3",
   "pip install -r requirements.txt",
   "python -m playwright install chromium",
 ]
