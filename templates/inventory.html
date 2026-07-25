@@ -269,7 +269,7 @@ function renderTable() {
     if (!r.shopify_product_id && r.listing_id) {
       actionCell = `<button class="btn" style="font-size:11px;padding:4px 8px;" onclick="publishRowToShopify(this, '${r.listing_id}')">🛍️ Publish to Shopify</button>`;
     } else if (!r.shopify_product_id && !r.listing_id && r.ebay_item_id && r.ebay_local_photo_ids) {
-      actionCell = `<button class="btn" style="font-size:11px;padding:4px 8px;" onclick="publishEbayOnlyToShopify(this, '${r.id}')">🛍️ Publish to Shopify (eBay-only)</button>`;
+      actionCell = `<button class="btn" style="font-size:11px;padding:4px 8px;" onclick="publishEbayOnlyToShopify(this, '${r.ebay_item_id}')">🛍️ Publish to Shopify (eBay-only)</button>`;
     } else if (!r.shopify_product_id && !r.listing_id && r.ebay_item_id) {
       actionCell = `<span class="muted" title="Click 'Pull eBay-Only Photos' above first — this item has no photos in our own storage yet.">— (pull photos first)</span>`;
     } else {
