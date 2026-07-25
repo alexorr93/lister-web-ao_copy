@@ -3857,6 +3857,7 @@ class CreateGroup(BaseModel):
     session_id:    str
     condition:     str
     category_mode: str = "industrial"
+    pricing_mode:  str = "always_search"
 
 @app.post("/api/groups")
 async def create_group(body: CreateGroup, request: Request):
@@ -3872,12 +3873,14 @@ async def create_group(body: CreateGroup, request: Request):
             # Increment scan count
             supabase.table("businesses").update({"scan_count": scan_count + 1}).eq("id", business_id).execute()
         category_mode = body.category_mode if body.category_mode in ("industrial", "motors") else "industrial"
+        pricing_mode = body.pricing_mode if body.pricing_mode in ("always_search", "api_first") else "always_search"
         res = supabase.table("listing_groups").insert({
             "session_id": body.session_id,
             "status":     "waiting",
             "quantity":   1,
             "condition":  body.condition,
             "category_mode": category_mode,
+            "pricing_mode": pricing_mode,
             "business_id": business_id,
             "created_at": datetime.utcnow().isoformat(),
         }).execute()

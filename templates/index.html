@@ -216,6 +216,7 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tile-cond-btn { font-size:10px; padding:4px 8px; background:transparent; border:none; color:var(--muted); cursor:pointer; font-family:inherit; font-weight:600; }
 .tile-cond-btn.active { background:var(--accent); color:#fff; }
 .catmode-btn.active { background:#2563eb; border-color:#2563eb; color:#fff; font-weight:600; }
+.pricemode-btn.active { background:#16a34a; border-color:#16a34a; color:#fff; font-weight:600; }
 .proc-bar-wrap { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px 14px; margin-bottom:14px; }
 .proc-bar-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:7px; font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:0.06em; }
 .proc-bar-track { height:5px; background:var(--border); border-radius:3px; overflow:hidden; margin-bottom:7px; }
@@ -406,6 +407,13 @@ select.field-input { background: #fff; color: #0f172a; }
         <div style="display:flex;gap:10px;margin-top:6px;" title="Stays where you set it until you change it — same as the active lot.">
           <button class="btn catmode-btn" data-catmode="industrial" onclick="setCategoryMode('industrial')" style="flex:1;">Business &amp; Industrial</button>
           <button class="btn catmode-btn" data-catmode="motors" onclick="setCategoryMode('motors')" style="flex:1;">Auto Parts</button>
+        </div>
+      </div>
+      <div style="margin-bottom:16px;">
+        <div class="field-label">Pricing Mode</div>
+        <div style="display:flex;gap:10px;margin-top:6px;" title="Always Search: Gemini always verifies via live web search on top of the eBay API. API First: skip that search when the eBay API already returns real data — faster, but skips the cross-market (Amazon/Reverb/etc.) check. Stays where you set it until you change it.">
+          <button class="btn pricemode-btn" data-pricemode="always_search" onclick="setPricingMode('always_search')" style="flex:1;">Always Search</button>
+          <button class="btn pricemode-btn" data-pricemode="api_first" onclick="setPricingMode('api_first')" style="flex:1;">API First</button>
         </div>
       </div>
       <button class="btn btn-green" style="width:100%;font-size:16px;padding:14px;" onclick="startUploadBatch()">🚀 Start Batch</button>
@@ -887,6 +895,23 @@ function syncCategoryModeUI() {
   });
 }
 
+// Pricing mode toggle: Always Search (existing behavior — Gemini always does a
+// live web search pass on top of any eBay API result) vs API First (skip the
+// search entirely when the eBay API already returned real sold+active data).
+// Sticky the same way, so batches can be run side by side to compare.
+let pricingMode = localStorage.getItem('lister_pricing_mode') || 'always_search';
+function setPricingMode(m) {
+  if (m !== 'always_search' && m !== 'api_first') m = 'always_search';
+  pricingMode = m;
+  localStorage.setItem('lister_pricing_mode', m);
+  syncPricingModeUI();
+}
+function syncPricingModeUI() {
+  document.querySelectorAll('.pricemode-btn').forEach(function(b) {
+    b.classList.toggle('active', b.dataset.pricemode === pricingMode);
+  });
+}
+
 function setActiveLotSuffix(suffix) {
   activeLotSuffix = suffix;
   localStorage.setItem('lister_active_lot_suffix', suffix);
@@ -1073,6 +1098,7 @@ window._defaultDesc = 'Shipped primarily with UPS and sometimes USPS. If you hav
 document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('modal').classList.remove('open');
   syncCategoryModeUI();
+  syncPricingModeUI();
 });
 
 async function loadListings() {
@@ -2124,7 +2150,7 @@ async function startScanBatch() {
 }
 
 async function createScanGroup() {
-  const r = await api('POST', '/api/groups', {session_id: scanBatchId, condition: scanCondition, category_mode: categoryMode});
+  const r = await api('POST', '/api/groups', {session_id: scanBatchId, condition: scanCondition, category_mode: categoryMode, pricing_mode: pricingMode});
   scanGroupId = r.id;
   scanPhotos = [];
   document.getElementById('scan-thumbs').innerHTML = '';
@@ -2206,7 +2232,7 @@ async function startUploadBatch() {
 }
 
 async function createUpGroup() {
-  const r = await api('POST', '/api/groups', {session_id: upBatchId, condition: upCondition, category_mode: categoryMode});
+  const r = await api('POST', '/api/groups', {session_id: upBatchId, condition: upCondition, category_mode: categoryMode, pricing_mode: pricingMode});
   upGroupId = r.id;
   upPhotos = [];
   document.getElementById('upload-thumbs').innerHTML = '';
