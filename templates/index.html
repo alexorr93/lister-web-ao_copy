@@ -333,6 +333,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <button class="btn" onclick="selectAll()">☑ Select All</button>
       <button class="btn" onclick="deselectAll()">☐ Deselect</button>
       <button class="btn" style="color:#a78bfa;border-color:#7c3aed;" onclick="autofillLotSku()" title="Fills in the Lot SKU for selected items using the lot that was active when each was scanned — no waiting on scan completion">🏷️ Autofill Lot SKU</button>
+      <button class="btn" style="color:#f59e0b;border-color:#b45309;" onclick="rematchCategory()" title="Re-runs eBay category matching on selected items (or everything stuck on the generic 'Other Business & Industrial' fallback) — needed because already-scanned items never get re-checked automatically once they're inside the allowed category root, even if the matching logic gets fixed later">📂 Re-match Category</button>
       <div style="display:flex;align-items:center;gap:4px;" title="Sets the active lot — same as the dropdown on the Fast Scan/Upload tabs.">
         <span style="font-size:11px;color:var(--muted);white-space:nowrap;">SKU:</span>
         <select class="field-input" id="actionbar-lot-select" onchange="setActiveLotSku(this.value)" style="font-size:12px;padding:5px 8px;width:100px;">
@@ -1541,6 +1542,31 @@ async function autofillLotSku() {
   }
   renderTiles();
   toast(`Lot SKU filled on ${ok} item(s)${failed ? ', ' + failed + ' failed' : ''} ✓`);
+}
+
+async function rematchCategory() {
+  // If nothing is explicitly selected, default to everything sitting on the
+  // generic "Other Business & Industrial" fallback (26261) — that's the actual
+  // recurring pain point, since those items never get auto-revisited.
+  const targets = selected.size
+    ? listings.filter(l => selected.has(String(l.id)))
+    : listings.filter(l => String(l.ebay_category_id) === '26261');
+  if (!targets.length) { toast('Nothing to re-match ✓'); return; }
+  if (!confirm(`Re-run category matching on ${targets.length} item(s)?`)) return;
+  let matched = 0, stillGeneric = 0, failed = 0;
+  for (const l of targets) {
+    try {
+      const r = await api('POST', `/api/listings/${l.id}/rematch-category`, {});
+      if (r.category_id) {
+        l.ebay_category_id = r.category_id;
+        matched++;
+      } else {
+        stillGeneric++;
+      }
+    } catch(e) { failed++; }
+  }
+  renderTiles();
+  toast(`${matched} re-matched to a real category, ${stillGeneric} still generic${failed ? ', ' + failed + ' failed' : ''}`);
 }
 function updateSubmitBtn() {
   const btn = document.getElementById('submit-ebay-btn');

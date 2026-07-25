@@ -1329,6 +1329,32 @@ class EbaySubmit(BaseModel):
     brand: Optional[str] = None
     mpn: Optional[str] = None
 
+
+@app.post("/api/listings/{item_id}/rematch-category")
+async def rematch_category(item_id: str, request: Request):
+    """Re-runs eBay category matching for one listing using the current (both-tree)
+    suggest_ebay_category logic. Exists because the background auto_fill_worker's
+    revalidation sweep only re-checks listings categorized OUTSIDE Business &
+    Industrial / eBay Motors — a listing sitting at the generic 26261 fallback is
+    technically still inside that root, so it passes the sweep's check and is never
+    revisited automatically. This is the only way to fix already-scanned items after
+    a category-matching bug fix ships; new scans self-correct via the worker."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    res = supabase.table("listings").select("id,title").eq("id", item_id).eq("business_id", business_id).execute()
+    if not res.data:
+        raise HTTPException(404, "Listing not found")
+    title = res.data[0].get("title") or ""
+    if not title or title == "Scanning...":
+        raise HTTPException(400, "No title yet")
+    suggestion = suggest_ebay_category(title, business_id, restrict=True)
+    if suggestion:
+        supabase.table("listings").update({"ebay_category_id": suggestion["category_id"]}).eq("id", item_id).execute()
+        return {"ok": True, "category_id": suggestion["category_id"], "name": suggestion.get("name")}
+    else:
+        return {"ok": True, "category_id": None, "name": None, "note": "still no B&I/Motors match"}
+
 @app.post("/api/listings/{item_id}/ebay")
 async def submit_to_ebay(item_id: str, body: EbaySubmit, request: Request):
     business_id = require_auth(request)
