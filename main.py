@@ -8668,7 +8668,94 @@ async def api_shopify_publish(item_id: str, request: Request):
     except Exception as e:
         raise HTTPException(500, str(e))
 
-@app.post("/api/inventory/{row_id}/publish-ebay-only-to-shopify")
+def _publish_one_to_shopify(business_id: str, item_id: str) -> dict:
+    """Shared single-item publish logic, used by both the single endpoint above and
+    the batch job below, so the two paths can never drift out of sync."""
+    res = supabase.table("listings").select("*").eq("id", item_id).limit(1).execute()
+    if not res.data:
+        raise Exception("Listing not found")
+    listing = res.data[0]
+    _require_valid_lot_sku_for_publish(business_id, listing)
+    result = push_listing_to_shopify(listing)
+    try:
+        supabase.table("listings").update({
+            "shopify_product_id": str(result.get("product_id") or ""),
+            "shopify_status": result.get("status") or "active",
+            "shopify_error": None,
+        }).eq("id", item_id).execute()
+    except Exception as col_err:
+        print(f"shopify-publish: product created ({result}) but failed to save status columns: {col_err}")
+    try:
+        _maybe_confirm_inventory_match(business_id, item_id)
+    except Exception:
+        pass
+    return result
+
+_shopify_batch_publish_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
+
+def _shopify_batch_publish_work(business_id: str, item_ids: list) -> dict:
+    published, failed_ids, errors = 0, [], {}
+    for item_id in item_ids:
+        try:
+            _publish_one_to_shopify(business_id, item_id)
+            published += 1
+        except Exception as e:
+            failed_ids.append(item_id)
+            errors[item_id] = str(e)
+            try:
+                supabase.table("listings").update({"shopify_status": "failed", "shopify_error": str(e)}).eq("id", item_id).execute()
+            except Exception:
+                pass
+        _shopify_batch_publish_job_status[business_id]["progress"] = {"done": published + len(failed_ids), "total": len(item_ids)}
+    return {"published": published, "failed": len(failed_ids), "failed_ids": failed_ids, "errors": errors}
+
+async def _run_shopify_batch_publish_background(business_id: str, item_ids: list):
+    import asyncio, datetime as _dt
+    try:
+        result = await asyncio.to_thread(_shopify_batch_publish_work, business_id, item_ids)
+        _shopify_batch_publish_job_status[business_id] = {
+            "running": False, "result": result,
+            "started_at": _shopify_batch_publish_job_status.get(business_id, {}).get("started_at"),
+            "finished_at": _dt.datetime.utcnow().isoformat(),
+        }
+    except Exception as e:
+        _shopify_batch_publish_job_status[business_id] = {
+            "running": False, "result": {"error": str(e)},
+            "started_at": _shopify_batch_publish_job_status.get(business_id, {}).get("started_at"),
+            "finished_at": _dt.datetime.utcnow().isoformat(),
+        }
+
+@app.post("/api/listings/shopify-publish-batch")
+async def shopify_publish_batch(request: Request, item_ids: List[str] = Body(..., embed=True)):
+    """Publishes multiple listings to Shopify as a background job -- runs entirely
+    server-side, so closing the tab or navigating away no longer stops it partway
+    through (the previous bulk button was a plain client-side JS loop that died the
+    instant the tab closed, same class of problem every other bulk action in this
+    file already solved with this exact background-job + polling pattern)."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    if not item_ids:
+        raise HTTPException(400, "No items selected")
+    if _shopify_batch_publish_job_status.get(business_id, {}).get("running"):
+        return {"started": False, "already_running": True}
+    import asyncio, datetime as _dt
+    _shopify_batch_publish_job_status[business_id] = {
+        "running": True, "result": None, "progress": {"done": 0, "total": len(item_ids)},
+        "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None,
+    }
+    asyncio.create_task(_run_shopify_batch_publish_background(business_id, item_ids))
+    return {"started": True}
+
+@app.get("/api/listings/shopify-publish-batch-status")
+async def shopify_publish_batch_status(request: Request, response: Response):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    response.headers["Cache-Control"] = "no-store"
+    return _shopify_batch_publish_job_status.get(business_id, {"running": False, "result": None, "progress": None, "started_at": None, "finished_at": None})
+
+
 async def publish_ebay_only_to_shopify(row_id: str, request: Request):
     """Publishes a genuinely eBay-only inventory item (no Lister listings row behind
     it at all — a plain eBay-native item Lister never touched) to Shopify, using the

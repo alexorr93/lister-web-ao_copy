@@ -1754,22 +1754,42 @@ async function submitSelectedToShopify() {
   if (!selected.size) return;
   const ids = Array.from(selected);
   if (!validateLotSkusForPublish(ids)) return;
-  const ok = confirm(`Publish ${ids.length} item(s) live to Shopify now?\n\nThis publishes immediately (active), separately from anything sent to eBay.`);
+  const ok = confirm(`Publish ${ids.length} item(s) live to Shopify now?\n\nThis publishes immediately (active), separately from anything sent to eBay.\n\nRuns in the background on the server — safe to close this tab or navigate away, it'll keep going either way.`);
   if (!ok) return;
-  let success = 0, failed = 0;
-  for (let i = 0; i < ids.length; i++) {
-    const id = ids[i];
-    showBatchProgress(i + 1, ids.length, 'Publishing to Shopify');
-    try {
-      await api('POST', `/api/listings/${id}/shopify-publish`);
-      success++;
-    } catch(e) { failed++; }
-    renderTiles();
+  showBatchProgress(0, ids.length, 'Publishing to Shopify');
+  try {
+    const r = await api('POST', '/api/listings/shopify-publish-batch', {item_ids: ids});
+    if (r.already_running) {
+      toast('A Shopify publish batch is already running — polling its progress...', 'success');
+    }
+    pollShopifyPublishBatch(ids.length);
+  } catch(e) {
+    hideBatchProgress();
+    toast(`Failed to start: ${e.message}`, 'error');
   }
-  hideBatchProgress();
-  toast(`Published ${success} item(s) to Shopify${failed ? ', ' + failed + ' failed' : ''} ✓`);
-  selected.clear();
-  renderTiles();
+}
+
+async function pollShopifyPublishBatch(total) {
+  try {
+    const r = await api('GET', '/api/listings/shopify-publish-batch-status');
+    if (r.running) {
+      const done = r.progress ? r.progress.done : 0;
+      showBatchProgress(done, r.progress ? r.progress.total : total, 'Publishing to Shopify');
+      setTimeout(() => pollShopifyPublishBatch(total), 3000);
+      return;
+    }
+    hideBatchProgress();
+    if (r.result && r.result.error) {
+      toast(`❌ ${r.result.error}`, 'error');
+    } else if (r.result) {
+      toast(`Published ${r.result.published} item(s) to Shopify${r.result.failed ? ', ' + r.result.failed + ' failed' : ''} ✓`);
+    }
+    selected.clear();
+    loadListings();
+  } catch(e) {
+    hideBatchProgress();
+    toast(`Lost track of the publish job: ${e.message}`, 'error');
+  }
 }
 
 async function deleteItem(id) {
