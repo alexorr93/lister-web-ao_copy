@@ -138,11 +138,14 @@ async function pollScan() {
       if (r.result.error) {
         document.getElementById('scan-status').textContent = `❌ ${r.result.error}`;
       } else {
-        const failedPage = r.result.diagnostics && r.result.diagnostics.pages.find(p => p.status >= 400);
+        const failedPage = r.result.diagnostics && r.result.diagnostics.pages.find(p => p.status >= 400 || p.status === 999 || p.status === 0);
         if (failedPage) {
+          const statusLabel = failedPage.status === 999 ? "still hit the WAF challenge (real browser included)"
+                             : failedPage.status === 0 ? "browser error"
+                             : `HTTP ${failedPage.status}`;
           document.getElementById('scan-status').innerHTML =
-            `❌ Blocked on page ${failedPage.page} (HTTP ${failedPage.status}). Response from BidSpotter:<br>` +
-            `<pre style="white-space:pre-wrap;background:#0f1420;padding:10px;border-radius:6px;margin-top:6px;font-size:11px;max-height:300px;overflow:auto;">${(failedPage.response_body_snippet || '(empty)').replace(/</g,'&lt;')}</pre>`;
+            `❌ Blocked on page ${failedPage.page} (${statusLabel}). Response from BidSpotter:<br>` +
+            `<pre style="white-space:pre-wrap;background:#0f1420;padding:10px;border-radius:6px;margin-top:6px;font-size:11px;max-height:300px;overflow:auto;">${(failedPage.response_body_snippet || failedPage.error || '(empty)').replace(/</g,'&lt;')}</pre>`;
         } else {
           const diag = r.result.diagnostics ? ` [pages: ${JSON.stringify(r.result.diagnostics.pages)}]` : '';
           document.getElementById('scan-status').textContent =

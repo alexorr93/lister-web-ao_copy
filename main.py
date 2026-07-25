@@ -5485,109 +5485,131 @@ def _scan_bidspotter_catalogs(max_pages: int = 40) -> dict:
     every time (not just on failure) so any future issue is debuggable straight
     from the scan result shown in the UI, without needing to pull server logs.
     """
-    import requests as _requests, re as _re
     from bs4 import BeautifulSoup
+    import re as _re
+    from playwright.sync_api import sync_playwright
 
     results = []
     seen_urls = set()
     page_diagnostics = []
-    for page in range(1, max_pages + 1):
-        url = f"https://www.bidspotter.com/en-us/auction-catalogues?page={page}"
-        resp = _requests.get(url, headers=_BIDSPOTTER_HEADERS, timeout=30)
-        if resp.status_code >= 400:
-            # Capture the actual response body, not just the status -- a bare 405
-            # doesn't say WHO blocked it (Cloudflare/Akamai/a WAF rule/BidSpotter's
-            # own app) or why. Most bot-block pages say so explicitly in the body.
-            # Truncated to keep this readable in the UI's status message.
-            page_diagnostics.append({
-                "page": page, "status": resp.status_code, "cards_found": 0, "parsed": 0,
-                "response_headers": dict(resp.headers),
-                "response_body_snippet": resp.text[:1500],
-            })
-            print(f"_scan_bidspotter_catalogs: page {page} returned {resp.status_code}, stopping")
-            print(f"_scan_bidspotter_catalogs: response body snippet: {resp.text[:1500]}")
-            break
-        soup = BeautifulSoup(resp.text, "html.parser")
 
-        # Each catalog card's own link is the anchor -- same "find by stable link
-        # pattern, not guessed CSS classes" approach as the per-catalog lot scraper.
-        # Each card has TWO anchors to the same URL (an image-wrapped one with no
-        # text, then the real title-text one) -- group by URL first and keep the
-        # one with actual text, instead of deduping on whichever anchor is seen
-        # first (which was silently the empty image one every time, skipping
-        # every catalog with title never even read -- confirmed root cause of the
-        # scan reporting 0 catalogs).
-        cards = soup.find_all("a", href=_re.compile(r"/auction-catalogues/[^/]+/catalogue-id-"))
-        by_url = {}
-        for a in cards:
-            href = a["href"]
-            full_url = href if href.startswith("http") else f"https://www.bidspotter.com{href}"
-            text = a.get_text(strip=True)
-            if full_url not in by_url or (not by_url[full_url][1] and text):
-                by_url[full_url] = (a, text)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"])
+        context = browser.new_context(
+            user_agent=_BIDSPOTTER_HEADERS["User-Agent"],
+            viewport={"width": 1366, "height": 900},
+            locale="en-US",
+        )
+        page_obj = context.new_page()
 
-        page_new = 0
-        for full_url, (a, title) in by_url.items():
-            if full_url in seen_urls:
-                continue
-            seen_urls.add(full_url)
-            page_new += 1
-            if not title:
-                continue  # neither anchor for this card had text -- skip, nothing usable
+        for page in range(1, max_pages + 1):
+            url = f"https://www.bidspotter.com/en-us/auction-catalogues?page={page}"
+            try:
+                page_obj.goto(url, wait_until="domcontentloaded", timeout=45000)
+                # Give the WAF challenge a window to resolve on its own if it's the
+                # silent JS-verification kind (no human interaction needed) rather
+                # than reading the page immediately after the initial load.
+                page_obj.wait_for_timeout(4000)
+                html = page_obj.content()
+                status = 999 if ("awswaf.com" in html or "Human Verification" in html or "captcha" in html.lower()) else 200
+            except Exception as e:
+                page_diagnostics.append({"page": page, "status": 0, "cards_found": 0, "parsed": 0, "error": str(e)})
+                print(f"_scan_bidspotter_catalogs (playwright): page {page} threw: {e}")
+                break
 
-            # Walk up to the card container to pull auctioneer/date/location/category tags
-            block = a
-            block_text = ""
-            for _ in range(6):
-                block = block.parent
+            if status == 999:
+                page_diagnostics.append({
+                    "page": page, "status": 999, "cards_found": 0, "parsed": 0,
+                    "response_body_snippet": html[:1500],
+                })
+                print(f"_scan_bidspotter_catalogs (playwright): page {page} still hit the WAF challenge even with a real browser")
+                break
+
+            soup = BeautifulSoup(html, "html.parser")
+
+            # Each catalog card's own link is the anchor -- same "find by stable link
+            # pattern, not guessed CSS classes" approach as the per-catalog lot scraper.
+            # Each card has TWO anchors to the same URL (an image-wrapped one with no
+            # text, then the real title-text one) -- group by URL first and keep the
+            # one with actual text, instead of deduping on whichever anchor is seen
+            # first (which was silently the empty image one every time, skipping
+            # every catalog with title never even read -- confirmed root cause of the
+            # scan reporting 0 catalogs).
+            cards = soup.find_all("a", href=_re.compile(r"/auction-catalogues/[^/]+/catalogue-id-"))
+            by_url = {}
+            for a in cards:
+                href = a["href"]
+                full_url = href if href.startswith("http") else f"https://www.bidspotter.com{href}"
+                text = a.get_text(strip=True)
+                if full_url not in by_url or (not by_url[full_url][1] and text):
+                    by_url[full_url] = (a, text)
+
+            page_new = 0
+            for full_url, (a, title) in by_url.items():
+                if full_url in seen_urls:
+                    continue
+                seen_urls.add(full_url)
+                page_new += 1
+                if not title:
+                    continue  # neither anchor for this card had text -- skip, nothing usable
+
+                # Walk up to the card container to pull auctioneer/date/location/category tags
+                block = a
+                block_text = ""
+                for _ in range(6):
+                    block = block.parent
+                    if block is None:
+                        break
+                    block_text = block.get_text(" | ", strip=True)
+                    if "Ends from" in block_text or "View auction" in block_text:
+                        break
                 if block is None:
-                    break
-                block_text = block.get_text(" | ", strip=True)
-                if "Ends from" in block_text or "View auction" in block_text:
-                    break
-            if block is None:
-                continue
+                    continue
 
-            date_m = _re.search(r"Ends from\s+([A-Za-z]+ \d{1,2}, \d{4}[^|]*)", block_text)
-            end_date = date_m.group(1).strip() if date_m else None
+                date_m = _re.search(r"Ends from\s+([A-Za-z]+ \d{1,2}, \d{4}[^|]*)", block_text)
+                end_date = date_m.group(1).strip() if date_m else None
 
-            # Location line: either "City, State" or "Multi-location - see lot details"
-            state = None
-            loc_m = _re.search(r"\|\s*([^|]+?,\s*[A-Za-z ]+)\s*\|", block_text)
-            if loc_m:
-                state = loc_m.group(1).split(",")[-1].strip()
-            elif "Multi-location" in block_text:
-                state = "Multi-location"
+                # Location line: either "City, State" or "Multi-location - see lot details"
+                state = None
+                loc_m = _re.search(r"\|\s*([^|]+?,\s*[A-Za-z ]+)\s*\|", block_text)
+                if loc_m:
+                    state = loc_m.group(1).split(",")[-1].strip()
+                elif "Multi-location" in block_text:
+                    state = "Multi-location"
 
-            # Auctioneer: the other link inside this same block, distinct from the title link
-            auctioneer = None
-            for a2 in block.find_all("a"):
-                t2 = a2.get_text(strip=True)
-                if t2 and t2 != title and "Sign Up to bid" not in t2 and "View auction" not in t2:
-                    auctioneer = t2
-                    break
+                # Auctioneer: the other link inside this same block, distinct from the title link
+                auctioneer = None
+                for a2 in block.find_all("a"):
+                    t2 = a2.get_text(strip=True)
+                    if t2 and t2 != title and "Sign Up to bid" not in t2 and "View auction" not in t2:
+                        auctioneer = t2
+                        break
 
-            # Category tag counts, e.g. "Cars (56)" -- sum them for the estimate
-            lot_count = None
-            tag_counts = _re.findall(r"\((\d+)\)", block_text)
-            if tag_counts:
-                # Drop the last one or two if they're "+ N more" counts, not real category tags
-                real_tags = _re.findall(r"[A-Za-z][A-Za-z &]*\s*\((\d+)\)", block_text)
-                if real_tags:
-                    lot_count = sum(int(n) for n in real_tags)
+                # Category tag counts, e.g. "Cars (56)" -- sum them for the estimate
+                lot_count = None
+                tag_counts = _re.findall(r"\((\d+)\)", block_text)
+                if tag_counts:
+                    # Drop the last one or two if they're "+ N more" counts, not real category tags
+                    real_tags = _re.findall(r"[A-Za-z][A-Za-z &]*\s*\((\d+)\)", block_text)
+                    if real_tags:
+                        lot_count = sum(int(n) for n in real_tags)
 
-            results.append({
-                "catalog_url": full_url,
-                "title": title[:500],
-                "auctioneer": auctioneer,
-                "end_date": end_date,
-                "state": state,
-                "lot_count": lot_count,
-                "lot_count_is_estimate": True,
-            })
-        page_diagnostics.append({"page": page, "status": resp.status_code, "cards_found": len(by_url), "parsed": page_new})
-        if page_new == 0:
-            break  # no new catalogs on this page -- reached the end
+                results.append({
+                    "catalog_url": full_url,
+                    "title": title[:500],
+                    "auctioneer": auctioneer,
+                    "end_date": end_date,
+                    "state": state,
+                    "lot_count": lot_count,
+                    "lot_count_is_estimate": True,
+                })
+            page_diagnostics.append({"page": page, "status": status, "cards_found": len(by_url), "parsed": page_new})
+            if page_new == 0:
+                break  # no new catalogs on this page -- reached the end
+
+        context.close()
+        browser.close()
+
     return {"catalogs": results, "diagnostics": {"pages": page_diagnostics, "total_parsed": len(results)}}
 
 _auction_monitor_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
