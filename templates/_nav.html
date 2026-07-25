@@ -4,6 +4,7 @@
      JS tab-switch buttons on index.html itself, and as real links (`/?tab=...`) from
      every other page. -->
 {% set on_index = active_tab in ['intake', 'upload', 'fastscan', 'auction', 'settings'] %}
+<style>.nav-browsesearch{color:#60a5fa;}.nav-browsesearch.active{background:#3b82f6;color:#fff;}</style>
 <nav class="nav">
   {% if on_index %}
   <button class="nav-btn nav-intake{{ ' active' if active_tab == 'intake' else '' }}" data-tab="intake">📥 Intake</button>
@@ -20,6 +21,7 @@
   <a class="nav-btn nav-lots{{ ' active' if active_tab == 'lots' else '' }}" href="/acquisitions">🛒 Lots</a>
   <a class="nav-btn nav-shopify{{ ' active' if active_tab == 'shopify' else '' }}" href="/shopify-sync">🔁 Shopify</a>
   <a class="nav-btn nav-categories{{ ' active' if active_tab == 'categories' else '' }}" href="/categories">📂 Categories</a>
+  <a class="nav-btn nav-browsesearch{{ ' active' if active_tab == 'browse_search' else '' }}" href="/browse-search">🔎 Browse Search</a>
   {% if is_admin %}
     {% if on_index %}
     <button class="nav-btn nav-auction{{ ' active' if active_tab == 'auction' else '' }}" data-tab="auction">🔨 Auctions</button>
