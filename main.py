@@ -375,8 +375,22 @@ def _require_valid_lot_sku_for_publish(business_id: str, listing: dict):
     'must match a real lot' message unless the listing's ebay_sku prefix matches an
     actual row on the Lots page. Called by all three publish endpoints (eBay v1,
     eBay v2, Shopify) so a bad SKU can never reach a live platform listing no matter
-    which path is used to get there."""
+    which path is used to get there.
+
+    FIXED: was ONLY ever checking listings.ebay_sku -- but a listing matched via the
+    Inventory tab (see listing_by_ebay_id in list_inventory) can have a real,
+    perfectly valid, lot-tagged SKU sitting on the live eBay listing itself
+    (ebay_listing_status.sku, e.g. 'RB66-US') while its own local listings row never
+    had ebay_sku filled in at all. That's not a missing SKU, it's the wrong column
+    being checked. Now falls back to the real live eBay SKU via ebay_item_id before
+    concluding there's genuinely no SKU anywhere."""
     sku = (listing.get("ebay_sku") or "").strip()
+    if not sku and listing.get("ebay_item_id"):
+        live = (supabase.table("ebay_listing_status").select("sku")
+                .eq("business_id", business_id).eq("item_id", listing["ebay_item_id"])
+                .limit(1).execute().data or [])
+        if live and live[0].get("sku"):
+            sku = live[0]["sku"].strip()
     if not sku:
         raise HTTPException(400, "This item has no Lot SKU set — assign one from the Lots page before publishing.")
     prefix = _lot_prefix(sku)
