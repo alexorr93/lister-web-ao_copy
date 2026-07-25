@@ -256,8 +256,6 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .modal-action-btn { width: 100%; padding: 14px; border: none; border-radius: 10px; color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit; transition: filter 0.15s; }
 .modal-action-btn:hover { filter: brightness(1.1); }
 .modal-action-save     { background: #475569; }
-.modal-action-schedule { background: var(--accent); }
-.modal-action-publish  { background: #d97706; }
 .modal-action-shopify  { background: #95bf47; }
 
 /* BATCH UPLOAD */
@@ -351,9 +349,8 @@ select.field-input { background: #fff; color: #0f172a; }
         <input type="text" class="field-input" id="actionbar-suffix-input" placeholder="optional" oninput="setActiveLotSuffix(this.value)" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="actionbar-suffix-nofill" disabled style="font-size:12px;padding:5px 8px;width:70px;"/>
         <button class="btn" style="font-size:11px;padding:5px 6px;" onclick="unlockSuffixInput(this)" title="Click to type a custom 2nd half">✏️</button>
       </div>
-      <button class="btn btn-primary" id="submit-ebay-btn" style="display:none" onclick="submitSelected()">⏰ Schedule to eBay</button>
-      <button class="btn btn-primary" id="publish-now-btn" style="display:none;background:#ea580c;border-color:#ea580c;" onclick="submitSelectedNow()">⚡ Publish Immediately</button>
-      <button class="btn btn-primary" id="publish-now-v2-btn" style="display:none;background:#7c3aed;border-color:#7c3aed;" onclick="submitSelectedNowV2()" title="Uses the classic eBay API — SKU stays editable after publishing">🧪 Publish (v2) Immediately</button>
+      <button class="btn btn-primary" id="schedule-v2-btn" style="display:none" onclick="submitSelectedScheduleV2()">⏰ Schedule to eBay</button>
+      <button class="btn btn-primary" id="publish-now-v2-btn" style="display:none;background:#ea580c;border-color:#ea580c;" onclick="submitSelectedNowV2()" title="SKU stays editable after publishing">⚡ Publish Immediately</button>
       <button class="btn btn-primary" id="submit-shopify-btn" style="display:none;background:#95bf47;border-color:#95bf47;" onclick="submitSelectedToShopify()">🛍️ Publish to Shopify</button>
       <button class="btn" id="archive-selected-btn" style="display:none;color:var(--red);border-color:#991b1b;" onclick="archiveSelected()">🗄️ Archive Selected</button>
       <div class="spacer"></div>
@@ -734,15 +731,13 @@ select.field-input { background: #fff; color: #0f172a; }
           <button class="btn" onclick="updateSkuV2()">Update SKU</button>
         </div>
         <div style="display:flex;gap:8px;">
-          <button class="btn" style="flex:1;background:#7c3aed;color:#fff;border-color:#7c3aed;" onclick="submitToEbayV2('now')">🧪 Publish (v2)</button>
-          <button class="btn" style="flex:1;" onclick="submitToEbayV2('schedule')">🧪 Schedule (v2)</button>
+          <button class="btn" style="flex:1;background:#ea580c;color:#fff;border-color:#ea580c;" onclick="submitToEbayV2('now')">⚡ Publish Immediately</button>
+          <button class="btn" style="flex:1;" onclick="submitToEbayV2('schedule')">⏰ Schedule</button>
         </div>
       </div>
       <div id="modal-shopify-status" style="font-size:12px;color:var(--muted);margin-top:14px;"></div>
       <div class="modal-actions">
         <button class="modal-action-btn modal-action-save" onclick="saveModal()">💾 Save</button>
-        <button class="modal-action-btn modal-action-schedule" onclick="submitToEbay('schedule')">⏰ Schedule to eBay</button>
-        <button class="modal-action-btn modal-action-publish" onclick="confirmPublishNow()">🚀 Publish to eBay</button>
         <button class="modal-action-btn modal-action-shopify" onclick="publishToShopify()">🛍️ Publish to Shopify</button>
       </div>
     </div>
@@ -1624,15 +1619,12 @@ async function rematchCategory() {
   toast(`${matched} matched, ${fellBack} fell back to the catch-all${failed ? ', ' + failed + ' failed' : ''}`);
 }
 function updateSubmitBtn() {
-  const btn = document.getElementById('submit-ebay-btn');
+  const btn = document.getElementById('schedule-v2-btn');
   btn.style.display = selected.size > 0 ? 'inline-block' : 'none';
   btn.textContent = `⏰ Schedule ${selected.size} to eBay`;
-  const nowBtn = document.getElementById('publish-now-btn');
-  nowBtn.style.display = selected.size > 0 ? 'inline-block' : 'none';
-  nowBtn.textContent = `⚡ Publish ${selected.size} Immediately`;
   const nowBtnV2 = document.getElementById('publish-now-v2-btn');
   nowBtnV2.style.display = selected.size > 0 ? 'inline-block' : 'none';
-  nowBtnV2.textContent = `🧪 Publish ${selected.size} (v2)`;
+  nowBtnV2.textContent = `⚡ Publish ${selected.size} Immediately`;
   const shopBtn = document.getElementById('submit-shopify-btn');
   shopBtn.style.display = selected.size > 0 ? 'inline-block' : 'none';
   shopBtn.textContent = `🛍️ Publish ${selected.size} to Shopify`;
@@ -1711,7 +1703,7 @@ function hideBatchProgress() {
   document.getElementById('batch-submit-progress').style.display = 'none';
 }
 
-async function submitSelected() {
+async function submitSelectedScheduleV2() {
   if (!selected.size) return;
   const ids = Array.from(selected);
   if (!validateLotSkusForPublish(ids)) return;
@@ -1723,9 +1715,9 @@ async function submitSelected() {
     const id = ids[i];
     showBatchProgress(i + 1, ids.length, 'Scheduling to eBay');
     try {
-      const r = await api('POST', `/api/listings/${id}/ebay`, {mode: 'schedule', hours_from_now: hours});
+      const r = await api('POST', `/api/listings/${id}/ebay-v2`, {mode: 'schedule', hours_from_now: hours});
       const l = listings.find(x => String(x.id) === id);
-      if (l) { l.ebay_status = r.status; l.ebay_item_id = r.item_id; l.ebay_scheduled_at = r.scheduled_at; }
+      if (l) { l.ebay_status = r.status; l.ebay_item_id = r.item_id; l.ebay_scheduled_at = r.scheduled_at; l.ebay_sku = r.sku; }
       success++;
     } catch(e) { failed++; }
     renderTiles();
@@ -1735,39 +1727,16 @@ async function submitSelected() {
   renderTiles();
 }
 
-async function submitSelectedNow() {
+async function submitSelectedNowV2() {
   if (!selected.size) return;
   const ids = Array.from(selected);
   if (!validateLotSkusForPublish(ids)) return;
-  const ok = confirm(`Publish ${ids.length} item(s) LIVE to eBay immediately?\n\nThis goes live right away, not scheduled — different from Schedule to eBay.`);
+  const ok = confirm(`Publish ${ids.length} item(s) LIVE to eBay immediately?\n\nThis goes live right away, not scheduled — different from Schedule to eBay. SKU stays editable after publishing.`);
   if (!ok) return;
   let success = 0, failed = 0;
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i];
     showBatchProgress(i + 1, ids.length, 'Publishing to eBay');
-    try {
-      const r = await api('POST', `/api/listings/${id}/ebay`, {mode: 'now'});
-      const l = listings.find(x => String(x.id) === id);
-      if (l) { l.ebay_status = r.status; l.ebay_item_id = r.item_id; }
-      success++;
-    } catch(e) { failed++; }
-    renderTiles();
-  }
-  hideBatchProgress();
-  toast(`Published ${success} item(s) immediately${failed ? ', ' + failed + ' failed' : ''} ✓`);
-  renderTiles();
-}
-
-async function submitSelectedNowV2() {
-  if (!selected.size) return;
-  const ids = Array.from(selected);
-  if (!validateLotSkusForPublish(ids)) return;
-  const ok = confirm(`Publish ${ids.length} item(s) LIVE to eBay immediately via the new system (v2)?\n\nUses the classic eBay API — SKU stays editable after publishing, unlike the original push.`);
-  if (!ok) return;
-  let success = 0, failed = 0;
-  for (let i = 0; i < ids.length; i++) {
-    const id = ids[i];
-    showBatchProgress(i + 1, ids.length, 'Publishing to eBay (v2)');
     try {
       const r = await api('POST', `/api/listings/${id}/ebay-v2`, {mode: 'now'});
       const l = listings.find(x => String(x.id) === id);
@@ -1777,7 +1746,7 @@ async function submitSelectedNowV2() {
     renderTiles();
   }
   hideBatchProgress();
-  toast(`Published ${success} item(s) via v2${failed ? ', ' + failed + ' failed' : ''} ✓`);
+  toast(`Published ${success} item(s) immediately${failed ? ', ' + failed + ' failed' : ''} ✓`);
   renderTiles();
 }
 
@@ -1945,7 +1914,7 @@ async function submitToEbayV2(mode) {
   const hours = mode === 'schedule' ? parseFloat(document.getElementById('modal-ebay-hours').value) || 24 : null;
   const brand = document.getElementById('modal-brand-input').value.trim() || null;
   const mpn = document.getElementById('modal-mpn-input').value.trim() || null;
-  toast((mode === 'schedule' ? 'Scheduling' : 'Publishing') + ' (v2)...', 'success');
+  toast((mode === 'schedule' ? 'Scheduling' : 'Publishing') + '...', 'success');
   try {
     const r = await api('POST', `/api/listings/${modalItemId}/ebay-v2`, {mode, hours_from_now: hours, brand, mpn});
     const l = listings.find(x => x.id === modalItemId);
@@ -1956,10 +1925,10 @@ async function submitToEbayV2(mode) {
       l.ebay_sku = r.sku;
       l.brand = r.brand;
     }
-    toast(mode === 'schedule' ? 'Scheduled (v2) ✓' : 'Published (v2) ✓');
+    toast(mode === 'schedule' ? 'Scheduled ✓' : 'Published ✓');
     openModal(modalItemId);
     renderTiles();
-  } catch(e) { toast('v2 push failed: ' + e.message, 'error'); }
+  } catch(e) { toast('eBay publish failed: ' + e.message, 'error'); }
 }
 
 async function updateSkuV2() {
@@ -2071,41 +2040,6 @@ async function setModalCategoryManual() {
   } catch(e) {
     statusEl.textContent = '⚠️ ' + e.message;
     toast('Failed to set category', 'error');
-  }
-}
-
-function confirmPublishNow() {
-  const titleEl = document.getElementById('modal-title-input');
-  const priceEl = document.getElementById('modal-price-input');
-  const ok = confirm(`Publish this LIVE right now?\n\n"${titleEl.value}"\n$${priceEl.value}\n\nThis makes it publicly visible and buyable immediately. Scheduling is safer if you're not 100% sure.`);
-  if (ok) submitToEbay('now');
-}
-
-async function submitToEbay(mode) {
-  if (!modalItemId) return;
-  const hours = mode === 'schedule' ? parseFloat(document.getElementById('modal-ebay-hours').value) || 24 : null;
-  const brand = document.getElementById('modal-brand-input').value.trim() || null;
-  const mpn = document.getElementById('modal-mpn-input').value.trim() || null;
-  const label = mode === 'draft' ? 'Saving draft' : mode === 'now' ? 'Publishing' : 'Scheduling';
-  toast(label + '...', 'success');
-  try {
-    const r = await api('POST', `/api/listings/${modalItemId}/ebay`, {mode, hours_from_now: hours, brand, mpn});
-    const l = listings.find(x => x.id === modalItemId);
-    if (l) {
-      l.ebay_status = r.status;
-      l.ebay_item_id = r.item_id;
-      l.ebay_scheduled_at = r.scheduled_at;
-      l.brand = r.brand;
-      l.ebay_mpn = r.mpn;
-      l.ebay_mpn_is_fallback = r.mpn_is_fallback;
-    }
-    if (mode === 'draft') toast('Saved as eBay draft ✓');
-    else if (mode === 'now') toast('Published to eBay ✓');
-    else toast('Scheduled — goes live in ' + hours + 'h ✓');
-    openModal(modalItemId); // refresh status display
-    renderTiles();
-  } catch(e) {
-    toast('eBay submit failed: ' + e.message, 'error');
   }
 }
 
