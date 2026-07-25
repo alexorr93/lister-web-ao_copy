@@ -61,7 +61,11 @@ async def auto_fill_worker():
     needed. Also periodically re-validates listings that already have SOME category (e.g.
     mantle-scanner's own initial guess, which is never restricted to Business & Industrial /
     eBay Motors) — the null/0/blank check alone let a wrong category sail through forever
-    once mantle-scanner had written anything non-empty into ebay_category_id."""
+    once mantle-scanner had written anything non-empty into ebay_category_id. Also retries
+    anything still sitting at the generic default fallback category — that fallback is
+    technically INSIDE the allowed Business & Industrial/eBay Motors root, so it used to be
+    invisible to the revalidation sweep and stayed wrong forever with zero automatic retries,
+    even after the underlying matching logic was fixed."""
     import asyncio
 
     def needs_category(row: dict) -> bool:
@@ -127,8 +131,22 @@ async def auto_fill_worker():
                     pres = supabase.table("ebay_categories").select("category_id,path").in_("category_id", chunk).execute()
                     for prow in (pres.data or []):
                         path_map[str(prow["category_id"])] = prow.get("path") or ""
-                misfiled = [r for r in already_categorized if not _category_is_restricted_ok(r["ebay_category_id"], path_map)][:50]
-                print(f"auto_fill_worker: revalidation sweep found {len(misfiled)} listing(s) categorized outside Business & Industrial/eBay Motors")
+
+                def is_stuck_at_generic_default(row: dict) -> bool:
+                    # The generic fallback (e.g. "Other Business & Industrial") is
+                    # technically INSIDE the allowed root, so _category_is_restricted_ok
+                    # alone will never flag it — meaning an item mantle-scanner (or
+                    # anything else) drops here because no specific match was found
+                    # stays here forever, even after the underlying matching logic
+                    # gets fixed, since nothing ever asks it again. Explicitly retry
+                    # these too, per business, since the fallback ID is configurable.
+                    biz_default = get_ebay_settings(row["business_id"]).get("EBAY_DEFAULT_CATEGORY_ID", "") or "26261"
+                    return str(row.get("ebay_category_id") or "") == str(biz_default)
+
+                misfiled = [r for r in already_categorized
+                            if not _category_is_restricted_ok(r["ebay_category_id"], path_map)
+                            or is_stuck_at_generic_default(r)][:50]
+                print(f"auto_fill_worker: revalidation sweep found {len(misfiled)} listing(s) categorized outside Business & Industrial/eBay Motors, or still stuck at the generic fallback")
                 for row in misfiled:
                     fix_row(row)
         except Exception as e:
