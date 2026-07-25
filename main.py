@@ -1826,8 +1826,8 @@ async def saved_searches_run(request: Request, body: dict = Body(...)):
     if not listed_date:
         listed_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    start_iso = f"{listed_date}T00:00:00.000Z"
-    end_iso = f"{listed_date}T23:59:59.999Z"
+    start_iso = f"{listed_date}T00:00:00Z"
+    end_iso = f"{listed_date}T23:59:59Z"
 
     token = get_ebay_access_token(business_id)
     headers = {
@@ -1839,6 +1839,7 @@ async def saved_searches_run(request: Request, body: dict = Body(...)):
     offset = 0
     page_size = 200
     max_items = 1000  # hard ceiling per run regardless of how many eBay reports
+    ebay_warnings = []
     while len(all_items) < max_items:
         r = _req.get(
             f"{EBAY_API_BASE}/buy/browse/v1/item_summary/search",
@@ -1855,6 +1856,8 @@ async def saved_searches_run(request: Request, body: dict = Body(...)):
         if r.status_code != 200:
             raise HTTPException(502, f"eBay Browse API error ({r.status_code}): {r.text[:300]}")
         data = r.json()
+        if data.get("warnings"):
+            ebay_warnings.extend(data["warnings"])
         items = data.get("itemSummaries", [])
         if not items:
             break
@@ -1863,8 +1866,17 @@ async def saved_searches_run(request: Request, body: dict = Body(...)):
         if len(items) < page_size:
             break
 
+    # If eBay rejected the itemStartDate filter, it silently falls back to an
+    # unfiltered search rather than erroring — surface that instead of storing
+    # results that don't actually match the requested date.
+    if ebay_warnings:
+        raise HTTPException(502, f"eBay rejected the date filter: {ebay_warnings}")
+
     rows = []
     for it in all_items[:max_items]:
+        creation_date = it.get("itemCreationDate") or ""
+        if not creation_date.startswith(listed_date):
+            continue  # extra guard: only store items actually listed on the requested date
         price = it.get("price", {}) or {}
         image = it.get("image", {}) or {}
         seller = it.get("seller", {}) or {}
