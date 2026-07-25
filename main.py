@@ -5461,7 +5461,7 @@ _BIDSPOTTER_HEADERS = {
     "Upgrade-Insecure-Requests": "1",
 }
 
-def _scan_bidspotter_catalogs(max_pages: int = 40) -> list:
+def _scan_bidspotter_catalogs(max_pages: int = 40) -> dict:
     """Walks BidSpotter's US catalog list (search-filter?countryName=United States),
     page by page, extracting one summary row per catalog: title, url, auctioneer,
     end date, and location. Uses the same headers already confirmed to work against
@@ -5474,35 +5474,51 @@ def _scan_bidspotter_catalogs(max_pages: int = 40) -> list:
     which is a separate, heavier fetch per catalog -- deliberately not done here
     for this first pass. Marked via lot_count_is_estimate so this is never
     presented as more precise than it is.
+
+    Returns {"catalogs": [...], "diagnostics": {...}} -- diagnostics is returned
+    every time (not just on failure) so any future issue is debuggable straight
+    from the scan result shown in the UI, without needing to pull server logs.
     """
     import requests as _requests, re as _re
     from bs4 import BeautifulSoup
 
     results = []
     seen_urls = set()
+    page_diagnostics = []
     for page in range(1, max_pages + 1):
         url = f"https://www.bidspotter.com/en-us/auction-catalogues/search-filter?countryName=United%20States&page={page}"
         resp = _requests.get(url, headers=_BIDSPOTTER_HEADERS, timeout=30)
         if resp.status_code >= 400:
+            page_diagnostics.append({"page": page, "status": resp.status_code, "cards_found": 0, "parsed": 0})
             print(f"_scan_bidspotter_catalogs: page {page} returned {resp.status_code}, stopping")
             break
         soup = BeautifulSoup(resp.text, "html.parser")
 
         # Each catalog card's own link is the anchor -- same "find by stable link
         # pattern, not guessed CSS classes" approach as the per-catalog lot scraper.
+        # Each card has TWO anchors to the same URL (an image-wrapped one with no
+        # text, then the real title-text one) -- group by URL first and keep the
+        # one with actual text, instead of deduping on whichever anchor is seen
+        # first (which was silently the empty image one every time, skipping
+        # every catalog with title never even read -- confirmed root cause of the
+        # scan reporting 0 catalogs).
         cards = soup.find_all("a", href=_re.compile(r"/auction-catalogues/[^/]+/catalogue-id-"))
-        page_new = 0
+        by_url = {}
         for a in cards:
             href = a["href"]
             full_url = href if href.startswith("http") else f"https://www.bidspotter.com{href}"
+            text = a.get_text(strip=True)
+            if full_url not in by_url or (not by_url[full_url][1] and text):
+                by_url[full_url] = (a, text)
+
+        page_new = 0
+        for full_url, (a, title) in by_url.items():
             if full_url in seen_urls:
                 continue
             seen_urls.add(full_url)
             page_new += 1
-
-            title = a.get_text(strip=True)
             if not title:
-                continue  # this is one of the smaller repeated links (auctioneer name, etc.), not the title anchor
+                continue  # neither anchor for this card had text -- skip, nothing usable
 
             # Walk up to the card container to pull auctioneer/date/location/category tags
             block = a
@@ -5554,14 +5570,16 @@ def _scan_bidspotter_catalogs(max_pages: int = 40) -> list:
                 "lot_count": lot_count,
                 "lot_count_is_estimate": True,
             })
+        page_diagnostics.append({"page": page, "status": resp.status_code, "cards_found": len(by_url), "parsed": page_new})
         if page_new == 0:
             break  # no new catalogs on this page -- reached the end
-    return results
+    return {"catalogs": results, "diagnostics": {"pages": page_diagnostics, "total_parsed": len(results)}}
 
 _auction_monitor_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
 
 def _auction_monitor_scan_work(business_id: str) -> dict:
-    catalogs = _scan_bidspotter_catalogs()
+    scan = _scan_bidspotter_catalogs()
+    catalogs = scan["catalogs"]
     new_count, updated_count = 0, 0
     now_iso = datetime.utcnow().isoformat()
     for c in catalogs:
@@ -5586,7 +5604,7 @@ def _auction_monitor_scan_work(business_id: str) -> dict:
             record["first_seen_at"] = now_iso
             supabase.table("auction_catalogs").insert(record).execute()
             new_count += 1
-    return {"checked": len(catalogs), "new": new_count, "updated": updated_count}
+    return {"checked": len(catalogs), "new": new_count, "updated": updated_count, "diagnostics": scan["diagnostics"]}
 
 async def _run_auction_monitor_scan_background(business_id: str):
     import asyncio, datetime as _dt

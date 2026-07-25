@@ -96,8 +96,9 @@ async function pollScan() {
       if (r.result.error) {
         document.getElementById('scan-status').textContent = `❌ ${r.result.error}`;
       } else {
+        const diag = r.result.diagnostics ? ` [pages: ${JSON.stringify(r.result.diagnostics.pages)}]` : '';
         document.getElementById('scan-status').textContent =
-          `✅ Checked ${r.result.checked} catalogs — ${r.result.new} new, ${r.result.updated} updated.`;
+          `✅ Checked ${r.result.checked} catalogs — ${r.result.new} new, ${r.result.updated} updated.${diag}`;
       }
       loadCatalogs();
     }
