@@ -40,6 +40,22 @@ a { color: #60a5fa; }
   </div>
   <div id="scan-status" class="status-msg"></div>
 
+  <details style="margin-bottom:18px;">
+    <summary style="cursor:pointer;color:var(--muted);font-size:13px;margin-bottom:8px;">➕ Add a catalog from a manual Print Catalog export (real lot count, not an estimate)</summary>
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:8px;display:flex;flex-direction:column;gap:8px;">
+      <input type="text" class="field-input" id="ingest-url" placeholder="Catalog URL (e.g. https://www.bidspotter.com/en-us/auction-catalogues/heath-industrial/catalogue-id-bsche10695)"/>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <input type="text" class="field-input" id="ingest-title" placeholder="Title" style="flex:2;min-width:200px;"/>
+        <input type="text" class="field-input" id="ingest-auctioneer" placeholder="Auctioneer" style="flex:1;min-width:140px;"/>
+        <input type="text" class="field-input" id="ingest-date" placeholder="End date" style="flex:1;min-width:140px;"/>
+        <input type="text" class="field-input" id="ingest-state" placeholder="State" style="flex:1;min-width:100px;"/>
+      </div>
+      <textarea id="ingest-text" placeholder="Paste the Lot / Description lines here (one lot per line: lot number, then description)" style="min-height:120px;font-size:12px;font-family:monospace;border-radius:8px;padding:8px;"></textarea>
+      <button class="btn btn-primary" onclick="ingestLots()" style="align-self:flex-start;">Parse & Save Lots</button>
+      <div id="ingest-status" class="status-msg"></div>
+    </div>
+  </details>
+
   <div id="table-area"></div>
 </div>
 
@@ -149,6 +165,35 @@ function renderTable() {
   }
   html += '</tbody></table>';
   document.getElementById('table-area').innerHTML = html;
+}
+
+async function ingestLots() {
+  const catalog_url = document.getElementById('ingest-url').value.trim();
+  const raw_text = document.getElementById('ingest-text').value;
+  const statusEl = document.getElementById('ingest-status');
+  if (!catalog_url || !raw_text) {
+    statusEl.textContent = '❌ Catalog URL and pasted lot text are both required.';
+    return;
+  }
+  statusEl.textContent = 'Parsing and saving...';
+  try {
+    const r = await api('POST', '/api/auction-monitor/ingest-lots', {
+      catalog_url,
+      title: document.getElementById('ingest-title').value.trim(),
+      auctioneer: document.getElementById('ingest-auctioneer').value.trim(),
+      end_date: document.getElementById('ingest-date').value.trim(),
+      state: document.getElementById('ingest-state').value.trim(),
+      raw_text,
+    });
+    if (r.error) {
+      statusEl.textContent = `❌ ${r.error}`;
+    } else {
+      statusEl.textContent = `✅ Saved ${r.parsed} lots — real exact count, not an estimate.`;
+      loadCatalogs();
+    }
+  } catch(e) {
+    statusEl.textContent = `❌ ${e.message}`;
+  }
 }
 
 loadCatalogs();

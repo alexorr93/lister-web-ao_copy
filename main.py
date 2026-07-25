@@ -5592,6 +5592,81 @@ def _scan_bidspotter_catalogs(max_pages: int = 40) -> dict:
 
 _auction_monitor_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
 
+def _parse_print_catalog_lots(raw_text: str) -> list:
+    """Parses a BidSpotter 'Print Catalog' export's Lot/Description lines into
+    structured rows. Handles both the simple case (each lot on one line) and the
+    multi-line-wrapped case seen on later pages of longer catalogs, where the lot
+    number can appear on its own line between description fragments -- callers
+    that give this cleanly-ordered text (one lot per line, as pasted from the
+    catalog view) get a reliable parse either way, since the regex only needs the
+    lot number to be the first token on a line."""
+    import re as _re
+    rows = []
+    for line in raw_text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        m = _re.match(r'^(\d+[A-Za-z]?)\s+(.+)$', line)
+        if m:
+            rows.append({"lot_number": m.group(1), "description": m.group(2)[:2000]})
+    return rows
+
+@app.post("/api/auction-monitor/ingest-lots")
+async def auction_monitor_ingest_lots(request: Request):
+    """Ingests a manually-exported Print Catalog's lot list -- the reliable path
+    for individual catalogs, since BidSpotter's WAF (confirmed via the actual
+    challenge-page response body) blocks plain server-side requests to these
+    pages entirely; a real browser (e.g. Claude in Chrome) is required to get the
+    export in the first place. Upserts every lot row, then updates that catalog's
+    row in auction_catalogs with the REAL exact lot count (not the category-tag
+    estimate the list-page scan produces) and marks lot_count_is_estimate false."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    body = await request.json()
+    catalog_url = (body.get("catalog_url") or "").strip()
+    raw_text = body.get("raw_text") or ""
+    if not catalog_url or not raw_text:
+        raise HTTPException(400, "catalog_url and raw_text are required")
+
+    lots = _parse_print_catalog_lots(raw_text)
+    if not lots:
+        return {"parsed": 0, "error": "No lot lines matched -- expected lines starting with a lot number"}
+
+    now_iso = datetime.utcnow().isoformat()
+    for lot in lots:
+        record = {
+            "business_id": business_id,
+            "catalog_url": catalog_url,
+            "lot_number": lot["lot_number"],
+            "description": lot["description"],
+            "last_seen_at": now_iso,
+        }
+        existing = supabase.table("auction_lots").select("id")\
+            .eq("business_id", business_id).eq("catalog_url", catalog_url).eq("lot_number", lot["lot_number"]).limit(1).execute()
+        if existing.data:
+            supabase.table("auction_lots").update(record).eq("id", existing.data[0]["id"]).execute()
+        else:
+            supabase.table("auction_lots").insert(record).execute()
+
+    # Update the catalog's summary row with the real exact count, if it exists
+    catalog_fields = {}
+    for k in ("title", "auctioneer", "end_date", "state"):
+        if body.get(k):
+            catalog_fields[k] = body[k]
+    catalog_existing = supabase.table("auction_catalogs").select("id")\
+        .eq("business_id", business_id).eq("catalog_url", catalog_url).limit(1).execute()
+    catalog_fields.update({
+        "lot_count": len(lots), "lot_count_is_estimate": False, "last_checked_at": now_iso,
+    })
+    if catalog_existing.data:
+        supabase.table("auction_catalogs").update(catalog_fields).eq("id", catalog_existing.data[0]["id"]).execute()
+    else:
+        catalog_fields.update({"business_id": business_id, "source": "bidspotter", "catalog_url": catalog_url, "first_seen_at": now_iso})
+        supabase.table("auction_catalogs").insert(catalog_fields).execute()
+
+    return {"parsed": len(lots), "lot_count": len(lots)}
+
 def _auction_monitor_scan_work(business_id: str) -> dict:
     scan = _scan_bidspotter_catalogs()
     catalogs = scan["catalogs"]
