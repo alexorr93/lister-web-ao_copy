@@ -64,5 +64,19 @@
       "PowerShell(git clean -f*)",
       "PowerShell(Remove-Item * -Recurse -Force*)"
     ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "statusMessage": "Syncing dev2 to latest...",
+            "command": "cd \"C:\\Users\\Alex\\Documents\\lister-web-ao_copy\"; BRANCH=$(git rev-parse --abbrev-ref HEAD); if [ \"$BRANCH\" != \"dev2\" ]; then echo \"{\\\"systemMessage\\\": \\\"Skipped dev2 auto-sync: on branch $BRANCH.\\\"}\"; exit 0; fi; if [ -n \"$(git status --porcelain)\" ]; then echo \"{\\\"systemMessage\\\": \\\"Skipped dev2 auto-sync: uncommitted changes present.\\\"}\"; exit 0; fi; git fetch origin dev2 >/dev/null 2>&1; BEFORE=$(git rev-parse HEAD); if git pull --ff-only origin dev2 >/dev/null 2>&1; then AFTER=$(git rev-parse HEAD); if [ \"$BEFORE\" != \"$AFTER\" ]; then echo \"{\\\"systemMessage\\\": \\\"Synced dev2 to latest ($BEFORE -> $AFTER).\\\"}\"; else echo \"{\\\"systemMessage\\\": \\\"dev2 already up to date.\\\"}\"; fi; else echo \"{\\\"systemMessage\\\": \\\"dev2 auto-sync failed (not a clean fast-forward) - check manually.\\\"}\"; fi"
+          }
+        ]
+      }
+    ]
   }
 }
