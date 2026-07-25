@@ -1844,7 +1844,7 @@ async def saved_searches_run(request: Request, body: dict = Body(...)):
         "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
     }
 
-    filter_parts = [f"itemStartDate:[{start_iso}..{end_iso}]"]
+    filter_parts = [f"itemStartDate:[{start_iso}..{end_iso}]", "itemLocationCountry:US"]
     if min_price is not None:
         filter_parts.append(f"price:[{min_price}..]")
         filter_parts.append("priceCurrency:USD")
