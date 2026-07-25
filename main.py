@@ -1932,6 +1932,14 @@ async def inventory_page(request: Request):
         return RedirectResponse("/login", status_code=302)
     return templates.TemplateResponse("inventory.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "inventory"})
 
+@app.get("/auction-monitor", response_class=HTMLResponse)
+async def auction_monitor_page(request: Request):
+    nav = get_nav_context(request)
+    if nav is None:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("auction_monitor.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "auction_monitor"})
+
 @app.get("/shopify-sync", response_class=HTMLResponse)
 async def shopify_sync_page(request: Request):
     nav = get_nav_context(request)
@@ -5443,6 +5451,200 @@ def _detect_auction_site(url: str) -> Optional[str]:
     if "dickensheet.com" in host:
         return "dickensheet"
     return None
+
+_BIDSPOTTER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.bidspotter.com/en-us/auction-catalogues",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+def _scan_bidspotter_catalogs(max_pages: int = 40) -> list:
+    """Walks BidSpotter's US catalog list (search-filter?countryName=United States),
+    page by page, extracting one summary row per catalog: title, url, auctioneer,
+    end date, and location. Uses the same headers already confirmed to work against
+    this site (see _fetch_bidspotter_lots below) rather than a generic fetch.
+
+    lot_count here is the SUM of each catalog's category-tag counts shown on this
+    list page (e.g. "Cars (56)", "Forklifts (147)") -- a real number, but an
+    ESTIMATE: a lot tagged under two categories gets counted twice. The exact
+    total (the "857 item(s)" figure) only lives on the individual catalog page,
+    which is a separate, heavier fetch per catalog -- deliberately not done here
+    for this first pass. Marked via lot_count_is_estimate so this is never
+    presented as more precise than it is.
+    """
+    import requests as _requests, re as _re
+    from bs4 import BeautifulSoup
+
+    results = []
+    seen_urls = set()
+    for page in range(1, max_pages + 1):
+        url = f"https://www.bidspotter.com/en-us/auction-catalogues/search-filter?countryName=United%20States&page={page}"
+        resp = _requests.get(url, headers=_BIDSPOTTER_HEADERS, timeout=30)
+        if resp.status_code >= 400:
+            print(f"_scan_bidspotter_catalogs: page {page} returned {resp.status_code}, stopping")
+            break
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        # Each catalog card's own link is the anchor -- same "find by stable link
+        # pattern, not guessed CSS classes" approach as the per-catalog lot scraper.
+        cards = soup.find_all("a", href=_re.compile(r"/auction-catalogues/[^/]+/catalogue-id-"))
+        page_new = 0
+        for a in cards:
+            href = a["href"]
+            full_url = href if href.startswith("http") else f"https://www.bidspotter.com{href}"
+            if full_url in seen_urls:
+                continue
+            seen_urls.add(full_url)
+            page_new += 1
+
+            title = a.get_text(strip=True)
+            if not title:
+                continue  # this is one of the smaller repeated links (auctioneer name, etc.), not the title anchor
+
+            # Walk up to the card container to pull auctioneer/date/location/category tags
+            block = a
+            block_text = ""
+            for _ in range(6):
+                block = block.parent
+                if block is None:
+                    break
+                block_text = block.get_text(" | ", strip=True)
+                if "Ends from" in block_text or "View auction" in block_text:
+                    break
+            if block is None:
+                continue
+
+            date_m = _re.search(r"Ends from\s+([A-Za-z]+ \d{1,2}, \d{4}[^|]*)", block_text)
+            end_date = date_m.group(1).strip() if date_m else None
+
+            # Location line: either "City, State" or "Multi-location - see lot details"
+            state = None
+            loc_m = _re.search(r"\|\s*([^|]+?,\s*[A-Za-z ]+)\s*\|", block_text)
+            if loc_m:
+                state = loc_m.group(1).split(",")[-1].strip()
+            elif "Multi-location" in block_text:
+                state = "Multi-location"
+
+            # Auctioneer: the other link inside this same block, distinct from the title link
+            auctioneer = None
+            for a2 in block.find_all("a"):
+                t2 = a2.get_text(strip=True)
+                if t2 and t2 != title and "Sign Up to bid" not in t2 and "View auction" not in t2:
+                    auctioneer = t2
+                    break
+
+            # Category tag counts, e.g. "Cars (56)" -- sum them for the estimate
+            lot_count = None
+            tag_counts = _re.findall(r"\((\d+)\)", block_text)
+            if tag_counts:
+                # Drop the last one or two if they're "+ N more" counts, not real category tags
+                real_tags = _re.findall(r"[A-Za-z][A-Za-z &]*\s*\((\d+)\)", block_text)
+                if real_tags:
+                    lot_count = sum(int(n) for n in real_tags)
+
+            results.append({
+                "catalog_url": full_url,
+                "title": title[:500],
+                "auctioneer": auctioneer,
+                "end_date": end_date,
+                "state": state,
+                "lot_count": lot_count,
+                "lot_count_is_estimate": True,
+            })
+        if page_new == 0:
+            break  # no new catalogs on this page -- reached the end
+    return results
+
+_auction_monitor_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
+
+def _auction_monitor_scan_work(business_id: str) -> dict:
+    catalogs = _scan_bidspotter_catalogs()
+    new_count, updated_count = 0, 0
+    now_iso = datetime.utcnow().isoformat()
+    for c in catalogs:
+        existing = supabase.table("auction_catalogs").select("id,first_seen_at")\
+            .eq("business_id", business_id).eq("catalog_url", c["catalog_url"]).limit(1).execute()
+        record = {
+            "business_id": business_id,
+            "source": "bidspotter",
+            "catalog_url": c["catalog_url"],
+            "title": c["title"],
+            "auctioneer": c.get("auctioneer"),
+            "end_date": c.get("end_date"),
+            "state": c.get("state"),
+            "lot_count": c.get("lot_count"),
+            "lot_count_is_estimate": c.get("lot_count_is_estimate", True),
+            "last_checked_at": now_iso,
+        }
+        if existing.data:
+            supabase.table("auction_catalogs").update(record).eq("id", existing.data[0]["id"]).execute()
+            updated_count += 1
+        else:
+            record["first_seen_at"] = now_iso
+            supabase.table("auction_catalogs").insert(record).execute()
+            new_count += 1
+    return {"checked": len(catalogs), "new": new_count, "updated": updated_count}
+
+async def _run_auction_monitor_scan_background(business_id: str):
+    import asyncio, datetime as _dt
+    try:
+        result = await asyncio.to_thread(_auction_monitor_scan_work, business_id)
+        _auction_monitor_job_status[business_id] = {
+            "running": False, "result": result,
+            "started_at": _auction_monitor_job_status.get(business_id, {}).get("started_at"),
+            "finished_at": _dt.datetime.utcnow().isoformat(),
+        }
+    except Exception as e:
+        _auction_monitor_job_status[business_id] = {
+            "running": False, "result": {"error": str(e)},
+            "started_at": _auction_monitor_job_status.get(business_id, {}).get("started_at"),
+            "finished_at": _dt.datetime.utcnow().isoformat(),
+        }
+
+@app.post("/api/auction-monitor/scan-now")
+async def auction_monitor_scan_now(request: Request):
+    """Kicks off a fresh scan of BidSpotter's US catalog list as a background job --
+    same pattern as every other bulk fetch in this file, since walking ~30-40 pages
+    plus parsing each can run past a reverse proxy's request timeout."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio, datetime as _dt
+    if _auction_monitor_job_status.get(business_id, {}).get("running"):
+        return {"started": False, "already_running": True}
+    _auction_monitor_job_status[business_id] = {
+        "running": True, "result": None,
+        "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None,
+    }
+    asyncio.create_task(_run_auction_monitor_scan_background(business_id))
+    return {"started": True}
+
+@app.get("/api/auction-monitor/scan-status")
+async def auction_monitor_scan_status(request: Request, response: Response):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    response.headers["Cache-Control"] = "no-store"
+    return _auction_monitor_job_status.get(business_id, {"running": False, "result": None, "started_at": None, "finished_at": None})
+
+@app.get("/api/auction-monitor/catalogs")
+async def auction_monitor_list(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    rows = []
+    start = 0
+    while True:
+        page = supabase.table("auction_catalogs").select("*")\
+            .eq("business_id", business_id).range(start, start + 999).execute().data or []
+        rows.extend(page)
+        if len(page) < 1000:
+            break
+        start += 1000
+    return {"catalogs": rows}
 
 def _fetch_bidspotter_lots(source_url: str, capture_scope: Optional[str]) -> list:
     """Fetches lots from a BidSpotter auction-catalogue page. Unlike Roller, this
