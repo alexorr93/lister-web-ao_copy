@@ -2716,7 +2716,7 @@ async def backfill_order_skus(request: Request, file: UploadFile = File(...)):
     for i in range(0, len(updates), 500):
         chunk = updates[i:i+500]
         try:
-            supabase.table("orders").upsert(chunk).execute()
+            supabase.table("orders").upsert(chunk, on_conflict="id").execute()
             updated += len(chunk)
         except Exception as e:
             print(f"backfill_order_skus: batch {i}-{i+len(chunk)} failed: {e}")
@@ -3065,7 +3065,7 @@ def apply_shipping_matches(business_id: str) -> dict:
     for i in range(0, len(updates), 500):
         chunk = updates[i:i+500]
         try:
-            supabase.table("orders").upsert(chunk).execute()
+            supabase.table("orders").upsert(chunk, on_conflict="id").execute()
             updated += len(chunk)
         except Exception as e:
             print(f"apply_shipping_matches: batch {i}-{i+len(chunk)} failed: {e}")
@@ -3306,7 +3306,7 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
                 "final_net": _safe(net - shipping_cost),
             }
             try:
-                supabase.table("orders").upsert(record).execute()
+                supabase.table("orders").upsert(record, on_conflict="id").execute()
                 upserted += 1
             except Exception as e:
                 skipped_rows += 1
@@ -3407,7 +3407,7 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
                 "final_net": final_net,
             }
             try:
-                supabase.table("orders").upsert(record).execute()
+                supabase.table("orders").upsert(record, on_conflict="id").execute()
                 upserted += 1
             except Exception as e:
                 shopify_skipped += 1
@@ -3689,7 +3689,7 @@ async def backfill_sku_by_item_id(request: Request, file: UploadFile = File(...)
     for i in range(0, len(updates), 500):
         chunk = updates[i:i+500]
         try:
-            supabase.table("orders").upsert(chunk).execute()
+            supabase.table("orders").upsert(chunk, on_conflict="id").execute()
             updated += len(chunk)
         except Exception as e:
             print(f"backfill_sku_by_item_id: batch {i}-{i+len(chunk)} failed: {e}")
@@ -6708,7 +6708,7 @@ async def resync_one_order(order_id: str, request: Request):
             "shipping_cost": round(shipping_cost, 2),
             "final_net": round(net - shipping_cost, 2),
         }
-        supabase.table("orders").upsert(record).execute()
+        supabase.table("orders").upsert(record, on_conflict="id").execute()
         upserted.append(record)
 
     return {"ok": True, "order_id": order_id, "line_items_updated": len(upserted), "records": upserted}
