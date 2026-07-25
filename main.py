@@ -84,14 +84,19 @@ async def auto_fill_worker():
         if not row.get("brand"):
             updates["brand"] = guess_brand_from_title(title)
         try:
-            suggestion = suggest_ebay_category(title, biz_id, restrict=True)
-            if suggestion:
+            row_mode = row.get("category_mode") or "industrial"
+            if row_mode not in ("industrial", "motors"):
+                row_mode = "industrial"
+            suggestion = suggest_ebay_category(title, biz_id, restrict=True, mode=row_mode)
+            if suggestion and suggestion.get("category_id"):
                 updates["ebay_category_id"] = suggestion["category_id"]
-                print(f"auto_fill_worker: {row['id']} -> category {suggestion['category_id']} ({suggestion.get('name')})")
+                print(f"auto_fill_worker: {row['id']} -> category {suggestion['category_id']} "
+                      f"({suggestion.get('name')}, mode={row_mode})")
             else:
-                fallback = get_ebay_settings(biz_id).get("EBAY_DEFAULT_CATEGORY_ID", "") or "26261"  # Other Business & Industrial — hard floor, no exceptions
+                fallback = _motors_fallback_id(biz_id) if row_mode == "motors" else \
+                    (get_ebay_settings(biz_id).get("EBAY_DEFAULT_CATEGORY_ID", "") or "26261")
                 updates["ebay_category_id"] = fallback
-                print(f"auto_fill_worker: {row['id']} -> no B&I/Motors match, locked to {fallback}")
+                print(f"auto_fill_worker: {row['id']} -> no match in {row_mode} lane, locked to {fallback}")
         except Exception as e:
             print(f"auto_fill_worker category error for {row['id']}: {e}")
         if updates:
@@ -100,7 +105,7 @@ async def auto_fill_worker():
     cycle = 0
     while True:
         try:
-            res = supabase.table("listings").select("id,title,brand,ebay_category_id,business_id")\
+            res = supabase.table("listings").select("id,title,brand,ebay_category_id,business_id,category_mode")\
                 .neq("status", "archived")\
                 .or_("ebay_category_id.is.null,ebay_category_id.eq.0,ebay_category_id.eq.")\
                 .limit(50).execute()
@@ -116,7 +121,7 @@ async def auto_fill_worker():
                 all_rows = []
                 start = 0
                 while True:
-                    page = supabase.table("listings").select("id,title,brand,ebay_category_id,business_id")\
+                    page = supabase.table("listings").select("id,title,brand,ebay_category_id,business_id,category_mode")\
                         .neq("status", "archived")\
                         .range(start, start + 999).execute().data or []
                     all_rows.extend(page)
@@ -140,7 +145,11 @@ async def auto_fill_worker():
                     # stays here forever, even after the underlying matching logic
                     # gets fixed, since nothing ever asks it again. Explicitly retry
                     # these too, per business, since the fallback ID is configurable.
-                    biz_default = get_ebay_settings(row["business_id"]).get("EBAY_DEFAULT_CATEGORY_ID", "") or "26261"
+                    row_mode = row.get("category_mode") or "industrial"
+                    if row_mode == "motors":
+                        biz_default = _motors_fallback_id(row["business_id"])
+                    else:
+                        biz_default = get_ebay_settings(row["business_id"]).get("EBAY_DEFAULT_CATEGORY_ID", "") or "26261"
                     return str(row.get("ebay_category_id") or "") == str(biz_default)
 
                 misfiled = [r for r in already_categorized
@@ -342,6 +351,7 @@ EBAY_ENV_KEYS = [
     "EBAY_PAYMENT_POLICY_ID", "EBAY_RETURN_POLICY_ID", "EBAY_FULFILLMENT_POLICY_ID",
     "EBAY_MERCHANT_LOCATION_KEY", "EBAY_LOCATION_ZIP", "EBAY_LOCATION_COUNTRY",
     "EBAY_LOCATION_CITY_STATE", "EBAY_DEFAULT_CATEGORY_ID",
+    "EBAY_DEFAULT_MOTORS_CATEGORY_ID",
 ]
 
 EBAY_OAUTH_SCOPES = (
@@ -1349,27 +1359,33 @@ class EbaySubmit(BaseModel):
 
 
 @app.post("/api/listings/{item_id}/rematch-category")
-async def rematch_category(item_id: str, request: Request):
-    """Re-runs eBay category matching for one listing using the current (both-tree)
-    suggest_ebay_category logic. Exists because the background auto_fill_worker's
-    revalidation sweep only re-checks listings categorized OUTSIDE Business &
-    Industrial / eBay Motors — a listing sitting at the generic 26261 fallback is
-    technically still inside that root, so it passes the sweep's check and is never
-    revisited automatically. This is the only way to fix already-scanned items after
-    a category-matching bug fix ships; new scans self-correct via the worker."""
+async def rematch_category(item_id: str, request: Request, mode: str = "industrial"):
+    """Re-runs category matching for one listing in the given lane (from the Intake
+    toggle). Exists because the background auto_fill_worker's revalidation sweep
+    only re-checks listings categorized OUTSIDE Business & Industrial / eBay Motors —
+    a listing sitting at the generic 26261 fallback is technically still inside that
+    root, so it passes the sweep's check and is never revisited automatically. This
+    is the only way to fix already-scanned items after a category-matching bug fix
+    ships; new scans self-correct via the worker."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
+    if mode not in ("industrial", "motors"):
+        mode = "industrial"
     res = supabase.table("listings").select("id,title").eq("id", item_id).eq("business_id", business_id).execute()
     if not res.data:
         raise HTTPException(404, "Listing not found")
     title = res.data[0].get("title") or ""
     if not title or title == "Scanning...":
         raise HTTPException(400, "No title yet")
-    suggestion = suggest_ebay_category(title, business_id, restrict=True)
-    if suggestion:
-        supabase.table("listings").update({"ebay_category_id": suggestion["category_id"]}).eq("id", item_id).execute()
-        return {"ok": True, "category_id": suggestion["category_id"], "name": suggestion.get("name")}
+    suggestion = suggest_ebay_category(title, business_id, restrict=True, mode=mode)
+    if suggestion and suggestion.get("category_id"):
+        supabase.table("listings").update({
+            "ebay_category_id": suggestion["category_id"],
+            "category_mode": mode,
+        }).eq("id", item_id).execute()
+        return {"ok": True, "category_id": suggestion["category_id"], "name": suggestion.get("name"),
+                "tree_id": suggestion.get("tree_id"), "is_fallback": suggestion.get("is_fallback", False)}
     else:
         return {"ok": True, "category_id": None, "name": None, "note": "still no B&I/Motors match"}
 
@@ -1520,63 +1536,94 @@ def sync_ebay_categories(token: str) -> dict:
         supabase.table("ebay_categories").upsert(batch, on_conflict="category_id").execute()
     return {"count": len(all_nodes), "top_level_names": all_top_level_names, "raw_bytes": total_raw_bytes}
 
-def suggest_ebay_category(title: str, business_id: str, restrict: bool = True, exclude_id: str = None) -> dict:
-    """Match an item title to the best eBay leaf category using eBay's OWN live category-suggestion
-    engine (same one that correctly found 'Other Business & Industrial' = 26261) — this is far more
-    accurate than local keyword matching, since it's eBay's real algorithm trained on real listings.
-    restrict=True limits results to Business & Industrial / eBay Motors (your usual categories).
-    exclude_id lets a repeat click skip the previous pick and try the next-best suggestion."""
+def _motors_fallback_id(business_id: str) -> str:
+    """The eBay Motors catch-all leaf, mirroring 26261's role in Business & Industrial.
+    Set via Settings > EBAY_DEFAULT_MOTORS_CATEGORY_ID (use the
+    /api/ebay/other-leaf-candidates helper to find it). If it's unset we fall back to
+    26261 rather than inventing an ID — a wrong category ID fails at publish time,
+    which is worse than a generic-but-valid one."""
+    try:
+        mid = str(get_ebay_settings(business_id).get("EBAY_DEFAULT_MOTORS_CATEGORY_ID", "") or "").strip()
+    except Exception:
+        mid = ""
+    if not mid:
+        print("suggest_ebay_category: EBAY_DEFAULT_MOTORS_CATEGORY_ID is not set — "
+              "Auto Parts items with no tree-100 match will land on 26261. "
+              "Set it in Settings to fix.")
+        return "26261"
+    return mid
+
+
+def suggest_ebay_category(title: str, business_id: str, restrict: bool = True,
+                           exclude_id: str = None, mode: str = "industrial") -> dict:
+    """Match an item title to an eBay leaf category using eBay's own suggestion engine.
+
+    mode is the intake toggle and is absolute — the two lanes never cross:
+        "industrial" -> tree 0, Business & Industrial branch only, falls back to 26261
+        "motors"     -> tree 100 only, falls back to EBAY_DEFAULT_MOTORS_CATEGORY_ID
+
+    Background on the long-running bug: querying both trees was already correct, but
+    results were appended tree-0-first and the caller took results[0]. Tree 0 answers
+    almost any query with SOMETHING under Business & Industrial, so tree 100 was
+    unreachable in practice. eBay ranks each tree independently and gives no
+    comparable cross-tree score, so there is no sound way to auto-arbitrate between
+    them — hence an explicit mode instead of a heuristic.
+    """
     import requests as _req
+
+    mode = mode if mode in ("industrial", "motors") else "industrial"
+    tree_id = "100" if mode == "motors" else "0"
+
+    def _fallback():
+        if mode == "motors":
+            fid = _motors_fallback_id(business_id)
+            return {"category_id": fid, "name": None, "path": None,
+                    "tree_id": "100", "is_fallback": True}
+        return {"category_id": "26261", "name": "Other Business & Industrial",
+                "path": "Business & Industrial > Other Business & Industrial",
+                "tree_id": "0", "is_fallback": True}
+
     try:
         token = get_ebay_access_token(business_id)
     except Exception as e:
         print(f"suggest_ebay_category: {e}")
-        return {}
+        return _fallback()
 
-    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-    results = []
-    # Query BOTH trees — tree 0 (standard US marketplace) and tree 100 (eBay Motors,
-    # confirmed to be a genuinely separate category tree, not a branch of tree 0 at
-    # all — syncing tree 0 alone returned 34 real top-level categories with zero
-    # "Motors" among them). Auto parts need tree 100's suggestions specifically.
-    for tree_id in ("0", "100"):
+    try:
         r = _req.get(
             f"https://api.ebay.com/commerce/taxonomy/v1/category_tree/{tree_id}/get_category_suggestions",
-            headers=headers, params={"q": title}, timeout=15
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            params={"q": title}, timeout=15
         )
-        if r.status_code != 200:
-            print(f"suggest_ebay_category: tree {tree_id} returned {r.status_code}: {r.text[:300]}")
-            continue
-        data = r.json()
-        for s in data.get("categorySuggestions", []):
-            cat = s.get("category", {})
-            ancestors = s.get("categoryTreeNodeAncestors", [])
-            path = " > ".join(a.get("categoryName", "") for a in ancestors[::-1])
-            full_path = f"{path} > {cat.get('categoryName','')}" if path else cat.get("categoryName", "")
-            results.append({"category_id": cat.get("categoryId"), "name": cat.get("categoryName"),
-                             "path": full_path, "tree_id": tree_id})
+    except Exception as e:
+        print(f"suggest_ebay_category: tree {tree_id} request failed: {e}")
+        return _fallback()
 
-    if restrict:
-        # FIXED: the previous version checked whether generic words like "Motors" or
-        # "Parts & Accessories" appeared ANYWHERE in the path — but those words can
-        # legitimately appear inside totally unrelated categories too (e.g. "Home &
-        # Garden > Outdoor Power Equipment > ... Motors" for a lawnmower part), which
-        # is almost certainly how a real Home & Garden result slipped through. Now
-        # filters by which TREE each result actually came from instead of guessing
-        # from path text: tree 100 is eBay Motors by definition (every result from it
-        # is valid, no text check needed), and tree 0 results are only kept if their
-        # literal TOP-LEVEL segment is exactly "Business & Industrial" — not just a
-        # substring match anywhere in the path.
-        def _is_allowed(r):
-            if r["tree_id"] == "100":
-                return True
-            top_level = r["path"].split(" > ")[0].strip()
-            return top_level == "Business & Industrial"
-        results = [r for r in results if _is_allowed(r)]
+    if r.status_code != 200:
+        print(f"suggest_ebay_category: tree {tree_id} returned {r.status_code}: {r.text[:300]}")
+        return _fallback()
+
+    results = []
+    for s in r.json().get("categorySuggestions", []):
+        cat = s.get("category", {})
+        ancestors = s.get("categoryTreeNodeAncestors", [])
+        path = " > ".join(a.get("categoryName", "") for a in ancestors[::-1])
+        full_path = f"{path} > {cat.get('categoryName','')}" if path else cat.get("categoryName", "")
+        results.append({"category_id": cat.get("categoryId"), "name": cat.get("categoryName"),
+                         "path": full_path, "tree_id": tree_id, "is_fallback": False})
+
+    if restrict and mode == "industrial":
+        # Literal TOP-LEVEL segment must be exactly "Business & Industrial" — not a
+        # substring match anywhere in the path, which is what previously let Home &
+        # Garden results through on words like "Motors".
+        results = [x for x in results
+                   if (x["path"] or "").split(" > ")[0].strip() == "Business & Industrial"]
+    # mode == "motors" needs no filter: tree 100 IS eBay Motors by definition.
+
     if exclude_id:
-        results = [r for r in results if r["category_id"] != exclude_id]
+        results = [x for x in results if x["category_id"] != exclude_id]
 
-    return results[0] if results else {}
+    return results[0] if results else _fallback()
 
 _category_sync_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
 
@@ -1595,6 +1642,19 @@ async def _run_category_sync_background(business_id: str, token: str):
             "started_at": _category_sync_job_status.get(business_id, {}).get("started_at"),
             "finished_at": _dt.datetime.utcnow().isoformat(),
         }
+
+@app.get("/api/ebay/other-leaf-candidates")
+async def api_other_leaf_candidates(request: Request):
+    """One-time helper: lists every synced leaf category whose name starts with
+    "Other " so you can find the eBay Motors catch-all without digging through
+    eBay's site. Paste the right ID into Settings > EBAY_DEFAULT_MOTORS_CATEGORY_ID."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    res = supabase.table("ebay_categories").select("category_id,name,path") \
+        .ilike("name", "Other %").eq("is_leaf", True).limit(500).execute()
+    rows = sorted(res.data or [], key=lambda r: r.get("path") or "")
+    return {"count": len(rows), "candidates": rows}
 
 @app.post("/api/ebay/sync-categories")
 async def api_sync_categories(request: Request):
@@ -1630,22 +1690,30 @@ async def api_sync_categories_status(request: Request, response: Response):
     return _category_sync_job_status.get(business_id, {"running": False, "result": None, "started_at": None, "finished_at": None})
 
 @app.post("/api/listings/{item_id}/auto-category")
-async def api_auto_category(item_id: str, request: Request, broad: bool = False, exclude: str = None, query: str = None):
+async def api_auto_category(item_id: str, request: Request, broad: bool = False,
+                             exclude: str = None, query: str = None, mode: str = None):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     try:
-        res = supabase.table("listings").select("title").eq("id", item_id).limit(1).execute()
+        res = supabase.table("listings").select("title,category_mode").eq("id", item_id).limit(1).execute()
         if not res.data:
             raise HTTPException(404, "Listing not found")
         title = query if query else res.data[0].get("title", "")
+        # mode comes from the Intake toggle (sent by the frontend); if the caller
+        # didn't pass one, fall back to whatever this listing was scanned under.
+        effective_mode = mode if mode in ("industrial", "motors") else (res.data[0].get("category_mode") or "industrial")
         # restrict is always True now — this business only ever sells in Business &
         # Industrial / eBay Motors, full stop, no "search all categories" escape hatch.
-        suggestion = suggest_ebay_category(title, business_id, restrict=True, exclude_id=exclude)
-        if not suggestion:
-            fallback = get_ebay_settings(business_id).get("EBAY_DEFAULT_CATEGORY_ID", "") or "26261"
-            suggestion = {"category_id": fallback, "name": "Other Business & Industrial", "path": ""}
-        supabase.table("listings").update({"ebay_category_id": suggestion["category_id"]}).eq("id", item_id).execute()
+        suggestion = suggest_ebay_category(title, business_id, restrict=True, exclude_id=exclude, mode=effective_mode)
+        if not suggestion or not suggestion.get("category_id"):
+            fallback_mode_id = _motors_fallback_id(business_id) if effective_mode == "motors" else \
+                (get_ebay_settings(business_id).get("EBAY_DEFAULT_CATEGORY_ID", "") or "26261")
+            suggestion = {"category_id": fallback_mode_id, "name": None, "path": ""}
+        supabase.table("listings").update({
+            "ebay_category_id": suggestion["category_id"],
+            "category_mode": effective_mode,
+        }).eq("id", item_id).execute()
         return {"ok": True, **suggestion}
     except HTTPException:
         raise
@@ -3786,8 +3854,9 @@ async def archive_batch(request: Request):
 # ── API: BATCH UPLOAD ─────────────────────────────────────────── #
 
 class CreateGroup(BaseModel):
-    session_id: str
-    condition:  str
+    session_id:    str
+    condition:     str
+    category_mode: str = "industrial"
 
 @app.post("/api/groups")
 async def create_group(body: CreateGroup, request: Request):
@@ -3802,11 +3871,13 @@ async def create_group(body: CreateGroup, request: Request):
                 raise HTTPException(402, "Scan limit reached. Please contact us to upgrade your plan.")
             # Increment scan count
             supabase.table("businesses").update({"scan_count": scan_count + 1}).eq("id", business_id).execute()
+        category_mode = body.category_mode if body.category_mode in ("industrial", "motors") else "industrial"
         res = supabase.table("listing_groups").insert({
             "session_id": body.session_id,
             "status":     "waiting",
             "quantity":   1,
             "condition":  body.condition,
+            "category_mode": category_mode,
             "business_id": business_id,
             "created_at": datetime.utcnow().isoformat(),
         }).execute()
