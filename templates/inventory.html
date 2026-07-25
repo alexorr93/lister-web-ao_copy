@@ -75,7 +75,7 @@ tr:last-child td { border-bottom: none; }
 
   <div class="filter-bar">
     <button class="btn btn-primary" onclick="syncInventory()" title="Shopify: live API call, pulls fresh right now. eBay: reads from the local cache last filled by 'Sync Active Listings' on the Lots page — does NOT call eBay itself.">🔄 Sync Inventory <span style="font-size:10px;opacity:.8;">(Shopify: live · eBay: cached — sync on Lots page first)</span></button>
-    <button class="btn" onclick="pullEbayPhotos()" title="Downloads up to 2 real photos per eBay-only item into Lister's own storage — a one-time step needed before these items can be published to Shopify.">📥 Pull eBay Photos (into our storage)</button>
+    <button class="btn" onclick="pullEbayPhotos()" title="Downloads up to 2 real photos per eBay-ONLY item (skips anything already matched to a Shopify product) into Lister's own storage — a one-time step needed before these items can be published to Shopify.">📥 Pull eBay-Only Photos (into our storage)</button>
     <input type="text" class="field-input" id="search-input" placeholder="Search title/SKU..." oninput="renderTable()" style="width:260px;"/>
     <select class="field-input" id="filter-select" onchange="renderTable()">
       <option value="">All</option>
@@ -201,7 +201,7 @@ async function pollPullEbayPhotos() {
         document.getElementById('photo-pull-status').textContent = `❌ ${data.result.error}`;
       } else {
         document.getElementById('photo-pull-status').textContent =
-          `✅ Checked ${data.result.checked}, downloaded photos for ${data.result.downloaded} item(s), ${data.result.already_had_photos} already had photos, ${data.result.no_photos_found} had none available on eBay.`;
+          `✅ eBay-only items: ${data.result.ebay_only_count}. Checked ${data.result.checked}, downloaded photos for ${data.result.downloaded}, ${data.result.already_had_photos} already had photos, ${data.result.no_photos_found} had none available on eBay.`;
       }
     }
   } catch(e) {

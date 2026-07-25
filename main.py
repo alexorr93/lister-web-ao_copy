@@ -7276,22 +7276,39 @@ def _download_and_store_ebay_photos(item_id: str, ebay_token: str, max_photos: i
 _ebay_photo_pull_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
 
 def _ebay_photo_pull_work(business_id: str) -> dict:
-    """For every eBay-only inventory row that doesn't already have local photos
-    pulled down, downloads up to 2 real photos from the live eBay listing into
-    Lister's own storage (see _download_and_store_ebay_photos) and records the
+    """For every genuinely eBay-ONLY inventory row (no matching Shopify product —
+    same definition the Inventory tab itself uses) that doesn't already have local
+    photos pulled down, downloads up to 2 real photos from the live eBay listing
+    into Lister's own storage (see _download_and_store_ebay_photos) and records the
     resulting photo_ids on the ebay_inventory row itself (local_photo_ids, comma-
-    separated). Deliberately does NOT touch anything about Shopify publishing --
-    that's a separate step, this only guarantees a local, permanent copy exists."""
+    separated). Matched items are skipped entirely -- they already have real photos
+    from the Shopify side, no need to spend eBay API calls on them. Deliberately
+    does NOT touch anything about Shopify publishing -- that's a separate step,
+    this only guarantees a local, permanent copy exists for the items that need it."""
     token = get_ebay_access_token(business_id)
-    rows = []
+
+    # Which ebay_inventory rows are actually eBay-only, per inventory_match (the
+    # same table /api/inventory itself reads to decide "eBay only" vs "Matched").
+    match_rows = []
     start = 0
     while True:
-        page = supabase.table("ebay_inventory").select("id,item_id,local_photo_ids")\
+        page = supabase.table("inventory_match").select("ebay_id,shopify_id")\
             .eq("business_id", business_id).range(start, start + 999).execute().data or []
-        rows.extend(page)
+        match_rows.extend(page)
         if len(page) < 1000:
             break
         start += 1000
+    ebay_only_ids = list({r["ebay_id"] for r in match_rows if r.get("ebay_id") and not r.get("shopify_id")})
+
+    if not ebay_only_ids:
+        return {"checked": 0, "downloaded": 0, "already_had_photos": 0, "no_photos_found": 0, "ebay_only_count": 0}
+
+    rows = []
+    for i in range(0, len(ebay_only_ids), 200):
+        chunk = ebay_only_ids[i:i+200]
+        page = supabase.table("ebay_inventory").select("id,item_id,local_photo_ids")\
+            .eq("business_id", business_id).in_("id", chunk).execute().data or []
+        rows.extend(page)
 
     checked, downloaded, already_had, no_photos_found = 0, 0, 0, 0
     for row in rows:
@@ -7308,7 +7325,8 @@ def _ebay_photo_pull_work(business_id: str) -> dict:
             downloaded += 1
         else:
             no_photos_found += 1
-    return {"checked": checked, "downloaded": downloaded, "already_had_photos": already_had, "no_photos_found": no_photos_found}
+    return {"checked": checked, "downloaded": downloaded, "already_had_photos": already_had,
+            "no_photos_found": no_photos_found, "ebay_only_count": len(ebay_only_ids)}
 
 async def _run_ebay_photo_pull_background(business_id: str):
     import asyncio, datetime as _dt
