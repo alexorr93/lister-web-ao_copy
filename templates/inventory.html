@@ -209,7 +209,7 @@ function renderTable() {
     return;
   }
   let html = `<table><thead><tr>
-    <th>Title</th><th>eBay Item ID</th><th>eBay SKU</th><th>eBay Qty</th><th>Shopify Product ID</th><th>Shopify SKU</th><th>Shopify Qty</th><th>Shopify Price</th><th>Status</th><th>Matched By</th><th>HD_ID</th><th>Action</th><th>Match</th>
+    <th></th><th>Title</th><th>eBay Item ID</th><th>eBay SKU</th><th>eBay Qty</th><th>Shopify Product ID</th><th>Shopify SKU</th><th>Shopify Qty</th><th>Shopify Price</th><th>Status</th><th>Matched By</th><th>HD_ID</th><th>Action</th><th>Match</th>
   </tr></thead><tbody>`;
   for (const r of filtered) {
     const status = !r.ebay_item_id ? '<span class="missing">Shopify only</span>'
@@ -230,7 +230,11 @@ function renderTable() {
     const matchCell = (!r.ebay_item_id || !r.shopify_product_id)
       ? `<button class="btn" style="font-size:11px;padding:4px 8px;" onclick="openManualMatch('${r.id}', ${r.ebay_item_id ? 'true' : 'false'})">🔗 Manual Match</button>`
       : '<span class="muted">—</span>';
+    const photoCell = r.ebay_gallery_url
+      ? `<img src="${escapeHtml(r.ebay_gallery_url)}" style="width:36px;height:36px;object-fit:cover;border-radius:4px;" loading="lazy" onerror="this.style.display='none'"/>`
+      : '';
     html += `<tr>
+      <td>${photoCell}</td>
       <td>${escapeHtml(r.title)}</td>
       <td class="muted">${escapeHtml(r.ebay_item_id || '—')}</td>
       <td class="muted">${escapeHtml(r.ebay_sku || '—')}</td>
