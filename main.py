@@ -368,6 +368,24 @@ def _lot_prefix(sku: str) -> str:
     can't drift between them."""
     return sku.split("-", 1)[0] if "-" in sku else sku
 
+def _require_valid_lot_sku_for_publish(business_id: str, listing: dict):
+    """Server-side twin of the frontend's validateLotSkusForPublish/lotSkuFor check —
+    that one only lives in JavaScript, so it protects the normal buttons but nothing
+    that might ever call these publish endpoints directly. Raises 400 with the same
+    'must match a real lot' message unless the listing's ebay_sku prefix matches an
+    actual row on the Lots page. Called by all three publish endpoints (eBay v1,
+    eBay v2, Shopify) so a bad SKU can never reach a live platform listing no matter
+    which path is used to get there."""
+    sku = (listing.get("ebay_sku") or "").strip()
+    if not sku:
+        raise HTTPException(400, "This item has no Lot SKU set — assign one from the Lots page before publishing.")
+    prefix = _lot_prefix(sku)
+    known_lot_skus = {a["sku"] for a in (supabase.table("acquisitions").select("sku")
+                       .eq("business_id", business_id).execute().data or []) if a.get("sku")}
+    if prefix not in known_lot_skus:
+        raise HTTPException(400, f"SKU '{sku}' doesn't match any real lot on the Lots page — "
+                                  f"fix it there or on this item's Lot SKU field before publishing.")
+
 def _sku_needs_assignment(sku: str) -> bool:
     """True for a blank SKU or a bare 'PREFIX-' placeholder (nothing after the dash)
     — the v2 eBay push path allows duplicate bare SKUs like 'AM1-' on purpose (see
@@ -1399,6 +1417,7 @@ async def submit_to_ebay(item_id: str, body: EbaySubmit, request: Request):
         if not res.data:
             raise HTTPException(404, "Listing not found")
         listing = res.data[0]
+        _require_valid_lot_sku_for_publish(business_id, listing)
         result = push_listing_to_ebay(listing, body.mode, body.hours_from_now, body.brand, body.mpn)
         update = {
             "ebay_offer_id": result["offer_id"],
@@ -1445,6 +1464,7 @@ async def submit_to_ebay_v2(item_id: str, body: EbaySubmit, request: Request):
         if not res.data:
             raise HTTPException(404, "Listing not found")
         listing = res.data[0]
+        _require_valid_lot_sku_for_publish(business_id, listing)
         if listing.get("ebay_item_id") and not listing.get("ebay_offer_id") and body.mode != "draft":
             raise HTTPException(400, "Already published — re-submitting isn't supported yet. Use the SKU field to relabel it instead.")
         result = push_listing_to_ebay_v2(listing, body.mode, body.hours_from_now, body.brand, body.mpn)
@@ -8471,6 +8491,7 @@ async def api_shopify_publish(item_id: str, request: Request):
         if not res.data:
             raise HTTPException(404, "Listing not found")
         listing = res.data[0]
+        _require_valid_lot_sku_for_publish(business_id, listing)
         result = push_listing_to_shopify(listing)
         try:
             supabase.table("listings").update({
