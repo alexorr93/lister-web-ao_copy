@@ -5495,8 +5495,17 @@ def _scan_bidspotter_catalogs(max_pages: int = 40) -> dict:
         url = f"https://www.bidspotter.com/en-us/auction-catalogues?page={page}"
         resp = _requests.get(url, headers=_BIDSPOTTER_HEADERS, timeout=30)
         if resp.status_code >= 400:
-            page_diagnostics.append({"page": page, "status": resp.status_code, "cards_found": 0, "parsed": 0})
+            # Capture the actual response body, not just the status -- a bare 405
+            # doesn't say WHO blocked it (Cloudflare/Akamai/a WAF rule/BidSpotter's
+            # own app) or why. Most bot-block pages say so explicitly in the body.
+            # Truncated to keep this readable in the UI's status message.
+            page_diagnostics.append({
+                "page": page, "status": resp.status_code, "cards_found": 0, "parsed": 0,
+                "response_headers": dict(resp.headers),
+                "response_body_snippet": resp.text[:1500],
+            })
             print(f"_scan_bidspotter_catalogs: page {page} returned {resp.status_code}, stopping")
+            print(f"_scan_bidspotter_catalogs: response body snippet: {resp.text[:1500]}")
             break
         soup = BeautifulSoup(resp.text, "html.parser")
 
