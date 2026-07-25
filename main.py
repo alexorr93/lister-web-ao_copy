@@ -7250,6 +7250,108 @@ def fetch_ebay_listing_photo_urls(token: str, item_id: str) -> list:
         print(f"fetch_ebay_listing_photo_urls failed for {item_id}: {e}")
         return []
 
+def _download_and_store_ebay_photos(item_id: str, ebay_token: str, max_photos: int = 2) -> list:
+    """Downloads up to max_photos of an eBay listing's real photos and stores them in
+    Lister's own 'part-photos' Supabase bucket -- so eBay-only inventory items get a
+    permanent local copy in our own environment instead of only ever referencing
+    eBay's external CDN URL. Returns the local photo_ids actually stored (empty list
+    if eBay had no photos or every download/upload failed)."""
+    import requests as _req
+    urls = fetch_ebay_listing_photo_urls(ebay_token, item_id)[:max_photos]
+    stored_ids = []
+    for i, url in enumerate(urls):
+        try:
+            resp = _req.get(url, timeout=15)
+            resp.raise_for_status()
+            photo_id = f"ebay-{item_id}-{i+1}.jpg"
+            supabase.storage.from_("part-photos").upload(
+                photo_id, resp.content,
+                {"content-type": "image/jpeg", "upsert": "true"},
+            )
+            stored_ids.append(photo_id)
+        except Exception as e:
+            print(f"_download_and_store_ebay_photos: item {item_id} photo {i+1} failed: {e}")
+    return stored_ids
+
+_ebay_photo_pull_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
+
+def _ebay_photo_pull_work(business_id: str) -> dict:
+    """For every eBay-only inventory row that doesn't already have local photos
+    pulled down, downloads up to 2 real photos from the live eBay listing into
+    Lister's own storage (see _download_and_store_ebay_photos) and records the
+    resulting photo_ids on the ebay_inventory row itself (local_photo_ids, comma-
+    separated). Deliberately does NOT touch anything about Shopify publishing --
+    that's a separate step, this only guarantees a local, permanent copy exists."""
+    token = get_ebay_access_token(business_id)
+    rows = []
+    start = 0
+    while True:
+        page = supabase.table("ebay_inventory").select("id,item_id,local_photo_ids")\
+            .eq("business_id", business_id).range(start, start + 999).execute().data or []
+        rows.extend(page)
+        if len(page) < 1000:
+            break
+        start += 1000
+
+    checked, downloaded, already_had, no_photos_found = 0, 0, 0, 0
+    for row in rows:
+        checked += 1
+        if row.get("local_photo_ids"):
+            already_had += 1
+            continue
+        item_id = row.get("item_id") or row.get("id")
+        if not item_id:
+            continue
+        ids = _download_and_store_ebay_photos(str(item_id), token, max_photos=2)
+        if ids:
+            supabase.table("ebay_inventory").update({"local_photo_ids": ",".join(ids)}).eq("id", row["id"]).execute()
+            downloaded += 1
+        else:
+            no_photos_found += 1
+    return {"checked": checked, "downloaded": downloaded, "already_had_photos": already_had, "no_photos_found": no_photos_found}
+
+async def _run_ebay_photo_pull_background(business_id: str):
+    import asyncio, datetime as _dt
+    try:
+        result = await asyncio.to_thread(_ebay_photo_pull_work, business_id)
+        _ebay_photo_pull_job_status[business_id] = {
+            "running": False, "result": result,
+            "started_at": _ebay_photo_pull_job_status.get(business_id, {}).get("started_at"),
+            "finished_at": _dt.datetime.utcnow().isoformat(),
+        }
+    except Exception as e:
+        _ebay_photo_pull_job_status[business_id] = {
+            "running": False, "result": {"error": str(e)},
+            "started_at": _ebay_photo_pull_job_status.get(business_id, {}).get("started_at"),
+            "finished_at": _dt.datetime.utcnow().isoformat(),
+        }
+
+@app.post("/api/inventory/pull-ebay-photos")
+async def pull_ebay_photos(request: Request):
+    """Kicks off the eBay-photo-download job as a background task (a full inventory
+    can have thousands of items, well past a reverse proxy's request timeout — same
+    pattern as every other bulk sync in this file)."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio, datetime as _dt
+    if _ebay_photo_pull_job_status.get(business_id, {}).get("running"):
+        return {"started": False, "already_running": True}
+    _ebay_photo_pull_job_status[business_id] = {
+        "running": True, "result": None,
+        "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None,
+    }
+    asyncio.create_task(_run_ebay_photo_pull_background(business_id))
+    return {"started": True}
+
+@app.get("/api/inventory/pull-ebay-photos-status")
+async def pull_ebay_photos_status(request: Request, response: Response):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    response.headers["Cache-Control"] = "no-store"
+    return _ebay_photo_pull_job_status.get(business_id, {"running": False, "result": None, "started_at": None, "finished_at": None})
+
 def _ebay_get_item_status(token: str, item_id: str) -> dict:
     """Trading API GetItem — the genuine SELLER-facing endpoint for 'what's the
     status of my own listing', works for any item regardless of how it was

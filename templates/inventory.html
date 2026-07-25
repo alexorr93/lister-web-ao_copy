@@ -75,6 +75,7 @@ tr:last-child td { border-bottom: none; }
 
   <div class="filter-bar">
     <button class="btn btn-primary" onclick="syncInventory()" title="Shopify: live API call, pulls fresh right now. eBay: reads from the local cache last filled by 'Sync Active Listings' on the Lots page — does NOT call eBay itself.">🔄 Sync Inventory <span style="font-size:10px;opacity:.8;">(Shopify: live · eBay: cached — sync on Lots page first)</span></button>
+    <button class="btn" onclick="pullEbayPhotos()" title="Downloads up to 2 real photos per eBay-only item into Lister's own storage — a one-time step needed before these items can be published to Shopify.">📥 Pull eBay Photos (into our storage)</button>
     <input type="text" class="field-input" id="search-input" placeholder="Search title/SKU..." oninput="renderTable()" style="width:260px;"/>
     <select class="field-input" id="filter-select" onchange="renderTable()">
       <option value="">All</option>
@@ -85,6 +86,7 @@ tr:last-child td { border-bottom: none; }
     </select>
   </div>
   <div id="sync-status" class="status-msg"></div>
+  <div id="photo-pull-status" class="status-msg"></div>
 
   <div class="summary-row" id="summary-row" style="display:none;">
     <div class="summary-card"><div class="num" id="stat-total">0</div><div class="label">Total Rows</div></div>
@@ -167,6 +169,43 @@ async function pollSync() {
     }
   } catch(e) {
     document.getElementById('sync-status').textContent = `❌ ${e.message}`;
+  }
+}
+
+async function pullEbayPhotos() {
+  document.getElementById('photo-pull-status').textContent = 'Starting eBay photo download (background, can take a while for many items)...';
+  try {
+    const r = await fetch('/api/inventory/pull-ebay-photos', {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed to start');
+    if (data.already_running) {
+      document.getElementById('photo-pull-status').textContent = 'Already running — polling...';
+    }
+    pollPullEbayPhotos();
+  } catch(e) {
+    document.getElementById('photo-pull-status').textContent = `❌ ${e.message}`;
+  }
+}
+
+async function pollPullEbayPhotos() {
+  try {
+    const r = await fetch('/api/inventory/pull-ebay-photos-status');
+    const data = await r.json();
+    if (data.running) {
+      document.getElementById('photo-pull-status').textContent = 'Downloading eBay photos into our storage — safe to leave open...';
+      setTimeout(pollPullEbayPhotos, 4000);
+      return;
+    }
+    if (data.result) {
+      if (data.result.error) {
+        document.getElementById('photo-pull-status').textContent = `❌ ${data.result.error}`;
+      } else {
+        document.getElementById('photo-pull-status').textContent =
+          `✅ Checked ${data.result.checked}, downloaded photos for ${data.result.downloaded} item(s), ${data.result.already_had_photos} already had photos, ${data.result.no_photos_found} had none available on eBay.`;
+      }
+    }
+  } catch(e) {
+    document.getElementById('photo-pull-status').textContent = `❌ ${e.message}`;
   }
 }
 
