@@ -265,11 +265,18 @@ function renderTable() {
     //    photos already downloaded into our own storage via 'Pull eBay-Only Photos'
     //    (ebay_local_photo_ids set) — the new path, using eBay's own title/price/sku
     //    plus those downloaded photos instead of anything from a listings row.
+    // Priority: if we've already downloaded real, verified photos for this item
+    // ourselves (ebay_local_photo_ids), ALWAYS use those — even when a Lister
+    // listing_id also happens to be matched. The old listing_id path relies on
+    // listing.photo_id (often blank for these) and then a live eBay-CDN fallback
+    // that has been silently failing to attach images at all — that's the actual
+    // cause of "published with no photo" even after photos were confirmed
+    // downloaded and verified. Our own downloaded copies are the reliable source.
     let actionCell;
-    if (!r.shopify_product_id && r.listing_id) {
-      actionCell = `<button class="btn" style="font-size:11px;padding:4px 8px;" onclick="publishRowToShopify(this, '${r.listing_id}')">🛍️ Publish to Shopify</button>`;
-    } else if (!r.shopify_product_id && !r.listing_id && r.ebay_item_id && r.ebay_local_photo_ids) {
+    if (!r.shopify_product_id && r.ebay_item_id && r.ebay_local_photo_ids) {
       actionCell = `<button class="btn" style="font-size:11px;padding:4px 8px;" onclick="publishEbayOnlyToShopify(this, '${r.ebay_item_id}')">🛍️ Publish to Shopify (eBay-only)</button>`;
+    } else if (!r.shopify_product_id && r.listing_id) {
+      actionCell = `<button class="btn" style="font-size:11px;padding:4px 8px;" onclick="publishRowToShopify(this, '${r.listing_id}')">🛍️ Publish to Shopify</button>`;
     } else if (!r.shopify_product_id && !r.listing_id && r.ebay_item_id) {
       actionCell = `<span class="muted" title="Click 'Pull eBay-Only Photos' above first — this item has no photos in our own storage yet.">— (pull photos first)</span>`;
     } else {
