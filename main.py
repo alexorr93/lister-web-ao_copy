@@ -6470,8 +6470,13 @@ def get_shopify_access_token(business_id: str, force_refresh: bool = False) -> s
     save_ebay_setting(business_id, "SHOPIFY_TOKEN_EXPIRES_AT", str(new_expires_at))
     return token
 
-def push_listing_to_shopify(listing: dict) -> dict:
-    """Creates an active product on Shopify via the Admin REST API."""
+def push_listing_to_shopify(listing: dict, image_urls_override: list = None) -> dict:
+    """Creates an active product on Shopify via the Admin REST API.
+    image_urls_override, when given, is used as-is (skips the photo_id/group_photos
+    lookup and the eBay-live-fallback below entirely) — for items that never had a
+    Lister listings row at all (a genuinely eBay-only inventory item), so there's no
+    photo_id to look up in the first place; the caller (see the eBay-only publish
+    endpoint) already resolved real photo URLs from Lister's own storage."""
     import requests as _req
 
     biz_id = listing.get("business_id")
@@ -6491,20 +6496,23 @@ def push_listing_to_shopify(listing: dict) -> dict:
     qty   = int(listing.get("quantity") or 1)
     brand = (listing.get("brand") or "").strip() or "Unbranded"
     sku   = listing.get("ebay_sku") or f"lister-{listing['id']}"
-    pid   = str(listing.get("photo_id") or "")
-    images = [{"src": photo_url(p)} for p in get_all_photo_ids(pid) if photo_url(p)] if pid else []
-    if not images and listing.get("ebay_item_id"):
-        # Lister's own storage has nothing for this listing (e.g. it was published
-        # under an old business account whose photos live in a different, never-
-        # copied-over storage instance) -- fall back to pulling the real, currently-
-        # live photos straight off the eBay listing itself, since it's already
-        # published there and eBay's image CDN is always publicly reachable.
-        try:
-            ebay_token = get_ebay_access_token(biz_id)
-            ebay_urls = fetch_ebay_listing_photo_urls(ebay_token, listing["ebay_item_id"])
-            images = [{"src": u} for u in ebay_urls]
-        except Exception as e:
-            print(f"push_listing_to_shopify: eBay photo fallback failed: {e}")
+    if image_urls_override is not None:
+        images = [{"src": u} for u in image_urls_override]
+    else:
+        pid = str(listing.get("photo_id") or "")
+        images = [{"src": photo_url(p)} for p in get_all_photo_ids(pid) if photo_url(p)] if pid else []
+        if not images and listing.get("ebay_item_id"):
+            # Lister's own storage has nothing for this listing (e.g. it was published
+            # under an old business account whose photos live in a different, never-
+            # copied-over storage instance) -- fall back to pulling the real, currently-
+            # live photos straight off the eBay listing itself, since it's already
+            # published there and eBay's image CDN is always publicly reachable.
+            try:
+                ebay_token = get_ebay_access_token(biz_id)
+                ebay_urls = fetch_ebay_listing_photo_urls(ebay_token, listing["ebay_item_id"])
+                images = [{"src": u} for u in ebay_urls]
+            except Exception as e:
+                print(f"push_listing_to_shopify: eBay photo fallback failed: {e}")
 
     body = {
         "product": {
@@ -6809,7 +6817,7 @@ def fetch_ebay_inventory_items(business_id: str) -> list:
     res_rows = []
     start = 0
     while True:
-        page = (supabase.table("ebay_listing_status").select("item_id,sku,title,quantity_available,gallery_url")
+        page = (supabase.table("ebay_listing_status").select("item_id,sku,title,quantity_available,gallery_url,price")
                 .eq("business_id", business_id).eq("listing_status", "Active")
                 .range(start, start + 999).execute().data or [])
         res_rows.extend(page)
@@ -6820,6 +6828,7 @@ def fetch_ebay_inventory_items(business_id: str) -> list:
         "sku": r.get("sku") or "", "title": r.get("title") or "",
         "quantity": r.get("quantity_available") or 0, "condition": "",
         "item_id": r.get("item_id"), "gallery_url": r.get("gallery_url"),
+        "price": r.get("price"),
     } for r in res_rows if r.get("item_id")]
 
 def fetch_shopify_inventory_items(business_id: str) -> list:
@@ -7040,7 +7049,7 @@ def sync_inventory(business_id: str) -> dict:
 
     ebay_records = [{
         "id": it["item_id"], "business_id": business_id, "sku": it["sku"], "title": it["title"],
-        "quantity": it["quantity"], "condition": it["condition"], "price": None,
+        "quantity": it["quantity"], "condition": it["condition"], "price": it.get("price"),
         "category_id": None, "offer_id": None, "listing_status": None, "item_id": it["item_id"],
         "gallery_url": it.get("gallery_url"),
     } for it in ebay_items if it.get("item_id")]
@@ -8551,7 +8560,8 @@ async def list_inventory(request: Request):
             "hd_id": row.get("hd_id"),
             "ebay_sku": e.get("sku"), "ebay_qty": e.get("quantity"), "ebay_condition": e.get("condition"),
             "ebay_item_id": e.get("item_id") or (row.get("ebay_id") if row.get("ebay_id") else None),
-            "ebay_gallery_url": e.get("gallery_url"),
+            "ebay_gallery_url": e.get("gallery_url"), "ebay_price": e.get("price"),
+            "ebay_local_photo_ids": e.get("local_photo_ids"),
             "shopify_sku": s.get("sku"), "shopify_qty": s.get("quantity"), "shopify_price": s.get("price"), "shopify_status": s.get("status"),
             "shopify_product_id": s.get("product_id") or (row.get("shopify_id") if row.get("shopify_id") else None),
             "listing_id": (matching_listing.get("id") if matching_listing and not matching_listing.get("shopify_product_id") else None),
@@ -8642,10 +8652,49 @@ async def api_shopify_publish(item_id: str, request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        try:
-            supabase.table("listings").update({"shopify_status": "failed", "shopify_error": str(e)}).eq("id", item_id).execute()
-        except Exception:
-            pass
+        raise HTTPException(500, str(e))
+
+@app.post("/api/inventory/{row_id}/publish-ebay-only-to-shopify")
+async def publish_ebay_only_to_shopify(row_id: str, request: Request):
+    """Publishes a genuinely eBay-only inventory item (no Lister listings row behind
+    it at all — a plain eBay-native item Lister never touched) to Shopify, using the
+    real photos already downloaded into Lister's own storage by
+    /api/inventory/pull-ebay-photos. Refuses to run until that step has actually
+    happened for this specific item (checks for a non-empty local_photo_ids), rather
+    than silently falling back to eBay's external CDN or publishing with no photos —
+    those photos are meant to live in our own environment first, by design."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    res = supabase.table("ebay_inventory").select("*").eq("id", row_id).eq("business_id", business_id).limit(1).execute()
+    if not res.data:
+        raise HTTPException(404, "eBay inventory item not found")
+    row = res.data[0]
+    local_photo_ids = (row.get("local_photo_ids") or "").strip()
+    if not local_photo_ids:
+        raise HTTPException(400, "No local photos yet for this item — click 'Pull eBay-Only Photos' first.")
+    photo_ids = [p.strip() for p in local_photo_ids.split(",") if p.strip()]
+    image_urls = [photo_url(p) for p in photo_ids if photo_url(p)]
+    if not image_urls:
+        raise HTTPException(400, "local_photo_ids was set but none resolved to a real photo URL — re-run the photo pull for this item.")
+
+    synthetic_listing = {
+        "business_id": business_id,
+        "title": row.get("title"),
+        "price": row.get("price"),
+        "quantity": row.get("quantity") or 1,
+        "ebay_sku": row.get("sku"),
+        "id": row_id,
+    }
+    # Same lock every other publish path enforces — a SKU must match a real lot
+    # before anything goes live, no exceptions for this path either.
+    _require_valid_lot_sku_for_publish(business_id, synthetic_listing)
+    try:
+        result = push_listing_to_shopify(synthetic_listing, image_urls_override=image_urls)
+        return {"ok": True, **result}
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(500, str(e))
 
 # ── SETTINGS ──────────────────────────────────────────────────── #

@@ -258,14 +258,23 @@ function renderTable() {
     const hdCell = r.hd_id
       ? `<span class="muted" style="font-family:monospace;font-size:11px;" title="${escapeHtml(r.hd_id)}">🔒 ${escapeHtml(r.hd_id.slice(0, 8))}...</span>`
       : '<span class="muted">—</span>';
-    // Only offer this for eBay-only rows with a real Lister listing behind them —
-    // title/price/photos/description all live on that listings row, so this is
-    // the same publish path the main intake page uses, just triggered from here.
-    // A genuinely eBay-native item Lister never touched has nothing to publish
-    // from (no saved photos locally), so no button shows for those at all.
-    const actionCell = (!r.shopify_product_id && r.listing_id)
-      ? `<button class="btn" style="font-size:11px;padding:4px 8px;" onclick="publishRowToShopify(this, '${r.listing_id}')">🛍️ Publish to Shopify</button>`
-      : '<span class="muted">—</span>';
+    // Two ways an item can be published to Shopify from here:
+    // 1. A real Lister listing behind it (title/price/photos/description all live
+    //    on that listings row) — the original path, unchanged.
+    // 2. A genuinely eBay-only item with no Lister listing at all, but with real
+    //    photos already downloaded into our own storage via 'Pull eBay-Only Photos'
+    //    (ebay_local_photo_ids set) — the new path, using eBay's own title/price/sku
+    //    plus those downloaded photos instead of anything from a listings row.
+    let actionCell;
+    if (!r.shopify_product_id && r.listing_id) {
+      actionCell = `<button class="btn" style="font-size:11px;padding:4px 8px;" onclick="publishRowToShopify(this, '${r.listing_id}')">🛍️ Publish to Shopify</button>`;
+    } else if (!r.shopify_product_id && !r.listing_id && r.ebay_item_id && r.ebay_local_photo_ids) {
+      actionCell = `<button class="btn" style="font-size:11px;padding:4px 8px;" onclick="publishEbayOnlyToShopify(this, '${r.id}')">🛍️ Publish to Shopify (eBay-only)</button>`;
+    } else if (!r.shopify_product_id && !r.listing_id && r.ebay_item_id) {
+      actionCell = `<span class="muted" title="Click 'Pull eBay-Only Photos' above first — this item has no photos in our own storage yet.">— (pull photos first)</span>`;
+    } else {
+      actionCell = '<span class="muted">—</span>';
+    }
     const matchCell = (!r.ebay_item_id || !r.shopify_product_id)
       ? `<button class="btn" style="font-size:11px;padding:4px 8px;" onclick="openManualMatch('${r.id}', ${r.ebay_item_id ? 'true' : 'false'})">🔗 Manual Match</button>`
       : '<span class="muted">—</span>';
@@ -307,6 +316,23 @@ async function publishRowToShopify(btn, listingId) {
     alert(`Failed to publish: ${e.message}`);
     btn.disabled = false;
     btn.textContent = '🛍️ Publish to Shopify';
+  }
+}
+
+async function publishEbayOnlyToShopify(btn, rowId) {
+  if (!confirm("Publish this eBay-only item to Shopify now, using eBay's own title/price/SKU and the photos already downloaded into our own storage?")) return;
+  btn.disabled = true;
+  btn.textContent = 'Publishing...';
+  try {
+    const r = await fetch(`/api/inventory/${rowId}/publish-ebay-only-to-shopify`, {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    toast('Published to Shopify ✓');
+    syncInventory();
+  } catch(e) {
+    alert(`Failed to publish: ${e.message}`);
+    btn.disabled = false;
+    btn.textContent = '🛍️ Publish to Shopify (eBay-only)';
   }
 }
 
