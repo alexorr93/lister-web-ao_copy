@@ -5548,22 +5548,35 @@ def _run_auto_capture(session_id: str, source_url: str, capture_scope: Optional[
         print(f"[auto-capture] session {session_id} failed: {e}")
         supabase.table("auction_capture_sessions").update({"status": "auto_capture_failed", "capture_scope": f"{capture_scope or ''} (auto-capture error: {e})"}).eq("id", session_id).execute()
 
+# Roller and BidSpotter's server-side scrapers currently always fail (Roller: GraphQL
+# 400s / no auction ID on non-catalog URLs like watchlists; BidSpotter: bot-detection
+# wall). Auto-attempting them just produces a confusing failed session every time, so
+# these two route straight to "needs Claude" instead of trying and failing first.
+CLAUDE_ONLY_SITES = {"roller", "bidspotter"}
+
 @app.post("/api/auction/capture/sessions")
 async def create_capture_session(request: Request, body: AuctionCaptureSessionCreate, background_tasks: BackgroundTasks):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     site = _detect_auction_site(body.source_url)
+    auto_capture = bool(site) and site not in CLAUDE_ONLY_SITES
+    if site in CLAUDE_ONLY_SITES:
+        status = "awaiting_claude_capture"
+    elif auto_capture:
+        status = "capturing"
+    else:
+        status = "in_progress"
     row = {
         "business_id": str(business_id),
         "source_url": body.source_url,
         "name": body.name or body.source_url,
         "capture_scope": body.capture_scope or "all",
-        "status": "capturing" if site else "in_progress",
+        "status": status,
     }
     res = supabase.table("auction_capture_sessions").insert(row).execute()
     session = res.data[0]
-    if site:
+    if auto_capture:
         background_tasks.add_task(_run_auto_capture, session["id"], body.source_url, body.capture_scope, site)
     return session
 

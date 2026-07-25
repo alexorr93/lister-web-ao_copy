@@ -2235,6 +2235,7 @@ function _captureStatusLabel(s) {
   if (s === 'stop_requested') return 'stopping...';
   if (s === 'done') return 'done';
   if (s === 'auto_capture_failed') return 'capture failed';
+  if (s === 'awaiting_claude_capture') return '⏳ ask Claude to capture this';
   return s;
 }
 
