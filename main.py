@@ -2115,18 +2115,22 @@ def _apply_cash_to_profit(business_id: str):
         start += 1000
 
 def _apply_shopify_sales_to_profit(business_id: str):
-    """recalculate_acquisition_profits() only sums eBay payouts (the Lots page's
-    "eBay"/Total_Payouts column is exactly that — eBay-specific, per its own name), so
-    Shopify sales never counted toward a lot's Profit/ROI even though every Shopify
-    order is already synced into the same local `orders` table eBay orders use. Adds
-    each lot's matching Shopify orders.final_net (already shipping-cost-adjusted) into
-    Profit here, same layering approach as _apply_cash_to_profit — reads whatever
-    Profit that function just left (baseline + cash), so this always adds Shopify on
-    top of a fresh, not previously-Shopify-corrected, number."""
+    """recalculate_acquisition_profits() only sums eBay payouts into total_payouts
+    (the Postgres function has no SQL source in this repo, but its own naming and
+    behavior confirm it's eBay-only), so Shopify sales never counted toward a lot's
+    Total_Payouts/Profit/ROI even though every Shopify order is already synced into
+    the same local `orders` table eBay orders use. This adds each lot's matching
+    Shopify orders.final_net (already shipping-cost-adjusted) both as its own visible
+    shopify_payouts column (for the Lots page's Shopify column, shown between eBay
+    and Total_Payouts) and folded into total_payouts itself, so Total_Payouts is a
+    genuine eBay+Shopify grand total. Same layering approach as _apply_cash_to_profit
+    — reads whatever total_payouts/profit that function just left (RPC baseline +
+    cash), so this always adds Shopify on top of a fresh, not previously-corrected,
+    number rather than compounding across repeated Recalculate runs."""
     acquisitions = []
     start = 0
     while True:
-        page = supabase.table("acquisitions").select("id,sku,cost,profit")\
+        page = supabase.table("acquisitions").select("id,sku,cost,profit,total_payouts")\
             .eq("business_id", business_id).range(start, start + 999).execute().data or []
         acquisitions.extend(page)
         if len(page) < 1000:
@@ -2156,8 +2160,14 @@ def _apply_shopify_sales_to_profit(business_id: str):
         sales = shopify_sales_by_prefix.get(a.get("sku")) or 0
         cost = a.get("cost") or 0
         profit = (a.get("profit") or 0) + sales
+        total_payouts = (a.get("total_payouts") or 0) + sales
         roi_pct = round(profit / cost * 100, 2) if cost else None
-        supabase.table("acquisitions").update({"profit": profit, "roi_pct": roi_pct}).eq("id", a["id"]).execute()
+        supabase.table("acquisitions").update({
+            "profit": profit,
+            "roi_pct": roi_pct,
+            "shopify_payouts": sales,
+            "total_payouts": total_payouts,
+        }).eq("id", a["id"]).execute()
 
 @app.get("/api/acquisitions/debug-sku/{sku}")
 async def debug_acquisition_sku(sku: str, request: Request):

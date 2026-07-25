@@ -563,7 +563,7 @@ function renderTable() {
   });
   let html = `<table><thead><tr>
     <th>SKU</th><th>Lots</th><th>Payment_Method</th><th>Date</th><th>Cost</th><th>Cash</th>
-    <th>eBay</th><th>Total_Payouts</th><th>Profit</th><th>ROI</th><th>Active Listings</th><th></th>
+    <th>eBay</th><th>Shopify</th><th>Total_Payouts</th><th>Profit</th><th>ROI</th><th>Active Listings</th><th></th>
   </tr></thead><tbody>`;
   for (const a of sorted) {
     const roiClass = a.roi_pct == null ? '' : (a.roi_pct >= 0 ? 'pos' : 'neg');
@@ -580,6 +580,7 @@ function renderTable() {
       <td${editCls} ${ed('cost', 'number')}>${fmtMoney(a.cost)}</td>
       <td${editCls} ${ed('cash', 'number')}>${fmtMoney(a.cash)}</td>
       <td>${fmtMoney(a.ebay)}</td>
+      <td>${fmtMoney(a.shopify_payouts)}</td>
       <td>${fmtMoney(a.total_payouts)}</td>
       <td class="${profitClass}">${fmtMoney(a.profit)}</td>
       <td class="${roiClass}">${a.roi_pct == null ? '—' : a.roi_pct + '%'}</td>
@@ -590,6 +591,7 @@ function renderTable() {
   const totalCost = sorted.reduce((n, a) => n + (a.cost || 0), 0);
   const totalCash = sorted.reduce((n, a) => n + (a.cash || 0), 0);
   const totalEbay = sorted.reduce((n, a) => n + (a.ebay || 0), 0);
+  const totalShopify = sorted.reduce((n, a) => n + (a.shopify_payouts || 0), 0);
   const totalPayouts = sorted.reduce((n, a) => n + (a.total_payouts || 0), 0);
   const totalProfit = sorted.reduce((n, a) => n + (a.profit || 0), 0);
   const totalActiveListingsValue = sorted.reduce((n, a) => n + (a.active_listings_value || 0), 0);
@@ -599,13 +601,14 @@ function renderTable() {
     <td>${fmtMoney(totalCost)}</td>
     <td>${fmtMoney(totalCash)}</td>
     <td>${fmtMoney(totalEbay)}</td>
+    <td>${fmtMoney(totalShopify)}</td>
     <td>${fmtMoney(totalPayouts)}</td>
     <td class="${totalProfit >= 0 ? 'pos' : 'neg'}">${fmtMoney(totalProfit)}</td>
     <td></td><td>${fmtMoney(totalActiveListingsValue)} <span class="muted">(${totalActiveListingsCount})</span></td><td></td>
   </tr>`;
   html += `<tr class="muted" style="border-top:1px solid var(--border);">
     <td colspan="4">Uncategorized (SKUs not matching any lot)</td>
-    <td></td><td></td><td></td>
+    <td></td><td></td><td></td><td></td>
     <td>${fmtMoney(uncategorized.sales_total)}</td>
     <td></td><td></td>
     <td>${fmtMoney(uncategorized.active_listings_value)} (${uncategorized.active_listings_count})</td>
