@@ -40,8 +40,33 @@ a { color: #60a5fa; }
   </div>
   <div id="scan-status" class="status-msg"></div>
 
+  <details style="margin-bottom:10px;" open>
+    <summary style="cursor:pointer;color:var(--text);font-size:14px;font-weight:600;margin-bottom:8px;">📦 Bulk upload — many catalogs in one file (the actual mechanism for all 349 + new ones)</summary>
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:8px;">
+      <div class="sub" style="margin-bottom:10px;">
+        Ask Claude in Chrome to visit each catalog, pull its Print Catalog export, and compile ALL of them into one file in this format (repeat the block per catalog):
+      </div>
+      <pre style="white-space:pre-wrap;background:#0f1420;padding:10px;border-radius:6px;font-size:11px;margin-bottom:10px;">===CATALOG===
+URL: https://www.bidspotter.com/en-us/auction-catalogues/.../catalogue-id-...
+TITLE: ...
+AUCTIONEER: ...
+END_DATE: ...
+STATE: ...
+---LOTS---
+1 Description of lot 1
+2 Description of lot 2
+===CATALOG===
+URL: ...
+(next catalog...)</pre>
+      <input type="file" id="bulk-file-input" accept=".txt" style="margin-bottom:10px;color:var(--text);"/>
+      <br/>
+      <button class="btn btn-primary" onclick="ingestBulk()">Upload & Process All Catalogs</button>
+      <div id="bulk-status" class="status-msg"></div>
+    </div>
+  </details>
+
   <details style="margin-bottom:18px;">
-    <summary style="cursor:pointer;color:var(--muted);font-size:13px;margin-bottom:8px;">➕ Add a catalog from a manual Print Catalog export (real lot count, not an estimate)</summary>
+    <summary style="cursor:pointer;color:var(--muted);font-size:13px;margin-bottom:8px;">➕ One-off: add a single catalog manually</summary>
     <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:8px;display:flex;flex-direction:column;gap:8px;">
       <input type="text" class="field-input" id="ingest-url" placeholder="Catalog URL (e.g. https://www.bidspotter.com/en-us/auction-catalogues/heath-industrial/catalogue-id-bsche10695)"/>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -165,6 +190,33 @@ function renderTable() {
   }
   html += '</tbody></table>';
   document.getElementById('table-area').innerHTML = html;
+}
+
+async function ingestBulk() {
+  const fileInput = document.getElementById('bulk-file-input');
+  const statusEl = document.getElementById('bulk-status');
+  if (!fileInput.files.length) {
+    statusEl.textContent = '❌ Choose a file first.';
+    return;
+  }
+  statusEl.textContent = 'Reading file...';
+  const text = await fileInput.files[0].text();
+  statusEl.textContent = `Processing ${text.split('===CATALOG===').length - 1} catalog block(s)...`;
+  try {
+    const r = await api('POST', '/api/auction-monitor/ingest-bulk', { text });
+    if (r.error) {
+      statusEl.textContent = `❌ ${r.error}`;
+    } else {
+      let msg = `✅ Processed ${r.catalogs_processed} catalogs — ${r.total_lots} total lots saved.`;
+      if (r.errors && r.errors.length) {
+        msg += ` ⚠️ ${r.errors.length} catalog(s) had no lots parsed: ${r.errors.map(e => e.catalog_url).join(', ')}`;
+      }
+      statusEl.textContent = msg;
+      loadCatalogs();
+    }
+  } catch(e) {
+    statusEl.textContent = `❌ ${e.message}`;
+  }
 }
 
 async function ingestLots() {

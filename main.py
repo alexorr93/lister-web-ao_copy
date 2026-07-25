@@ -5611,27 +5611,14 @@ def _parse_print_catalog_lots(raw_text: str) -> list:
             rows.append({"lot_number": m.group(1), "description": m.group(2)[:2000]})
     return rows
 
-@app.post("/api/auction-monitor/ingest-lots")
-async def auction_monitor_ingest_lots(request: Request):
-    """Ingests a manually-exported Print Catalog's lot list -- the reliable path
-    for individual catalogs, since BidSpotter's WAF (confirmed via the actual
-    challenge-page response body) blocks plain server-side requests to these
-    pages entirely; a real browser (e.g. Claude in Chrome) is required to get the
-    export in the first place. Upserts every lot row, then updates that catalog's
-    row in auction_catalogs with the REAL exact lot count (not the category-tag
-    estimate the list-page scan produces) and marks lot_count_is_estimate false."""
-    business_id = require_auth(request)
-    if not business_id:
-        raise HTTPException(401, "Unauthorized")
-    body = await request.json()
-    catalog_url = (body.get("catalog_url") or "").strip()
-    raw_text = body.get("raw_text") or ""
-    if not catalog_url or not raw_text:
-        raise HTTPException(400, "catalog_url and raw_text are required")
-
+def _ingest_one_catalog(business_id: str, catalog_url: str, raw_text: str, meta: dict) -> dict:
+    """Shared logic for ingesting one catalog's lot text -- used by both the
+    single-catalog endpoint (one-off / testing) and the bulk endpoint (the real
+    mechanism: one Claude-in-Chrome pass across many catalogs, one file upload,
+    every catalog processed in the same request instead of one submission each)."""
     lots = _parse_print_catalog_lots(raw_text)
     if not lots:
-        return {"parsed": 0, "error": "No lot lines matched -- expected lines starting with a lot number"}
+        return {"catalog_url": catalog_url, "parsed": 0, "error": "No lot lines matched"}
 
     now_iso = datetime.utcnow().isoformat()
     for lot in lots:
@@ -5649,23 +5636,103 @@ async def auction_monitor_ingest_lots(request: Request):
         else:
             supabase.table("auction_lots").insert(record).execute()
 
-    # Update the catalog's summary row with the real exact count, if it exists
-    catalog_fields = {}
-    for k in ("title", "auctioneer", "end_date", "state"):
-        if body.get(k):
-            catalog_fields[k] = body[k]
+    catalog_fields = {k: meta[k] for k in ("title", "auctioneer", "end_date", "state") if meta.get(k)}
     catalog_existing = supabase.table("auction_catalogs").select("id")\
         .eq("business_id", business_id).eq("catalog_url", catalog_url).limit(1).execute()
-    catalog_fields.update({
-        "lot_count": len(lots), "lot_count_is_estimate": False, "last_checked_at": now_iso,
-    })
+    catalog_fields.update({"lot_count": len(lots), "lot_count_is_estimate": False, "last_checked_at": now_iso})
     if catalog_existing.data:
         supabase.table("auction_catalogs").update(catalog_fields).eq("id", catalog_existing.data[0]["id"]).execute()
     else:
         catalog_fields.update({"business_id": business_id, "source": "bidspotter", "catalog_url": catalog_url, "first_seen_at": now_iso})
         supabase.table("auction_catalogs").insert(catalog_fields).execute()
 
-    return {"parsed": len(lots), "lot_count": len(lots)}
+    return {"catalog_url": catalog_url, "parsed": len(lots)}
+
+def _parse_bulk_catalog_file(text: str) -> list:
+    """Splits a multi-catalog export into per-catalog blocks. Format (what Claude
+    in Chrome should be asked to produce when compiling many catalogs in one
+    pass -- this is the mechanism replacing one-form-per-catalog):
+
+    ===CATALOG===
+    URL: https://www.bidspotter.com/en-us/auction-catalogues/.../catalogue-id-...
+    TITLE: ...
+    AUCTIONEER: ...
+    END_DATE: ...
+    STATE: ...
+    ---LOTS---
+    1 Description of lot 1
+    2 Description of lot 2
+    ===CATALOG===
+    URL: ...
+    ...
+    """
+    import re as _re
+    blocks = [b for b in text.split("===CATALOG===") if b.strip()]
+    out = []
+    for block in blocks:
+        meta = {}
+        raw_text = ""
+        if "---LOTS---" in block:
+            header, raw_text = block.split("---LOTS---", 1)
+        else:
+            header = block
+        for line in header.split("\n"):
+            m = _re.match(r'^(URL|TITLE|AUCTIONEER|END_DATE|STATE):\s*(.+)$', line.strip(), _re.IGNORECASE)
+            if m:
+                key = m.group(1).lower()
+                key = {"url": "catalog_url", "title": "title", "auctioneer": "auctioneer", "end_date": "end_date", "state": "state"}[key]
+                meta[key] = m.group(2).strip()
+        if meta.get("catalog_url") and raw_text.strip():
+            out.append({"meta": meta, "raw_text": raw_text})
+    return out
+
+@app.post("/api/auction-monitor/ingest-bulk")
+async def auction_monitor_ingest_bulk(request: Request):
+    """The real mechanism for covering many/all 349 catalogs and new ones as they
+    appear: takes ONE upload containing MANY catalogs (see _parse_bulk_catalog_file
+    for the format), processes every one in this single request. Replaces
+    submitting the single-catalog form once per catalog."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    body = await request.json()
+    text = body.get("text") or ""
+    if not text.strip():
+        raise HTTPException(400, "text is required")
+
+    catalogs = _parse_bulk_catalog_file(text)
+    if not catalogs:
+        return {"catalogs_processed": 0, "error": "No '===CATALOG===' blocks found -- check the format"}
+
+    results = []
+    for c in catalogs:
+        results.append(_ingest_one_catalog(business_id, c["meta"]["catalog_url"], c["raw_text"], c["meta"]))
+    total_lots = sum(r.get("parsed", 0) for r in results)
+    errors = [r for r in results if r.get("error")]
+    return {"catalogs_processed": len(results), "total_lots": total_lots, "errors": errors}
+
+@app.post("/api/auction-monitor/ingest-lots")
+async def auction_monitor_ingest_lots(request: Request):
+    """Ingests a manually-exported Print Catalog's lot list -- the reliable path
+    for individual catalogs, since BidSpotter's WAF (confirmed via the actual
+    challenge-page response body) blocks plain server-side requests to these
+    pages entirely; a real browser (e.g. Claude in Chrome) is required to get the
+    export in the first place. Upserts every lot row, then updates that catalog's
+    row in auction_catalogs with the REAL exact lot count (not the category-tag
+    estimate the list-page scan produces) and marks lot_count_is_estimate false.
+
+    Kept for one-off / testing use. For covering many catalogs at once, use
+    /api/auction-monitor/ingest-bulk instead -- that's the actual mechanism."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    body = await request.json()
+    catalog_url = (body.get("catalog_url") or "").strip()
+    raw_text = body.get("raw_text") or ""
+    if not catalog_url or not raw_text:
+        raise HTTPException(400, "catalog_url and raw_text are required")
+    result = _ingest_one_catalog(business_id, catalog_url, raw_text, body)
+    return {"parsed": result.get("parsed", 0), "lot_count": result.get("parsed", 0), "error": result.get("error")}
 
 def _auction_monitor_scan_work(business_id: str) -> dict:
     scan = _scan_bidspotter_catalogs()
