@@ -1826,6 +1826,15 @@ async def saved_searches_run(request: Request, body: dict = Body(...)):
     if not listed_date:
         listed_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
+    min_price = body.get("min_price")
+    if min_price in ("", None):
+        min_price = None
+    else:
+        try:
+            min_price = float(min_price)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "min_price must be a number")
+
     start_iso = f"{listed_date}T00:00:00Z"
     end_iso = f"{listed_date}T23:59:59Z"
 
@@ -1834,6 +1843,12 @@ async def saved_searches_run(request: Request, body: dict = Body(...)):
         "Authorization": f"Bearer {token}",
         "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
     }
+
+    filter_parts = [f"itemStartDate:[{start_iso}..{end_iso}]"]
+    if min_price is not None:
+        filter_parts.append(f"price:[{min_price}..]")
+        filter_parts.append("priceCurrency:USD")
+    filter_str = ",".join(filter_parts)
 
     all_items = []
     offset = 0
@@ -1849,7 +1864,7 @@ async def saved_searches_run(request: Request, body: dict = Body(...)):
                 "limit": page_size,
                 "offset": offset,
                 "sort": "newlyListed",
-                "filter": f"itemStartDate:[{start_iso}..{end_iso}]",
+                "filter": filter_str,
             },
             timeout=20,
         )
@@ -1866,11 +1881,11 @@ async def saved_searches_run(request: Request, body: dict = Body(...)):
         if len(items) < page_size:
             break
 
-    # If eBay rejected the itemStartDate filter, it silently falls back to an
-    # unfiltered search rather than erroring — surface that instead of storing
-    # results that don't actually match the requested date.
+    # If eBay rejected a filter, it silently falls back to unfiltered results
+    # rather than erroring — surface that instead of storing results that don't
+    # actually match the requested date/price.
     if ebay_warnings:
-        raise HTTPException(502, f"eBay rejected the date filter: {ebay_warnings}")
+        raise HTTPException(502, f"eBay rejected a filter: {ebay_warnings}")
 
     rows = []
     for it in all_items[:max_items]:
@@ -1878,6 +1893,9 @@ async def saved_searches_run(request: Request, body: dict = Body(...)):
         if not creation_date.startswith(listed_date):
             continue  # extra guard: only store items actually listed on the requested date
         price = it.get("price", {}) or {}
+        price_value = price.get("value")
+        if min_price is not None and price_value is not None and float(price_value) < min_price:
+            continue  # extra guard: only store items at/above the requested min price
         image = it.get("image", {}) or {}
         seller = it.get("seller", {}) or {}
         categories = it.get("categories", []) or []
@@ -1886,7 +1904,7 @@ async def saved_searches_run(request: Request, body: dict = Body(...)):
             "query": query,
             "item_id": it.get("itemId"),
             "title": it.get("title"),
-            "price": price.get("value"),
+            "price": price_value,
             "currency": price.get("currency"),
             "condition": it.get("condition"),
             "item_web_url": it.get("itemWebUrl"),
@@ -1906,9 +1924,10 @@ async def saved_searches_run(request: Request, body: dict = Body(...)):
         "last_run_at": now_iso,
         "last_run_date": listed_date,
         "last_result_count": len(rows),
+        "min_price": min_price,
     }, on_conflict="business_id,query").execute()
 
-    return {"query": query, "listed_date": listed_date, "count": len(rows)}
+    return {"query": query, "listed_date": listed_date, "min_price": min_price, "count": len(rows)}
 
 
 @app.get("/api/saved-searches/results")

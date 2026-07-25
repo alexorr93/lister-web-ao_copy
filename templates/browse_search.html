@@ -59,13 +59,17 @@ td a:hover { text-decoration: underline; }
       <span class="field-label">Listed on</span>
       <input type="date" id="date-input">
     </div>
+    <div class="date-field">
+      <span class="field-label">Min price ($)</span>
+      <input type="number" id="min-price-input" min="0" step="1" placeholder="0" style="width:100px;">
+    </div>
     <button class="btn" id="run-btn" onclick="runSearch()">Save &amp; Run</button>
   </div>
 
   <div id="status" class="status-msg"></div>
 
   <table id="saved-table">
-    <tr><th>Search</th><th>Last run</th><th>Listed date used</th><th>Results found</th><th>Actions</th></tr>
+    <tr><th>Search</th><th>Last run</th><th>Listed date used</th><th>Min price</th><th>Results found</th><th>Actions</th></tr>
   </table>
 
   <div id="results-wrap" class="results-panel"></div>
@@ -82,10 +86,10 @@ async function loadSavedSearches() {
   const res = await fetch('/api/saved-searches');
   const data = await res.json();
   const table = document.getElementById('saved-table');
-  table.innerHTML = '<tr><th>Search</th><th>Last run</th><th>Listed date used</th><th>Results found</th><th>Actions</th></tr>';
+  table.innerHTML = '<tr><th>Search</th><th>Last run</th><th>Listed date used</th><th>Min price</th><th>Results found</th><th>Actions</th></tr>';
   if (!data.searches.length) {
     const tr = document.createElement('tr');
-    tr.innerHTML = '<td colspan="5" class="empty">No saved searches yet — add one above.</td>';
+    tr.innerHTML = '<td colspan="6" class="empty">No saved searches yet — add one above.</td>';
     table.appendChild(tr);
     return;
   }
@@ -95,9 +99,10 @@ async function loadSavedSearches() {
       <td class="query-cell">${s.query}</td>
       <td class="muted">${s.last_run_at ? new Date(s.last_run_at).toLocaleString() : 'never'}</td>
       <td class="muted">${s.last_run_date || '-'}</td>
+      <td class="muted">${s.min_price != null ? '$' + Number(s.min_price).toFixed(2) : '-'}</td>
       <td>${s.last_result_count ?? '-'}</td>
       <td class="actions">
-        <button class="btn btn-small btn-outline" onclick="rerunSaved('${escapeAttr(s.query)}')">Run again</button>
+        <button class="btn btn-small btn-outline" onclick="rerunSaved('${escapeAttr(s.query)}', ${s.min_price != null ? s.min_price : 'null'})">Run again</button>
         <button class="btn btn-small btn-outline" onclick="viewResults('${escapeAttr(s.query)}', '${s.last_run_date || ''}')">View results</button>
         <button class="btn btn-small btn-danger" onclick="deleteSaved(${s.id})">Delete</button>
       </td>`;
@@ -110,26 +115,27 @@ function escapeAttr(s) { return (s || '').replace(/'/g, "\\'"); }
 async function runSearch() {
   const q = document.getElementById('query-input').value.trim();
   const listedDate = document.getElementById('date-input').value || todayStr();
+  const minPrice = document.getElementById('min-price-input').value;
   if (!q) return;
-  await executeRun(q, listedDate);
+  await executeRun(q, listedDate, minPrice === '' ? null : Number(minPrice));
   document.getElementById('query-input').value = '';
 }
 
-async function rerunSaved(query) {
+async function rerunSaved(query, minPrice) {
   const listedDate = document.getElementById('date-input').value || todayStr();
-  await executeRun(query, listedDate);
+  await executeRun(query, listedDate, minPrice);
 }
 
-async function executeRun(query, listedDate) {
+async function executeRun(query, listedDate, minPrice) {
   const btn = document.getElementById('run-btn');
   const status = document.getElementById('status');
   btn.disabled = true;
-  status.textContent = `Searching eBay for "${query}" listed on ${listedDate}...`;
+  status.textContent = `Searching eBay for "${query}" listed on ${listedDate}${minPrice != null ? ' at $' + minPrice + '+' : ''}...`;
   try {
     const res = await fetch('/api/saved-searches/run', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({query, listed_date: listedDate})
+      body: JSON.stringify({query, listed_date: listedDate, min_price: minPrice})
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({detail: res.statusText}));
