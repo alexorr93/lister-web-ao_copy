@@ -1473,6 +1473,13 @@ async def submit_to_ebay_v2(item_id: str, body: EbaySubmit, request: Request):
             "ebay_status": result["status"],
             "ebay_error": None,
             "brand": result.get("brand"),
+            # v2 (Trading API) never sets ebay_offer_id — that's purely a v1 (Sell
+            # Inventory API) concept. A listing that once had a v1 attempt keeps that
+            # field forever otherwise, which the Uncategorized view reads as "still
+            # v1, SKU can't be edited" — incorrectly locking a listing that's actually
+            # live via v2 right now. A successful v2 publish is authoritative that v2
+            # is the current mechanism, so always clear it here.
+            "ebay_offer_id": None,
         }
         if result["item_id"]:
             update["ebay_item_id"] = result["item_id"]
