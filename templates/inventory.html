@@ -248,7 +248,7 @@ function renderTable() {
     return;
   }
   let html = `<table><thead><tr>
-    <th></th><th>Title</th><th>eBay Item ID</th><th>eBay SKU</th><th>eBay Qty</th><th>Shopify Product ID</th><th>Shopify SKU</th><th>Shopify Qty</th><th>Shopify Price</th><th>Status</th><th>Matched By</th><th>HD_ID</th><th>Action</th><th>Match</th>
+    <th></th><th>Title</th><th>eBay Item ID</th><th>eBay SKU</th><th>eBay Qty</th><th>Created</th><th>Shopify Product ID</th><th>Shopify SKU</th><th>Shopify Qty</th><th>Shopify Price</th><th>Status</th><th>Matched By</th><th>HD_ID</th><th>Action</th><th>Match</th>
   </tr></thead><tbody>`;
   for (const r of filtered) {
     const status = !r.ebay_item_id ? '<span class="missing">Shopify only</span>'
@@ -288,12 +288,14 @@ function renderTable() {
     const photoCell = r.ebay_gallery_url
       ? `<img src="${escapeHtml(r.ebay_gallery_url)}" style="width:36px;height:36px;object-fit:cover;border-radius:4px;" loading="lazy" onerror="this.style.display='none'"/>`
       : '';
+    const createdCell = r.ebay_created_at ? escapeHtml(String(r.ebay_created_at).slice(0, 10)) : '—';
     html += `<tr>
       <td>${photoCell}</td>
       <td>${escapeHtml(r.title)}</td>
       <td class="muted">${escapeHtml(r.ebay_item_id || '—')}</td>
       <td class="muted">${escapeHtml(r.ebay_sku || '—')}</td>
       <td class="muted">${r.ebay_qty ?? '—'}</td>
+      <td class="muted">${createdCell}</td>
       <td class="muted">${escapeHtml(r.shopify_product_id || '—')}</td>
       <td class="muted">${escapeHtml(r.shopify_sku || '—')}</td>
       <td class="muted">${r.shopify_qty ?? '—'}</td>

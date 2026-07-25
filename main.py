@@ -6831,7 +6831,7 @@ def fetch_ebay_inventory_items(business_id: str) -> list:
     res_rows = []
     start = 0
     while True:
-        page = (supabase.table("ebay_listing_status").select("item_id,sku,title,quantity_available,gallery_url,price")
+        page = (supabase.table("ebay_listing_status").select("item_id,sku,title,quantity_available,gallery_url,price,start_time")
                 .eq("business_id", business_id).eq("listing_status", "Active")
                 .range(start, start + 999).execute().data or [])
         res_rows.extend(page)
@@ -6842,7 +6842,7 @@ def fetch_ebay_inventory_items(business_id: str) -> list:
         "sku": r.get("sku") or "", "title": r.get("title") or "",
         "quantity": r.get("quantity_available") or 0, "condition": "",
         "item_id": r.get("item_id"), "gallery_url": r.get("gallery_url"),
-        "price": r.get("price"),
+        "price": r.get("price"), "start_time": r.get("start_time"),
     } for r in res_rows if r.get("item_id")]
 
 def fetch_shopify_inventory_items(business_id: str) -> list:
@@ -7065,7 +7065,7 @@ def sync_inventory(business_id: str) -> dict:
         "id": it["item_id"], "business_id": business_id, "sku": it["sku"], "title": it["title"],
         "quantity": it["quantity"], "condition": it["condition"], "price": it.get("price"),
         "category_id": None, "offer_id": None, "listing_status": None, "item_id": it["item_id"],
-        "gallery_url": it.get("gallery_url"),
+        "gallery_url": it.get("gallery_url"), "start_time": it.get("start_time"),
     } for it in ebay_items if it.get("item_id")]
     shopify_records = [{
         "id": it["variant_id"], "business_id": business_id, "product_id": it["product_id"],
@@ -8575,7 +8575,7 @@ async def list_inventory(request: Request):
             "ebay_sku": e.get("sku"), "ebay_qty": e.get("quantity"), "ebay_condition": e.get("condition"),
             "ebay_item_id": e.get("item_id") or (row.get("ebay_id") if row.get("ebay_id") else None),
             "ebay_gallery_url": e.get("gallery_url"), "ebay_price": e.get("price"),
-            "ebay_local_photo_ids": e.get("local_photo_ids"),
+            "ebay_local_photo_ids": e.get("local_photo_ids"), "ebay_created_at": e.get("start_time"),
             "shopify_sku": s.get("sku"), "shopify_qty": s.get("quantity"), "shopify_price": s.get("price"), "shopify_status": s.get("status"),
             "shopify_product_id": s.get("product_id") or (row.get("shopify_id") if row.get("shopify_id") else None),
             "listing_id": (matching_listing.get("id") if matching_listing and not matching_listing.get("shopify_product_id") else None),
