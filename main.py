@@ -1787,6 +1787,112 @@ async def shopify_sync_page(request: Request):
         return RedirectResponse("/login", status_code=302)
     return templates.TemplateResponse("shopify_sync.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "shopify"})
 
+
+@app.get("/browse-search", response_class=HTMLResponse)
+async def browse_search_page(request: Request):
+    nav = get_nav_context(request)
+    return templates.TemplateResponse("browse_search.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "browse_search"})
+
+
+@app.post("/api/browse-search/run")
+async def browse_search_run(request: Request, body: dict = Body(...)):
+    """Runs a free-text search against eBay's Browse API (item_summary/search)
+    and stores every result in browse_search_results, keyed on (business_id, query, item_id).
+    Manual, on-demand only — no scoring, no scheduling, no price comparison."""
+    import requests as _req
+
+    business_id = get_business_id(request)
+    if not business_id:
+        raise HTTPException(401, "Not logged in")
+
+    query = (body.get("query") or "").strip()
+    if not query:
+        raise HTTPException(400, "query is required")
+    limit = min(int(body.get("limit", 50)), 200)
+
+    token = get_ebay_access_token(business_id)
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+    }
+
+    all_items = []
+    offset = 0
+    page_size = min(limit, 200)
+    while len(all_items) < limit:
+        r = _req.get(
+            f"{EBAY_API_BASE}/buy/browse/v1/item_summary/search",
+            headers=headers,
+            params={"q": query, "limit": page_size, "offset": offset, "sort": "newlyListed"},
+            timeout=20,
+        )
+        if r.status_code != 200:
+            raise HTTPException(502, f"eBay Browse API error ({r.status_code}): {r.text[:300]}")
+        data = r.json()
+        items = data.get("itemSummaries", [])
+        if not items:
+            break
+        all_items.extend(items)
+        offset += page_size
+        if len(items) < page_size:
+            break
+
+    rows = []
+    for it in all_items[:limit]:
+        price = it.get("price", {}) or {}
+        image = it.get("image", {}) or {}
+        seller = it.get("seller", {}) or {}
+        categories = it.get("categories", []) or []
+        rows.append({
+            "business_id": business_id,
+            "query": query,
+            "item_id": it.get("itemId"),
+            "title": it.get("title"),
+            "price": price.get("value"),
+            "currency": price.get("currency"),
+            "condition": it.get("condition"),
+            "item_web_url": it.get("itemWebUrl"),
+            "image_url": image.get("imageUrl"),
+            "seller_username": seller.get("username"),
+            "category_id": categories[0].get("categoryId") if categories else None,
+        })
+
+    if rows:
+        supabase.table("browse_search_results").upsert(rows, on_conflict="business_id,query,item_id").execute()
+
+    return {"query": query, "count": len(rows)}
+
+
+@app.get("/api/browse-search/results")
+async def browse_search_results(request: Request, response: Response, q: str = None):
+    """Returns stored results for a query, or (if q omitted) the most recent rows
+    across all past searches. q does a plain ILIKE match against the stored query text."""
+    business_id = get_business_id(request)
+    if not business_id:
+        raise HTTPException(401, "Not logged in")
+
+    query_builder = supabase.table("browse_search_results").select("*").eq("business_id", business_id)
+    if q:
+        query_builder = query_builder.ilike("query", f"%{q}%")
+    res = query_builder.order("fetched_at", desc=True).limit(500).execute()
+    return {"rows": res.data}
+
+
+@app.get("/api/browse-search/history")
+async def browse_search_history(request: Request, response: Response):
+    """Distinct list of search terms previously run, most recent first, for the dropdown."""
+    business_id = get_business_id(request)
+    if not business_id:
+        raise HTTPException(401, "Not logged in")
+
+    res = supabase.table("browse_search_results").select("query,fetched_at") \
+        .eq("business_id", business_id).order("fetched_at", desc=True).limit(1000).execute()
+    seen = []
+    for row in res.data:
+        if row["query"] not in seen:
+            seen.append(row["query"])
+    return {"queries": seen[:50]}
+
 class AcquisitionCreate(BaseModel):
     sku: str
     name: Optional[str] = None

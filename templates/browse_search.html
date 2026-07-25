@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Browse Search — Lister AI</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<style>
+:root { --bg: #1a0611; --card: #1e2535; --border: #2d3348; --text: #f1f5f9; --muted: #64748b; --accent: #16a34a; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.nav { background: var(--card); border-bottom: 1px solid var(--border); padding: 0 16px; display: flex; align-items: center; gap: 6px; overflow-x: auto; height: 52px; position: sticky; top: 0; z-index: 100; }
+.nav-btn { padding: 6px 14px; border-radius: 8px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; background: transparent; color: var(--muted); text-decoration: none; display: inline-block; font-family: inherit; }
+.nav-btn:hover { background: #1e2535; color: var(--text); }
+.nav-spacer { flex: 1; }
+.nav-account { font-size: 12px; color: var(--muted); margin-right: 4px; white-space: nowrap; }
+.nav-download { padding: 6px 12px; background: #1e2535; border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; }
+.main { max-width: 1200px; margin: 0 auto; padding: 20px 16px; }
+h1 { font-size: 20px; margin-bottom: 4px; }
+.sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+.search-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.search-bar input[type=text] { flex: 1; background: #fff; color: #111; border: none; border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+.btn { padding: 10px 18px; border-radius: 8px; border: 1px solid var(--border); background: var(--accent); border-color: var(--accent); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
+.btn:hover { opacity: 0.9; }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.history { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+.history button { padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+.history button:hover { background: var(--border); color: var(--text); }
+.status-msg { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+th { text-align: left; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid var(--border); vertical-align: top; }
+tr:last-child td { border-bottom: none; }
+td img { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; }
+td a { color: #60a5fa; text-decoration: none; }
+td a:hover { text-decoration: underline; }
+.muted { color: var(--muted); }
+.empty { text-align: center; padding: 40px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+{% include "_nav.html" %}
+
+<div class="main">
+  <h1>Browse Search</h1>
+  <div class="sub">Type a search term and pull what's currently listed on eBay for it right now. Results are stored so you can revisit them without re-running the search.</div>
+
+  <div class="search-bar">
+    <input type="text" id="query-input" placeholder="e.g. cummins turbocharger" onkeydown="if(event.key==='Enter') runSearch()">
+    <button class="btn" id="run-btn" onclick="runSearch()">Run Search</button>
+  </div>
+
+  <div id="history" class="history"></div>
+  <div id="status" class="status-msg"></div>
+  <div id="results-wrap"></div>
+</div>
+
+<script>
+async function loadHistory() {
+  const res = await fetch('/api/browse-search/history');
+  const data = await res.json();
+  const wrap = document.getElementById('history');
+  wrap.innerHTML = '';
+  data.queries.forEach(q => {
+    const btn = document.createElement('button');
+    btn.textContent = q;
+    btn.onclick = () => { document.getElementById('query-input').value = q; loadResults(q); };
+    wrap.appendChild(btn);
+  });
+}
+
+async function runSearch() {
+  const q = document.getElementById('query-input').value.trim();
+  if (!q) return;
+  const btn = document.getElementById('run-btn');
+  const status = document.getElementById('status');
+  btn.disabled = true;
+  status.textContent = 'Searching eBay for "' + q + '"...';
+  try {
+    const res = await fetch('/api/browse-search/run', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query: q, limit: 100})
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({detail: res.statusText}));
+      status.textContent = 'Error: ' + (err.detail || res.statusText);
+      btn.disabled = false;
+      return;
+    }
+    const data = await res.json();
+    status.textContent = `Found ${data.count} listing(s) for "${data.query}" — stored.`;
+    await loadHistory();
+    await loadResults(q);
+  } catch (e) {
+    status.textContent = 'Error: ' + e.message;
+  }
+  btn.disabled = false;
+}
+
+async function loadResults(q) {
+  const res = await fetch('/api/browse-search/results?q=' + encodeURIComponent(q));
+  const data = await res.json();
+  const wrap = document.getElementById('results-wrap');
+  if (!data.rows.length) {
+    wrap.innerHTML = '<div class="empty">No stored results for this search yet — click Run Search.</div>';
+    return;
+  }
+  let html = '<table><tr><th></th><th>Title</th><th>Price</th><th>Condition</th><th>Seller</th><th>Fetched</th></tr>';
+  data.rows.forEach(r => {
+    html += `<tr>
+      <td>${r.image_url ? `<img src="${r.image_url}">` : ''}</td>
+      <td><a href="${r.item_web_url}" target="_blank">${r.title || ''}</a></td>
+      <td>${r.price ? '$' + Number(r.price).toFixed(2) : '<span class="muted">-</span>'}</td>
+      <td class="muted">${r.condition || '-'}</td>
+      <td class="muted">${r.seller_username || '-'}</td>
+      <td class="muted">${r.fetched_at ? new Date(r.fetched_at).toLocaleString() : '-'}</td>
+    </tr>`;
+  });
+  html += '</table>';
+  wrap.innerHTML = html;
+}
+
+loadHistory();
+</script>
+
+</body>
+</html>
