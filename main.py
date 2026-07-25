@@ -1794,12 +1794,25 @@ async def browse_search_page(request: Request):
     return templates.TemplateResponse("browse_search.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "browse_search"})
 
 
-@app.post("/api/browse-search/run")
-async def browse_search_run(request: Request, body: dict = Body(...)):
-    """Runs a free-text search against eBay's Browse API (item_summary/search)
-    and stores every result in browse_search_results, keyed on (business_id, query, item_id).
-    Manual, on-demand only — no scoring, no scheduling, no price comparison."""
+@app.get("/api/saved-searches")
+async def saved_searches_list(request: Request, response: Response):
+    """The permanent list of saved search terms — this is the primary content of the tab."""
+    business_id = get_business_id(request)
+    if not business_id:
+        raise HTTPException(401, "Not logged in")
+    res = supabase.table("saved_searches").select("*").eq("business_id", business_id) \
+        .order("created_at", desc=True).execute()
+    return {"searches": res.data}
+
+
+@app.post("/api/saved-searches/run")
+async def saved_searches_run(request: Request, body: dict = Body(...)):
+    """Adds the term to the permanent saved-searches list (if new) and runs it against
+    eBay's Browse API, filtered server-side to items listed on the given date via the
+    itemStartDate filter — eBay only returns that day's listings, nothing is pulled and
+    filtered afterward. Results are stored in browse_search_results."""
     import requests as _req
+    from datetime import datetime, timezone
 
     business_id = get_business_id(request)
     if not business_id:
@@ -1808,7 +1821,13 @@ async def browse_search_run(request: Request, body: dict = Body(...)):
     query = (body.get("query") or "").strip()
     if not query:
         raise HTTPException(400, "query is required")
-    limit = min(int(body.get("limit", 50)), 200)
+
+    listed_date = (body.get("listed_date") or "").strip()
+    if not listed_date:
+        listed_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    start_iso = f"{listed_date}T00:00:00Z"
+    end_iso = f"{listed_date}T23:59:59Z"
 
     token = get_ebay_access_token(business_id)
     headers = {
@@ -1818,17 +1837,27 @@ async def browse_search_run(request: Request, body: dict = Body(...)):
 
     all_items = []
     offset = 0
-    page_size = min(limit, 200)
-    while len(all_items) < limit:
+    page_size = 200
+    max_items = 1000  # hard ceiling per run regardless of how many eBay reports
+    ebay_warnings = []
+    while len(all_items) < max_items:
         r = _req.get(
             f"{EBAY_API_BASE}/buy/browse/v1/item_summary/search",
             headers=headers,
-            params={"q": query, "limit": page_size, "offset": offset, "sort": "newlyListed"},
+            params={
+                "q": query,
+                "limit": page_size,
+                "offset": offset,
+                "sort": "newlyListed",
+                "filter": f"itemStartDate:[{start_iso}..{end_iso}]",
+            },
             timeout=20,
         )
         if r.status_code != 200:
             raise HTTPException(502, f"eBay Browse API error ({r.status_code}): {r.text[:300]}")
         data = r.json()
+        if data.get("warnings"):
+            ebay_warnings.extend(data["warnings"])
         items = data.get("itemSummaries", [])
         if not items:
             break
@@ -1837,8 +1866,17 @@ async def browse_search_run(request: Request, body: dict = Body(...)):
         if len(items) < page_size:
             break
 
+    # If eBay rejected the itemStartDate filter, it silently falls back to an
+    # unfiltered search rather than erroring — surface that instead of storing
+    # results that don't actually match the requested date.
+    if ebay_warnings:
+        raise HTTPException(502, f"eBay rejected the date filter: {ebay_warnings}")
+
     rows = []
-    for it in all_items[:limit]:
+    for it in all_items[:max_items]:
+        creation_date = it.get("itemCreationDate") or ""
+        if not creation_date.startswith(listed_date):
+            continue  # extra guard: only store items actually listed on the requested date
         price = it.get("price", {}) or {}
         image = it.get("image", {}) or {}
         seller = it.get("seller", {}) or {}
@@ -1855,43 +1893,47 @@ async def browse_search_run(request: Request, body: dict = Body(...)):
             "image_url": image.get("imageUrl"),
             "seller_username": seller.get("username"),
             "category_id": categories[0].get("categoryId") if categories else None,
+            "item_creation_date": it.get("itemCreationDate"),
         })
 
     if rows:
         supabase.table("browse_search_results").upsert(rows, on_conflict="business_id,query,item_id").execute()
 
-    return {"query": query, "count": len(rows)}
+    now_iso = datetime.now(timezone.utc).isoformat()
+    supabase.table("saved_searches").upsert({
+        "business_id": business_id,
+        "query": query,
+        "last_run_at": now_iso,
+        "last_run_date": listed_date,
+        "last_result_count": len(rows),
+    }, on_conflict="business_id,query").execute()
+
+    return {"query": query, "listed_date": listed_date, "count": len(rows)}
 
 
-@app.get("/api/browse-search/results")
-async def browse_search_results(request: Request, response: Response, q: str = None):
-    """Returns stored results for a query, or (if q omitted) the most recent rows
-    across all past searches. q does a plain ILIKE match against the stored query text."""
+@app.get("/api/saved-searches/results")
+async def saved_searches_results(request: Request, response: Response, q: str, listed_date: str = None):
+    """Stored results for one saved search — optionally narrowed to a specific listed date."""
     business_id = get_business_id(request)
     if not business_id:
         raise HTTPException(401, "Not logged in")
 
-    query_builder = supabase.table("browse_search_results").select("*").eq("business_id", business_id)
-    if q:
-        query_builder = query_builder.ilike("query", f"%{q}%")
+    query_builder = supabase.table("browse_search_results").select("*") \
+        .eq("business_id", business_id).eq("query", q)
+    if listed_date:
+        query_builder = query_builder.gte("item_creation_date", f"{listed_date}T00:00:00.000Z") \
+            .lte("item_creation_date", f"{listed_date}T23:59:59.999Z")
     res = query_builder.order("fetched_at", desc=True).limit(500).execute()
     return {"rows": res.data}
 
 
-@app.get("/api/browse-search/history")
-async def browse_search_history(request: Request, response: Response):
-    """Distinct list of search terms previously run, most recent first, for the dropdown."""
+@app.delete("/api/saved-searches/{search_id}")
+async def saved_searches_delete(request: Request, search_id: int):
     business_id = get_business_id(request)
     if not business_id:
         raise HTTPException(401, "Not logged in")
-
-    res = supabase.table("browse_search_results").select("query,fetched_at") \
-        .eq("business_id", business_id).order("fetched_at", desc=True).limit(1000).execute()
-    seen = []
-    for row in res.data:
-        if row["query"] not in seen:
-            seen.append(row["query"])
-    return {"queries": seen[:50]}
+    supabase.table("saved_searches").delete().eq("id", search_id).eq("business_id", business_id).execute()
+    return {"deleted": search_id}
 
 class AcquisitionCreate(BaseModel):
     sku: str

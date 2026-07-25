@@ -15,27 +15,34 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .nav-spacer { flex: 1; }
 .nav-account { font-size: 12px; color: var(--muted); margin-right: 4px; white-space: nowrap; }
 .nav-download { padding: 6px 12px; background: #1e2535; border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; }
-.main { max-width: 1200px; margin: 0 auto; padding: 20px 16px; }
+.main { max-width: 1100px; margin: 0 auto; padding: 20px 16px; }
 h1 { font-size: 20px; margin-bottom: 4px; }
 .sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
-.search-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
-.search-bar input[type=text] { flex: 1; background: #fff; color: #111; border: none; border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+.add-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 18px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; flex-wrap: wrap; }
+.add-bar input[type=text] { flex: 1; min-width: 220px; background: #fff; color: #111; border: none; border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+.add-bar input[type=date] { background: #fff; color: #111; border: none; border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+.field-label { font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; }
+.date-field { display: flex; flex-direction: column; gap: 4px; }
 .btn { padding: 10px 18px; border-radius: 8px; border: 1px solid var(--border); background: var(--accent); border-color: var(--accent); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
 .btn:hover { opacity: 0.9; }
 .btn:disabled { opacity: 0.5; cursor: default; }
-.history { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
-.history button { padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
-.history button:hover { background: var(--border); color: var(--text); }
+.btn-small { padding: 6px 10px; font-size: 12px; }
+.btn-outline { background: transparent; color: var(--text); }
+.btn-danger { background: transparent; border-color: #7f1d1d; color: #ef4444; }
 .status-msg { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
-table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 20px; }
 th { text-align: left; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
-td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid var(--border); vertical-align: top; }
+td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 tr:last-child td { border-bottom: none; }
-td img { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; }
+td img { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; }
 td a { color: #60a5fa; text-decoration: none; }
 td a:hover { text-decoration: underline; }
 .muted { color: var(--muted); }
 .empty { text-align: center; padding: 40px; color: var(--muted); }
+.query-cell { font-weight: 600; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.results-panel { display: none; margin: -8px 0 16px 0; }
+.results-panel.open { display: block; }
 </style>
 </head>
 <body>
@@ -44,44 +51,85 @@ td a:hover { text-decoration: underline; }
 
 <div class="main">
   <h1>Browse Search</h1>
-  <div class="sub">Type a search term and pull what's currently listed on eBay for it right now. Results are stored so you can revisit them without re-running the search.</div>
+  <div class="sub">Set up saved searches for parts you want to watch. Each search only pulls items eBay reports as listed on the date you pick — nothing is fetched in bulk and filtered afterward.</div>
 
-  <div class="search-bar">
+  <div class="add-bar">
     <input type="text" id="query-input" placeholder="e.g. cummins turbocharger" onkeydown="if(event.key==='Enter') runSearch()">
-    <button class="btn" id="run-btn" onclick="runSearch()">Run Search</button>
+    <div class="date-field">
+      <span class="field-label">Listed on</span>
+      <input type="date" id="date-input">
+    </div>
+    <button class="btn" id="run-btn" onclick="runSearch()">Save &amp; Run</button>
   </div>
 
-  <div id="history" class="history"></div>
   <div id="status" class="status-msg"></div>
-  <div id="results-wrap"></div>
+
+  <table id="saved-table">
+    <tr><th>Search</th><th>Last run</th><th>Listed date used</th><th>Results found</th><th>Actions</th></tr>
+  </table>
+
+  <div id="results-wrap" class="results-panel"></div>
 </div>
 
 <script>
-async function loadHistory() {
-  const res = await fetch('/api/browse-search/history');
+function todayStr() {
+  const d = new Date();
+  return d.toISOString().slice(0, 10);
+}
+document.getElementById('date-input').value = todayStr();
+
+async function loadSavedSearches() {
+  const res = await fetch('/api/saved-searches');
   const data = await res.json();
-  const wrap = document.getElementById('history');
-  wrap.innerHTML = '';
-  data.queries.forEach(q => {
-    const btn = document.createElement('button');
-    btn.textContent = q;
-    btn.onclick = () => { document.getElementById('query-input').value = q; loadResults(q); };
-    wrap.appendChild(btn);
+  const table = document.getElementById('saved-table');
+  table.innerHTML = '<tr><th>Search</th><th>Last run</th><th>Listed date used</th><th>Results found</th><th>Actions</th></tr>';
+  if (!data.searches.length) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="5" class="empty">No saved searches yet — add one above.</td>';
+    table.appendChild(tr);
+    return;
+  }
+  data.searches.forEach(s => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="query-cell">${s.query}</td>
+      <td class="muted">${s.last_run_at ? new Date(s.last_run_at).toLocaleString() : 'never'}</td>
+      <td class="muted">${s.last_run_date || '-'}</td>
+      <td>${s.last_result_count ?? '-'}</td>
+      <td class="actions">
+        <button class="btn btn-small btn-outline" onclick="rerunSaved('${escapeAttr(s.query)}')">Run again</button>
+        <button class="btn btn-small btn-outline" onclick="viewResults('${escapeAttr(s.query)}', '${s.last_run_date || ''}')">View results</button>
+        <button class="btn btn-small btn-danger" onclick="deleteSaved(${s.id})">Delete</button>
+      </td>`;
+    table.appendChild(tr);
   });
 }
 
+function escapeAttr(s) { return (s || '').replace(/'/g, "\\'"); }
+
 async function runSearch() {
   const q = document.getElementById('query-input').value.trim();
+  const listedDate = document.getElementById('date-input').value || todayStr();
   if (!q) return;
+  await executeRun(q, listedDate);
+  document.getElementById('query-input').value = '';
+}
+
+async function rerunSaved(query) {
+  const listedDate = document.getElementById('date-input').value || todayStr();
+  await executeRun(query, listedDate);
+}
+
+async function executeRun(query, listedDate) {
   const btn = document.getElementById('run-btn');
   const status = document.getElementById('status');
   btn.disabled = true;
-  status.textContent = 'Searching eBay for "' + q + '"...';
+  status.textContent = `Searching eBay for "${query}" listed on ${listedDate}...`;
   try {
-    const res = await fetch('/api/browse-search/run', {
+    const res = await fetch('/api/saved-searches/run', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({query: q, limit: 100})
+      body: JSON.stringify({query, listed_date: listedDate})
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({detail: res.statusText}));
@@ -90,24 +138,33 @@ async function runSearch() {
       return;
     }
     const data = await res.json();
-    status.textContent = `Found ${data.count} listing(s) for "${data.query}" — stored.`;
-    await loadHistory();
-    await loadResults(q);
+    status.textContent = `Found ${data.count} listing(s) for "${data.query}" listed on ${data.listed_date} — saved.`;
+    await loadSavedSearches();
   } catch (e) {
     status.textContent = 'Error: ' + e.message;
   }
   btn.disabled = false;
 }
 
-async function loadResults(q) {
-  const res = await fetch('/api/browse-search/results?q=' + encodeURIComponent(q));
-  const data = await res.json();
+async function deleteSaved(id) {
+  if (!confirm('Delete this saved search?')) return;
+  await fetch(`/api/saved-searches/${id}`, {method: 'DELETE'});
+  await loadSavedSearches();
+}
+
+async function viewResults(query, listedDate) {
   const wrap = document.getElementById('results-wrap');
+  wrap.classList.add('open');
+  wrap.innerHTML = '<div class="status-msg">Loading...</div>';
+  const params = new URLSearchParams({q: query});
+  if (listedDate) params.set('listed_date', listedDate);
+  const res = await fetch('/api/saved-searches/results?' + params.toString());
+  const data = await res.json();
   if (!data.rows.length) {
-    wrap.innerHTML = '<div class="empty">No stored results for this search yet — click Run Search.</div>';
+    wrap.innerHTML = '<div class="empty">No stored results for this search/date yet.</div>';
     return;
   }
-  let html = '<table><tr><th></th><th>Title</th><th>Price</th><th>Condition</th><th>Seller</th><th>Fetched</th></tr>';
+  let html = `<table><tr><th></th><th>Title</th><th>Price</th><th>Condition</th><th>Seller</th></tr>`;
   data.rows.forEach(r => {
     html += `<tr>
       <td>${r.image_url ? `<img src="${r.image_url}">` : ''}</td>
@@ -115,14 +172,13 @@ async function loadResults(q) {
       <td>${r.price ? '$' + Number(r.price).toFixed(2) : '<span class="muted">-</span>'}</td>
       <td class="muted">${r.condition || '-'}</td>
       <td class="muted">${r.seller_username || '-'}</td>
-      <td class="muted">${r.fetched_at ? new Date(r.fetched_at).toLocaleString() : '-'}</td>
     </tr>`;
   });
   html += '</table>';
   wrap.innerHTML = html;
 }
 
-loadHistory();
+loadSavedSearches();
 </script>
 
 </body>
