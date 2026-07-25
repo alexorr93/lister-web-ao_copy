@@ -9,6 +9,8 @@
 [phases.setup]
 nixPkgs = [
   "python311",
+  "gcc",
+  "gcc.cc",
   "chromium",
   "nss",
   "atk",
