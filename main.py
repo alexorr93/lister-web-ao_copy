@@ -3353,25 +3353,27 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
                     cost_by_tracking_shopify.get(tn, 0) or 0 for tn in row.get("tracking_numbers", [])
                 )
 
-        # Preserve any real SKU already stored for this order+title, same rule and
-        # reasoning as the eBay side above — Shopify's own variant SKU is often just
-        # a storage-location code, not what actually got manually corrected here, and
-        # a manual correction is meant to be final. Matched by (order_id, title) rather
-        # than the row's own id, since this table's Shopify record id embeds the SKU
-        # itself (see 'record' below) — matching by id would miss exactly the rows
-        # whose SKU was corrected, since a differing SKU means a differing id.
-        shopify_order_ids = list({row["order_id"] for row in shopify_rows})
-        existing_shopify_sku = {}
-        for i in range(0, len(shopify_order_ids), 200):
-            chunk = shopify_order_ids[i:i+200]
+        # Preserve any real SKU already stored for this exact line item — matched by
+        # the same stable composite id used for the upsert itself (order_id +
+        # Shopify's real line-item id), same rule as the eBay side above.
+        # PREVIOUSLY matched by (order_id, title) instead, based on a since-removed
+        # id scheme where the id used to embed the sku itself. That approach has a
+        # real collision risk with the CURRENT id scheme: an order with two line
+        # items sharing the same title (confirmed this happens — e.g. multiple
+        # identical units bought as separate cart lines) would only remember one
+        # corrected SKU per title and could silently apply it to the wrong line.
+        # Matching by the exact id removes that risk entirely.
+        candidate_shopify_ids = [
+            f"shopify:{row['order_id']}:{row.get('line_item_id') or f'noid-{i}'}"
+            for i, row in enumerate(shopify_rows)
+        ]
+        existing_sku_by_shopify_id = {}
+        for i in range(0, len(candidate_shopify_ids), 200):
+            chunk = candidate_shopify_ids[i:i+200]
             try:
-                res = (supabase.table("orders").select("order_id,title,sku")
-                       .eq("business_id", business_id).eq("platform", "Shopify")
-                       .in_("order_id", chunk).execute())
+                res = supabase.table("orders").select("id,sku").in_("id", chunk).execute()
                 for r in (res.data or []):
-                    key = (r["order_id"], r.get("title") or "")
-                    if key not in existing_shopify_sku and r.get("sku") and not _is_blank_sku(r["sku"]):
-                        existing_shopify_sku[key] = r["sku"]
+                    existing_sku_by_shopify_id[r["id"]] = r.get("sku")
             except Exception:
                 pass
 
@@ -3384,7 +3386,6 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
             shipping_share = _safe2(order_shipping_cost * (row["revenue"] / order_subtotal)) if order_subtotal > 0 else 0.0
             final_net = _safe2(net - shipping_share)
             trackings = row.get("tracking_numbers", [])
-            final_sku = existing_shopify_sku.get((oid, row.get("title") or "")) or row["sku"]
             # Stable ID uses Shopify's own real line-item ID, not a positional index —
             # a positional 'i' shifts whenever the fetched list's order or length
             # changes between runs (a new order appearing earlier, pagination
@@ -3396,8 +3397,11 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
             line_item_id = row.get("line_item_id") or f"noid-{i}"  # fallback only for
             # rows Shopify somehow returned without a line item id at all (shouldn't
             # normally happen) — keeps behavior no worse than before for that edge case
+            record_id = f"shopify:{row['order_id']}:{line_item_id}"
+            existing_sku = existing_sku_by_shopify_id.get(record_id)
+            final_sku = existing_sku if (existing_sku and not _is_blank_sku(existing_sku)) else row["sku"]
             record = {
-                "id": f"shopify:{row['order_id']}:{line_item_id}",
+                "id": record_id,
                 "business_id": business_id, "platform": "Shopify", "order_id": row["order_id"],
                 "sku": final_sku, "title": row["title"], "quantity": row["quantity"],
                 "order_date": row["order_date"], "gross_revenue": _safe2(row["revenue"]),
