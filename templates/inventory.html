@@ -209,6 +209,13 @@ async function pollPullEbayPhotos() {
   }
 }
 
+let invSortKey = null;
+let invSortDir = 1;
+function setInvSort(key) {
+  if (invSortKey === key) invSortDir *= -1; else { invSortKey = key; invSortDir = 1; }
+  renderTable();
+}
+
 function renderTable() {
   if (!inventory.length) {
     document.getElementById('table-area').innerHTML = '<div class="empty">No inventory synced yet — click Sync Inventory above.</div>';
@@ -247,8 +254,19 @@ function renderTable() {
     document.getElementById('table-area').innerHTML = '<div class="empty">No rows match this filter.</div>';
     return;
   }
+
+  if (invSortKey) {
+    filtered = [...filtered].sort((a, b) => {
+      let av = a[invSortKey], bv = b[invSortKey];
+      av = av ?? ''; bv = bv ?? '';
+      const cmp = av > bv ? 1 : (av < bv ? -1 : 0);
+      return cmp * invSortDir;
+    });
+  }
+
+  const th = (key, label) => `<th onclick="setInvSort('${key}')" style="cursor:pointer;">${label}${invSortKey===key ? (invSortDir===1?' ▲':' ▼') : ''}</th>`;
   let html = `<table><thead><tr>
-    <th></th><th>Title</th><th>eBay Item ID</th><th>eBay SKU</th><th>eBay Qty</th><th>Created</th><th>Shopify Product ID</th><th>Shopify SKU</th><th>Shopify Qty</th><th>Shopify Price</th><th>Status</th><th>Matched By</th><th>HD_ID</th><th>Action</th><th>Match</th>
+    <th></th>${th('title','Title')}${th('ebay_item_id','eBay Item ID')}${th('ebay_sku','eBay SKU')}${th('ebay_qty','eBay Qty')}${th('ebay_created_at','Created')}${th('shopify_product_id','Shopify Product ID')}${th('shopify_sku','Shopify SKU')}${th('shopify_qty','Shopify Qty')}${th('shopify_price','Shopify Price')}<th>Status</th><th>Matched By</th><th>HD_ID</th><th>Action</th><th>Match</th>
   </tr></thead><tbody>`;
   for (const r of filtered) {
     const status = !r.ebay_item_id ? '<span class="missing">Shopify only</span>'
