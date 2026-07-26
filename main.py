@@ -3023,6 +3023,43 @@ async def set_sku_override(body: SkuOverrideUpdate, request: Request):
         raise HTTPException(404, "Listing not found")
     return {"ok": True, "item_id": body.item_id, "sku_override": new_sku}
 
+@app.get("/api/acquisitions/sku-overrides")
+async def list_sku_overrides(request: Request):
+    """Every currently-set sku_override, permanently visible here regardless of
+    whether it's since matched a lot. The Uncategorized view drops an item the
+    moment its override resolves to a known lot (it's no longer 'needs
+    attention'), which means there was previously no way to look back at
+    corrections already made -- this exists specifically to be pulled up any
+    time, since sku_override is the only place this correction lives."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    rows = _fetch_all_for_business(business_id, "ebay_listing_status",
+                                    "item_id,title,sku,sku_override,price,quantity_available,updated_at")
+    overrides = [r for r in rows if r.get("sku_override")]
+
+    lot_rows = _fetch_all_for_business(business_id, "acquisitions", "sku,name,cost,date")
+    lots_by_sku = {l["sku"]: l for l in lot_rows if l.get("sku")}
+
+    out = []
+    for r in overrides:
+        prefix = _lot_prefix(r["sku_override"])
+        lot = lots_by_sku.get(prefix)
+        out.append({
+            "item_id": r.get("item_id"),
+            "title": r.get("title"),
+            "original_ebay_sku": r.get("sku"),
+            "your_corrected_sku": r.get("sku_override"),
+            "lot_sku": prefix,
+            "lot_name": lot.get("name") if lot else None,
+            "lot_matched": lot is not None,
+            "price": r.get("price"),
+            "quantity_available": r.get("quantity_available"),
+            "updated_at": r.get("updated_at"),
+        })
+    out.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
+    return {"overrides": out}
+
 @app.get("/api/acquisitions")
 async def list_acquisitions(request: Request):
     business_id = require_auth(request)

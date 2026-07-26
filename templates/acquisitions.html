@@ -82,6 +82,12 @@ tr:last-child td { border-bottom: none; }
   <div class="view-tabs">
     <button class="view-tab active" id="tab-lots" onclick="setView('lots')">Lots</button>
     <button class="view-tab" id="tab-uncategorized" onclick="setView('uncategorized')">Uncategorized</button>
+    <button class="view-tab" id="tab-overrides" onclick="setView('overrides')">My SKU Overrides</button>
+  </div>
+
+  <div id="overrides-panel" style="display:none;">
+    <div class="sub" id="overrides-status"></div>
+    <div id="overrides-table-area"><div class="empty">Loading...</div></div>
   </div>
 
   <div id="lots-panel">
@@ -255,9 +261,12 @@ let uncategorized = {active_listings_value: 0, active_listings_count: 0, sales_t
 function setView(view) {
   document.getElementById('tab-lots').classList.toggle('active', view === 'lots');
   document.getElementById('tab-uncategorized').classList.toggle('active', view === 'uncategorized');
+  document.getElementById('tab-overrides').classList.toggle('active', view === 'overrides');
   document.getElementById('lots-panel').style.display = view === 'lots' ? '' : 'none';
   document.getElementById('uncategorized-panel').style.display = view === 'uncategorized' ? '' : 'none';
+  document.getElementById('overrides-panel').style.display = view === 'overrides' ? '' : 'none';
   if (view === 'uncategorized') renderUncategorizedTable();
+  if (view === 'overrides') loadSkuOverrides();
 }
 
 let uncatSortKey = 'value', uncatSortDir = -1;
@@ -360,6 +369,46 @@ async function saveUncatSkuOverride(btn, itemId) {
     btn.disabled = false;
     btn.textContent = 'Save';
   }
+}
+
+async function loadSkuOverrides() {
+  document.getElementById('overrides-table-area').innerHTML = '<div class="empty">Loading...</div>';
+  try {
+    const r = await fetch('/api/acquisitions/sku-overrides');
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed to load');
+    renderSkuOverridesTable(data.overrides || []);
+  } catch(e) {
+    document.getElementById('overrides-table-area').innerHTML = `<div class="empty">❌ ${e.message}</div>`;
+  }
+}
+
+function renderSkuOverridesTable(overrides) {
+  document.getElementById('overrides-status').textContent =
+    `${overrides.length} manual SKU correction(s) on record — permanent, never overwritten by any sync. Pull this list up any time.`;
+  if (!overrides.length) {
+    document.getElementById('overrides-table-area').innerHTML = '<div class="empty">No manual SKU overrides yet.</div>';
+    return;
+  }
+  let html = `<table><thead><tr>
+    <th>eBay Item</th><th>Original eBay SKU</th><th>Your Correction</th><th>Matched Lot</th><th>Price</th><th>Qty</th><th>Last Updated</th>
+  </tr></thead><tbody>`;
+  for (const o of overrides) {
+    const matchNote = o.lot_matched
+      ? `<span style="color:var(--green,#22c55e);">✓ ${escapeHtml(o.lot_name || o.lot_sku)}</span>`
+      : `<span style="color:var(--muted);">No matching lot (${escapeHtml(o.lot_sku || '')})</span>`;
+    html += `<tr>
+      <td>${escapeHtml(o.title || '')}</td>
+      <td class="muted">${escapeHtml(o.original_ebay_sku || '(blank)')}</td>
+      <td><strong>${escapeHtml(o.your_corrected_sku || '')}</strong></td>
+      <td>${matchNote}</td>
+      <td>${fmtMoney(o.price)}</td>
+      <td>${o.quantity_available ?? '—'}</td>
+      <td class="muted">${o.updated_at ? new Date(o.updated_at).toLocaleString() : ''}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('overrides-table-area').innerHTML = html;
 }
 
 function fmtMoney(n) {
