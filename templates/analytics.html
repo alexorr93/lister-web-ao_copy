@@ -51,15 +51,15 @@ h1 { font-size: 20px; margin-bottom: 4px; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .quick-range { display: flex; gap: 6px; }
 .quick-range button { padding: 8px 10px; font-size: 12px; }
-.summary-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 18px; }
+.summary-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 18px; }
 .summary-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
 .summary-card .num { font-size: 26px; font-weight: 800; }
 .summary-card .label { font-size: 12px; color: var(--muted); margin-top: 4px; }
 .summary-card .note { font-size: 10px; color: var(--muted); margin-top: 6px; opacity: .8; }
-.sub-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-.sub-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
-.sub-card .num { font-size: 18px; font-weight: 700; }
-.sub-card .label { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.sub-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.sub-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; }
+.sub-card .num { font-size: 24px; font-weight: 800; }
+.sub-card .label { font-size: 12px; color: var(--muted); margin-top: 4px; }
 .error-banner { background: rgba(220,38,38,0.15); border: 1px solid var(--red); color: #fca5a5; border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; }
 h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin: 22px 0 10px; }
 .nav-analytics { color: #06b6d4; }
@@ -103,11 +103,6 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
       <div class="note">As of right now — not affected by the date range above (no historical daily snapshots are stored)</div>
     </div>
     <div class="summary-card">
-      <div class="num" id="m-green-revenue" style="color:#22c55e;">—</div>
-      <div class="label">Green Revenue</div>
-      <div class="note">Revenue in range from sales of lots that are currently profitable (profit &gt; 1), counted from the day each lot actually turned profitable onward</div>
-    </div>
-    <div class="summary-card">
       <div class="num" id="m-avg-sale-price">—</div>
       <div class="label">Average Sale Price</div>
       <div class="note">Total revenue ÷ units sold, in range</div>
@@ -132,12 +127,16 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
   <h2>Totals for the selected range</h2>
   <div class="sub-row">
     <div class="sub-card">
-      <div class="num" id="t-orders">—</div>
-      <div class="label">Orders</div>
-    </div>
-    <div class="sub-card">
       <div class="num" id="t-revenue">—</div>
       <div class="label">Revenue</div>
+    </div>
+    <div class="sub-card">
+      <div class="num" id="t-green-revenue" style="color:#22c55e;">—</div>
+      <div class="label">Green Revenue</div>
+    </div>
+    <div class="sub-card">
+      <div class="num" id="t-orders">—</div>
+      <div class="label">Orders</div>
     </div>
     <div class="sub-card">
       <div class="num" id="t-new-listings">—</div>
@@ -198,7 +197,7 @@ function setLastMonth() {
 }
 
 function fmtMoney(n) {
-  return '$' + (n || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  return '$' + Math.round(n || 0).toLocaleString();
 }
 
 async function loadAnalytics() {
@@ -215,14 +214,14 @@ async function loadAnalytics() {
     if (!r.ok) throw new Error(data.detail || 'Request failed');
 
     document.getElementById('m-inventory-value').textContent = fmtMoney(data.inventory_snapshot_value);
-    document.getElementById('m-green-revenue').textContent = fmtMoney(data.green_revenue);
     document.getElementById('m-avg-sale-price').textContent = fmtMoney(data.avg_sale_price);
-    document.getElementById('m-avg-sales-per-day').textContent = (data.avg_sales_per_day || 0).toLocaleString(undefined, {maximumFractionDigits: 1});
-    document.getElementById('m-avg-listings-count').textContent = (data.avg_new_listings_per_day_count || 0).toLocaleString(undefined, {maximumFractionDigits: 1});
+    document.getElementById('m-avg-sales-per-day').textContent = Math.round(data.avg_sales_per_day || 0).toLocaleString();
+    document.getElementById('m-avg-listings-count').textContent = Math.round(data.avg_new_listings_per_day_count || 0).toLocaleString();
     document.getElementById('m-avg-listings-value').textContent = fmtMoney(data.avg_new_listings_per_day_value);
 
     document.getElementById('t-orders').textContent = data.totals_in_range.orders;
     document.getElementById('t-revenue').textContent = fmtMoney(data.totals_in_range.revenue);
+    document.getElementById('t-green-revenue').textContent = fmtMoney(data.green_revenue);
     document.getElementById('t-new-listings').textContent = data.totals_in_range.new_listings;
   } catch(e) {
     errorArea.innerHTML = `<div class="error-banner">❌ ${e.message}</div>`;
@@ -267,7 +266,7 @@ function renderTrendChart(data) {
         legend: { labels: { color: '#f1f5f9' } },
         tooltip: {
           callbacks: {
-            label: ctx => `${ctx.dataset.label}: ${showPctMultiple ? Number(ctx.parsed.y).toFixed(1) + '%' : '$' + ctx.parsed.y.toLocaleString()}`,
+            label: ctx => `${ctx.dataset.label}: ${showPctMultiple ? Math.round(ctx.parsed.y) + '%' : '$' + Math.round(ctx.parsed.y).toLocaleString()}`,
           },
         },
       },
@@ -276,7 +275,7 @@ function renderTrendChart(data) {
         y: {
           ticks: {
             color: '#64748b',
-            callback: v => showPctMultiple ? Number(v).toFixed(1) + '%' : '$' + v.toLocaleString(),
+            callback: v => showPctMultiple ? Math.round(v) + '%' : '$' + Math.round(v).toLocaleString(),
           },
           grid: { color: '#2d3348' },
         },
