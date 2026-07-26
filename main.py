@@ -865,6 +865,13 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
         scheduled_at_iso = scheduled_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
         schedule_xml = f"<ScheduleTime>{scheduled_at_iso}</ScheduleTime>"
 
+    # Many Motors Parts & Accessories categories don't support Best Offer at all
+    # -- matches the 'Best offer feature disabled... unavailable for the
+    # specified category' warning in the reported error. Skip it entirely for
+    # motors-mode items rather than always requesting it.
+    best_offer_xml = "" if listing.get("category_mode") == "motors" else \
+        '<BestOfferDetails><BestOfferEnabled>true</BestOfferEnabled></BestOfferDetails>'
+
     xml_body = (
         '<?xml version="1.0" encoding="utf-8"?>'
         '<AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
@@ -884,7 +891,7 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
         '<ListingType>FixedPriceItem</ListingType>'
         f'<Quantity>{qty}</Quantity>'
         f'<SKU>{_xesc(sku)}</SKU>'
-        '<BestOfferDetails><BestOfferEnabled>true</BestOfferEnabled></BestOfferDetails>'
+        f'{best_offer_xml}'
         f'<PictureDetails>{picture_xml}</PictureDetails>'
         f'<ItemSpecifics>{item_specifics_xml}</ItemSpecifics>'
         '<SellerProfiles>'
@@ -896,10 +903,18 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
         '</Item>'
         '</AddFixedPriceItemRequest>'
     )
+    # THE actual root cause of 'Category is not valid' on Motors items, found by
+    # checking this directly: X-EBAY-API-SITEID was hardcoded to "0" (the
+    # standard US site) for every publish, motors or not. eBay Motors is a
+    # SEPARATE site (ID 100) with its own category tree -- a Motors category
+    # simply doesn't exist under Site 0, so no valid Motors category ID could
+    # ever have worked here, regardless of which one got chosen. This is why
+    # fixing the category-matching logic alone never resolved it.
+    site_id = "100" if listing.get("category_mode") == "motors" else "0"
     headers = {
         "X-EBAY-API-COMPATIBILITY-LEVEL": "1193",
         "X-EBAY-API-CALL-NAME": "AddFixedPriceItem",
-        "X-EBAY-API-SITEID": "0",
+        "X-EBAY-API-SITEID": site_id,
         "Content-Type": "text/xml",
     }
     r = _req.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_body.encode("utf-8"), timeout=30)
