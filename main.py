@@ -336,11 +336,18 @@ async def analytics_snapshot_worker():
 def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
     """One row per business per day in analytics_snapshots -- inventory value
     (today's live figure) plus that single day's sale price/new-listings numbers,
-    so a future trend view has real daily granularity instead of just 'now'."""
+    so a future trend view has real daily granularity instead of just 'now'.
+
+    Also computes YTD net revenue and YTD inventory spend as of today, for Net
+    Cash Yield -- simplified per explicit request to drop cash entirely from
+    this one (just post-fee orders minus inventory spend) and precomputed here
+    instead of recalculated live on every page load, since summing an entire
+    year's rows on every request was the actual slowdown."""
     import datetime as _dt
     from zoneinfo import ZoneInfo
 
     mt_today = _dt.datetime.now(ZoneInfo("America/Denver")).strftime("%Y-%m-%d")
+    year_start = f"{mt_today[:4]}-01-01"
 
     inventory_value = _compute_inventory_snapshot_value(business_id)
     green_revenue = _compute_green_revenue(business_id, mt_today, mt_today)
@@ -356,6 +363,14 @@ def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
     new_listings_count_day = len(listing_rows)
     new_listings_value_day = round(sum(r.get("price") or 0 for r in listing_rows), 2)
 
+    ytd_order_rows = supabase.table("orders").select("final_net").eq("business_id", business_id)\
+        .gte("order_date", year_start).lte("order_date", mt_today).execute().data or []
+    ytd_net_revenue = round(sum(r.get("final_net") or 0 for r in ytd_order_rows), 2)
+
+    ytd_acq_rows = supabase.table("acquisitions").select("cost").eq("business_id", business_id)\
+        .gte("date", year_start).lte("date", mt_today).execute().data or []
+    ytd_inventory_spend = round(sum(r.get("cost") or 0 for r in ytd_acq_rows), 2)
+
     record = {
         "business_id": business_id,
         "snapshot_date": mt_today,
@@ -364,6 +379,8 @@ def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
         "avg_sale_price_day": avg_sale_price_day,
         "new_listings_count_day": new_listings_count_day,
         "new_listings_value_day": new_listings_value_day,
+        "ytd_net_revenue": ytd_net_revenue,
+        "ytd_inventory_spend": ytd_inventory_spend,
     }
     existing = supabase.table("analytics_snapshots").select("id").eq("business_id", business_id)\
         .eq("snapshot_date", mt_today).limit(1).execute()
@@ -4516,13 +4533,16 @@ async def api_analytics_history(request: Request, days: int = 90):
 
 @app.get("/api/analytics/net-cash-yield")
 async def api_net_cash_yield(request: Request, year: int = None):
-    """Net Cash Yield for a given year: (post-fee revenue + cash, same 'Net
-    Sales' definition as the main Analytics view) MINUS (all inventory
-    purchases dated in that same year). A single number answering 'did the
-    cash that actually came in this year cover what we spent buying inventory
-    this year' -- not tied to the Start/End Month filter above the charts,
-    just a plain year picker, defaulting to the current year through today
-    (YTD) rather than the full calendar year if that year isn't over yet."""
+    """Net Cash Yield for a given year: post-fee order revenue (orders.final_net,
+    eBay+Shopify, no cash -- simplified per explicit request to drop cash from
+    this one entirely) MINUS all inventory purchases dated that year.
+
+    For the CURRENT year, reads the precomputed ytd_net_revenue/
+    ytd_inventory_spend columns the daily snapshot worker already writes,
+    instead of re-summing a whole year of rows live on every page load (which
+    was the actual slowdown). For a PAST, fully-closed year, computes it live --
+    a one-time bounded sum over a year that's already over and won't change,
+    not something hit on every load the way 'current year so far' is."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
@@ -4530,26 +4550,33 @@ async def api_net_cash_yield(request: Request, year: int = None):
     now = _dt.datetime.utcnow()
     target_year = year or now.year
     start_date_str = f"{target_year:04d}-01-01"
-    end_date_str = f"{target_year:04d}-12-31" if target_year != now.year else now.strftime("%Y-%m-%d")
+    is_ytd = target_year == now.year
 
-    order_rows = supabase.table("orders").select("final_net").eq("business_id", business_id)\
-        .gte("order_date", start_date_str).lte("order_date", end_date_str).execute().data or []
-    total_net_revenue = sum(r.get("final_net") or 0 for r in order_rows)
-    cash_in_range = _compute_cash_in_range(business_id, start_date_str, end_date_str)
-    net_sales = total_net_revenue + cash_in_range
-
-    acq_rows = supabase.table("acquisitions").select("cost,date").eq("business_id", business_id)\
-        .gte("date", start_date_str).lte("date", end_date_str).execute().data or []
-    total_spend = sum(r.get("cost") or 0 for r in acq_rows)
+    if is_ytd:
+        snap = supabase.table("analytics_snapshots").select("snapshot_date,ytd_net_revenue,ytd_inventory_spend")\
+            .eq("business_id", business_id).gte("snapshot_date", start_date_str)\
+            .order("snapshot_date", desc=True).limit(1).execute()
+        row = (snap.data or [None])[0]
+        total_net_revenue = (row or {}).get("ytd_net_revenue") or 0
+        total_spend = (row or {}).get("ytd_inventory_spend") or 0
+        end_date_str = (row or {}).get("snapshot_date") or now.strftime("%Y-%m-%d")
+    else:
+        end_date_str = f"{target_year:04d}-12-31"
+        order_rows = supabase.table("orders").select("final_net").eq("business_id", business_id)\
+            .gte("order_date", start_date_str).lte("order_date", end_date_str).execute().data or []
+        total_net_revenue = sum(r.get("final_net") or 0 for r in order_rows)
+        acq_rows = supabase.table("acquisitions").select("cost").eq("business_id", business_id)\
+            .gte("date", start_date_str).lte("date", end_date_str).execute().data or []
+        total_spend = sum(r.get("cost") or 0 for r in acq_rows)
 
     return {
         "year": target_year,
         "start": start_date_str,
         "end": end_date_str,
-        "is_ytd": target_year == now.year,
-        "net_sales": round(net_sales, 2),
+        "is_ytd": is_ytd,
+        "net_sales": round(total_net_revenue, 2),
         "total_spend": round(total_spend, 2),
-        "net_cash_yield": round(net_sales - total_spend, 2),
+        "net_cash_yield": round(total_net_revenue - total_spend, 2),
     }
 
 @app.get("/api/analytics/monthly-trend")
