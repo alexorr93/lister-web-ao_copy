@@ -196,27 +196,29 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
   <h2>Inventory Snapshot Value, by month</h2>
   <div class="sub" style="margin-bottom:10px;">Always shows its own full available range, from the earliest real data through today — not affected by the Start Month/End Month filter above (that filter only applies to the Spend vs. Sales and Green Revenue charts). Gaps between two known values are averaged into a real midpoint; nothing is shown before the first real data point.</div>
   <div style="display:flex;gap:12px;align-items:stretch;">
-    <div class="summary-card" style="padding:16px;flex:2;">
+    <div class="summary-card" style="padding:16px;flex:3;">
       <canvas id="inventory-value-chart" height="90"></canvas>
     </div>
-    <div class="summary-card" style="padding:16px;flex:1;display:flex;flex-direction:column;justify-content:center;min-width:170px;">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+    <div class="summary-card" style="padding:16px;flex:1;display:flex;flex-direction:column;justify-content:center;min-width:190px;gap:12px;">
+      <div style="display:flex;align-items:center;gap:8px;">
         <select id="ncy-year" class="field-input" style="padding:6px 8px;font-size:12px;" onchange="loadNetCashYield()"></select>
         <button class="btn" style="padding:6px 8px;font-size:11px;" onclick="refreshNetCashYieldNow()" title="Recomputes today's figures right now instead of waiting for the overnight job">🔄</button>
       </div>
-      <div class="num" id="ncy-value" style="font-size:22px;font-weight:800;">—</div>
-      <div class="label">Net Cash Yield <span id="ncy-ytd-tag"></span></div>
-      <div class="note" style="font-size:10px;color:var(--muted);margin-top:6px;" id="ncy-note">Post-fee order revenue (eBay + Shopify) + cash − Inventory Spend, this year</div>
-    </div>
-    <div class="summary-card" style="padding:16px;flex:1;display:flex;flex-direction:column;justify-content:center;min-width:170px;">
-      <div class="num" id="ia-value" style="font-size:22px;font-weight:800;">—</div>
-      <div class="label">Inventory Appreciation</div>
-      <div class="note" style="font-size:10px;color:var(--muted);margin-top:6px;" id="ia-note">Today's Inventory Snapshot Value − Jan 1 value, this year</div>
-    </div>
-    <div class="summary-card" style="padding:16px;flex:1;display:flex;flex-direction:column;justify-content:center;min-width:170px;">
-      <div class="num" id="nba-value" style="font-size:22px;font-weight:800;">—</div>
-      <div class="label">Net Business Appreciation</div>
-      <div class="note" style="font-size:10px;color:var(--muted);margin-top:6px;">Net Cash Yield + Inventory Appreciation — cash generated plus the change in what's still in inventory</div>
+      <div>
+        <div class="num" id="ncy-value" style="font-size:19px;font-weight:800;">—</div>
+        <div class="label" style="font-size:11px;">Net Cash Yield <span id="ncy-ytd-tag"></span></div>
+        <div class="note" style="font-size:9px;color:var(--muted);margin-top:2px;" id="ncy-note">Post-fee order revenue (eBay + Shopify) + cash − Inventory Spend, this year</div>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:10px;">
+        <div class="num" id="ia-value" style="font-size:19px;font-weight:800;">—</div>
+        <div class="label" style="font-size:11px;">Inventory Appreciation</div>
+        <div class="note" style="font-size:9px;color:var(--muted);margin-top:2px;" id="ia-note">Today's Inventory Snapshot Value − Jan 1 value, this year</div>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:10px;">
+        <div class="num" id="nba-value" style="font-size:19px;font-weight:800;">—</div>
+        <div class="label" style="font-size:11px;">Net Business Appreciation</div>
+        <div class="note" style="font-size:9px;color:var(--muted);margin-top:2px;">Net Cash Yield + Inventory Appreciation</div>
+      </div>
     </div>
   </div>
 </div>
