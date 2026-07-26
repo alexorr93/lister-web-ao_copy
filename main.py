@@ -380,6 +380,20 @@ def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
     ytd_cash = _compute_cash_for_year(business_id, int(mt_today[:4]))
     ytd_net_cash_yield = round(ytd_net_revenue + ytd_cash - ytd_inventory_spend, 2)
 
+    # YTD Inventory Appreciation: today's inventory value minus whatever it was
+    # on/near Jan 1 -- reuses the same nearest-snapshot lookup Inventory Growth
+    # Multiple already relies on, since it's the same underlying question
+    # (what did inventory look like at the start of the year). Net Business
+    # Appreciation = Net Cash Yield + Inventory Appreciation: cash generated
+    # AND the change in what's still sitting in inventory, over the same
+    # period -- the fuller picture of whether the business grew this year.
+    jan1_value, jan1_date = _nearest_inventory_snapshot(business_id, year_start)
+    ytd_inventory_appreciation = round(inventory_value - jan1_value, 2) if jan1_value is not None else None
+    ytd_net_business_appreciation = (
+        round(ytd_net_cash_yield + ytd_inventory_appreciation, 2)
+        if ytd_inventory_appreciation is not None else None
+    )
+
     record = {
         "business_id": business_id,
         "snapshot_date": mt_today,
@@ -392,6 +406,8 @@ def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
         "ytd_inventory_spend": ytd_inventory_spend,
         "ytd_cash": ytd_cash,
         "ytd_net_cash_yield": ytd_net_cash_yield,
+        "ytd_inventory_appreciation": ytd_inventory_appreciation,
+        "ytd_net_business_appreciation": ytd_net_business_appreciation,
     }
     existing = supabase.table("analytics_snapshots").select("id").eq("business_id", business_id)\
         .eq("snapshot_date", mt_today).limit(1).execute()
@@ -4480,6 +4496,22 @@ def _compute_inventory_snapshot_value(business_id: str) -> float:
             value += float(price) * float(qty)
     return round(value, 2)
 
+def _nearest_inventory_snapshot(business_id: str, date_str: str):
+    """Closest recorded Inventory Snapshot Value on or before date_str, using the
+    analytics_snapshots history (CSV backfill + daily tracking). Extracted from
+    the live /api/analytics endpoint's Inventory Growth Multiple logic so the
+    daily snapshot worker can share the exact same lookup for YTD Inventory
+    Appreciation, instead of duplicating it. Must exclude NULL rows (the CSV
+    backfill's gap months) -- otherwise 'latest row on or before this date'
+    could BE a gap row, silently returning None even though a perfectly good
+    earlier value exists (a real bug found and fixed once already)."""
+    res = supabase.table("analytics_snapshots").select("snapshot_date,inventory_snapshot_value")\
+        .eq("business_id", business_id).lte("snapshot_date", date_str)\
+        .not_.is_("inventory_snapshot_value", "null")\
+        .order("snapshot_date", desc=True).limit(1).execute()
+    row = (res.data or [None])[0]
+    return (row.get("inventory_snapshot_value"), row.get("snapshot_date")) if row else (None, None)
+
 def _compute_green_revenue(business_id: str, start_date_str: str, end_date_str: str) -> float:
     """'Green Revenue' -- sum of actual order revenue (gross_revenue, per the
     user's own flag: is lot profit > 1 = Green) PLUS cash payments belonging to
@@ -4630,26 +4662,11 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
     net_sales = round(total_net_revenue + cash_in_range, 2)
 
     # --- Inventory Growth Multiple: % change in Inventory Snapshot Value across the
-    # selected range, using the analytics_snapshots history (the monthly CSV
-    # backfill plus the daily snapshots going forward) -- the closest snapshot ON
-    # OR BEFORE each end of the range stands in for that date, since snapshots
-    # aren't necessarily recorded for every single day (especially the backfilled
-    # monthly ones).
-    def _snapshot_value_near(date_str: str):
-        # Must exclude rows where inventory_snapshot_value is NULL (the CSV
-        # backfill's gap months) -- otherwise the "latest row on or before this
-        # date" could BE a gap row, silently returning None even though a
-        # perfectly good earlier value exists. Same bug just fixed in the
-        # Inventory Snapshot Value chart below, fixed here too.
-        res = supabase.table("analytics_snapshots").select("snapshot_date,inventory_snapshot_value")\
-            .eq("business_id", business_id).lte("snapshot_date", date_str)\
-            .not_.is_("inventory_snapshot_value", "null")\
-            .order("snapshot_date", desc=True).limit(1).execute()
-        row = (res.data or [None])[0]
-        return (row.get("inventory_snapshot_value"), row.get("snapshot_date")) if row else (None, None)
-
-    start_inv_value, start_inv_date = _snapshot_value_near(start_date_str)
-    end_inv_value, end_inv_date = _snapshot_value_near(end_date_str)
+    # selected range, using the shared _nearest_inventory_snapshot lookup (the
+    # closest snapshot ON OR BEFORE each end of the range stands in for that
+    # date, since snapshots aren't recorded for every single day).
+    start_inv_value, start_inv_date = _nearest_inventory_snapshot(business_id, start_date_str)
+    end_inv_value, end_inv_date = _nearest_inventory_snapshot(business_id, end_date_str)
     inventory_growth_pct = None
     if start_inv_value and end_inv_value is not None:
         inventory_growth_pct = round((end_inv_value - start_inv_value) / start_inv_value * 100, 1)
@@ -4731,7 +4748,7 @@ async def api_net_cash_yield(request: Request, year: int = None):
     is_ytd = target_year == now.year
 
     if is_ytd:
-        snap = supabase.table("analytics_snapshots").select("snapshot_date,ytd_net_revenue,ytd_inventory_spend,ytd_cash,ytd_net_cash_yield")\
+        snap = supabase.table("analytics_snapshots").select("snapshot_date,ytd_net_revenue,ytd_inventory_spend,ytd_cash,ytd_net_cash_yield,ytd_inventory_appreciation,ytd_net_business_appreciation")\
             .eq("business_id", business_id).gte("snapshot_date", start_date_str)\
             .order("snapshot_date", desc=True).limit(1).execute()
         row = (snap.data or [None])[0]
@@ -4739,6 +4756,8 @@ async def api_net_cash_yield(request: Request, year: int = None):
         total_spend = (row or {}).get("ytd_inventory_spend") or 0
         total_cash = (row or {}).get("ytd_cash") or 0
         stored_yield = (row or {}).get("ytd_net_cash_yield")
+        stored_appreciation = (row or {}).get("ytd_inventory_appreciation")
+        stored_business_appreciation = (row or {}).get("ytd_net_business_appreciation")
         end_date_str = (row or {}).get("snapshot_date") or now.strftime("%Y-%m-%d")
     else:
         end_date_str = f"{target_year:04d}-12-31"
@@ -4750,12 +4769,23 @@ async def api_net_cash_yield(request: Request, year: int = None):
         total_spend = sum(r.get("cost") or 0 for r in acq_rows)
         total_cash = _compute_cash_for_year(business_id, target_year)
         stored_yield = None
+        # Past year: appreciation is Dec 31 value minus Jan 1 value, both from
+        # whatever real snapshot history exists near those dates.
+        jan1_value, _ = _nearest_inventory_snapshot(business_id, start_date_str)
+        dec31_value, _ = _nearest_inventory_snapshot(business_id, end_date_str)
+        stored_appreciation = round(dec31_value - jan1_value, 2) if (jan1_value is not None and dec31_value is not None) else None
+        stored_business_appreciation = None  # computed below once net_cash_yield is known
 
     net_sales = total_net_revenue + total_cash
     # Use the stored value directly when we have it (the current year, read
     # straight from the daily snapshot) instead of recomputing -- only falls
     # back to computing it here for a past year, which has no stored snapshot.
     net_cash_yield = stored_yield if stored_yield is not None else round(net_sales - total_spend, 2)
+    inventory_appreciation = stored_appreciation
+    net_business_appreciation = (
+        stored_business_appreciation if stored_business_appreciation is not None
+        else (round(net_cash_yield + inventory_appreciation, 2) if inventory_appreciation is not None else None)
+    )
 
     return {
         "year": target_year,
@@ -4767,6 +4797,8 @@ async def api_net_cash_yield(request: Request, year: int = None):
         "cash": round(total_cash, 2),
         "total_spend": round(total_spend, 2),
         "net_cash_yield": net_cash_yield,
+        "inventory_appreciation": inventory_appreciation,
+        "net_business_appreciation": net_business_appreciation,
     }
 
 @app.get("/api/analytics/monthly-trend")

@@ -196,17 +196,27 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
   <h2>Inventory Snapshot Value, by month</h2>
   <div class="sub" style="margin-bottom:10px;">Always shows its own full available range, from the earliest real data through today — not affected by the Start Month/End Month filter above (that filter only applies to the Spend vs. Sales and Green Revenue charts). Gaps between two known values are averaged into a real midpoint; nothing is shown before the first real data point.</div>
   <div style="display:flex;gap:12px;align-items:stretch;">
-    <div class="summary-card" style="padding:16px;flex:3;">
+    <div class="summary-card" style="padding:16px;flex:2;">
       <canvas id="inventory-value-chart" height="90"></canvas>
     </div>
-    <div class="summary-card" style="padding:16px;flex:1;display:flex;flex-direction:column;justify-content:center;min-width:200px;">
+    <div class="summary-card" style="padding:16px;flex:1;display:flex;flex-direction:column;justify-content:center;min-width:170px;">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
         <select id="ncy-year" class="field-input" style="padding:6px 8px;font-size:12px;" onchange="loadNetCashYield()"></select>
         <button class="btn" style="padding:6px 8px;font-size:11px;" onclick="refreshNetCashYieldNow()" title="Recomputes today's figures right now instead of waiting for the overnight job">🔄</button>
       </div>
-      <div class="num" id="ncy-value" style="font-size:24px;font-weight:800;">—</div>
+      <div class="num" id="ncy-value" style="font-size:22px;font-weight:800;">—</div>
       <div class="label">Net Cash Yield <span id="ncy-ytd-tag"></span></div>
       <div class="note" style="font-size:10px;color:var(--muted);margin-top:6px;" id="ncy-note">Post-fee order revenue (eBay + Shopify) + cash − Inventory Spend, this year</div>
+    </div>
+    <div class="summary-card" style="padding:16px;flex:1;display:flex;flex-direction:column;justify-content:center;min-width:170px;">
+      <div class="num" id="ia-value" style="font-size:22px;font-weight:800;">—</div>
+      <div class="label">Inventory Appreciation</div>
+      <div class="note" style="font-size:10px;color:var(--muted);margin-top:6px;" id="ia-note">Today's Inventory Snapshot Value − Jan 1 value, this year</div>
+    </div>
+    <div class="summary-card" style="padding:16px;flex:1;display:flex;flex-direction:column;justify-content:center;min-width:170px;">
+      <div class="num" id="nba-value" style="font-size:22px;font-weight:800;">—</div>
+      <div class="label">Net Business Appreciation</div>
+      <div class="note" style="font-size:10px;color:var(--muted);margin-top:6px;">Net Cash Yield + Inventory Appreciation — cash generated plus the change in what's still in inventory</div>
     </div>
   </div>
 </div>
@@ -508,6 +518,28 @@ async function loadNetCashYield() {
     document.getElementById('ncy-ytd-tag').textContent = data.is_ytd ? '(YTD)' : '';
     document.getElementById('ncy-note').textContent =
       `Revenue $${Math.round(data.net_revenue_only).toLocaleString()} + Cash $${Math.round(data.cash).toLocaleString()} − Spend $${Math.round(data.total_spend).toLocaleString()}, ${data.start} to ${data.end}`;
+
+    const iaEl = document.getElementById('ia-value');
+    if (data.inventory_appreciation === null || data.inventory_appreciation === undefined) {
+      iaEl.textContent = '—';
+      iaEl.style.color = '';
+      document.getElementById('ia-note').textContent = 'Not enough snapshot history yet for Jan 1 this year';
+    } else {
+      const iaVal = Math.round(data.inventory_appreciation);
+      iaEl.textContent = (iaVal >= 0 ? '+$' : '−$') + Math.abs(iaVal).toLocaleString();
+      iaEl.style.color = iaVal >= 0 ? '#22c55e' : '#dc2626';
+      document.getElementById('ia-note').textContent = `Today's Inventory Snapshot Value − Jan 1 value, ${data.year}`;
+    }
+
+    const nbaEl = document.getElementById('nba-value');
+    if (data.net_business_appreciation === null || data.net_business_appreciation === undefined) {
+      nbaEl.textContent = '—';
+      nbaEl.style.color = '';
+    } else {
+      const nbaVal = Math.round(data.net_business_appreciation);
+      nbaEl.textContent = (nbaVal >= 0 ? '+$' : '−$') + Math.abs(nbaVal).toLocaleString();
+      nbaEl.style.color = nbaVal >= 0 ? '#22c55e' : '#dc2626';
+    }
   } catch(e) {
     document.getElementById('ncy-value').textContent = 'Error';
   }
