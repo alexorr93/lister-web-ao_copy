@@ -3127,14 +3127,26 @@ async def list_acquisitions(request: Request):
         # its prefix matches a real lot, it still needs an individual SKU, so it
         # belongs here alongside blank SKUs — not silently counted as "matched."
         needs_sku = _sku_needs_assignment(sku)
-        if sku and not needs_sku and prefix in known_lot_skus:
+
+        matched_listing = listing_by_item_id.get(row.get("item_id"))
+        sku_editable = bool(matched_listing) and not matched_listing.get("ebay_offer_id")
+        # FIXED a real blind spot: a locked (v1/Inventory-API) listing whose raw eBay
+        # SKU happens to superficially match a real lot's prefix format (e.g. an old
+        # eBay-generated SKU like "AM-1024" that coincidentally looks like a valid
+        # lot-prefixed SKU) was being counted as correctly matched -- but that match
+        # was never actually verified by anyone through Lister's own lot system for
+        # legacy v1 listings. Now: a locked listing with NO explicit sku_override on
+        # record always needs review, regardless of whether its raw SKU happens to
+        # look plausible, since a coincidental format match isn't the same as a
+        # confirmed assignment.
+        needs_review = needs_sku or (not sku_editable and not override_sku)
+
+        if sku and not needs_review and prefix in known_lot_skus:
             value_by_prefix[prefix] = value_by_prefix.get(prefix, 0) + value
             count_by_prefix[prefix] = count_by_prefix.get(prefix, 0) + 1
         else:
             uncategorized_value += value
             uncategorized_count += 1
-            matched_listing = listing_by_item_id.get(row.get("item_id"))
-            sku_editable = bool(matched_listing) and not matched_listing.get("ebay_offer_id")
             uncategorized_items.append({
                 "item_id": row.get("item_id"), "sku": sku, "raw_sku": raw_sku, "title": row.get("title"),
                 "price": row.get("price"), "quantity_available": row.get("quantity_available"),

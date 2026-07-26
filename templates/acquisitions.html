@@ -279,8 +279,10 @@ function setUncatSort(key) {
 function renderUncategorizedTable() {
   const items = [...(uncategorized.items || [])];
   const needsSkuCount = items.filter(it => it.needs_sku).length;
+  const lockedUnverifiedCount = items.filter(it => !it.needs_sku && !it.sku_editable && !it.has_override).length;
+  const noMatchCount = items.length - needsSkuCount - lockedUnverifiedCount;
   document.getElementById('uncategorized-status').textContent =
-    `${items.length} active listing(s) need attention (${needsSkuCount} need a real SKU assigned, ${items.length - needsSkuCount} don't match any lot) — ${fmtMoney(uncategorized.active_listings_value)} in active-listing value, ${fmtMoney(uncategorized.sales_total)} in unmatched sales.`;
+    `${items.length} active listing(s) need attention (${needsSkuCount} need a real SKU assigned, ${lockedUnverifiedCount} are locked v1 listings never manually verified, ${noMatchCount} don't match any lot) — ${fmtMoney(uncategorized.active_listings_value)} in active-listing value, ${fmtMoney(uncategorized.sales_total)} in unmatched sales.`;
   if (!items.length) {
     document.getElementById('uncategorized-table-area').innerHTML = '<div class="empty">Nothing uncategorized — every active listing matches a lot and has a real SKU.</div>';
     return;
@@ -300,7 +302,9 @@ function renderUncategorizedTable() {
   for (const it of items) {
     const reason = it.needs_sku
       ? `<span style="color:var(--amber);font-weight:600;">Needs SKU</span>`
-      : `<span style="color:var(--muted);">No matching lot</span>`;
+      : (!it.sku_editable && !it.has_override
+          ? `<span style="color:var(--amber);font-weight:600;">Locked, unverified</span>`
+          : `<span style="color:var(--muted);">No matching lot</span>`);
     let editCell;
     if (it.sku_editable) {
       editCell = `<input type="text" class="field-input uncat-sku-input" data-item-id="${it.item_id}" value="${escapeHtml(it.sku)}" style="width:110px;font-size:12px;padding:4px 6px;"/>
