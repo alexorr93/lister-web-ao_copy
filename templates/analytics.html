@@ -50,7 +50,7 @@ h1 { font-size: 20px; margin-bottom: 4px; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .quick-range { display: flex; gap: 6px; }
 .quick-range button { padding: 8px 10px; font-size: 12px; }
-.summary-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 18px; }
+.summary-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 18px; }
 .summary-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
 .summary-card .num { font-size: 26px; font-weight: 800; }
 .summary-card .label { font-size: 12px; color: var(--muted); margin-top: 4px; }
@@ -84,6 +84,7 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
     </div>
     <button class="btn btn-primary" onclick="loadAnalytics()">Apply</button>
     <div class="quick-range">
+      <button class="btn" onclick="setToday()">Today</button>
       <button class="btn" onclick="setRange(7)">Last 7d</button>
       <button class="btn" onclick="setRange(30)">Last 30d</button>
       <button class="btn" onclick="setRange(90)">Last 90d</button>
@@ -109,6 +110,11 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
       <div class="num" id="m-avg-sale-price">—</div>
       <div class="label">Average Sale Price</div>
       <div class="note">Total revenue ÷ units sold, in range</div>
+    </div>
+    <div class="summary-card">
+      <div class="num" id="m-avg-sales-per-day">—</div>
+      <div class="label">Avg Sales / Day</div>
+      <div class="note">Orders in range ÷ days in range</div>
     </div>
     <div class="summary-card">
       <div class="num" id="m-avg-listings-count">—</div>
@@ -140,6 +146,13 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
 </div>
 
 <script>
+function setToday() {
+  const today = new Date().toISOString().slice(0,10);
+  document.getElementById('start-date').value = today;
+  document.getElementById('end-date').value = today;
+  loadAnalytics();
+}
+
 function setRange(days) {
   const end = new Date();
   const start = new Date();
@@ -186,6 +199,7 @@ async function loadAnalytics() {
     document.getElementById('m-inventory-value').textContent = fmtMoney(data.inventory_snapshot_value);
     document.getElementById('m-green-revenue').textContent = fmtMoney(data.green_revenue);
     document.getElementById('m-avg-sale-price').textContent = fmtMoney(data.avg_sale_price);
+    document.getElementById('m-avg-sales-per-day').textContent = (data.avg_sales_per_day || 0).toLocaleString(undefined, {maximumFractionDigits: 1});
     document.getElementById('m-avg-listings-count').textContent = (data.avg_new_listings_per_day_count || 0).toLocaleString(undefined, {maximumFractionDigits: 1});
     document.getElementById('m-avg-listings-value').textContent = fmtMoney(data.avg_new_listings_per_day_value);
 

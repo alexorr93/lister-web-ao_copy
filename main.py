@@ -4081,6 +4081,7 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
     total_revenue = sum(r.get("gross_revenue") or 0 for r in order_rows)
     total_qty_sold = sum(r.get("quantity") or 0 for r in order_rows)
     avg_sale_price = round(total_revenue / total_qty_sold, 2) if total_qty_sold else 0
+    avg_sales_per_day = round(len(order_rows) / num_days, 2)
 
     # --- Average New Listings Per Day: count and $ (within the selected date range) ---
     listing_rows = supabase.table("listings").select("price,created_at").eq("business_id", business_id)\
@@ -4097,6 +4098,7 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
         "inventory_snapshot_value": inventory_snapshot_value,
         "green_revenue": green_revenue,
         "avg_sale_price": avg_sale_price,
+        "avg_sales_per_day": avg_sales_per_day,
         "avg_new_listings_per_day_count": avg_new_listings_per_day_count,
         "avg_new_listings_per_day_value": avg_new_listings_per_day_value,
         "totals_in_range": {
