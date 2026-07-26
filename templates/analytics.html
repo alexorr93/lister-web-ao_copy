@@ -105,7 +105,7 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
     <div class="summary-card">
       <div class="num" id="m-avg-sale-price">—</div>
       <div class="label">Average Sale Price</div>
-      <div class="note">Total revenue ÷ units sold, in range</div>
+      <div class="note">Order revenue (excl. cash) ÷ units sold, in range — <span id="m-units-sold"></span> units sold</div>
     </div>
     <div class="summary-card">
       <div class="num" id="m-avg-sales-per-day">—</div>
@@ -190,7 +190,7 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
   </div>
 
   <h2>Inventory Snapshot Value, by month</h2>
-  <div class="sub" style="margin-bottom:10px;">Uses the closest recorded snapshot on or before the end of each month — genuinely limited to how far back real snapshots exist (your CSV backfill plus daily tracking since), since this is a point-in-time figure with no dated transaction history to reconstruct it from.</div>
+  <div class="sub" style="margin-bottom:10px;">Always shows its own full available range, from the earliest real data through today — not affected by the Start Month/End Month filter above (that filter only applies to the Spend vs. Sales and Green Revenue charts). Gaps between two known values are averaged into a real midpoint; nothing is shown before the first real data point.</div>
   <div class="summary-card" style="padding:16px;">
     <canvas id="inventory-value-chart" height="90"></canvas>
   </div>
@@ -249,6 +249,7 @@ async function loadAnalytics() {
 
     document.getElementById('m-inventory-value').textContent = fmtMoney(data.inventory_snapshot_value);
     document.getElementById('m-avg-sale-price').textContent = fmtMoney(data.avg_sale_price);
+    document.getElementById('m-units-sold').textContent = (data.totals_in_range.quantity_sold || 0).toLocaleString();
     document.getElementById('m-avg-sales-per-day').textContent = Math.round(data.avg_sales_per_day || 0).toLocaleString();
     document.getElementById('m-avg-sales-per-day-dollars').textContent = fmtMoney(data.avg_sales_per_day_dollars);
     document.getElementById('m-avg-listings-count').textContent = Math.round(data.avg_new_listings_per_day_count || 0).toLocaleString();
@@ -396,7 +397,7 @@ function renderInventoryValueChart(data) {
   inventoryValueChart = new Chart(ctx, {
     type: 'line',
     data: {
-      labels: data.months,
+      labels: data.inventory_value_months,
       datasets: [{
         label: 'Inventory Snapshot Value',
         data: data.inventory_value_by_month,
@@ -420,6 +421,21 @@ function renderInventoryValueChart(data) {
   });
 }
 
+// This chart is NOT affected by the Start Month/End Month filter above -- it
+// always shows its own full available range (from the earliest real snapshot
+// through today) and is only loaded once, on page load, never re-fetched by
+// the Apply button.
+async function loadInventoryValueChart() {
+  try {
+    const r = await fetch('/api/analytics/monthly-trend');
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Request failed');
+    renderInventoryValueChart(data);
+  } catch(e) {
+    document.getElementById('inventory-value-chart').parentElement.innerHTML = `<div class="error-banner">❌ ${e.message}</div>`;
+  }
+}
+
 async function loadMonthlyTrend() {
   try {
     const startMonth = document.getElementById('trend-start-month').value || '2025-01';
@@ -431,7 +447,6 @@ async function loadMonthlyTrend() {
     if (!r.ok) throw new Error(data.detail || 'Request failed');
     renderTrendChart(data);
     renderGreenTrendChart(data);
-    renderInventoryValueChart(data);
   } catch(e) {
     document.getElementById('trend-chart').parentElement.innerHTML = `<div class="error-banner">❌ ${e.message}</div>`;
   }
@@ -440,6 +455,7 @@ async function loadMonthlyTrend() {
 setRange(30);
 document.getElementById('trend-end-month').value = new Date().toISOString().slice(0,7);
 loadMonthlyTrend();
+loadInventoryValueChart();
 </script>
 </body>
 </html>

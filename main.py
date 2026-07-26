@@ -4569,24 +4569,43 @@ async def api_analytics_monthly_trend(request: Request, start: str = None, end: 
         month_start, month_end = _month_bounds(month)
         green_revenue_by_month.append(_compute_green_revenue(business_id, month_start, month_end))
 
-    # Inventory Snapshot Value by month. Real bug found while fixing this: the
-    # old version could pick up a gap row (inventory_snapshot_value = NULL, from
-    # months the user's CSV backfill genuinely had no number for) as its "latest
-    # seen" value, silently erasing a perfectly good earlier value instead of
-    # skipping past it -- that's why January and everything after briefly went
-    # blank. Now:
+    # Inventory Snapshot Value by month -- deliberately NOT tied to the start/end
+    # filter above. Runs its own independent range: from whichever month has the
+    # EARLIEST real data through the current month, always, regardless of what's
+    # selected in Start Month/End Month. This chart's x-axis is compressed to
+    # only the span where real data actually exists, per explicit request.
+    #
+    # Real bug found while building the gap-filling below: the old version could
+    # pick up a gap row (inventory_snapshot_value = NULL, from months the user's
+    # CSV backfill genuinely had no number for) as its "latest seen" value,
+    # silently erasing a perfectly good earlier value instead of skipping past
+    # it -- that's why January and everything after briefly went blank. Now:
     #  - an exact snapshot dated within the month wins outright
     #  - a gap with a REAL value on both sides gets the average of those two
-    #    (a real midpoint, per the user's explicit request for exactly this)
-    #  - a gap with no earlier real value at all (before the CSV's first entry --
-    #    July/Aug 2025) is left blank rather than guessed at, since there's
-    #    nothing to average against
+    #    (a real midpoint, per explicit request for exactly this)
+    #  - a gap with no earlier real value at all is left blank rather than
+    #    guessed at, since there's nothing to average against -- but this only
+    #    happens now if data is missing from the MIDDLE of the real range, since
+    #    the leading all-blank months are trimmed off the x-axis entirely below
     real_points = sorted(
         [(r.get("snapshot_date"), r.get("inventory_snapshot_value")) for r in snapshot_rows if r.get("inventory_snapshot_value") is not None],
         key=lambda p: p[0],
     )
+    if real_points:
+        inv_start_month = real_points[0][0][:7]
+        inv_months = []
+        y, m = int(inv_start_month[:4]), int(inv_start_month[5:7])
+        while (y, m) <= (now.year, now.month):
+            inv_months.append(f"{y:04d}-{m:02d}")
+            m += 1
+            if m > 12:
+                m = 1
+                y += 1
+    else:
+        inv_months = []
+
     inventory_value_by_month = []
-    for month in all_months:
+    for month in inv_months:
         month_start, month_end = _month_bounds(month)
         exact = None
         for d, v in real_points:
@@ -4623,6 +4642,7 @@ async def api_analytics_monthly_trend(request: Request, start: str = None, end: 
         "months": all_months,
         "inventory_spend": inventory_spend,
         "green_revenue_by_month": green_revenue_by_month,
+        "inventory_value_months": inv_months,
         "inventory_value_by_month": inventory_value_by_month,
         "sales": sales,
         "pct_multiple": pct_multiple,
