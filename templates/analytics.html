@@ -267,7 +267,7 @@ function renderTrendChart(data) {
         legend: { labels: { color: '#f1f5f9' } },
         tooltip: {
           callbacks: {
-            label: ctx => `${ctx.dataset.label}: ${showPctMultiple ? ctx.parsed.y + '%' : '$' + ctx.parsed.y.toLocaleString()}`,
+            label: ctx => `${ctx.dataset.label}: ${showPctMultiple ? Number(ctx.parsed.y).toFixed(1) + '%' : '$' + ctx.parsed.y.toLocaleString()}`,
           },
         },
       },
@@ -276,7 +276,7 @@ function renderTrendChart(data) {
         y: {
           ticks: {
             color: '#64748b',
-            callback: v => showPctMultiple ? v + '%' : '$' + v.toLocaleString(),
+            callback: v => showPctMultiple ? Number(v).toFixed(1) + '%' : '$' + v.toLocaleString(),
           },
           grid: { color: '#2d3348' },
         },
