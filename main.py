@@ -4149,6 +4149,35 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
     avg_sale_price = round(total_revenue / total_qty_sold, 2) if total_qty_sold else 0
     avg_sales_per_day = round(len(order_rows) / num_days, 2)
 
+    # --- Net Sales: revenue + cash entries dated within the same range ---
+    # acquisitions.cash is a manual per-lot entry (e.g. cash taken in outside the
+    # normal eBay/Shopify order flow) dated by that lot's own acquisitions.date --
+    # already exactly the "input the user provided" needed to filter it by period,
+    # same as every other dated field here. No new table needed for this one.
+    cash_rows = supabase.table("acquisitions").select("cash,date").eq("business_id", business_id)\
+        .gte("date", start_date_str).lte("date", end_date_str).execute().data or []
+    cash_in_range = sum(r.get("cash") or 0 for r in cash_rows)
+    net_sales = round(total_revenue + cash_in_range, 2)
+
+    # --- Inventory Growth Multiple: % change in Inventory Snapshot Value across the
+    # selected range, using the analytics_snapshots history (the monthly CSV
+    # backfill plus the daily snapshots going forward) -- the closest snapshot ON
+    # OR BEFORE each end of the range stands in for that date, since snapshots
+    # aren't necessarily recorded for every single day (especially the backfilled
+    # monthly ones).
+    def _snapshot_value_near(date_str: str):
+        res = supabase.table("analytics_snapshots").select("snapshot_date,inventory_snapshot_value")\
+            .eq("business_id", business_id).lte("snapshot_date", date_str)\
+            .order("snapshot_date", desc=True).limit(1).execute()
+        row = (res.data or [None])[0]
+        return (row.get("inventory_snapshot_value"), row.get("snapshot_date")) if row else (None, None)
+
+    start_inv_value, start_inv_date = _snapshot_value_near(start_date_str)
+    end_inv_value, end_inv_date = _snapshot_value_near(end_date_str)
+    inventory_growth_pct = None
+    if start_inv_value and end_inv_value is not None:
+        inventory_growth_pct = round((end_inv_value - start_inv_value) / start_inv_value * 100, 1)
+
     # --- Average New Listings Per Day: count and $ (within the selected date range) ---
     listing_rows = supabase.table("listings").select("price,created_at").eq("business_id", business_id)\
         .gte("created_at", start_date_str).lte("created_at", end_date_str + "T23:59:59").execute().data or []
@@ -4171,8 +4200,13 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
             "orders": len(order_rows),
             "quantity_sold": total_qty_sold,
             "revenue": round(total_revenue, 2),
+            "cash": round(cash_in_range, 2),
+            "net_sales": net_sales,
             "new_listings": total_new_listings,
             "new_listings_value": round(total_new_listings_value, 2),
+            "inventory_growth_pct": inventory_growth_pct,
+            "inventory_growth_start_date": start_inv_date,
+            "inventory_growth_end_date": end_inv_date,
         },
     }
 

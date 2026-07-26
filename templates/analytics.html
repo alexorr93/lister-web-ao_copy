@@ -56,7 +56,7 @@ h1 { font-size: 20px; margin-bottom: 4px; }
 .summary-card .num { font-size: 26px; font-weight: 800; }
 .summary-card .label { font-size: 12px; color: var(--muted); margin-top: 4px; }
 .summary-card .note { font-size: 10px; color: var(--muted); margin-top: 6px; opacity: .8; }
-.sub-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.sub-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
 .sub-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; }
 .sub-card .num { font-size: 24px; font-weight: 800; }
 .sub-card .label { font-size: 12px; color: var(--muted); margin-top: 4px; }
@@ -135,12 +135,22 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
       <div class="label">Green Revenue</div>
     </div>
     <div class="sub-card">
+      <div class="num" id="t-net-sales">—</div>
+      <div class="label">Net Sales</div>
+      <div class="note" style="font-size:10px;color:var(--muted);margin-top:4px;">Revenue + cash entries dated in this range</div>
+    </div>
+    <div class="sub-card">
       <div class="num" id="t-orders">—</div>
       <div class="label">Orders</div>
     </div>
     <div class="sub-card">
       <div class="num" id="t-new-listings">—</div>
       <div class="label">New Listings Created</div>
+    </div>
+    <div class="sub-card">
+      <div class="num" id="t-inventory-growth">—</div>
+      <div class="label">Inventory Growth</div>
+      <div class="note" style="font-size:10px;color:var(--muted);margin-top:4px;" id="t-inventory-growth-note"></div>
     </div>
   </div>
 
@@ -222,7 +232,22 @@ async function loadAnalytics() {
     document.getElementById('t-orders').textContent = data.totals_in_range.orders;
     document.getElementById('t-revenue').textContent = fmtMoney(data.totals_in_range.revenue);
     document.getElementById('t-green-revenue').textContent = fmtMoney(data.green_revenue);
+    document.getElementById('t-net-sales').textContent = fmtMoney(data.totals_in_range.net_sales);
     document.getElementById('t-new-listings').textContent = data.totals_in_range.new_listings;
+
+    const growthPct = data.totals_in_range.inventory_growth_pct;
+    const growthEl = document.getElementById('t-inventory-growth');
+    const growthNoteEl = document.getElementById('t-inventory-growth-note');
+    if (growthPct === null || growthPct === undefined) {
+      growthEl.textContent = '—';
+      growthEl.style.color = '';
+      growthNoteEl.textContent = 'Not enough snapshot history yet for this range';
+    } else {
+      const rounded = Math.round(growthPct);
+      growthEl.textContent = (rounded >= 0 ? '+' : '') + rounded + '%';
+      growthEl.style.color = rounded >= 0 ? '#22c55e' : '#dc2626';
+      growthNoteEl.textContent = `${data.totals_in_range.inventory_growth_start_date} → ${data.totals_in_range.inventory_growth_end_date}`;
+    }
   } catch(e) {
     errorArea.innerHTML = `<div class="error-banner">❌ ${e.message}</div>`;
   }
