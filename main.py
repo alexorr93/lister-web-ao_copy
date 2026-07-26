@@ -371,6 +371,8 @@ def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
         .gte("date", year_start).lte("date", mt_today).execute().data or []
     ytd_inventory_spend = round(sum(r.get("cost") or 0 for r in ytd_acq_rows), 2)
 
+    ytd_cash = _compute_cash_for_year(business_id, int(mt_today[:4]))
+
     record = {
         "business_id": business_id,
         "snapshot_date": mt_today,
@@ -381,6 +383,7 @@ def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
         "new_listings_value_day": new_listings_value_day,
         "ytd_net_revenue": ytd_net_revenue,
         "ytd_inventory_spend": ytd_inventory_spend,
+        "ytd_cash": ytd_cash,
     }
     existing = supabase.table("analytics_snapshots").select("id").eq("business_id", business_id)\
         .eq("snapshot_date", mt_today).limit(1).execute()
@@ -2472,6 +2475,26 @@ def _compute_cash_in_range(business_id: str, start_date_str: str, end_date_str: 
             total += _cash_contribution_in_range(amount, r["spread_start_date"], start_date_str, end_date_str, today_str, extra_min_date=extra_min)
     return round(total, 2)
 
+def _compute_cash_for_year(business_id: str, year: int) -> float:
+    """Cash attributed to a specific calendar year, per explicit request:
+    - a PRECISE payment counts toward the year of its own payment_date
+    - a SPREAD payment (an old lot's cash with no real date attached) counts
+      toward the year the LOT was purchased (spread_start_date's year) --
+      using the FULL amount, not a prorated slice. This is only correct
+      because cash spreading is now frozen at CASH_SPREAD_CUTOFF_DATE: past
+      that date every spread payment's contribution is fully vested (its
+      total across all time equals its full amount, nothing left to prorate
+      further), so attributing the whole thing to the lot's purchase year is
+      exact, not an approximation."""
+    rows = _fetch_all_for_business(business_id, "cash_payments", "amount,payment_date,spread_start_date")
+    total = 0.0
+    for r in rows:
+        amount = r.get("amount") or 0
+        d = r.get("payment_date") or r.get("spread_start_date")
+        if d and int(str(d)[:4]) == year:
+            total += amount
+    return round(total, 2)
+
 @app.get("/api/analytics/cash-breakdown")
 async def api_cash_breakdown(request: Request, start: str, end: str):
     """Every single cash_payments row and its actual computed contribution to
@@ -4534,15 +4557,21 @@ async def api_analytics_history(request: Request, days: int = 90):
 @app.get("/api/analytics/net-cash-yield")
 async def api_net_cash_yield(request: Request, year: int = None):
     """Net Cash Yield for a given year: post-fee order revenue (orders.final_net,
-    eBay+Shopify, no cash -- simplified per explicit request to drop cash from
-    this one entirely) MINUS all inventory purchases dated that year.
+    eBay+Shopify) PLUS cash attributed to that year PLUS all inventory purchases
+    dated that year, subtracted.
+
+    Cash attribution, per explicit request: a precise cash payment counts
+    toward the year it's dated in, going forward. An old spread payment (a
+    lot's cash with no real date attached) counts toward the year the LOT was
+    purchased -- see _compute_cash_for_year for why the FULL amount is correct
+    here, not a prorated slice, now that spreading is frozen.
 
     For the CURRENT year, reads the precomputed ytd_net_revenue/
-    ytd_inventory_spend columns the daily snapshot worker already writes,
-    instead of re-summing a whole year of rows live on every page load (which
-    was the actual slowdown). For a PAST, fully-closed year, computes it live --
-    a one-time bounded sum over a year that's already over and won't change,
-    not something hit on every load the way 'current year so far' is."""
+    ytd_inventory_spend/ytd_cash columns the daily snapshot worker already
+    writes, instead of re-summing a whole year of rows live on every page load
+    (which was the actual slowdown). For a PAST, fully-closed year, computes it
+    live -- a one-time bounded sum over a year that's already over and won't
+    change, not something hit on every load the way 'current year so far' is."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
@@ -4553,12 +4582,13 @@ async def api_net_cash_yield(request: Request, year: int = None):
     is_ytd = target_year == now.year
 
     if is_ytd:
-        snap = supabase.table("analytics_snapshots").select("snapshot_date,ytd_net_revenue,ytd_inventory_spend")\
+        snap = supabase.table("analytics_snapshots").select("snapshot_date,ytd_net_revenue,ytd_inventory_spend,ytd_cash")\
             .eq("business_id", business_id).gte("snapshot_date", start_date_str)\
             .order("snapshot_date", desc=True).limit(1).execute()
         row = (snap.data or [None])[0]
         total_net_revenue = (row or {}).get("ytd_net_revenue") or 0
         total_spend = (row or {}).get("ytd_inventory_spend") or 0
+        total_cash = (row or {}).get("ytd_cash") or 0
         end_date_str = (row or {}).get("snapshot_date") or now.strftime("%Y-%m-%d")
     else:
         end_date_str = f"{target_year:04d}-12-31"
@@ -4568,15 +4598,20 @@ async def api_net_cash_yield(request: Request, year: int = None):
         acq_rows = supabase.table("acquisitions").select("cost").eq("business_id", business_id)\
             .gte("date", start_date_str).lte("date", end_date_str).execute().data or []
         total_spend = sum(r.get("cost") or 0 for r in acq_rows)
+        total_cash = _compute_cash_for_year(business_id, target_year)
+
+    net_sales = total_net_revenue + total_cash
 
     return {
         "year": target_year,
         "start": start_date_str,
         "end": end_date_str,
         "is_ytd": is_ytd,
-        "net_sales": round(total_net_revenue, 2),
+        "net_sales": round(net_sales, 2),
+        "net_revenue_only": round(total_net_revenue, 2),
+        "cash": round(total_cash, 2),
         "total_spend": round(total_spend, 2),
-        "net_cash_yield": round(total_net_revenue - total_spend, 2),
+        "net_cash_yield": round(net_sales - total_spend, 2),
     }
 
 @app.get("/api/analytics/monthly-trend")

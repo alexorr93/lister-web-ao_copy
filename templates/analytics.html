@@ -205,7 +205,7 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
       </div>
       <div class="num" id="ncy-value" style="font-size:24px;font-weight:800;">—</div>
       <div class="label">Net Cash Yield <span id="ncy-ytd-tag"></span></div>
-      <div class="note" style="font-size:10px;color:var(--muted);margin-top:6px;" id="ncy-note">Post-fee order revenue (eBay + Shopify, no cash) − Inventory Spend, this year</div>
+      <div class="note" style="font-size:10px;color:var(--muted);margin-top:6px;" id="ncy-note">Post-fee order revenue (eBay + Shopify) + cash − Inventory Spend, this year</div>
     </div>
   </div>
 </div>
@@ -493,7 +493,7 @@ async function loadNetCashYield() {
     el.style.color = val >= 0 ? '#22c55e' : '#dc2626';
     document.getElementById('ncy-ytd-tag').textContent = data.is_ytd ? '(YTD)' : '';
     document.getElementById('ncy-note').textContent =
-      `Post-fee Revenue $${Math.round(data.net_sales).toLocaleString()} − Inventory Spend $${Math.round(data.total_spend).toLocaleString()}, ${data.start} to ${data.end}`;
+      `Revenue $${Math.round(data.net_revenue_only).toLocaleString()} + Cash $${Math.round(data.cash).toLocaleString()} − Spend $${Math.round(data.total_spend).toLocaleString()}, ${data.start} to ${data.end}`;
   } catch(e) {
     document.getElementById('ncy-value').textContent = 'Error';
   }
