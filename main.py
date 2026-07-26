@@ -4672,12 +4672,23 @@ async def api_analytics_monthly_trend(request: Request, start: str = None, end: 
     # % Multiple view, just a different combination of the same two numbers.
     dollar_variance = [round(sa - s, 2) for s, sa in zip(inventory_spend, sales)]
 
+    # Green Revenue as a % of that month's Revenue -- same "sales" array already
+    # represents total Revenue per month (order revenue + cash, matching the
+    # live Revenue figure), so no new data fetch needed for this. Precomputed
+    # here, same pattern as pct_multiple above, so the chart's toggle is just a
+    # dataset swap.
+    green_revenue_pct_by_month = [
+        round((g / sa * 100), 1) if sa else None
+        for g, sa in zip(green_revenue_by_month, sales)
+    ]
+
     return {
         "start": start_str[:7],
         "end": end_str[:7],
         "months": all_months,
         "inventory_spend": inventory_spend,
         "green_revenue_by_month": green_revenue_by_month,
+        "green_revenue_pct_by_month": green_revenue_pct_by_month,
         "inventory_value_months": inv_months,
         "inventory_value_by_month": inventory_value_by_month,
         "sales": sales,

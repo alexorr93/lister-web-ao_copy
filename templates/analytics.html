@@ -185,6 +185,10 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
 
   <h2>Green Revenue, by month</h2>
   <div class="sub" style="margin-bottom:10px;">Computed the same way as the live figure above, for each month directly — full historical depth, not limited to daily-tracking history.</div>
+  <div class="quick-range" style="margin-bottom:10px;">
+    <button class="btn btn-primary" id="green-mode-btn-dollar" onclick="setGreenChartMode('dollar')">$ Green Revenue</button>
+    <button class="btn" id="green-mode-btn-pct" onclick="setGreenChartMode('pct')">% of Revenue</button>
+  </div>
   <div class="summary-card" style="padding:16px;">
     <canvas id="green-trend-chart" height="90"></canvas>
   </div>
@@ -362,16 +366,28 @@ function renderTrendChart(data) {
 }
 
 let greenTrendChart = null;
+let greenChartMode = 'dollar';  // starts on $, per the original chart
+let lastGreenTrendData = null;
+
+function setGreenChartMode(mode) {
+  greenChartMode = mode;
+  document.getElementById('green-mode-btn-dollar').classList.toggle('btn-primary', mode === 'dollar');
+  document.getElementById('green-mode-btn-pct').classList.toggle('btn-primary', mode === 'pct');
+  if (lastGreenTrendData) renderGreenTrendChart(lastGreenTrendData);
+}
+
 function renderGreenTrendChart(data) {
+  lastGreenTrendData = data;
   const ctx = document.getElementById('green-trend-chart').getContext('2d');
   if (greenTrendChart) greenTrendChart.destroy();
+  const isPct = greenChartMode === 'pct';
   greenTrendChart = new Chart(ctx, {
     type: 'bar',
     data: {
       labels: data.months,
       datasets: [{
-        label: 'Green Revenue',
-        data: data.green_revenue_by_month,
+        label: isPct ? 'Green Revenue (% of Revenue)' : 'Green Revenue',
+        data: isPct ? data.green_revenue_pct_by_month : data.green_revenue_by_month,
         backgroundColor: 'rgba(34,197,94,0.5)',
         borderColor: '#22c55e',
         borderWidth: 1,
@@ -381,11 +397,11 @@ function renderGreenTrendChart(data) {
       responsive: true,
       plugins: {
         legend: { labels: { color: '#f1f5f9' } },
-        tooltip: { callbacks: { label: ctx => `Green Revenue: $${Math.round(ctx.parsed.y).toLocaleString()}` } },
+        tooltip: { callbacks: { label: ctx => isPct ? `Green Revenue: ${Math.round(ctx.parsed.y)}% of Revenue` : `Green Revenue: $${Math.round(ctx.parsed.y).toLocaleString()}` } },
       },
       scales: {
         x: { ticks: { color: '#64748b' }, grid: { color: '#2d3348' } },
-        y: { ticks: { color: '#64748b', callback: v => '$' + Math.round(v).toLocaleString() }, grid: { color: '#2d3348' } },
+        y: { ticks: { color: '#64748b', callback: v => isPct ? Math.round(v) + '%' : '$' + Math.round(v).toLocaleString() }, grid: { color: '#2d3348' } },
       },
     },
   });
