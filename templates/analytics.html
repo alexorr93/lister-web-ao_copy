@@ -142,7 +142,7 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
     <div class="sub-card">
       <div class="num" id="t-net-sales">—</div>
       <div class="label">Net Sales</div>
-      <div class="note" style="font-size:10px;color:var(--muted);margin-top:4px;">Revenue + cash entries dated in this range</div>
+      <div class="note" style="font-size:10px;color:var(--muted);margin-top:4px;" id="t-net-sales-note">Revenue after fees + cash in this range</div>
     </div>
     <div class="sub-card">
       <div class="num" id="t-orders">—</div>
@@ -256,6 +256,8 @@ async function loadAnalytics() {
     document.getElementById('t-revenue').textContent = fmtMoney(data.totals_in_range.revenue);
     document.getElementById('t-green-revenue').textContent = fmtMoney(data.green_revenue);
     document.getElementById('t-net-sales').textContent = fmtMoney(data.totals_in_range.net_sales);
+    document.getElementById('t-net-sales-note').textContent =
+      `Post-fee revenue + $${Math.round(data.totals_in_range.cash).toLocaleString()} cash in this range`;
     document.getElementById('t-new-listings').textContent = data.totals_in_range.new_listings;
 
     const growthPct = data.totals_in_range.inventory_growth_pct;

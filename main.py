@@ -4238,6 +4238,40 @@ def _compute_green_revenue(business_id: str, start_date_str: str, end_date_str: 
             total += float(r.get("gross_revenue") or 0)
     return round(total, 2)
 
+@app.get("/api/analytics/green-revenue-breakdown")
+async def api_green_revenue_breakdown(request: Request, start: str, end: str):
+    """Per-lot detail behind a Green Revenue figure, for actually verifying a
+    number that looks surprising instead of just asserting it's correct --
+    same exact logic as _compute_green_revenue, but returns each contributing
+    lot's sku, became_green_at, and how much of its revenue fell in this range,
+    instead of collapsing straight to one total."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    lot_rows = _fetch_all_for_business(business_id, "acquisitions", "sku,profit,became_green_at")
+    green_lots = {r["sku"]: r["became_green_at"] for r in lot_rows if r.get("sku") and (r.get("profit") or 0) > 1 and r.get("became_green_at")}
+
+    order_rows = supabase.table("orders").select("sku,gross_revenue,order_date").eq("business_id", business_id)\
+        .gte("order_date", start).lte("order_date", end).execute().data or []
+
+    by_lot = {}
+    for r in order_rows:
+        sku = r.get("sku") or ""
+        prefix = _lot_prefix(sku) if sku else None
+        became_green_at = green_lots.get(prefix)
+        if not became_green_at:
+            continue
+        order_date = r.get("order_date") or ""
+        if order_date >= became_green_at[:10]:
+            entry = by_lot.setdefault(prefix, {"sku": prefix, "became_green_at": became_green_at, "revenue": 0.0, "order_count": 0})
+            entry["revenue"] += float(r.get("gross_revenue") or 0)
+            entry["order_count"] += 1
+
+    rows = sorted(by_lot.values(), key=lambda x: x["revenue"], reverse=True)
+    for r in rows:
+        r["revenue"] = round(r["revenue"], 2)
+    return {"start": start, "end": end, "total": round(sum(r["revenue"] for r in rows), 2), "lots": rows}
+
 @app.get("/api/analytics")
 async def api_analytics(request: Request, start: str = None, end: str = None):
     business_id = require_auth(request)
@@ -4261,21 +4295,25 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
     green_revenue = _compute_green_revenue(business_id, start_date_str, end_date_str)
 
     # --- Average Sale Price (within the selected date range) ---
-    order_rows = supabase.table("orders").select("gross_revenue,quantity").eq("business_id", business_id)\
+    order_rows = supabase.table("orders").select("gross_revenue,final_net,quantity").eq("business_id", business_id)\
         .gte("order_date", start_date_str).lte("order_date", end_date_str).execute().data or []
     total_revenue = sum(r.get("gross_revenue") or 0 for r in order_rows)
+    total_net_revenue = sum(r.get("final_net") or 0 for r in order_rows)
     total_qty_sold = sum(r.get("quantity") or 0 for r in order_rows)
     avg_sale_price = round(total_revenue / total_qty_sold, 2) if total_qty_sold else 0
     avg_sales_per_day = round(len(order_rows) / num_days, 2)
     avg_sales_per_day_dollars = round(total_revenue / num_days, 2)
 
-    # --- Net Sales: revenue + cash payments dated (or spread) within the range ---
-    # Now uses the real cash_payments ledger instead of a lump-sum-on-purchase-
-    # date guess -- precise payments count only on their actual date, and
-    # historical spread entries are prorated by how much of their [purchase
-    # date, today] window overlaps this range.
+    # --- Net Sales: revenue AFTER eBay/Shopify fees (final_net, not gross_revenue)
+    # plus cash payments dated (or spread) within the range ---
+    # FIXED a real bug here: this previously added cash on top of gross_revenue,
+    # which is exactly backwards for something called "Net Sales" -- it could
+    # (and did) show a number HIGHER than gross Revenue itself, which never made
+    # sense. Net Sales should be smaller than gross Revenue before cash is even
+    # added, since fees come out first. Now uses final_net (the same authoritative
+    # post-fee figure Financials already uses) as the base.
     cash_in_range = _compute_cash_in_range(business_id, start_date_str, end_date_str)
-    net_sales = round(total_revenue + cash_in_range, 2)
+    net_sales = round(total_net_revenue + cash_in_range, 2)
 
     # --- Inventory Growth Multiple: % change in Inventory Snapshot Value across the
     # selected range, using the analytics_snapshots history (the monthly CSV
