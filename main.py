@@ -343,7 +343,7 @@ def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
     mt_today = _dt.datetime.now(ZoneInfo("America/Denver")).strftime("%Y-%m-%d")
 
     inventory_value = _compute_inventory_snapshot_value(business_id)
-    green_revenue = _compute_green_revenue(business_id)
+    green_revenue = _compute_green_revenue(business_id, mt_today, mt_today)
 
     order_rows = supabase.table("orders").select("gross_revenue,quantity").eq("business_id", business_id)\
         .eq("order_date", mt_today).execute().data or []
@@ -2250,9 +2250,10 @@ def _apply_shopify_sales_to_profit(business_id: str):
     cash), so this always adds Shopify on top of a fresh, not previously-corrected,
     number rather than compounding across repeated Recalculate runs."""
     acquisitions = []
+    import datetime as _dt
     start = 0
     while True:
-        page = supabase.table("acquisitions").select("id,sku,cost,profit,total_payouts")\
+        page = supabase.table("acquisitions").select("id,sku,cost,profit,total_payouts,became_green_at")\
             .eq("business_id", business_id).range(start, start + 999).execute().data or []
         acquisitions.extend(page)
         if len(page) < 1000:
@@ -2284,11 +2285,27 @@ def _apply_shopify_sales_to_profit(business_id: str):
         profit = (a.get("profit") or 0) + sales
         total_payouts = (a.get("total_payouts") or 0) + sales
         roi_pct = round(profit / cost * 100, 2) if cost else None
+
+        # "Green" = profit > 1 (the user's own simple flag). became_green_at marks
+        # the most recent time this lot crossed from not-green into green -- set
+        # once on the transition, kept as-is while it stays green, and CLEARED if
+        # profit drops back to <= 1 (so a later re-crossing gets a fresh, correct
+        # timestamp rather than an old stale one). This is what lets Green Revenue
+        # be filtered by date range correctly without a full daily snapshot table:
+        # only count a lot's sales from became_green_at onward, never sales that
+        # happened while it was still red.
+        was_green_at = a.get("became_green_at")
+        if profit > 1:
+            became_green_at = was_green_at or _dt.datetime.utcnow().isoformat()
+        else:
+            became_green_at = None
+
         supabase.table("acquisitions").update({
             "profit": profit,
             "roi_pct": roi_pct,
             "shopify_payouts": sales,
             "total_payouts": total_payouts,
+            "became_green_at": became_green_at,
         }).eq("id", a["id"]).execute()
 
 @app.get("/api/acquisitions/debug-sku/{sku}")
@@ -3995,17 +4012,46 @@ def _compute_inventory_snapshot_value(business_id: str) -> float:
             value += float(price) * float(qty)
     return round(value, 2)
 
-def _compute_green_revenue(business_id: str) -> float:
-    """'Green Revenue' -- total sales revenue (total_payouts, eBay+Shopify combined)
-    summed across every lot that's already profitable (profit > 0). This is
-    interpretation (A) confirmed with the user: ALL revenue from a de-risked lot,
-    not just the surplus past breakeven (that would just be profit itself, not a
-    new number). Like Inventory Snapshot Value, this is a live, current-state
-    aggregate as of right now -- a lot's profit/total_payouts are cumulative
-    totals, not individually dated transactions, so there's no clean way to filter
-    this by date range the way order-level metrics can be."""
-    rows = _fetch_all_for_business(business_id, "acquisitions", "profit,total_payouts")
-    return round(sum(float(r.get("total_payouts") or 0) for r in rows if (r.get("profit") or 0) > 0), 2)
+def _compute_green_revenue(business_id: str, start_date_str: str, end_date_str: str) -> float:
+    """'Green Revenue' -- sum of actual order revenue (gross_revenue, per the
+    user's own flag: is lot profit > 1 = Green) within the SELECTED DATE RANGE,
+    for lots that are currently green.
+
+    Rebuilt after the first version was wrong: it summed each green lot's
+    all-time total_payouts regardless of date range, so it always showed a
+    lifetime figure no matter what filter was applied (confirmed by the user --
+    showed $981k for "last month", which was actually all-time revenue across
+    every profitable lot ever).
+
+    The real problem underneath, which the user identified themselves: a lot's
+    "green" status is evaluated NOW, but we're filtering PAST sales -- without
+    knowing when it actually turned green, a sale from before it was profitable
+    could get miscounted as "green revenue". Solved without a daily snapshot
+    table: acquisitions.became_green_at is now stamped once, at the moment a
+    lot's profit crosses above 1 (see _apply_shopify_sales_to_profit), and
+    cleared if it drops back down. A sale only counts here if the lot is
+    currently green AND the sale happened on or after that lot's became_green_at
+    -- so sales from while it was still red are correctly excluded."""
+    lot_rows = _fetch_all_for_business(business_id, "acquisitions", "sku,profit,became_green_at")
+    green_lots = {r["sku"]: r["became_green_at"] for r in lot_rows if r.get("sku") and (r.get("profit") or 0) > 1 and r.get("became_green_at")}
+    if not green_lots:
+        return 0.0
+
+    order_rows = supabase.table("orders").select("sku,gross_revenue,order_date").eq("business_id", business_id)\
+        .gte("order_date", start_date_str).lte("order_date", end_date_str).execute().data or []
+    total = 0.0
+    for r in order_rows:
+        sku = r.get("sku") or ""
+        prefix = _lot_prefix(sku) if sku else None
+        became_green_at = green_lots.get(prefix)
+        if not became_green_at:
+            continue
+        order_date = r.get("order_date") or ""
+        # became_green_at is a full timestamp, order_date is just a date -- compare
+        # on date portion only, so the transition day itself still counts
+        if order_date >= became_green_at[:10]:
+            total += float(r.get("gross_revenue") or 0)
+    return round(total, 2)
 
 @app.get("/api/analytics")
 async def api_analytics(request: Request, start: str = None, end: str = None):
@@ -4027,7 +4073,7 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
     # alongside the period-filtered metrics but not filtered by them; the UI
     # labels it "as of now" rather than implying otherwise.
     inventory_snapshot_value = _compute_inventory_snapshot_value(business_id)
-    green_revenue = _compute_green_revenue(business_id)
+    green_revenue = _compute_green_revenue(business_id, start_date_str, end_date_str)
 
     # --- Average Sale Price (within the selected date range) ---
     order_rows = supabase.table("orders").select("gross_revenue,quantity").eq("business_id", business_id)\
