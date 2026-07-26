@@ -6873,6 +6873,28 @@ async def delete_capture_session(session_id: str, request: Request):
     supabase.table("auction_capture_sessions").delete().eq("id", session_id).execute()
     return {"ok": True, "deleted_session": session_id, "deleted_lots": len(lot_ids)}
 
+class AuctionLotBulkDelete(BaseModel):
+    lot_ids: List[str]
+
+@app.post("/api/auction/capture/lots/bulk-delete")
+async def bulk_delete_capture_lots(body: AuctionLotBulkDelete, request: Request):
+    """Deletes specific lots (e.g. junk/duplicate rows from a messy capture) without
+    touching the rest of the session. Scoped to sessions the caller owns, same as
+    delete_capture_session, so one business can't delete another's lots by guessing IDs."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    if not body.lot_ids:
+        return {"ok": True, "deleted": 0}
+    owned_sessions = {s["id"] for s in supabase.table("auction_capture_sessions").select("id").eq("business_id", str(business_id)).execute().data}
+    lots = supabase.table("auction_lots").select("id,session_id").in_("id", body.lot_ids).execute().data
+    owned_lot_ids = [l["id"] for l in lots if l["session_id"] in owned_sessions]
+    if not owned_lot_ids:
+        raise HTTPException(404, "No matching lots found")
+    supabase.table("auction_lot_items").delete().in_("lot_id", owned_lot_ids).execute()
+    supabase.table("auction_lots").delete().in_("id", owned_lot_ids).execute()
+    return {"ok": True, "deleted": len(owned_lot_ids)}
+
 def _download_and_store_lot_photo(url: str, session_id: str, lot_number: str, idx: int) -> Optional[str]:
     """Downloads an external lot photo and re-uploads it into Supabase Storage so it
     survives even if the auction listing is later removed. Returns the public URL,

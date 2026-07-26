@@ -561,6 +561,7 @@ select.field-input { background: #fff; color: #0f172a; }
       </select>
       <button class="btn" onclick="stopSelectedCapture()">⏸️ Stop Capture</button>
       <button class="btn" onclick="shareSelectedCaptureSession()">🔗 Share</button>
+      <button class="btn" id="lot-select-mode-btn" onclick="toggleSelectMode()">☑️ Select Lots</button>
       <button class="btn" style="background:#7a2020;color:#fff;" onclick="deleteSelectedCaptureSession()">🗑️ Delete Session</button>
     </div>
     <div id="metric-progress" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px;">
@@ -2347,6 +2348,50 @@ async function deleteSelectedCaptureSession() {
 }
 
 let auctionLotsCache = [];
+let lotSelectMode = false;
+let selectedLotIds = new Set();
+let lastClickedLotId = null;
+
+function toggleSelectMode() {
+  lotSelectMode = !lotSelectMode;
+  selectedLotIds.clear();
+  document.getElementById('lot-select-mode-btn').textContent = lotSelectMode ? '✕ Cancel Select' : '☑️ Select Lots';
+  renderAuctionTable();
+}
+
+function toggleLotSelect(evt, lotId) {
+  const checked = evt.target.checked;
+  if (evt.shiftKey && lastClickedLotId) {
+    const ids = auctionLotsCache.map(l => l.id);
+    const a = ids.indexOf(lastClickedLotId), b = ids.indexOf(lotId);
+    if (a >= 0 && b >= 0) {
+      const [lo, hi] = a < b ? [a, b] : [b, a];
+      for (let i = lo; i <= hi; i++) { if (checked) selectedLotIds.add(ids[i]); else selectedLotIds.delete(ids[i]); }
+    }
+  } else {
+    if (checked) selectedLotIds.add(lotId); else selectedLotIds.delete(lotId);
+  }
+  lastClickedLotId = lotId;
+  renderAuctionTable();
+}
+
+function toggleSelectAllLots(headerCb) {
+  if (headerCb.checked) auctionLotsCache.forEach(l => selectedLotIds.add(l.id));
+  else selectedLotIds.clear();
+  renderAuctionTable();
+}
+
+async function deleteSelectedLots() {
+  if (!selectedLotIds.size) { toast('Nothing selected', 'error'); return; }
+  const n = selectedLotIds.size;
+  if (!confirm(`Delete ${n} selected lot(s)? This cannot be undone.`)) return;
+  try {
+    const r = await api('POST', '/api/auction/capture/lots/bulk-delete', {lot_ids: Array.from(selectedLotIds)});
+    toast(`Deleted ${r.deleted} lot(s)`);
+    selectedLotIds.clear();
+    loadAuctionItems(activeSession);
+  } catch(e) { toast('Failed to delete selected lots', 'error'); }
+}
 
 async function loadAuctionItems(sessionId) {
   if (!sessionId) { document.getElementById('auction-list').innerHTML = ''; return; }
@@ -2385,7 +2430,11 @@ function renderAuctionTable() {
       <a href="https://www.ebay.com/sch/i.html?_nkw=${q}" target="_blank" style="flex:1;text-align:center;font-size:10px;font-weight:700;padding:4px 0;border-radius:6px;background:#e53238;color:#fff;text-decoration:none;">eBay Active</a>
       <a href="https://www.ebay.com/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1" target="_blank" style="flex:1;text-align:center;font-size:10px;font-weight:700;padding:4px 0;border-radius:6px;background:#2e8b57;color:#fff;text-decoration:none;">eBay Sold</a>
     </div>`;
+    const selectCell = lotSelectMode
+      ? `<td><input type="checkbox" ${selectedLotIds.has(lot.id) ? 'checked' : ''} onclick="toggleLotSelect(event,'${lot.id}')"></td>`
+      : '';
     return `<tr id="lot-row-${lot.id}">
+      ${selectCell}
       <td>${imgHtml}</td>
       <td style="max-width:220px;">
         <div style="font-weight:700;font-size:12px;color:var(--text);">Lot ${lot.lot_number || '?'}: ${lot.title || 'Unknown'}</div>
@@ -2405,10 +2454,18 @@ function renderAuctionTable() {
       </td>
     </tr>`;
   }).join('');
+  const selectToolbar = lotSelectMode
+    ? `<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+        <span style="font-size:11px;color:var(--muted);">${selectedLotIds.size} selected · shift-click to select a range</span>
+        <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="deleteSelectedLots()">🗑️ Delete Selected</button>
+      </div>`
+    : '';
   document.getElementById('auction-list').innerHTML = `
+    ${selectToolbar}
     <div style="overflow-x:auto;">
       <table class="pdf-result-table" style="width:100%;">
         <thead><tr>
+          ${lotSelectMode ? `<th><input type="checkbox" onclick="toggleSelectAllLots(this)"></th>` : ''}
           <th></th>
           <th>Lot</th>
           <th>Itemization</th>
