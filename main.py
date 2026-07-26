@@ -4274,6 +4274,10 @@ async def api_analytics_monthly_trend(request: Request, start: str = None, end: 
     # $100k sales = 50%. Precomputed here (not in JS) so the toggle is just a
     # dataset swap, not a recalculation.
     pct_multiple = [round((s / sa * 100), 1) if sa else None for s, sa in zip(inventory_spend, sales)]
+    # "$ Variance": sales - inventory spend for that month, as a single summed
+    # number per month rather than two separate series -- same pattern as the
+    # % Multiple view, just a different combination of the same two numbers.
+    dollar_variance = [round(sa - s, 2) for s, sa in zip(inventory_spend, sales)]
 
     return {
         "start": start_str[:7],
@@ -4283,6 +4287,7 @@ async def api_analytics_monthly_trend(request: Request, start: str = None, end: 
         "green_revenue_by_month": green_revenue_by_month,
         "sales": sales,
         "pct_multiple": pct_multiple,
+        "dollar_variance": dollar_variance,
     }
 
 @app.get("/archive", response_class=HTMLResponse)
