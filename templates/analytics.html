@@ -503,7 +503,7 @@ async function loadNetCashYield() {
     if (!r.ok) throw new Error(data.detail || 'Request failed');
     const el = document.getElementById('ncy-value');
     const val = Math.round(data.net_cash_yield);
-    el.textContent = (val >= 0 ? '+' : '') + '$' + Math.abs(val).toLocaleString();
+    el.textContent = (val >= 0 ? '+$' : '−$') + Math.abs(val).toLocaleString();
     el.style.color = val >= 0 ? '#22c55e' : '#dc2626';
     document.getElementById('ncy-ytd-tag').textContent = data.is_ytd ? '(YTD)' : '';
     document.getElementById('ncy-note').textContent =
