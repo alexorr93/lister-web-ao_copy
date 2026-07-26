@@ -2439,10 +2439,13 @@ async def api_cash_breakdown(request: Request, start: str, end: str):
     """Every single cash_payments row and its actual computed contribution to
     [start, end] -- built specifically to answer 'how are you getting $X' with
     real row-level data instead of more explanation. Also surfaces a
-    duplicate_skus list: any sku with more than one row, which would explain a
-    number coming out roughly double what's expected (e.g. if the one-time
-    migration ran more than once, or a lot got both a migrated spread row AND
-    a manually-added precise one)."""
+    likely_duplicate_rows list: pairs of rows for the SAME sku, SAME amount,
+    SAME type, created within a few seconds of each other -- the actual
+    signature of an accidental double-insert (e.g. the one-time migration
+    running twice). A lot legitimately having several DIFFERENT cash payments
+    over time is normal, not flagged -- confirmed against real data that the
+    old 'any sku with >1 row' check was too blunt and flagged legitimate
+    multi-payment lots as false positives."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
@@ -2451,10 +2454,8 @@ async def api_cash_breakdown(request: Request, start: str, end: str):
     rows = _fetch_all_for_business(business_id, "cash_payments", "sku,amount,payment_date,spread_start_date,created_at")
 
     detail = []
-    sku_row_counts = {}
     for r in rows:
         sku = r.get("sku")
-        sku_row_counts[sku] = sku_row_counts.get(sku, 0) + 1
         amount = r.get("amount") or 0
         if r.get("payment_date"):
             contribution = amount if start <= r["payment_date"] <= end else 0.0
@@ -2469,12 +2470,28 @@ async def api_cash_breakdown(request: Request, start: str, end: str):
             "contribution_to_range": round(contribution, 2), "created_at": r.get("created_at"),
         })
 
-    duplicate_skus = [sku for sku, count in sku_row_counts.items() if count > 1]
+    # Real duplicate signature: same sku + same amount + same type, created
+    # within 10 seconds of each other (a migration or double-click firing twice
+    # looks like this; a genuinely different payment added later never does).
+    likely_duplicate_rows = []
+    by_key = {}
+    for r in rows:
+        key = (r.get("sku"), r.get("amount"), "precise" if r.get("payment_date") else "spread")
+        by_key.setdefault(key, []).append(r.get("created_at") or "")
+    for (sku, amount, row_type), timestamps in by_key.items():
+        timestamps = sorted(t for t in timestamps if t)
+        for i in range(1, len(timestamps)):
+            t1 = _dt3.datetime.fromisoformat(timestamps[i-1].replace("Z", "+00:00"))
+            t2 = _dt3.datetime.fromisoformat(timestamps[i].replace("Z", "+00:00"))
+            if (t2 - t1).total_seconds() < 10:
+                likely_duplicate_rows.append({"sku": sku, "amount": amount, "type": row_type})
+                break
+
     detail.sort(key=lambda d: d["contribution_to_range"], reverse=True)
     return {
         "start": start, "end": end,
         "total_contribution": round(sum(d["contribution_to_range"] for d in detail), 2),
-        "duplicate_skus": duplicate_skus,
+        "likely_duplicate_rows": likely_duplicate_rows,
         "rows": detail,
     }
 
@@ -4516,9 +4533,18 @@ async def api_analytics_monthly_trend(request: Request, start: str = None, end: 
 
     inventory_spend = [round(spend_by_month.get(m, 0), 2) for m in all_months]
 
+    today_str = now.strftime("%Y-%m-%d")
+    current_month_str = now.strftime("%Y-%m")
+
     def _month_bounds(month):
         next_m_y, next_m_m = (int(month[:4]) + 1, 1) if month[5:7] == "12" else (int(month[:4]), int(month[5:7]) + 1)
         month_end = (_dt.date(next_m_y, next_m_m, 1) - _dt.timedelta(days=1)).strftime("%Y-%m-%d")
+        if month == current_month_str:
+            # The current month is still in progress -- a bar for it shouldn't
+            # include days that haven't happened yet. Capping at today is also
+            # what makes this match the top card's "This Month" quick-range,
+            # which stops at today rather than the actual last day of the month.
+            month_end = min(month_end, today_str)
         return f"{month}-01", month_end
 
     # Sales now includes cash in that same month, matching Revenue on the main
