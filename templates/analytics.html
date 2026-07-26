@@ -144,7 +144,7 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
     <div class="sub-card">
       <div class="num" id="t-green-revenue" style="color:#22c55e;">—</div>
       <div class="label">Green Revenue (sales from profitable lots)</div>
-      <div class="note" style="font-size:10px;color:var(--muted);margin-top:4px;">Includes cash from green lots too, from their became-profitable date onward</div>
+      <div class="note" style="font-size:10px;color:var(--muted);margin-top:4px;" id="t-green-revenue-note">Includes cash from green lots too, from their became-profitable date onward</div>
     </div>
     <div class="sub-card">
       <div class="num" id="t-orders">—</div>
@@ -257,6 +257,8 @@ async function loadAnalytics() {
     document.getElementById('t-orders').textContent = data.totals_in_range.orders;
     document.getElementById('t-revenue').textContent = fmtMoney(data.totals_in_range.revenue);
     document.getElementById('t-green-revenue').textContent = fmtMoney(data.green_revenue);
+    document.getElementById('t-green-revenue-note').textContent =
+      data.green_revenue_pct !== null ? `${Math.round(data.green_revenue_pct)}% of Revenue this period — track this over time, not the dollar figure, to see if your portfolio's actually maturing` : 'Includes cash from green lots too, from their became-profitable date onward';
     document.getElementById('t-net-sales').textContent = fmtMoney(data.totals_in_range.net_sales);
     document.getElementById('t-net-sales-note').textContent =
       `Post-fee revenue + $${Math.round(data.totals_in_range.cash).toLocaleString()} cash in this range`;

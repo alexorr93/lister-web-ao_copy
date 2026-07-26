@@ -4412,6 +4412,15 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
     # table, no platform filter anywhere -- confirmed) PLUS cash in this range.
     total_revenue = round(total_order_revenue + cash_in_range, 2)
 
+    # Green Revenue as a % of Revenue: the metric that actually distinguishes
+    # "portfolio genuinely getting more profitable over time" from "raw sales
+    # dollars just moved because of seasonality/listing activity" -- the dollar
+    # figure alone tracks overall sales volume mechanically (it's a subset of
+    # the same sales), so it can look like it "just follows Revenue" even when
+    # the underlying share of green lots is climbing. This is the number that
+    # actually tests that.
+    green_revenue_pct = round(green_revenue / total_revenue * 100, 1) if total_revenue else None
+
     # --- Avg Order Price: renamed from "Average Sale Price" and redefined per
     # explicit request -- Revenue (including cash, same figure as the Revenue
     # card above) divided by ORDER COUNT, not order-only revenue divided by
@@ -4468,7 +4477,7 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
         "num_days": num_days,
         "inventory_snapshot_value": inventory_snapshot_value,
         "green_revenue": green_revenue,
-        "avg_order_price": avg_order_price,
+        "green_revenue_pct": green_revenue_pct,
         "avg_sales_per_day": avg_sales_per_day,
         "avg_sales_per_day_dollars": avg_sales_per_day_dollars,
         "avg_new_listings_per_day_count": avg_new_listings_per_day_count,
