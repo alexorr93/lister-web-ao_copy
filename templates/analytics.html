@@ -263,7 +263,14 @@ function renderTrendChart(data) {
     data: { labels: data.months, datasets },
     options: {
       responsive: true,
-      plugins: { legend: { labels: { color: '#f1f5f9' } } },
+      plugins: {
+        legend: { labels: { color: '#f1f5f9' } },
+        tooltip: {
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: ${showPctMultiple ? ctx.parsed.y + '%' : '$' + ctx.parsed.y.toLocaleString()}`,
+          },
+        },
+      },
       scales: {
         x: { ticks: { color: '#64748b' }, grid: { color: '#2d3348' } },
         y: {
