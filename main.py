@@ -4246,8 +4246,13 @@ async def api_analytics_monthly_trend(request: Request, start: str = None, end: 
 
     acq_rows = _fetch_all_for_business(business_id, "acquisitions", "cost,date")
     order_rows = _fetch_all_for_business(business_id, "orders", "gross_revenue,order_date")
+    # Green Revenue over time: sums the daily green_revenue figures already being
+    # written to analytics_snapshots (added when Green Revenue was built) --
+    # note this only has real depth from whenever that daily worker started
+    # running, since it's a new column with no historical backfill.
+    snapshot_rows = _fetch_all_for_business(business_id, "analytics_snapshots", "snapshot_date,green_revenue")
 
-    spend_by_month, sales_by_month = {}, {}
+    spend_by_month, sales_by_month, green_by_month = {}, {}, {}
     for r in acq_rows:
         d = (r.get("date") or "")[:7]  # "YYYY-MM"
         if d and start_str <= f"{d}-01" <= end_str:
@@ -4256,10 +4261,15 @@ async def api_analytics_monthly_trend(request: Request, start: str = None, end: 
         d = (r.get("order_date") or "")[:7]
         if d and start_str <= f"{d}-01" <= end_str:
             sales_by_month[d] = sales_by_month.get(d, 0) + (r.get("gross_revenue") or 0)
+    for r in snapshot_rows:
+        d = (r.get("snapshot_date") or "")[:7]
+        if d and start_str <= f"{d}-01" <= end_str:
+            green_by_month[d] = green_by_month.get(d, 0) + (r.get("green_revenue") or 0)
 
-    all_months = sorted(set(spend_by_month.keys()) | set(sales_by_month.keys()))
+    all_months = sorted(set(spend_by_month.keys()) | set(sales_by_month.keys()) | set(green_by_month.keys()))
     inventory_spend = [round(spend_by_month.get(m, 0), 2) for m in all_months]
     sales = [round(sales_by_month.get(m, 0), 2) for m in all_months]
+    green_revenue_by_month = [round(green_by_month.get(m, 0), 2) for m in all_months]
     # "Inventory multiple": spend as a % of sales for that month, e.g. $50k spend /
     # $100k sales = 50%. Precomputed here (not in JS) so the toggle is just a
     # dataset swap, not a recalculation.
@@ -4270,6 +4280,7 @@ async def api_analytics_monthly_trend(request: Request, start: str = None, end: 
         "end": end_str[:7],
         "months": all_months,
         "inventory_spend": inventory_spend,
+        "green_revenue_by_month": green_revenue_by_month,
         "sales": sales,
         "pct_multiple": pct_multiple,
     }
