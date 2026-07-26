@@ -168,6 +168,7 @@ async def start_background_jobs():
     asyncio.create_task(auto_fill_worker())
     asyncio.create_task(order_sync_worker())
     asyncio.create_task(shopify_sync_worker())
+    asyncio.create_task(analytics_snapshot_worker())
 
 async def shopify_sync_worker():
     """Runs the eBay-live-qty -> Shopify-qty sync automatically once per hour, at
@@ -299,6 +300,76 @@ async def order_sync_worker():
         except Exception as e:
             print(f"order_sync_worker error: {e}")
         await asyncio.sleep(1200)  # 20 minutes
+
+async def analytics_snapshot_worker():
+    """Runs once a day, at a fixed time (00:10 UTC), for EVERY business -- unlike
+    shopify_sync_worker above, this has nothing to do with Shopify; it loops over
+    the businesses table directly, not app_settings' Shopify-connected subset,
+    since Inventory Snapshot Value already accounts for eBay-only, Shopify-only,
+    or both. Only reusing the same 'sleep until next time boundary' scheduling
+    shape as shopify_sync_worker, not its logic.
+
+    Exists because Inventory Snapshot Value has no historical source at all --
+    every other Analytics metric can be recomputed for a past date directly from
+    orders/listings' own timestamps, but inventory value is a live aggregate with
+    no record of what it used to be. This is what actually builds that history,
+    one row per business per day, from here on."""
+    import asyncio, datetime as _dt
+    while True:
+        now = _dt.datetime.now(_dt.timezone.utc)
+        next_run = now.replace(hour=0, minute=10, second=0, microsecond=0)
+        if next_run <= now:
+            next_run += _dt.timedelta(days=1)
+        await asyncio.sleep(max((next_run - now).total_seconds(), 5))
+        try:
+            biz_res = supabase.table("businesses").select("id").execute()
+            business_ids = [b["id"] for b in (biz_res.data or [])]
+            for biz_id in business_ids:
+                try:
+                    result = await asyncio.to_thread(run_daily_analytics_snapshot_for_business, biz_id)
+                    print(f"analytics_snapshot_worker: business {biz_id} -> {result}")
+                except Exception as e:
+                    print(f"analytics_snapshot_worker: business {biz_id} failed: {e}")
+        except Exception as e:
+            print(f"analytics_snapshot_worker error: {e}")
+
+def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
+    """One row per business per day in analytics_snapshots -- inventory value
+    (today's live figure) plus that single day's sale price/new-listings numbers,
+    so a future trend view has real daily granularity instead of just 'now'."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    mt_today = _dt.datetime.now(ZoneInfo("America/Denver")).strftime("%Y-%m-%d")
+
+    inventory_value = _compute_inventory_snapshot_value(business_id)
+
+    order_rows = supabase.table("orders").select("gross_revenue,quantity").eq("business_id", business_id)\
+        .eq("order_date", mt_today).execute().data or []
+    total_revenue = sum(r.get("gross_revenue") or 0 for r in order_rows)
+    total_qty_sold = sum(r.get("quantity") or 0 for r in order_rows)
+    avg_sale_price_day = round(total_revenue / total_qty_sold, 2) if total_qty_sold else 0
+
+    listing_rows = supabase.table("listings").select("price,created_at").eq("business_id", business_id)\
+        .gte("created_at", mt_today).lte("created_at", mt_today + "T23:59:59").execute().data or []
+    new_listings_count_day = len(listing_rows)
+    new_listings_value_day = round(sum(r.get("price") or 0 for r in listing_rows), 2)
+
+    record = {
+        "business_id": business_id,
+        "snapshot_date": mt_today,
+        "inventory_snapshot_value": inventory_value,
+        "avg_sale_price_day": avg_sale_price_day,
+        "new_listings_count_day": new_listings_count_day,
+        "new_listings_value_day": new_listings_value_day,
+    }
+    existing = supabase.table("analytics_snapshots").select("id").eq("business_id", business_id)\
+        .eq("snapshot_date", mt_today).limit(1).execute()
+    if existing.data:
+        supabase.table("analytics_snapshots").update(record).eq("id", existing.data[0]["id"]).execute()
+    else:
+        supabase.table("analytics_snapshots").insert(record).execute()
+    return record
 
 EBAY_DESCRIPTION = "Shipped primarily with UPS and sometimes USPS. If you have special packing or shipping needs, please send a message. This item is sold in as-is condition. The seller assumes no liability for the use, operation, or installation of this product. Due to the technical nature of this equipment, the buyer is responsible for having the item professionally inspected and installed by a certified technician prior to use."
 
@@ -3891,6 +3962,37 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
         "errors": {},
     }
 
+def _fetch_all_for_business(business_id: str, table: str, select_cols: str) -> list:
+    all_rows, start_i, page_size = [], 0, 1000
+    q_base = supabase.table(table).select(select_cols).eq("business_id", business_id)
+    while True:
+        res = q_base.range(start_i, start_i + page_size - 1).execute()
+        page = res.data or []
+        all_rows.extend(page)
+        if len(page) < page_size:
+            break
+        start_i += page_size
+    return all_rows
+
+def _compute_inventory_snapshot_value(business_id: str) -> float:
+    """Current total (price x qty) across matched eBay/Shopify inventory, avoiding
+    double-counting a matched pair. Always 'as of right now' -- shared by both the
+    live /api/analytics endpoint and the daily snapshot worker below, so there's
+    exactly one place this math lives."""
+    inv_rows = _fetch_all_for_business(business_id, "inventory_match", "ebay_id,shopify_id")
+    ebay_by_id = {r["id"]: r for r in _fetch_all_for_business(business_id, "ebay_inventory", "id,price,quantity")}
+    shopify_by_id = {r["id"]: r for r in _fetch_all_for_business(business_id, "shopify_inventory", "id,price,quantity,product_id")}
+    shopify_by_product_id = {r["product_id"]: r for r in shopify_by_id.values() if r.get("product_id")}
+    value = 0.0
+    for row in inv_rows:
+        e = ebay_by_id.get(row.get("ebay_id")) or {}
+        s = shopify_by_id.get(row.get("shopify_id")) or shopify_by_product_id.get(row.get("shopify_id")) or {}
+        price = e.get("price") if e.get("price") is not None else s.get("price")
+        qty = e.get("quantity") if e.get("quantity") is not None else s.get("quantity")
+        if price is not None and qty is not None:
+            value += float(price) * float(qty)
+    return round(value, 2)
+
 @app.get("/api/analytics")
 async def api_analytics(request: Request, start: str = None, end: str = None):
     business_id = require_auth(request)
@@ -3904,39 +4006,13 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
     end_date_str = end_dt.strftime("%Y-%m-%d")
     num_days = max((end_dt.date() - start_dt.date()).days + 1, 1)
 
-    def _fetch_all(table, select_cols, eq_filters=None):
-        all_rows, start_i, page_size = [], 0, 1000
-        q_base = supabase.table(table).select(select_cols).eq("business_id", business_id)
-        if eq_filters:
-            for k, v in eq_filters.items():
-                q_base = q_base.eq(k, v)
-        while True:
-            res = q_base.range(start_i, start_i + page_size - 1).execute()
-            page = res.data or []
-            all_rows.extend(page)
-            if len(page) < page_size:
-                break
-            start_i += page_size
-        return all_rows
-
     # --- Inventory Snapshot Value ---
     # This is a CURRENT, as-of-right-now figure -- there's no historical daily
     # snapshot stored anywhere, so it does NOT change based on the date range
     # above (a past inventory value would need data we don't capture). Shown
     # alongside the period-filtered metrics but not filtered by them; the UI
     # labels it "as of now" rather than implying otherwise.
-    inv_rows = _fetch_all("inventory_match", "ebay_id,shopify_id")
-    ebay_by_id = {r["id"]: r for r in _fetch_all("ebay_inventory", "id,price,quantity")}
-    shopify_by_id = {r["id"]: r for r in _fetch_all("shopify_inventory", "id,price,quantity,product_id")}
-    shopify_by_product_id = {r["product_id"]: r for r in shopify_by_id.values() if r.get("product_id")}
-    inventory_snapshot_value = 0.0
-    for row in inv_rows:
-        e = ebay_by_id.get(row.get("ebay_id")) or {}
-        s = shopify_by_id.get(row.get("shopify_id")) or shopify_by_product_id.get(row.get("shopify_id")) or {}
-        price = e.get("price") if e.get("price") is not None else s.get("price")
-        qty = e.get("quantity") if e.get("quantity") is not None else s.get("quantity")
-        if price is not None and qty is not None:
-            inventory_snapshot_value += float(price) * float(qty)
+    inventory_snapshot_value = _compute_inventory_snapshot_value(business_id)
 
     # --- Average Sale Price (within the selected date range) ---
     order_rows = supabase.table("orders").select("gross_revenue,quantity").eq("business_id", business_id)\
@@ -3957,7 +4033,7 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
         "start": start_date_str,
         "end": end_date_str,
         "num_days": num_days,
-        "inventory_snapshot_value": round(inventory_snapshot_value, 2),
+        "inventory_snapshot_value": inventory_snapshot_value,
         "avg_sale_price": avg_sale_price,
         "avg_new_listings_per_day_count": avg_new_listings_per_day_count,
         "avg_new_listings_per_day_value": avg_new_listings_per_day_value,
@@ -3969,6 +4045,22 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
             "new_listings_value": round(total_new_listings_value, 2),
         },
     }
+
+@app.get("/api/analytics/history")
+async def api_analytics_history(request: Request, days: int = 90):
+    """Returns the accumulated daily snapshots from analytics_snapshots, oldest
+    to newest, for trend display. Empty/short at first -- one row gets added per
+    business per day going forward by analytics_snapshot_worker; there's no
+    backfill for dates before this feature existed, since that data was never
+    captured."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import datetime as _dt
+    cutoff = (_dt.datetime.utcnow() - _dt.timedelta(days=days)).strftime("%Y-%m-%d")
+    res = supabase.table("analytics_snapshots").select("*").eq("business_id", business_id)\
+        .gte("snapshot_date", cutoff).order("snapshot_date").execute()
+    return {"snapshots": res.data or []}
 
 @app.get("/archive", response_class=HTMLResponse)
 async def archive_page(request: Request):
