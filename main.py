@@ -378,6 +378,7 @@ def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
     ytd_inventory_spend = round(sum(r.get("cost") or 0 for r in ytd_acq_rows), 2)
 
     ytd_cash = _compute_cash_for_year(business_id, int(mt_today[:4]))
+    ytd_net_cash_yield = round(ytd_net_revenue + ytd_cash - ytd_inventory_spend, 2)
 
     record = {
         "business_id": business_id,
@@ -390,6 +391,7 @@ def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
         "ytd_net_revenue": ytd_net_revenue,
         "ytd_inventory_spend": ytd_inventory_spend,
         "ytd_cash": ytd_cash,
+        "ytd_net_cash_yield": ytd_net_cash_yield,
     }
     existing = supabase.table("analytics_snapshots").select("id").eq("business_id", business_id)\
         .eq("snapshot_date", mt_today).limit(1).execute()
@@ -4680,13 +4682,14 @@ async def api_net_cash_yield(request: Request, year: int = None):
     is_ytd = target_year == now.year
 
     if is_ytd:
-        snap = supabase.table("analytics_snapshots").select("snapshot_date,ytd_net_revenue,ytd_inventory_spend,ytd_cash")\
+        snap = supabase.table("analytics_snapshots").select("snapshot_date,ytd_net_revenue,ytd_inventory_spend,ytd_cash,ytd_net_cash_yield")\
             .eq("business_id", business_id).gte("snapshot_date", start_date_str)\
             .order("snapshot_date", desc=True).limit(1).execute()
         row = (snap.data or [None])[0]
         total_net_revenue = (row or {}).get("ytd_net_revenue") or 0
         total_spend = (row or {}).get("ytd_inventory_spend") or 0
         total_cash = (row or {}).get("ytd_cash") or 0
+        stored_yield = (row or {}).get("ytd_net_cash_yield")
         end_date_str = (row or {}).get("snapshot_date") or now.strftime("%Y-%m-%d")
     else:
         end_date_str = f"{target_year:04d}-12-31"
@@ -4697,8 +4700,13 @@ async def api_net_cash_yield(request: Request, year: int = None):
         acq_rows = [r for r in acq_rows if start_date_str <= (r.get("date") or "") <= end_date_str]
         total_spend = sum(r.get("cost") or 0 for r in acq_rows)
         total_cash = _compute_cash_for_year(business_id, target_year)
+        stored_yield = None
 
     net_sales = total_net_revenue + total_cash
+    # Use the stored value directly when we have it (the current year, read
+    # straight from the daily snapshot) instead of recomputing -- only falls
+    # back to computing it here for a past year, which has no stored snapshot.
+    net_cash_yield = stored_yield if stored_yield is not None else round(net_sales - total_spend, 2)
 
     return {
         "year": target_year,
@@ -4709,7 +4717,7 @@ async def api_net_cash_yield(request: Request, year: int = None):
         "net_revenue_only": round(total_net_revenue, 2),
         "cash": round(total_cash, 2),
         "total_spend": round(total_spend, 2),
-        "net_cash_yield": round(net_sales - total_spend, 2),
+        "net_cash_yield": net_cash_yield,
     }
 
 @app.get("/api/analytics/monthly-trend")
