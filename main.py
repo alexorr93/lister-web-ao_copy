@@ -4375,13 +4375,12 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
     inventory_snapshot_value = _compute_inventory_snapshot_value(business_id)
     green_revenue = _compute_green_revenue(business_id, start_date_str, end_date_str)
 
-    # --- Average Sale Price (within the selected date range) ---
+    # --- Order-level figures (within the selected date range) ---
     order_rows = supabase.table("orders").select("gross_revenue,final_net,quantity").eq("business_id", business_id)\
         .gte("order_date", start_date_str).lte("order_date", end_date_str).execute().data or []
     total_order_revenue = sum(r.get("gross_revenue") or 0 for r in order_rows)
     total_net_revenue = sum(r.get("final_net") or 0 for r in order_rows)
     total_qty_sold = sum(r.get("quantity") or 0 for r in order_rows)
-    avg_sale_price = round(total_order_revenue / total_qty_sold, 2) if total_qty_sold else 0
     avg_sales_per_day = round(len(order_rows) / num_days, 2)
     avg_sales_per_day_dollars = round(total_order_revenue / num_days, 2)
 
@@ -4391,6 +4390,13 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
     # --- Revenue: eBay + Shopify order revenue (both already in the same orders
     # table, no platform filter anywhere -- confirmed) PLUS cash in this range.
     total_revenue = round(total_order_revenue + cash_in_range, 2)
+
+    # --- Avg Order Price: renamed from "Average Sale Price" and redefined per
+    # explicit request -- Revenue (including cash, same figure as the Revenue
+    # card above) divided by ORDER COUNT, not order-only revenue divided by
+    # units sold. This is deliberately the "higher number" the user did the
+    # math for themselves (Revenue $102,666 / 432 orders = ~$237).
+    avg_order_price = round(total_revenue / len(order_rows), 2) if order_rows else 0
 
     # --- Net Sales: revenue AFTER eBay/Shopify fees (final_net, not gross_revenue)
     # plus cash payments dated (or spread) within the range ---
@@ -4441,7 +4447,7 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
         "num_days": num_days,
         "inventory_snapshot_value": inventory_snapshot_value,
         "green_revenue": green_revenue,
-        "avg_sale_price": avg_sale_price,
+        "avg_order_price": avg_order_price,
         "avg_sales_per_day": avg_sales_per_day,
         "avg_sales_per_day_dollars": avg_sales_per_day_dollars,
         "avg_new_listings_per_day_count": avg_new_listings_per_day_count,

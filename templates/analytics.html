@@ -103,9 +103,9 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
       <div class="note">As of right now — not affected by the date range above (no historical daily snapshots are stored)</div>
     </div>
     <div class="summary-card">
-      <div class="num" id="m-avg-sale-price">—</div>
-      <div class="label">Average Sale Price</div>
-      <div class="note">Order revenue (excl. cash) ÷ units sold, in range — <span id="m-units-sold"></span> units sold</div>
+      <div class="num" id="m-avg-order-price">—</div>
+      <div class="label">Avg Order Price</div>
+      <div class="note">Revenue (incl. cash) ÷ number of orders, in range</div>
     </div>
     <div class="summary-card">
       <div class="num" id="m-avg-sales-per-day">—</div>
@@ -248,8 +248,7 @@ async function loadAnalytics() {
     if (!r.ok) throw new Error(data.detail || 'Request failed');
 
     document.getElementById('m-inventory-value').textContent = fmtMoney(data.inventory_snapshot_value);
-    document.getElementById('m-avg-sale-price').textContent = fmtMoney(data.avg_sale_price);
-    document.getElementById('m-units-sold').textContent = (data.totals_in_range.quantity_sold || 0).toLocaleString();
+    document.getElementById('m-avg-order-price').textContent = fmtMoney(data.avg_order_price);
     document.getElementById('m-avg-sales-per-day').textContent = Math.round(data.avg_sales_per_day || 0).toLocaleString();
     document.getElementById('m-avg-sales-per-day-dollars').textContent = fmtMoney(data.avg_sales_per_day_dollars);
     document.getElementById('m-avg-listings-count').textContent = Math.round(data.avg_new_listings_per_day_count || 0).toLocaleString();
