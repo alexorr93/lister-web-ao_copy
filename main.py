@@ -2388,9 +2388,18 @@ async def backfill_green_timestamps(request: Request):
 #    payment_date is null. Used only by the one-time historical migration, for
 #    every OTHER lot's pre-existing cash value -- since we don't know the real
 #    date that cash arrived, it's spread evenly per day from the lot's purchase
-#    date through TODAY. This is intentionally a ROLLING window: the per-day
-#    rate is recomputed live every time it's queried (today - spread_start_date
-#    keeps growing), never pre-materialized into stored daily rows.
+#    date through a FIXED CUTOFF (CASH_SPREAD_CUTOFF_DATE below), not an
+#    ever-rolling "today". Originally this really did roll forward forever (a
+#    lot purchased Oct 1 would spread Oct 1 -> whenever it's queried, growing
+#    every day) -- deliberately changed after the user decided that was the
+#    actual source of the confusion: every new period kept picking up a few
+#    more dollars from ~80 old lots' spread payments, with no way to tell "real
+#    new cash" apart from "old spread still trickling in" without a breakdown
+#    tool. Freezing the spread window at a fixed date ends this permanently:
+#    from CASH_SPREAD_CUTOFF_DATE onward, spread payments contribute ZERO to
+#    any range -- only new precise payments (via Add Cash Pmt) count for
+#    anything after that date, no more ambiguity, ever.
+CASH_SPREAD_CUTOFF_DATE = "2026-06-30"
 
 def _cash_contribution_in_range(amount: float, spread_start_date: str, range_start: str, range_end: str, today_str: str, extra_min_date: str = None) -> float:
     """For a spread-type payment: how much of it falls inside [range_start,
@@ -2418,7 +2427,7 @@ def _compute_cash_in_range(business_id: str, start_date_str: str, end_date_str: 
     on which days count -- used by Green Revenue to only count cash from a
     lot's became_green_at onward, same rule as its order revenue."""
     import datetime as _dt3
-    today_str = _dt3.datetime.utcnow().strftime("%Y-%m-%d")
+    today_str = min(_dt3.datetime.utcnow().strftime("%Y-%m-%d"), CASH_SPREAD_CUTOFF_DATE)
     rows = _fetch_all_for_business(business_id, "cash_payments", "sku,amount,payment_date,spread_start_date")
     total = 0.0
     for r in rows:
@@ -2450,7 +2459,7 @@ async def api_cash_breakdown(request: Request, start: str, end: str):
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     import datetime as _dt3
-    today_str = _dt3.datetime.utcnow().strftime("%Y-%m-%d")
+    today_str = min(_dt3.datetime.utcnow().strftime("%Y-%m-%d"), CASH_SPREAD_CUTOFF_DATE)
     rows = _fetch_all_for_business(business_id, "cash_payments", "sku,amount,payment_date,spread_start_date,created_at")
 
     detail = []
