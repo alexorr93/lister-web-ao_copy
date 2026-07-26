@@ -2434,6 +2434,50 @@ def _compute_cash_in_range(business_id: str, start_date_str: str, end_date_str: 
             total += _cash_contribution_in_range(amount, r["spread_start_date"], start_date_str, end_date_str, today_str, extra_min_date=extra_min)
     return round(total, 2)
 
+@app.get("/api/analytics/cash-breakdown")
+async def api_cash_breakdown(request: Request, start: str, end: str):
+    """Every single cash_payments row and its actual computed contribution to
+    [start, end] -- built specifically to answer 'how are you getting $X' with
+    real row-level data instead of more explanation. Also surfaces a
+    duplicate_skus list: any sku with more than one row, which would explain a
+    number coming out roughly double what's expected (e.g. if the one-time
+    migration ran more than once, or a lot got both a migrated spread row AND
+    a manually-added precise one)."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import datetime as _dt3
+    today_str = _dt3.datetime.utcnow().strftime("%Y-%m-%d")
+    rows = _fetch_all_for_business(business_id, "cash_payments", "sku,amount,payment_date,spread_start_date,created_at")
+
+    detail = []
+    sku_row_counts = {}
+    for r in rows:
+        sku = r.get("sku")
+        sku_row_counts[sku] = sku_row_counts.get(sku, 0) + 1
+        amount = r.get("amount") or 0
+        if r.get("payment_date"):
+            contribution = amount if start <= r["payment_date"] <= end else 0.0
+            row_type = "precise"
+            date_info = r["payment_date"]
+        else:
+            contribution = _cash_contribution_in_range(amount, r.get("spread_start_date") or today_str, start, end, today_str)
+            row_type = "spread"
+            date_info = f"{r.get('spread_start_date')} -> {today_str} (rolling)"
+        detail.append({
+            "sku": sku, "type": row_type, "full_amount": amount, "date_info": date_info,
+            "contribution_to_range": round(contribution, 2), "created_at": r.get("created_at"),
+        })
+
+    duplicate_skus = [sku for sku, count in sku_row_counts.items() if count > 1]
+    detail.sort(key=lambda d: d["contribution_to_range"], reverse=True)
+    return {
+        "start": start, "end": end,
+        "total_contribution": round(sum(d["contribution_to_range"] for d in detail), 2),
+        "duplicate_skus": duplicate_skus,
+        "rows": detail,
+    }
+
 class AddCashPayment(BaseModel):
     sku: str
     amount: float
