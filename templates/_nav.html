@@ -1,28 +1,15 @@
 <!-- Shared top nav — included on every page (templates/_nav.html) so all tabs are
      reachable from anywhere. `active_tab` (set by each route in main.py) picks which
-     item is highlighted; Intake/Upload/Fast Scan/Auctions/Settings render as in-page
-     JS tab-switch buttons on index.html itself, and as real links (`/?tab=...`) from
-     every other page. -->
-{% set on_index = active_tab in ['intake', 'upload', 'fastscan', 'auction', 'settings'] %}
-<style>.nav-browsesearch{color:#60a5fa;}.nav-browsesearch.active{background:#3b82f6;color:#fff;}</style>
+     item is highlighted; Auctions/Settings render as in-page JS tab-switch buttons on
+     index.html itself, and as real links (`/?tab=...`) from every other page.
+
+     NOTE: this branch (auction-monitor-dev) runs in a separate Railway environment
+     dedicated to auction sourcing work -- pared down to just Auctions + Auction
+     Monitor. The full nav (Intake/Upload/Inventory/Financials/etc.) still exists
+     as-is on the production environment (dev2 branch / halfdome domain); nothing
+     was removed there, only hidden from nav here. -->
+{% set on_index = active_tab in ['auction', 'settings'] %}
 <nav class="nav">
-  {% if on_index %}
-  <button class="nav-btn nav-intake{{ ' active' if active_tab == 'intake' else '' }}" data-tab="intake">📥 Intake</button>
-  <button class="nav-btn nav-upload{{ ' active' if active_tab == 'upload' else '' }}" data-tab="upload">📸 Upload</button>
-  <button class="nav-btn nav-fastscan{{ ' active' if active_tab == 'fastscan' else '' }}" data-tab="fastscan">⚡ Fast Scan</button>
-  {% else %}
-  <a class="nav-btn nav-intake" href="/?tab=intake">📥 Intake</a>
-  <a class="nav-btn nav-upload" href="/?tab=upload">📸 Upload</a>
-  <a class="nav-btn nav-fastscan" href="/?tab=fastscan">⚡ Fast Scan</a>
-  {% endif %}
-  <a class="nav-btn nav-archive{{ ' active' if active_tab == 'archive' else '' }}" href="/archive">🗄️ Archive</a>
-  <a class="nav-btn nav-inventory{{ ' active' if active_tab == 'inventory' else '' }}" href="/inventory">📦 Inventory</a>
-  <a class="nav-btn nav-financials{{ ' active' if active_tab == 'financials' else '' }}" href="/financials">💰 Financials</a>
-  <a class="nav-btn nav-lots{{ ' active' if active_tab == 'lots' else '' }}" href="/acquisitions">🛒 Lots</a>
-  <a class="nav-btn nav-auctionmonitor{{ ' active' if active_tab == 'auction_monitor' else '' }}" href="/auction-monitor">🔎 Auction Monitor</a>
-  <a class="nav-btn nav-shopify{{ ' active' if active_tab == 'shopify' else '' }}" href="/shopify-sync">🔁 Shopify</a>
-  <a class="nav-btn nav-categories{{ ' active' if active_tab == 'categories' else '' }}" href="/categories">📂 Categories</a>
-  <a class="nav-btn nav-browsesearch{{ ' active' if active_tab == 'browse_search' else '' }}" href="/browse-search">🔎 Browse Search</a>
   {% if is_admin %}
     {% if on_index %}
     <button class="nav-btn nav-auction{{ ' active' if active_tab == 'auction' else '' }}" data-tab="auction">🔨 Auctions</button>
@@ -30,15 +17,13 @@
     <a class="nav-btn nav-auction" href="/?tab=auction">🔨 Auctions</a>
     {% endif %}
   {% endif %}
+  <a class="nav-btn nav-auctionmonitor{{ ' active' if active_tab == 'auction_monitor' else '' }}" href="/auction-monitor">🔎 Auction Monitor</a>
   <div class="nav-spacer"></div>
   <span class="nav-account" style="opacity:.6;" title="When this server process last started (Mountain time) — Railway restarts it on every deploy, so this is effectively 'last deployed at'">🚀 {{ deploy_time_mt.strftime('%b %d, %I:%M %p') }} MT</span>
   {% if on_index %}
   <button class="nav-btn nav-settings{{ ' active' if active_tab == 'settings' else '' }}" data-tab="settings">⚙️ Settings</button>
   {% else %}
   <a class="nav-btn nav-settings" href="/?tab=settings">⚙️ Settings</a>
-  {% endif %}
-  {% if on_index %}
-  <a class="nav-download" href="#" onclick="window.location.href='/api/export/ebay-csv';return false;">⬇️ eBay CSV</a>
   {% endif %}
   {% if account_label %}<span class="nav-account">👤 {{ account_label }}</span>{% endif %}
   <a class="nav-download" href="/logout" style="color:#ef4444;border-color:#7f1d1d;">⏻ Logout</a>
