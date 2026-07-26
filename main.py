@@ -4403,14 +4403,16 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
     total_net_revenue = sum(r.get("final_net") or 0 for r in order_rows)
     total_qty_sold = sum(r.get("quantity") or 0 for r in order_rows)
     avg_sales_per_day = round(len(order_rows) / num_days, 2)
-    avg_sales_per_day_dollars = round(total_order_revenue / num_days, 2)
 
-    # --- Cash in this range (once, shared by Revenue and Net Sales below) ---
+    # --- Cash in this range (once, shared by Revenue, Net Sales, and Avg Sales/Day($) below) ---
     cash_in_range = _compute_cash_in_range(business_id, start_date_str, end_date_str)
 
     # --- Revenue: eBay + Shopify order revenue (both already in the same orders
     # table, no platform filter anywhere -- confirmed) PLUS cash in this range.
     total_revenue = round(total_order_revenue + cash_in_range, 2)
+    # FIXED: this previously used order-only revenue (no cash), inconsistent
+    # with every other revenue-like figure on this page now including cash.
+    avg_sales_per_day_dollars = round(total_revenue / num_days, 2)
 
     # Green Revenue as a % of Revenue: the metric that actually distinguishes
     # "portfolio genuinely getting more profitable over time" from "raw sales
