@@ -343,6 +343,7 @@ def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
     mt_today = _dt.datetime.now(ZoneInfo("America/Denver")).strftime("%Y-%m-%d")
 
     inventory_value = _compute_inventory_snapshot_value(business_id)
+    green_revenue = _compute_green_revenue(business_id)
 
     order_rows = supabase.table("orders").select("gross_revenue,quantity").eq("business_id", business_id)\
         .eq("order_date", mt_today).execute().data or []
@@ -359,6 +360,7 @@ def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
         "business_id": business_id,
         "snapshot_date": mt_today,
         "inventory_snapshot_value": inventory_value,
+        "green_revenue": green_revenue,
         "avg_sale_price_day": avg_sale_price_day,
         "new_listings_count_day": new_listings_count_day,
         "new_listings_value_day": new_listings_value_day,
@@ -3993,6 +3995,18 @@ def _compute_inventory_snapshot_value(business_id: str) -> float:
             value += float(price) * float(qty)
     return round(value, 2)
 
+def _compute_green_revenue(business_id: str) -> float:
+    """'Green Revenue' -- total sales revenue (total_payouts, eBay+Shopify combined)
+    summed across every lot that's already profitable (profit > 0). This is
+    interpretation (A) confirmed with the user: ALL revenue from a de-risked lot,
+    not just the surplus past breakeven (that would just be profit itself, not a
+    new number). Like Inventory Snapshot Value, this is a live, current-state
+    aggregate as of right now -- a lot's profit/total_payouts are cumulative
+    totals, not individually dated transactions, so there's no clean way to filter
+    this by date range the way order-level metrics can be."""
+    rows = _fetch_all_for_business(business_id, "acquisitions", "profit,total_payouts")
+    return round(sum(float(r.get("total_payouts") or 0) for r in rows if (r.get("profit") or 0) > 0), 2)
+
 @app.get("/api/analytics")
 async def api_analytics(request: Request, start: str = None, end: str = None):
     business_id = require_auth(request)
@@ -4013,6 +4027,7 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
     # alongside the period-filtered metrics but not filtered by them; the UI
     # labels it "as of now" rather than implying otherwise.
     inventory_snapshot_value = _compute_inventory_snapshot_value(business_id)
+    green_revenue = _compute_green_revenue(business_id)
 
     # --- Average Sale Price (within the selected date range) ---
     order_rows = supabase.table("orders").select("gross_revenue,quantity").eq("business_id", business_id)\
@@ -4034,6 +4049,7 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
         "end": end_date_str,
         "num_days": num_days,
         "inventory_snapshot_value": inventory_snapshot_value,
+        "green_revenue": green_revenue,
         "avg_sale_price": avg_sale_price,
         "avg_new_listings_per_day_count": avg_new_listings_per_day_count,
         "avg_new_listings_per_day_value": avg_new_listings_per_day_value,

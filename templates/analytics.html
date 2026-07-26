@@ -22,7 +22,7 @@ h1 { font-size: 20px; margin-bottom: 4px; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .quick-range { display: flex; gap: 6px; }
 .quick-range button { padding: 8px 10px; font-size: 12px; }
-.summary-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
+.summary-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 18px; }
 .summary-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
 .summary-card .num { font-size: 26px; font-weight: 800; }
 .summary-card .label { font-size: 12px; color: var(--muted); margin-top: 4px; }
@@ -71,6 +71,11 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
       <div class="num" id="m-inventory-value">—</div>
       <div class="label">Inventory Snapshot Value</div>
       <div class="note">As of right now — not affected by the date range above (no historical daily snapshots are stored)</div>
+    </div>
+    <div class="summary-card">
+      <div class="num" id="m-green-revenue" style="color:#22c55e;">—</div>
+      <div class="label">Green Revenue</div>
+      <div class="note">Total sales revenue from lots that have already paid for themselves (profit &gt; 0) — as of right now, same as Inventory Snapshot Value above</div>
     </div>
     <div class="summary-card">
       <div class="num" id="m-avg-sale-price">—</div>
@@ -151,6 +156,7 @@ async function loadAnalytics() {
     if (!r.ok) throw new Error(data.detail || 'Request failed');
 
     document.getElementById('m-inventory-value').textContent = fmtMoney(data.inventory_snapshot_value);
+    document.getElementById('m-green-revenue').textContent = fmtMoney(data.green_revenue);
     document.getElementById('m-avg-sale-price').textContent = fmtMoney(data.avg_sale_price);
     document.getElementById('m-avg-listings-count').textContent = (data.avg_new_listings_per_day_count || 0).toLocaleString(undefined, {maximumFractionDigits: 1});
     document.getElementById('m-avg-listings-value').textContent = fmtMoney(data.avg_new_listings_per_day_value);
