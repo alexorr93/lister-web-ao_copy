@@ -865,12 +865,15 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
         scheduled_at_iso = scheduled_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
         schedule_xml = f"<ScheduleTime>{scheduled_at_iso}</ScheduleTime>"
 
-    # Many Motors Parts & Accessories categories don't support Best Offer at all
-    # -- matches the 'Best offer feature disabled... unavailable for the
-    # specified category' warning in the reported error. Skip it entirely for
-    # motors-mode items rather than always requesting it.
-    best_offer_xml = "" if listing.get("category_mode") == "motors" else \
-        '<BestOfferDetails><BestOfferEnabled>true</BestOfferEnabled></BestOfferDetails>'
+    # Previously skipped for motors-mode items after eBay's error said Best
+    # Offer was "unavailable...for the specified category" -- but that error
+    # came from BEFORE the Site ID fix, when the whole request was going to
+    # the wrong marketplace and eBay likely couldn't properly resolve the
+    # category's real feature set at all. Re-enabled now that Site is correct
+    # -- if a specific category genuinely doesn't support Best Offer, eBay
+    # will say so on its own (as a warning, not a blocking error) and it'll be
+    # visible in the modal's failure/status text either way.
+    best_offer_xml = '<BestOfferDetails><BestOfferEnabled>true</BestOfferEnabled></BestOfferDetails>'
 
     xml_body = (
         '<?xml version="1.0" encoding="utf-8"?>'
