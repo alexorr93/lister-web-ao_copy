@@ -2406,6 +2406,18 @@ async def backfill_green_timestamps(request: Request):
     result = _backfill_became_green_at_from_history(business_id)
     return result
 
+@app.post("/api/analytics/refresh-snapshot-now")
+async def refresh_snapshot_now(request: Request):
+    """Manually runs today's analytics_snapshot computation immediately, instead
+    of waiting for the overnight job (00:10 UTC). Useful right after adding a
+    new column to analytics_snapshots (like ytd_cash) -- the existing row for
+    today won't have real data in that new column until this runs again."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    result = run_daily_analytics_snapshot_for_business(business_id)
+    return result
+
 # ── Cash Payments Ledger ──────────────────────────────────────────
 # Replaces the single acquisitions.cash field with a real dated ledger, per the
 # user's explicit ask for a proper edit-history/date field for cash rather than

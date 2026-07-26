@@ -202,6 +202,7 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
     <div class="summary-card" style="padding:16px;flex:1;display:flex;flex-direction:column;justify-content:center;min-width:200px;">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
         <select id="ncy-year" class="field-input" style="padding:6px 8px;font-size:12px;" onchange="loadNetCashYield()"></select>
+        <button class="btn" style="padding:6px 8px;font-size:11px;" onclick="refreshNetCashYieldNow()" title="Recomputes today's figures right now instead of waiting for the overnight job">🔄</button>
       </div>
       <div class="num" id="ncy-value" style="font-size:24px;font-weight:800;">—</div>
       <div class="label">Net Cash Yield <span id="ncy-ytd-tag"></span></div>
@@ -481,6 +482,19 @@ async function loadMonthlyTrend() {
 
 setRange(30);
 document.getElementById('trend-end-month').value = new Date().toISOString().slice(0,7);
+async function refreshNetCashYieldNow() {
+  const el = document.getElementById('ncy-value');
+  el.textContent = '…';
+  try {
+    const r = await fetch('/api/analytics/refresh-snapshot-now', {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    loadNetCashYield();
+  } catch(e) {
+    el.textContent = 'Error';
+  }
+}
+
 async function loadNetCashYield() {
   try {
     const year = document.getElementById('ncy-year').value;
