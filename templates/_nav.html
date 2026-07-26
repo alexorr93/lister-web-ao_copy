@@ -7,8 +7,16 @@
      dedicated to auction sourcing work -- pared down to just Auctions + Auction
      Monitor. The full nav (Intake/Upload/Inventory/Financials/etc.) still exists
      as-is on the production environment (dev2 branch / halfdome domain); nothing
-     was removed there, only hidden from nav here. -->
-{% set on_index = active_tab in ['auction', 'settings'] %}
+     was removed there, only hidden from nav here.
+
+     IMPORTANT: on_index must still include intake/upload/fastscan below even
+     though those buttons aren't shown -- the server ALWAYS defaults active_tab
+     to "intake" when landing on "/", regardless of what gets clicked afterward.
+     on_index answers "are we on index.html at all", not "which buttons are
+     visible" -- narrowing it to just auction/settings broke that (confirmed:
+     caused Auctions to render as a full-page link instead of a JS tab-button
+     on first load, so clicking it never actually switched tabs). -->
+{% set on_index = active_tab in ['intake', 'upload', 'fastscan', 'auction', 'settings'] %}
 <nav class="nav">
   {% if is_admin %}
     {% if on_index %}
