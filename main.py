@@ -2392,34 +2392,46 @@ async def backfill_green_timestamps(request: Request):
 #    rate is recomputed live every time it's queried (today - spread_start_date
 #    keeps growing), never pre-materialized into stored daily rows.
 
-def _cash_contribution_in_range(amount: float, spread_start_date: str, range_start: str, range_end: str, today_str: str) -> float:
+def _cash_contribution_in_range(amount: float, spread_start_date: str, range_start: str, range_end: str, today_str: str, extra_min_date: str = None) -> float:
     """For a spread-type payment: how much of it falls inside [range_start,
-    range_end], given it's spread evenly across [spread_start_date, today]."""
+    range_end], given it's spread evenly across [spread_start_date, today].
+    extra_min_date (optional) further restricts which days count -- e.g. only
+    days on/after a lot's became_green_at, for Green Revenue -- without
+    changing the daily RATE itself, which is still based on the lot's full
+    original spread window."""
     import datetime as _dt3
     start = max(spread_start_date, "0001-01-01")
     total_days = (_dt3.date.fromisoformat(today_str) - _dt3.date.fromisoformat(start)).days + 1
     if total_days <= 0:
         return 0.0
     daily_rate = amount / total_days
-    overlap_start = max(start, range_start)
+    overlap_start = max(start, range_start, extra_min_date) if extra_min_date else max(start, range_start)
     overlap_end = min(today_str, range_end)
     if overlap_start > overlap_end:
         return 0.0
     overlap_days = (_dt3.date.fromisoformat(overlap_end) - _dt3.date.fromisoformat(overlap_start)).days + 1
     return daily_rate * overlap_days
 
-def _compute_cash_in_range(business_id: str, start_date_str: str, end_date_str: str) -> float:
+def _compute_cash_in_range(business_id: str, start_date_str: str, end_date_str: str, only_skus: set = None, min_date_by_sku: dict = None) -> float:
+    """only_skus + min_date_by_sku (both optional) restrict this to a specific
+    set of lots (e.g. currently-green ones) and, per lot, an extra lower bound
+    on which days count -- used by Green Revenue to only count cash from a
+    lot's became_green_at onward, same rule as its order revenue."""
     import datetime as _dt3
     today_str = _dt3.datetime.utcnow().strftime("%Y-%m-%d")
-    rows = _fetch_all_for_business(business_id, "cash_payments", "amount,payment_date,spread_start_date")
+    rows = _fetch_all_for_business(business_id, "cash_payments", "sku,amount,payment_date,spread_start_date")
     total = 0.0
     for r in rows:
+        sku = r.get("sku")
+        if only_skus is not None and sku not in only_skus:
+            continue
+        extra_min = (min_date_by_sku or {}).get(sku)
         amount = r.get("amount") or 0
         if r.get("payment_date"):
-            if start_date_str <= r["payment_date"] <= end_date_str:
+            if start_date_str <= r["payment_date"] <= end_date_str and (not extra_min or r["payment_date"] >= extra_min):
                 total += amount
         elif r.get("spread_start_date"):
-            total += _cash_contribution_in_range(amount, r["spread_start_date"], start_date_str, end_date_str, today_str)
+            total += _cash_contribution_in_range(amount, r["spread_start_date"], start_date_str, end_date_str, today_str, extra_min_date=extra_min)
     return round(total, 2)
 
 class AddCashPayment(BaseModel):
@@ -4199,8 +4211,9 @@ def _compute_inventory_snapshot_value(business_id: str) -> float:
 
 def _compute_green_revenue(business_id: str, start_date_str: str, end_date_str: str) -> float:
     """'Green Revenue' -- sum of actual order revenue (gross_revenue, per the
-    user's own flag: is lot profit > 1 = Green) within the SELECTED DATE RANGE,
-    for lots that are currently green.
+    user's own flag: is lot profit > 1 = Green) PLUS cash payments belonging to
+    green lots, within the SELECTED DATE RANGE, for lots that are currently
+    green.
 
     Rebuilt after the first version was wrong: it summed each green lot's
     all-time total_payouts regardless of date range, so it always showed a
@@ -4216,7 +4229,11 @@ def _compute_green_revenue(business_id: str, start_date_str: str, end_date_str: 
     lot's profit crosses above 1 (see _apply_shopify_sales_to_profit), and
     cleared if it drops back down. A sale only counts here if the lot is
     currently green AND the sale happened on or after that lot's became_green_at
-    -- so sales from while it was still red are correctly excluded."""
+    -- so sales from while it was still red are correctly excluded.
+
+    Cash from a green lot follows the exact same became_green_at boundary --
+    a spread payment's contribution is bounded to days on/after that date, and
+    a precise payment only counts if dated on/after it, same as orders."""
     lot_rows = _fetch_all_for_business(business_id, "acquisitions", "sku,profit,became_green_at")
     green_lots = {r["sku"]: r["became_green_at"] for r in lot_rows if r.get("sku") and (r.get("profit") or 0) > 1 and r.get("became_green_at")}
     if not green_lots:
@@ -4236,6 +4253,9 @@ def _compute_green_revenue(business_id: str, start_date_str: str, end_date_str: 
         # on date portion only, so the transition day itself still counts
         if order_date >= became_green_at[:10]:
             total += float(r.get("gross_revenue") or 0)
+
+    min_date_by_sku = {sku: ts[:10] for sku, ts in green_lots.items()}
+    total += _compute_cash_in_range(business_id, start_date_str, end_date_str, only_skus=set(green_lots.keys()), min_date_by_sku=min_date_by_sku)
     return round(total, 2)
 
 @app.get("/api/analytics/green-revenue-breakdown")
@@ -4297,12 +4317,19 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
     # --- Average Sale Price (within the selected date range) ---
     order_rows = supabase.table("orders").select("gross_revenue,final_net,quantity").eq("business_id", business_id)\
         .gte("order_date", start_date_str).lte("order_date", end_date_str).execute().data or []
-    total_revenue = sum(r.get("gross_revenue") or 0 for r in order_rows)
+    total_order_revenue = sum(r.get("gross_revenue") or 0 for r in order_rows)
     total_net_revenue = sum(r.get("final_net") or 0 for r in order_rows)
     total_qty_sold = sum(r.get("quantity") or 0 for r in order_rows)
-    avg_sale_price = round(total_revenue / total_qty_sold, 2) if total_qty_sold else 0
+    avg_sale_price = round(total_order_revenue / total_qty_sold, 2) if total_qty_sold else 0
     avg_sales_per_day = round(len(order_rows) / num_days, 2)
-    avg_sales_per_day_dollars = round(total_revenue / num_days, 2)
+    avg_sales_per_day_dollars = round(total_order_revenue / num_days, 2)
+
+    # --- Cash in this range (once, shared by Revenue and Net Sales below) ---
+    cash_in_range = _compute_cash_in_range(business_id, start_date_str, end_date_str)
+
+    # --- Revenue: eBay + Shopify order revenue (both already in the same orders
+    # table, no platform filter anywhere -- confirmed) PLUS cash in this range.
+    total_revenue = round(total_order_revenue + cash_in_range, 2)
 
     # --- Net Sales: revenue AFTER eBay/Shopify fees (final_net, not gross_revenue)
     # plus cash payments dated (or spread) within the range ---
@@ -4312,7 +4339,6 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
     # sense. Net Sales should be smaller than gross Revenue before cash is even
     # added, since fees come out first. Now uses final_net (the same authoritative
     # post-fee figure Financials already uses) as the base.
-    cash_in_range = _compute_cash_in_range(business_id, start_date_str, end_date_str)
     net_sales = round(total_net_revenue + cash_in_range, 2)
 
     # --- Inventory Growth Multiple: % change in Inventory Snapshot Value across the
@@ -4386,9 +4412,11 @@ async def api_analytics_history(request: Request, days: int = 90):
 @app.get("/api/analytics/monthly-trend")
 async def api_analytics_monthly_trend(request: Request, start: str = None, end: str = None):
     """Inventory spend vs. sales, grouped by month -- straight from acquisitions.cost
-    (grouped by acquisitions.date) and orders.gross_revenue (grouped by
-    orders.order_date). No snapshot/stamping mechanism needed here -- both source
-    fields are already dated per-row, so grouping by month is just a groupby.
+    (grouped by acquisitions.date), orders.gross_revenue (grouped by
+    orders.order_date), and cash payments in that same month (via
+    _compute_cash_in_range) -- Sales now includes cash, matching Revenue on the
+    main Analytics view. Both eBay and Shopify order revenue were already
+    captured here (no platform filter anywhere in these order queries, confirmed).
 
     Green Revenue by month is computed the SAME way as the live /api/analytics
     endpoint (_compute_green_revenue), once per month -- NOT read from
@@ -4443,14 +4471,26 @@ async def api_analytics_monthly_trend(request: Request, start: str = None, end: 
             sales_by_month[d] = sales_by_month.get(d, 0) + (r.get("gross_revenue") or 0)
 
     inventory_spend = [round(spend_by_month.get(m, 0), 2) for m in all_months]
-    sales = [round(sales_by_month.get(m, 0), 2) for m in all_months]
+
+    def _month_bounds(month):
+        next_m_y, next_m_m = (int(month[:4]) + 1, 1) if month[5:7] == "12" else (int(month[:4]), int(month[5:7]) + 1)
+        month_end = (_dt.date(next_m_y, next_m_m, 1) - _dt.timedelta(days=1)).strftime("%Y-%m-%d")
+        return f"{month}-01", month_end
+
+    # Sales now includes cash in that same month, matching Revenue on the main
+    # Analytics view -- both eBay and Shopify order revenue were already
+    # captured here (no platform filter anywhere in these queries, confirmed).
+    sales = []
+    for month in all_months:
+        month_start, month_end = _month_bounds(month)
+        order_total = sales_by_month.get(month, 0)
+        cash_total = _compute_cash_in_range(business_id, month_start, month_end)
+        sales.append(round(order_total + cash_total, 2))
 
     # Green Revenue: one real call per month, same math as the live endpoint.
     green_revenue_by_month = []
     for month in all_months:
-        month_start = f"{month}-01"
-        next_m_y, next_m_m = (int(month[:4]) + 1, 1) if month[5:7] == "12" else (int(month[:4]), int(month[5:7]) + 1)
-        month_end = (_dt.date(next_m_y, next_m_m, 1) - _dt.timedelta(days=1)).strftime("%Y-%m-%d")
+        month_start, month_end = _month_bounds(month)
         green_revenue_by_month.append(_compute_green_revenue(business_id, month_start, month_end))
 
     # Inventory Snapshot Value by month: nearest snapshot on or before the END
@@ -4460,8 +4500,7 @@ async def api_analytics_monthly_trend(request: Request, start: str = None, end: 
     snapshots_sorted = sorted(snapshot_rows, key=lambda r: r.get("snapshot_date") or "")
     inventory_value_by_month = []
     for month in all_months:
-        next_m_y, next_m_m = (int(month[:4]) + 1, 1) if month[5:7] == "12" else (int(month[:4]), int(month[5:7]) + 1)
-        month_end = (_dt.date(next_m_y, next_m_m, 1) - _dt.timedelta(days=1)).strftime("%Y-%m-%d")
+        _, month_end = _month_bounds(month)
         best = None
         for r in snapshots_sorted:
             if (r.get("snapshot_date") or "") <= month_end:
