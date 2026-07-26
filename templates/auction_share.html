@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src * blob: data: 'unsafe-inline' 'unsafe-eval';">
+<title>Auction Catalog</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f1117;color:#f1f5f9;min-height:100vh;padding:28px 16px;}
+.wrap{max-width:900px;margin:0 auto;}
+.page-title{font-size:22px;font-weight:700;margin-bottom:4px;}
+.page-sub{font-size:13px;color:#64748b;margin-bottom:24px;}
+.page-sub a{color:#93c5fd;}
+.loading, .error{color:#64748b;font-size:14px;padding:40px 0;text-align:center;}
+.error{color:#f87171;}
+.lot-card{background:#1e2535;border:1px solid #2d3348;border-radius:14px;overflow:hidden;margin-bottom:14px;display:grid;grid-template-columns:140px 1fr;}
+.lot-img{background:#161b28;display:flex;align-items:center;justify-content:center;}
+.lot-img img{width:100%;height:100%;object-fit:cover;display:block;min-height:140px;}
+.lot-img .placeholder{font-size:32px;color:#2d3348;}
+.lot-body{padding:14px 16px;display:flex;flex-direction:column;gap:8px;}
+.lot-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
+.lot-num{font-size:11px;font-weight:700;color:#64748b;background:#161b28;padding:2px 8px;border-radius:6px;}
+.lot-title{font-size:14px;font-weight:700;flex:1;min-width:180px;}
+.lot-bid{font-size:12px;color:#94a3b8;}
+.lot-link{font-size:11px;color:#93c5fd;text-decoration:none;}
+.metric-row{display:flex;gap:18px;flex-wrap:wrap;margin-top:4px;}
+.metric{font-size:11px;}
+.metric-lbl{color:#64748b;text-transform:uppercase;letter-spacing:.05em;font-size:9px;font-weight:700;margin-bottom:2px;}
+.metric-val{font-size:13px;font-weight:700;color:#EF9F27;}
+.metric-notes{color:#64748b;font-size:10px;margin-top:1px;max-width:220px;}
+.items{font-size:11px;color:#94a3b8;margin-top:2px;}
+.notes-box{font-size:11px;color:#94a3b8;background:#161b28;border-radius:6px;padding:6px 8px;margin-top:2px;white-space:pre-wrap;}
+.footer-note{text-align:center;font-size:11px;color:#475569;margin-top:24px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="page-title" id="page-title">Auction Catalog</div>
+  <div class="page-sub" id="page-sub">Loading…</div>
+  <div id="lots-container"><div class="loading">Loading catalog…</div></div>
+  <div class="footer-note">Shared read-only view — no login required.</div>
+</div>
+<script>
+function money(v){ return v == null ? '' : '$' + Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+async function load() {
+  const sessionId = location.pathname.split('/').filter(Boolean).pop();
+  try {
+    const res = await fetch(`/api/auction/capture/public/${sessionId}`);
+    if (!res.ok) throw new Error(res.status === 404 ? 'Catalog not found' : 'Failed to load');
+    const data = await res.json();
+    const session = data.session;
+    document.getElementById('page-title').textContent = session.name || 'Auction Catalog';
+    document.title = session.name || 'Auction Catalog';
+    document.getElementById('page-sub').innerHTML = session.source_url
+      ? `${data.lots.length} lot(s) &middot; <a href="${esc(session.source_url)}" target="_blank">source listing ↗</a>`
+      : `${data.lots.length} lot(s)`;
+    renderLots(data.lots);
+  } catch (e) {
+    document.getElementById('lots-container').innerHTML = `<div class="error">${esc(e.message)}</div>`;
+  }
+}
+
+function renderLots(lots) {
+  if (!lots.length) {
+    document.getElementById('lots-container').innerHTML = '<div class="loading">No lots in this catalog yet.</div>';
+    return;
+  }
+  document.getElementById('lots-container').innerHTML = lots.map(lot => {
+    const photo = (lot.photo_urls && lot.photo_urls[0]) || null;
+    const imgHtml = photo ? `<img src="${esc(photo)}" alt="">` : `<div class="placeholder">🔨</div>`;
+    const itemsHtml = (lot.items && lot.items.length)
+      ? `<div class="items">${lot.items.map(it => `${esc(it.item_name || 'Unknown item')}${it.quantity ? ' × ' + esc(it.quantity) : ''}`).join('<br>')}</div>`
+      : '';
+    const metrics = [];
+    if (lot.resale_value_low != null) metrics.push(`<div class="metric"><div class="metric-lbl">Resale Value</div><div class="metric-val">${money(lot.resale_value_low)}&ndash;${money(lot.resale_value_high)}</div>${lot.resale_value_notes ? `<div class="metric-notes">${esc(lot.resale_value_notes)}</div>` : ''}</div>`);
+    if (lot.liquidity_rating) metrics.push(`<div class="metric"><div class="metric-lbl">Liquidity</div><div class="metric-val" style="text-transform:uppercase;">${esc(lot.liquidity_rating)}</div>${lot.liquidity_notes ? `<div class="metric-notes">${esc(lot.liquidity_notes)}</div>` : ''}</div>`);
+    if (lot.weight_lbs != null) metrics.push(`<div class="metric"><div class="metric-lbl">Weight</div><div class="metric-val">${Number(lot.weight_lbs).toLocaleString()} lbs</div>${lot.weight_notes ? `<div class="metric-notes">${esc(lot.weight_notes)}</div>` : ''}</div>`);
+    if (lot.max_bid != null) metrics.push(`<div class="metric"><div class="metric-lbl">Max Price to Pay</div><div class="metric-val">${money(lot.max_bid)}</div>${lot.max_bid_notes ? `<div class="metric-notes">${esc(lot.max_bid_notes)}</div>` : ''}</div>`);
+    return `<div class="lot-card">
+      <div class="lot-img">${imgHtml}</div>
+      <div class="lot-body">
+        <div class="lot-head">
+          <span class="lot-num">Lot ${esc(lot.lot_number || '?')}</span>
+          <span class="lot-title">${esc(lot.title || 'Unknown')}</span>
+        </div>
+        ${lot.current_bid != null ? `<div class="lot-bid">Current bid: ${money(lot.current_bid)}</div>` : ''}
+        ${lot.listing_url ? `<a class="lot-link" href="${esc(lot.listing_url)}" target="_blank">View listing ↗</a>` : ''}
+        ${itemsHtml}
+        ${metrics.length ? `<div class="metric-row">${metrics.join('')}</div>` : ''}
+        ${lot.notes ? `<div class="notes-box">${esc(lot.notes)}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+load();
+</script>
+</body>
+</html>

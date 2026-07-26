@@ -956,6 +956,18 @@ async def auction_research_page(request: Request):
         "Content-Security-Policy": "default-src * blob: data:; script-src * blob: data: 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline'; img-src * blob: data:;"
     })
 
+@app.get("/auction/share/{session_id}", response_class=HTMLResponse)
+async def auction_capture_share_page(session_id: str, request: Request):
+    """Public, no-auth page for sharing one Live Lot Capture session (a single catalog)
+    externally, e.g. a link to send a friend. Read-only — the page fetches its own data
+    from /api/auction/capture/public/{session_id}, no login required."""
+    import os
+    with open(os.path.join(os.path.dirname(__file__), "templates", "auction_share.html")) as f:
+        html = f.read()
+    return HTMLResponse(content=html, headers={
+        "Content-Security-Policy": "default-src * blob: data:; script-src * blob: data: 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline'; img-src * blob: data:;"
+    })
+
 @app.get("/auction", response_class=HTMLResponse)
 async def auction_page(request: Request):
     business_id = require_auth(request)
@@ -6775,6 +6787,33 @@ async def list_capture_lots(session_id: str):
         lot["items"] = items_by_lot.get(lot["id"], [])
     return lots
 
+@app.get("/api/auction/capture/public/{session_id}")
+async def get_public_capture_session(session_id: str):
+    """No-auth read-only view of one capture session's lots, for sharing a link to a
+    single catalog externally (e.g. to a friend). session_id is an unguessable UUID —
+    same trust model as the existing auction_research_sessions share_id link."""
+    sess_res = (supabase.table("auction_capture_sessions")
+                .select("id,name,source_url,created_at")
+                .eq("id", session_id).execute())
+    if not sess_res.data:
+        raise HTTPException(404, "Session not found")
+    session = sess_res.data[0]
+    lots_res = (supabase.table("auction_lots")
+                .select("*")
+                .eq("session_id", session_id)
+                .order("created_at")
+                .execute())
+    lots = lots_res.data
+    lot_ids = [l["id"] for l in lots]
+    items_by_lot = {}
+    if lot_ids:
+        items_res = supabase.table("auction_lot_items").select("*").in_("lot_id", lot_ids).execute()
+        for it in items_res.data:
+            items_by_lot.setdefault(it["lot_id"], []).append(it)
+    for lot in lots:
+        lot["items"] = items_by_lot.get(lot["id"], [])
+    return {"session": session, "lots": lots}
+
 @app.patch("/api/auction/capture/lots/{lot_id}/notes")
 async def update_capture_lot_notes(lot_id: str, body: dict = Body(...)):
     res = (supabase.table("auction_lots")
@@ -7042,7 +7081,7 @@ for fast-moving common items).""",
 }
 
 def _compute_metric_for_lot(lot: dict, items: list, metric: str) -> dict:
-    import json, re
+    import json, re, time
     import requests as _requests
     from json_repair import repair_json
 
@@ -7070,15 +7109,26 @@ TASK: {spec['instructions']}
 Return ONLY a raw JSON object, no markdown, no backticks:
 {spec['schema']}"""
 
-    resp = _requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}",
-        json={
-            "contents": [{"parts": [{"text": prompt}]}],
-            "tools": [{"google_search": {}}],
-            "generationConfig": {"maxOutputTokens": 1500},
-        },
-        timeout=30,
-    )
+    # Gemini's free tier rate-limits (429) under sustained per-lot calls in a session with
+    # many lots — without a retry here, a rate-limited lot just permanently errors out and
+    # looks to the user like the job "gave up" partway through. Back off and retry those
+    # (and transient 5xx) a few times before actually giving up on this lot.
+    resp = None
+    for attempt in range(4):
+        resp = _requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}",
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "tools": [{"google_search": {}}],
+                "generationConfig": {"maxOutputTokens": 1500},
+            },
+            timeout=30,
+        )
+        if resp.status_code == 429 or resp.status_code >= 500:
+            if attempt < 3:
+                time.sleep(3 * (2 ** attempt))  # 3s, 6s, 12s
+                continue
+        break
     resp.raise_for_status()
     resp_data = resp.json()
     raw = (resp_data["candidates"][0]["content"]["parts"][0].get("text") or "").strip()
@@ -7113,6 +7163,20 @@ async def compute_metric_for_session(session_id: str, body: ComputeMetricRequest
     if body.lot_ids:
         q = q.in_("id", body.lot_ids)
     lots = q.execute().data
+
+    # Default run (no explicit lot_ids): skip lots that already have this metric filled
+    # in, so re-clicking "run" after a partial run (errors, quota limits, etc.) only
+    # retries what's missing instead of re-burning Gemini calls redoing lots that already
+    # succeeded. An explicit lot_ids selection always means "run these", already-filled
+    # or not — that's the escape hatch for deliberately redoing specific lots.
+    if not body.lot_ids:
+        already_filled_field = {
+            "resale_value": "resale_value_low",
+            "liquidity": "liquidity_rating",
+            "weight": "weight_lbs",
+            "max_bid": "max_bid",
+        }[body.metric]
+        lots = [l for l in lots if l.get(already_filled_field) is None]
 
     job_id = _uuid.uuid4().hex
     _metric_jobs[job_id] = {

@@ -560,6 +560,7 @@ select.field-input { background: #fff; color: #0f172a; }
         <option value="">Select a capture session...</option>
       </select>
       <button class="btn" onclick="stopSelectedCapture()">⏸️ Stop Capture</button>
+      <button class="btn" onclick="shareSelectedCaptureSession()">🔗 Share</button>
       <button class="btn" style="background:#7a2020;color:#fff;" onclick="deleteSelectedCaptureSession()">🗑️ Delete Session</button>
     </div>
     <div id="metric-progress" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px;">
@@ -2316,6 +2317,19 @@ async function stopSelectedCapture() {
     toast('Stop requested — will halt after the current lot');
     loadAuctionSessions();
   } catch(e) { toast('Failed to stop capture', 'error'); }
+}
+
+async function shareSelectedCaptureSession() {
+  const sel = document.getElementById('auction-session-select');
+  const id = sel.value;
+  if (!id) { toast('Select a session first', 'error'); return; }
+  const url = `${location.origin}/auction/share/${id}`;
+  try {
+    await navigator.clipboard.writeText(url);
+    toast('Share link copied to clipboard — anyone with it can view this catalog (read-only, no login)');
+  } catch(e) {
+    prompt('Copy this link to share (read-only, no login needed):', url);
+  }
 }
 
 async function deleteSelectedCaptureSession() {
