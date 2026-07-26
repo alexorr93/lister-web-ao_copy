@@ -2374,6 +2374,125 @@ async def backfill_green_timestamps(request: Request):
     result = _backfill_became_green_at_from_history(business_id)
     return result
 
+# ── Cash Payments Ledger ──────────────────────────────────────────
+# Replaces the single acquisitions.cash field with a real dated ledger, per the
+# user's explicit ask for a proper edit-history/date field for cash rather than
+# spreading estimates around a value with no real date attached.
+#
+# A payment row is EITHER:
+#  - a precise payment: payment_date is set, spread_start_date is null. Used
+#    for every NEW cash entry added via "Add Cash Pmt" going forward, and for
+#    the three lots the user explicitly named as entered this month (11R, R66,
+#    AM1) during the one-time migration below.
+#  - a spread entry: spread_start_date is set (the lot's own acquisitions.date),
+#    payment_date is null. Used only by the one-time historical migration, for
+#    every OTHER lot's pre-existing cash value -- since we don't know the real
+#    date that cash arrived, it's spread evenly per day from the lot's purchase
+#    date through TODAY. This is intentionally a ROLLING window: the per-day
+#    rate is recomputed live every time it's queried (today - spread_start_date
+#    keeps growing), never pre-materialized into stored daily rows.
+
+def _cash_contribution_in_range(amount: float, spread_start_date: str, range_start: str, range_end: str, today_str: str) -> float:
+    """For a spread-type payment: how much of it falls inside [range_start,
+    range_end], given it's spread evenly across [spread_start_date, today]."""
+    import datetime as _dt3
+    start = max(spread_start_date, "0001-01-01")
+    total_days = (_dt3.date.fromisoformat(today_str) - _dt3.date.fromisoformat(start)).days + 1
+    if total_days <= 0:
+        return 0.0
+    daily_rate = amount / total_days
+    overlap_start = max(start, range_start)
+    overlap_end = min(today_str, range_end)
+    if overlap_start > overlap_end:
+        return 0.0
+    overlap_days = (_dt3.date.fromisoformat(overlap_end) - _dt3.date.fromisoformat(overlap_start)).days + 1
+    return daily_rate * overlap_days
+
+def _compute_cash_in_range(business_id: str, start_date_str: str, end_date_str: str) -> float:
+    import datetime as _dt3
+    today_str = _dt3.datetime.utcnow().strftime("%Y-%m-%d")
+    rows = _fetch_all_for_business(business_id, "cash_payments", "amount,payment_date,spread_start_date")
+    total = 0.0
+    for r in rows:
+        amount = r.get("amount") or 0
+        if r.get("payment_date"):
+            if start_date_str <= r["payment_date"] <= end_date_str:
+                total += amount
+        elif r.get("spread_start_date"):
+            total += _cash_contribution_in_range(amount, r["spread_start_date"], start_date_str, end_date_str, today_str)
+    return round(total, 2)
+
+class AddCashPayment(BaseModel):
+    sku: str
+    amount: float
+    date: str  # "YYYY-MM-DD"
+
+@app.post("/api/acquisitions/add-cash-payment")
+async def add_cash_payment(body: AddCashPayment, request: Request):
+    """The 'Add Cash Pmt' action: sku must match a real, existing lot (binary --
+    rejected otherwise, can't attach cash to a lot that doesn't exist). Inserts
+    a precise, dated payment, then updates that lot's acquisitions.cash to the
+    new running total and re-runs the normal profit recalculation so
+    profit/total_payouts/roi_pct/became_green_at all reflect it immediately --
+    same pipeline every other cash change already goes through."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+
+    lot = supabase.table("acquisitions").select("id,sku,cash").eq("business_id", business_id).eq("sku", body.sku).limit(1).execute()
+    if not lot.data:
+        raise HTTPException(400, f"No lot found with SKU '{body.sku}' -- cash can only be added to an existing lot")
+
+    supabase.table("cash_payments").insert({
+        "business_id": business_id, "sku": body.sku, "amount": body.amount, "payment_date": body.date,
+    }).execute()
+
+    payment_rows = supabase.table("cash_payments").select("amount").eq("business_id", business_id).eq("sku", body.sku).execute().data or []
+    new_total_cash = round(sum(r.get("amount") or 0 for r in payment_rows), 2)
+    supabase.table("acquisitions").update({"cash": new_total_cash}).eq("id", lot.data[0]["id"]).execute()
+
+    apply_acquisition_profits(business_id)
+    return {"ok": True, "sku": body.sku, "new_total_cash": new_total_cash}
+
+@app.post("/api/acquisitions/migrate-cash-to-payments")
+async def migrate_cash_to_payments(request: Request):
+    """One-time migration: moves every lot's existing acquisitions.cash value
+    into the new ledger. The three lots the user explicitly named as entered
+    THIS MONTH (11R, R66, AM1) get a precise payment dated today -- everything
+    else gets a spread entry across [acquisitions.date, today], since those
+    values have no real date attached and were entered at various unknown
+    points in the past. Skips any sku that already has cash_payments rows, so
+    this is safe to run only once (or again harmlessly after that)."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import datetime as _dt3
+    today_str = _dt3.datetime.utcnow().strftime("%Y-%m-%d")
+    THIS_MONTH_SKUS = {"11R", "R66", "AM1"}
+
+    lots = _fetch_all_for_business(business_id, "acquisitions", "sku,cash,date")
+    existing_payment_skus = {r["sku"] for r in _fetch_all_for_business(business_id, "cash_payments", "sku")}
+
+    precise_migrated, spread_migrated, skipped = 0, 0, 0
+    for lot in lots:
+        sku = lot.get("sku")
+        cash = lot.get("cash") or 0
+        if not sku or not cash or sku in existing_payment_skus:
+            skipped += 1
+            continue
+        if sku in THIS_MONTH_SKUS:
+            supabase.table("cash_payments").insert({
+                "business_id": business_id, "sku": sku, "amount": cash, "payment_date": today_str,
+            }).execute()
+            precise_migrated += 1
+        else:
+            acq_date = lot.get("date") or today_str
+            supabase.table("cash_payments").insert({
+                "business_id": business_id, "sku": sku, "amount": cash, "spread_start_date": acq_date,
+            }).execute()
+            spread_migrated += 1
+    return {"precise_migrated": precise_migrated, "spread_migrated": spread_migrated, "skipped_already_migrated_or_no_cash": skipped}
+
 @app.get("/api/acquisitions/debug-sku/{sku}")
 async def debug_acquisition_sku(sku: str, request: Request):
     business_id = require_auth(request)
@@ -4149,14 +4268,12 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
     avg_sale_price = round(total_revenue / total_qty_sold, 2) if total_qty_sold else 0
     avg_sales_per_day = round(len(order_rows) / num_days, 2)
 
-    # --- Net Sales: revenue + cash entries dated within the same range ---
-    # acquisitions.cash is a manual per-lot entry (e.g. cash taken in outside the
-    # normal eBay/Shopify order flow) dated by that lot's own acquisitions.date --
-    # already exactly the "input the user provided" needed to filter it by period,
-    # same as every other dated field here. No new table needed for this one.
-    cash_rows = supabase.table("acquisitions").select("cash,date").eq("business_id", business_id)\
-        .gte("date", start_date_str).lte("date", end_date_str).execute().data or []
-    cash_in_range = sum(r.get("cash") or 0 for r in cash_rows)
+    # --- Net Sales: revenue + cash payments dated (or spread) within the range ---
+    # Now uses the real cash_payments ledger instead of a lump-sum-on-purchase-
+    # date guess -- precise payments count only on their actual date, and
+    # historical spread entries are prorated by how much of their [purchase
+    # date, today] window overlaps this range.
+    cash_in_range = _compute_cash_in_range(business_id, start_date_str, end_date_str)
     net_sales = round(total_revenue + cash_in_range, 2)
 
     # --- Inventory Growth Multiple: % change in Inventory Snapshot Value across the

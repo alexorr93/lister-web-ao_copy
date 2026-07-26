@@ -116,9 +116,36 @@ tr:last-child td { border-bottom: none; }
       <button class="btn btn-primary" onclick="addAcquisition()">+ Add Row</button>
       <button class="btn" onclick="recalculate()" title="Refreshes eBay/Total_Payouts/Profit for every row using the latest synced orders">🔄 Recalculate</button>
       <button class="btn" onclick="backfillGreenTimestamps()" title="One-time fix: corrects became_green_at for lots that were already profitable before this feature existed, using their real order history instead of today's date">🕐 Fix Green Timestamps (one-time)</button>
+      <button class="btn btn-primary" onclick="openAddCashPmtModal()">➕ Add Cash Pmt</button>
+      <button class="btn" onclick="migrateCashToPayments()" title="One-time: moves every lot's existing cash value into the new dated ledger. 11R/R66/AM1 are dated this month; every other lot's cash is spread across its purchase date through today, since those values have no real date attached.">🕐 Migrate Cash to Ledger (one-time)</button>
       <button class="btn" id="edit-mode-btn" onclick="toggleEditMode()">✏️ Edit</button>
       <button class="btn btn-danger" onclick="undoLastEdit()" title="Restores the values from right before your last edit">↩️ Undo Last Edit</button>
       <button class="btn" onclick="openCashHistory()" title="See every recorded change to the Cash field over time">📜 Cash History</button>
+
+    <div id="cash-pmt-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:200;align-items:center;justify-content:center;">
+      <div style="background:var(--card,#1e2535);border:1px solid var(--border,#2d3348);border-radius:12px;padding:24px;width:360px;">
+        <h3 style="margin-bottom:16px;">Add Cash Payment</h3>
+        <div style="margin-bottom:12px;">
+          <div style="font-size:11px;color:var(--muted,#64748b);font-weight:700;text-transform:uppercase;margin-bottom:4px;">Lot</div>
+          <select id="cash-pmt-sku" style="width:100%;padding:8px 10px;border-radius:8px;border:none;font-size:13px;">
+            <option value="">Select a lot...</option>
+          </select>
+        </div>
+        <div style="margin-bottom:12px;">
+          <div style="font-size:11px;color:var(--muted,#64748b);font-weight:700;text-transform:uppercase;margin-bottom:4px;">Amount</div>
+          <input type="number" id="cash-pmt-amount" step="0.01" style="width:100%;padding:8px 10px;border-radius:8px;border:none;font-size:13px;" placeholder="0.00"/>
+        </div>
+        <div style="margin-bottom:16px;">
+          <div style="font-size:11px;color:var(--muted,#64748b);font-weight:700;text-transform:uppercase;margin-bottom:4px;">Date</div>
+          <input type="date" id="cash-pmt-date" style="width:100%;padding:8px 10px;border-radius:8px;border:none;font-size:13px;"/>
+        </div>
+        <div id="cash-pmt-status" style="font-size:12px;margin-bottom:10px;"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button class="btn" onclick="closeAddCashPmtModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="submitCashPmt()">Add Payment</button>
+        </div>
+      </div>
+    </div>
       <button class="btn" onclick="syncActiveListings()" title="Pulls your real eBay ActiveList via the Trading API and recounts each lot's active listings">🔄 Sync Active Listings <span style="font-size:10px;opacity:.8;">(live API)</span></button>
       <span id="active-listings-synced" class="status-msg" style="margin:0;"></span>
     </div>
@@ -476,6 +503,62 @@ async function backfillGreenTimestamps() {
     if (!r.ok) throw new Error(data.detail || 'Failed');
     document.getElementById('upload-status').textContent =
       `✅ Fixed ${data.fixed} lot(s) with a real historical date. ${data.no_crossing_found} lot(s) left as-is (order history never crossed profit > 1 — likely cash-driven).`;
+  } catch(e) {
+    document.getElementById('upload-status').textContent = `❌ ${e.message}`;
+  }
+}
+
+function openAddCashPmtModal() {
+  const select = document.getElementById('cash-pmt-sku');
+  select.innerHTML = '<option value="">Select a lot...</option>' +
+    acquisitions
+      .filter(a => a.sku)
+      .map(a => `<option value="${a.sku}">${a.sku} — ${(a.name || '').replace(/</g,'&lt;')}</option>`)
+      .join('');
+  document.getElementById('cash-pmt-amount').value = '';
+  document.getElementById('cash-pmt-date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('cash-pmt-status').textContent = '';
+  document.getElementById('cash-pmt-modal').style.display = 'flex';
+}
+
+function closeAddCashPmtModal() {
+  document.getElementById('cash-pmt-modal').style.display = 'none';
+}
+
+async function submitCashPmt() {
+  const sku = document.getElementById('cash-pmt-sku').value;
+  const amount = parseFloat(document.getElementById('cash-pmt-amount').value);
+  const date = document.getElementById('cash-pmt-date').value;
+  const statusEl = document.getElementById('cash-pmt-status');
+  if (!sku) { statusEl.textContent = '❌ Select a lot first.'; statusEl.style.color = '#dc2626'; return; }
+  if (!amount || isNaN(amount)) { statusEl.textContent = '❌ Enter a valid amount.'; statusEl.style.color = '#dc2626'; return; }
+  if (!date) { statusEl.textContent = '❌ Select a date.'; statusEl.style.color = '#dc2626'; return; }
+  statusEl.textContent = 'Adding...'; statusEl.style.color = 'var(--muted,#64748b)';
+  try {
+    const r = await fetch('/api/acquisitions/add-cash-payment', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({sku, amount, date}),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    statusEl.textContent = `✅ Added. ${sku}'s total cash is now $${data.new_total_cash.toLocaleString()}.`;
+    statusEl.style.color = '#22c55e';
+    loadAcquisitions();
+    setTimeout(closeAddCashPmtModal, 1200);
+  } catch(e) {
+    statusEl.textContent = `❌ ${e.message}`;
+    statusEl.style.color = '#dc2626';
+  }
+}
+
+async function migrateCashToPayments() {
+  document.getElementById('upload-status').textContent = 'Migrating existing cash values into the dated ledger...';
+  try {
+    const r = await fetch('/api/acquisitions/migrate-cash-to-payments', {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    document.getElementById('upload-status').textContent =
+      `✅ ${data.precise_migrated} lot(s) dated this month (11R/R66/AM1), ${data.spread_migrated} lot(s) spread across their history, ${data.skipped_already_migrated_or_no_cash} skipped (no cash or already migrated).`;
   } catch(e) {
     document.getElementById('upload-status').textContent = `❌ ${e.message}`;
   }
