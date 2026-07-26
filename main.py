@@ -4514,6 +4514,44 @@ async def api_analytics_history(request: Request, days: int = 90):
         .gte("snapshot_date", cutoff).order("snapshot_date").execute()
     return {"snapshots": res.data or []}
 
+@app.get("/api/analytics/net-cash-yield")
+async def api_net_cash_yield(request: Request, year: int = None):
+    """Net Cash Yield for a given year: (post-fee revenue + cash, same 'Net
+    Sales' definition as the main Analytics view) MINUS (all inventory
+    purchases dated in that same year). A single number answering 'did the
+    cash that actually came in this year cover what we spent buying inventory
+    this year' -- not tied to the Start/End Month filter above the charts,
+    just a plain year picker, defaulting to the current year through today
+    (YTD) rather than the full calendar year if that year isn't over yet."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import datetime as _dt
+    now = _dt.datetime.utcnow()
+    target_year = year or now.year
+    start_date_str = f"{target_year:04d}-01-01"
+    end_date_str = f"{target_year:04d}-12-31" if target_year != now.year else now.strftime("%Y-%m-%d")
+
+    order_rows = supabase.table("orders").select("final_net").eq("business_id", business_id)\
+        .gte("order_date", start_date_str).lte("order_date", end_date_str).execute().data or []
+    total_net_revenue = sum(r.get("final_net") or 0 for r in order_rows)
+    cash_in_range = _compute_cash_in_range(business_id, start_date_str, end_date_str)
+    net_sales = total_net_revenue + cash_in_range
+
+    acq_rows = supabase.table("acquisitions").select("cost,date").eq("business_id", business_id)\
+        .gte("date", start_date_str).lte("date", end_date_str).execute().data or []
+    total_spend = sum(r.get("cost") or 0 for r in acq_rows)
+
+    return {
+        "year": target_year,
+        "start": start_date_str,
+        "end": end_date_str,
+        "is_ytd": target_year == now.year,
+        "net_sales": round(net_sales, 2),
+        "total_spend": round(total_spend, 2),
+        "net_cash_yield": round(net_sales - total_spend, 2),
+    }
+
 @app.get("/api/analytics/monthly-trend")
 async def api_analytics_monthly_trend(request: Request, start: str = None, end: str = None):
     """Inventory spend vs. sales, grouped by month -- straight from acquisitions.cost
