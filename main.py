@@ -4267,6 +4267,7 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
     total_qty_sold = sum(r.get("quantity") or 0 for r in order_rows)
     avg_sale_price = round(total_revenue / total_qty_sold, 2) if total_qty_sold else 0
     avg_sales_per_day = round(len(order_rows) / num_days, 2)
+    avg_sales_per_day_dollars = round(total_revenue / num_days, 2)
 
     # --- Net Sales: revenue + cash payments dated (or spread) within the range ---
     # Now uses the real cash_payments ledger instead of a lump-sum-on-purchase-
@@ -4311,6 +4312,7 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
         "green_revenue": green_revenue,
         "avg_sale_price": avg_sale_price,
         "avg_sales_per_day": avg_sales_per_day,
+        "avg_sales_per_day_dollars": avg_sales_per_day_dollars,
         "avg_new_listings_per_day_count": avg_new_listings_per_day_count,
         "avg_new_listings_per_day_value": avg_new_listings_per_day_value,
         "totals_in_range": {
@@ -4350,6 +4352,20 @@ async def api_analytics_monthly_trend(request: Request, start: str = None, end: 
     orders.order_date). No snapshot/stamping mechanism needed here -- both source
     fields are already dated per-row, so grouping by month is just a groupby.
 
+    Green Revenue by month is computed the SAME way as the live /api/analytics
+    endpoint (_compute_green_revenue), once per month -- NOT read from
+    analytics_snapshots. Realized after shipping the daily-snapshot version:
+    there was never a real reason to limit this to the shallow snapshot history
+    -- a lot's became_green_at plus dated order history already lets Green
+    Revenue be computed for any past month directly, exactly like Inventory
+    Spend vs. Sales. Full historical depth back to `start`, not just "since
+    daily tracking began."
+
+    Inventory Snapshot Value by month IS still sourced from analytics_snapshots
+    -- unlike the other two, it's a point-in-time aggregate with no dated
+    transaction history to reconstruct it from, so it genuinely can only go as
+    far back as real snapshots exist (the CSV backfill + daily tracking).
+
     start/end are "YYYY-MM" strings. Defaults: start=2025-01 (the user's requested
     default horizon), end=the current month."""
     business_id = require_auth(request)
@@ -4361,32 +4377,61 @@ async def api_analytics_monthly_trend(request: Request, start: str = None, end: 
     start_str = f"{start}-01" if start else "2025-01-01"
     end_str = f"{end}-01" if end else now.strftime("%Y-%m-01")
 
+    # Full calendar month list between start and end (not just months that
+    # happen to have acquisitions/order activity), so all three charts share a
+    # clean, continuous x-axis with no gaps.
+    all_months = []
+    y, m = int(start_str[:4]), int(start_str[5:7])
+    end_y, end_m = int(end_str[:4]), int(end_str[5:7])
+    while (y, m) <= (end_y, end_m):
+        all_months.append(f"{y:04d}-{m:02d}")
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+
     acq_rows = _fetch_all_for_business(business_id, "acquisitions", "cost,date")
     order_rows = _fetch_all_for_business(business_id, "orders", "gross_revenue,order_date")
-    # Green Revenue over time: sums the daily green_revenue figures already being
-    # written to analytics_snapshots (added when Green Revenue was built) --
-    # note this only has real depth from whenever that daily worker started
-    # running, since it's a new column with no historical backfill.
-    snapshot_rows = _fetch_all_for_business(business_id, "analytics_snapshots", "snapshot_date,green_revenue")
+    snapshot_rows = _fetch_all_for_business(business_id, "analytics_snapshots", "snapshot_date,inventory_snapshot_value")
 
-    spend_by_month, sales_by_month, green_by_month = {}, {}, {}
+    spend_by_month, sales_by_month = {}, {}
     for r in acq_rows:
-        d = (r.get("date") or "")[:7]  # "YYYY-MM"
-        if d and start_str <= f"{d}-01" <= end_str:
+        d = (r.get("date") or "")[:7]
+        if d in all_months:
             spend_by_month[d] = spend_by_month.get(d, 0) + (r.get("cost") or 0)
     for r in order_rows:
         d = (r.get("order_date") or "")[:7]
-        if d and start_str <= f"{d}-01" <= end_str:
+        if d in all_months:
             sales_by_month[d] = sales_by_month.get(d, 0) + (r.get("gross_revenue") or 0)
-    for r in snapshot_rows:
-        d = (r.get("snapshot_date") or "")[:7]
-        if d and start_str <= f"{d}-01" <= end_str:
-            green_by_month[d] = green_by_month.get(d, 0) + (r.get("green_revenue") or 0)
 
-    all_months = sorted(set(spend_by_month.keys()) | set(sales_by_month.keys()) | set(green_by_month.keys()))
     inventory_spend = [round(spend_by_month.get(m, 0), 2) for m in all_months]
     sales = [round(sales_by_month.get(m, 0), 2) for m in all_months]
-    green_revenue_by_month = [round(green_by_month.get(m, 0), 2) for m in all_months]
+
+    # Green Revenue: one real call per month, same math as the live endpoint.
+    green_revenue_by_month = []
+    for month in all_months:
+        month_start = f"{month}-01"
+        next_m_y, next_m_m = (int(month[:4]) + 1, 1) if month[5:7] == "12" else (int(month[:4]), int(month[5:7]) + 1)
+        month_end = (_dt.date(next_m_y, next_m_m, 1) - _dt.timedelta(days=1)).strftime("%Y-%m-%d")
+        green_revenue_by_month.append(_compute_green_revenue(business_id, month_start, month_end))
+
+    # Inventory Snapshot Value by month: nearest snapshot on or before the END
+    # of each month, same "closest available" approach as Inventory Growth
+    # Multiple already uses -- genuinely limited by how far back real snapshots
+    # exist, unlike the other two series above.
+    snapshots_sorted = sorted(snapshot_rows, key=lambda r: r.get("snapshot_date") or "")
+    inventory_value_by_month = []
+    for month in all_months:
+        next_m_y, next_m_m = (int(month[:4]) + 1, 1) if month[5:7] == "12" else (int(month[:4]), int(month[5:7]) + 1)
+        month_end = (_dt.date(next_m_y, next_m_m, 1) - _dt.timedelta(days=1)).strftime("%Y-%m-%d")
+        best = None
+        for r in snapshots_sorted:
+            if (r.get("snapshot_date") or "") <= month_end:
+                best = r.get("inventory_snapshot_value")
+            else:
+                break
+        inventory_value_by_month.append(round(best, 2) if best is not None else None)
+
     # "Inventory multiple": spend as a % of sales for that month, e.g. $50k spend /
     # $100k sales = 50%. Precomputed here (not in JS) so the toggle is just a
     # dataset swap, not a recalculation.
@@ -4402,6 +4447,7 @@ async def api_analytics_monthly_trend(request: Request, start: str = None, end: 
         "months": all_months,
         "inventory_spend": inventory_spend,
         "green_revenue_by_month": green_revenue_by_month,
+        "inventory_value_by_month": inventory_value_by_month,
         "sales": sales,
         "pct_multiple": pct_multiple,
         "dollar_variance": dollar_variance,

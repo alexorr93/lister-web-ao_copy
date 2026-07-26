@@ -51,7 +51,7 @@ h1 { font-size: 20px; margin-bottom: 4px; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .quick-range { display: flex; gap: 6px; }
 .quick-range button { padding: 8px 10px; font-size: 12px; }
-.summary-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 18px; }
+.summary-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 18px; }
 .summary-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
 .summary-card .num { font-size: 26px; font-weight: 800; }
 .summary-card .label { font-size: 12px; color: var(--muted); margin-top: 4px; }
@@ -111,6 +111,11 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
       <div class="num" id="m-avg-sales-per-day">—</div>
       <div class="label">Avg Sales / Day</div>
       <div class="note">Orders in range ÷ days in range</div>
+    </div>
+    <div class="summary-card">
+      <div class="num" id="m-avg-sales-per-day-dollars">—</div>
+      <div class="label">Avg Sales / Day ($)</div>
+      <div class="note">Revenue in range ÷ days in range</div>
     </div>
     <div class="summary-card">
       <div class="num" id="m-avg-listings-count">—</div>
@@ -177,9 +182,15 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
   </div>
 
   <h2>Green Revenue, by month</h2>
-  <div class="sub" style="margin-bottom:10px;">Only has real depth from whenever daily tracking started — this is a new figure, not backfilled historically.</div>
+  <div class="sub" style="margin-bottom:10px;">Computed the same way as the live figure above, for each month directly — full historical depth, not limited to daily-tracking history.</div>
   <div class="summary-card" style="padding:16px;">
     <canvas id="green-trend-chart" height="90"></canvas>
+  </div>
+
+  <h2>Inventory Snapshot Value, by month</h2>
+  <div class="sub" style="margin-bottom:10px;">Uses the closest recorded snapshot on or before the end of each month — genuinely limited to how far back real snapshots exist (your CSV backfill plus daily tracking since), since this is a point-in-time figure with no dated transaction history to reconstruct it from.</div>
+  <div class="summary-card" style="padding:16px;">
+    <canvas id="inventory-value-chart" height="90"></canvas>
   </div>
 </div>
 
@@ -237,6 +248,7 @@ async function loadAnalytics() {
     document.getElementById('m-inventory-value').textContent = fmtMoney(data.inventory_snapshot_value);
     document.getElementById('m-avg-sale-price').textContent = fmtMoney(data.avg_sale_price);
     document.getElementById('m-avg-sales-per-day').textContent = Math.round(data.avg_sales_per_day || 0).toLocaleString();
+    document.getElementById('m-avg-sales-per-day-dollars').textContent = fmtMoney(data.avg_sales_per_day_dollars);
     document.getElementById('m-avg-listings-count').textContent = Math.round(data.avg_new_listings_per_day_count || 0).toLocaleString();
     document.getElementById('m-avg-listings-value').textContent = fmtMoney(data.avg_new_listings_per_day_value);
 
@@ -373,6 +385,37 @@ function renderGreenTrendChart(data) {
   });
 }
 
+let inventoryValueChart = null;
+function renderInventoryValueChart(data) {
+  const ctx = document.getElementById('inventory-value-chart').getContext('2d');
+  if (inventoryValueChart) inventoryValueChart.destroy();
+  inventoryValueChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: data.months,
+      datasets: [{
+        label: 'Inventory Snapshot Value',
+        data: data.inventory_value_by_month,
+        borderColor: '#a78bfa',
+        backgroundColor: 'rgba(167,139,250,0.15)',
+        tension: 0.25,
+        spanGaps: true,
+      }],
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: '#f1f5f9' } },
+        tooltip: { callbacks: { label: ctx => `Inventory Value: $${Math.round(ctx.parsed.y).toLocaleString()}` } },
+      },
+      scales: {
+        x: { ticks: { color: '#64748b' }, grid: { color: '#2d3348' } },
+        y: { ticks: { color: '#64748b', callback: v => '$' + Math.round(v).toLocaleString() }, grid: { color: '#2d3348' } },
+      },
+    },
+  });
+}
+
 async function loadMonthlyTrend() {
   try {
     const startMonth = document.getElementById('trend-start-month').value || '2025-01';
@@ -384,6 +427,7 @@ async function loadMonthlyTrend() {
     if (!r.ok) throw new Error(data.detail || 'Request failed');
     renderTrendChart(data);
     renderGreenTrendChart(data);
+    renderInventoryValueChart(data);
   } catch(e) {
     document.getElementById('trend-chart').parentElement.innerHTML = `<div class="error-banner">❌ ${e.message}</div>`;
   }
