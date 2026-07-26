@@ -4409,8 +4409,14 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
     # aren't necessarily recorded for every single day (especially the backfilled
     # monthly ones).
     def _snapshot_value_near(date_str: str):
+        # Must exclude rows where inventory_snapshot_value is NULL (the CSV
+        # backfill's gap months) -- otherwise the "latest row on or before this
+        # date" could BE a gap row, silently returning None even though a
+        # perfectly good earlier value exists. Same bug just fixed in the
+        # Inventory Snapshot Value chart below, fixed here too.
         res = supabase.table("analytics_snapshots").select("snapshot_date,inventory_snapshot_value")\
             .eq("business_id", business_id).lte("snapshot_date", date_str)\
+            .not_.is_("inventory_snapshot_value", "null")\
             .order("snapshot_date", desc=True).limit(1).execute()
         row = (res.data or [None])[0]
         return (row.get("inventory_snapshot_value"), row.get("snapshot_date")) if row else (None, None)
@@ -4563,21 +4569,44 @@ async def api_analytics_monthly_trend(request: Request, start: str = None, end: 
         month_start, month_end = _month_bounds(month)
         green_revenue_by_month.append(_compute_green_revenue(business_id, month_start, month_end))
 
-    # Inventory Snapshot Value by month: nearest snapshot on or before the END
-    # of each month, same "closest available" approach as Inventory Growth
-    # Multiple already uses -- genuinely limited by how far back real snapshots
-    # exist, unlike the other two series above.
-    snapshots_sorted = sorted(snapshot_rows, key=lambda r: r.get("snapshot_date") or "")
+    # Inventory Snapshot Value by month. Real bug found while fixing this: the
+    # old version could pick up a gap row (inventory_snapshot_value = NULL, from
+    # months the user's CSV backfill genuinely had no number for) as its "latest
+    # seen" value, silently erasing a perfectly good earlier value instead of
+    # skipping past it -- that's why January and everything after briefly went
+    # blank. Now:
+    #  - an exact snapshot dated within the month wins outright
+    #  - a gap with a REAL value on both sides gets the average of those two
+    #    (a real midpoint, per the user's explicit request for exactly this)
+    #  - a gap with no earlier real value at all (before the CSV's first entry --
+    #    July/Aug 2025) is left blank rather than guessed at, since there's
+    #    nothing to average against
+    real_points = sorted(
+        [(r.get("snapshot_date"), r.get("inventory_snapshot_value")) for r in snapshot_rows if r.get("inventory_snapshot_value") is not None],
+        key=lambda p: p[0],
+    )
     inventory_value_by_month = []
     for month in all_months:
-        _, month_end = _month_bounds(month)
-        best = None
-        for r in snapshots_sorted:
-            if (r.get("snapshot_date") or "") <= month_end:
-                best = r.get("inventory_snapshot_value")
-            else:
-                break
-        inventory_value_by_month.append(round(best, 2) if best is not None else None)
+        month_start, month_end = _month_bounds(month)
+        exact = None
+        for d, v in real_points:
+            if month_start <= d <= month_end:
+                exact = v
+        if exact is not None:
+            inventory_value_by_month.append(round(exact, 2))
+            continue
+        before, after = None, None
+        for d, v in real_points:
+            if d <= month_end:
+                before = v
+            elif after is None:
+                after = v
+        if before is not None and after is not None:
+            inventory_value_by_month.append(round((before + after) / 2, 2))
+        elif before is not None:
+            inventory_value_by_month.append(round(before, 2))
+        else:
+            inventory_value_by_month.append(None)
 
     # "Inventory multiple": spend as a % of sales for that month, e.g. $50k spend /
     # $100k sales = 50%. Precomputed here (not in JS) so the toggle is just a
