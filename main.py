@@ -352,23 +352,29 @@ def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
     inventory_value = _compute_inventory_snapshot_value(business_id)
     green_revenue = _compute_green_revenue(business_id, mt_today, mt_today)
 
-    order_rows = supabase.table("orders").select("gross_revenue,quantity").eq("business_id", business_id)\
-        .eq("order_date", mt_today).execute().data or []
+    order_rows = _fetch_all_for_business(business_id, "orders", "gross_revenue,quantity,order_date")
+    order_rows = [r for r in order_rows if r.get("order_date") == mt_today]
     total_revenue = sum(r.get("gross_revenue") or 0 for r in order_rows)
     total_qty_sold = sum(r.get("quantity") or 0 for r in order_rows)
     avg_sale_price_day = round(total_revenue / total_qty_sold, 2) if total_qty_sold else 0
 
-    listing_rows = supabase.table("listings").select("price,created_at").eq("business_id", business_id)\
-        .gte("created_at", mt_today).lte("created_at", mt_today + "T23:59:59").execute().data or []
+    listing_rows = _fetch_all_for_business(business_id, "listings", "price,created_at")
+    listing_rows = [r for r in listing_rows if mt_today <= (r.get("created_at") or "") <= mt_today + "T23:59:59"]
     new_listings_count_day = len(listing_rows)
     new_listings_value_day = round(sum(r.get("price") or 0 for r in listing_rows), 2)
 
-    ytd_order_rows = supabase.table("orders").select("final_net").eq("business_id", business_id)\
-        .gte("order_date", year_start).lte("order_date", mt_today).execute().data or []
+    # FIXED a real bug here: these two were plain unpaginated .execute() calls,
+    # which Supabase caps around 1000 rows -- silently undercounting if there
+    # are more orders/acquisitions YTD than that (confirmed: the app showed
+    # $162,967 revenue while a proper full query returned $479,667.45). Every
+    # other query in this codebase already uses _fetch_all_for_business for
+    # exactly this reason; these two just weren't written that way originally.
+    ytd_order_rows = _fetch_all_for_business(business_id, "orders", "final_net,order_date")
+    ytd_order_rows = [r for r in ytd_order_rows if year_start <= (r.get("order_date") or "") <= mt_today]
     ytd_net_revenue = round(sum(r.get("final_net") or 0 for r in ytd_order_rows), 2)
 
-    ytd_acq_rows = supabase.table("acquisitions").select("cost").eq("business_id", business_id)\
-        .gte("date", year_start).lte("date", mt_today).execute().data or []
+    ytd_acq_rows = _fetch_all_for_business(business_id, "acquisitions", "cost,date")
+    ytd_acq_rows = [r for r in ytd_acq_rows if year_start <= (r.get("date") or "") <= mt_today]
     ytd_inventory_spend = round(sum(r.get("cost") or 0 for r in ytd_acq_rows), 2)
 
     ytd_cash = _compute_cash_for_year(business_id, int(mt_today[:4]))
@@ -4373,8 +4379,8 @@ def _compute_green_revenue(business_id: str, start_date_str: str, end_date_str: 
     if not green_lots:
         return 0.0
 
-    order_rows = supabase.table("orders").select("sku,gross_revenue,order_date").eq("business_id", business_id)\
-        .gte("order_date", start_date_str).lte("order_date", end_date_str).execute().data or []
+    order_rows = _fetch_all_for_business(business_id, "orders", "sku,gross_revenue,order_date")
+    order_rows = [r for r in order_rows if start_date_str <= (r.get("order_date") or "") <= end_date_str]
     total = 0.0
     for r in order_rows:
         sku = r.get("sku") or ""
@@ -4405,8 +4411,8 @@ async def api_green_revenue_breakdown(request: Request, start: str, end: str):
     lot_rows = _fetch_all_for_business(business_id, "acquisitions", "sku,profit,became_green_at")
     green_lots = {r["sku"]: r["became_green_at"] for r in lot_rows if r.get("sku") and (r.get("profit") or 0) > 1 and r.get("became_green_at")}
 
-    order_rows = supabase.table("orders").select("sku,gross_revenue,order_date").eq("business_id", business_id)\
-        .gte("order_date", start).lte("order_date", end).execute().data or []
+    order_rows = _fetch_all_for_business(business_id, "orders", "sku,gross_revenue,order_date")
+    order_rows = [r for r in order_rows if start <= (r.get("order_date") or "") <= end]
 
     by_lot = {}
     for r in order_rows:
@@ -4449,8 +4455,8 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
     green_revenue = _compute_green_revenue(business_id, start_date_str, end_date_str)
 
     # --- Order-level figures (within the selected date range) ---
-    order_rows = supabase.table("orders").select("gross_revenue,final_net,quantity").eq("business_id", business_id)\
-        .gte("order_date", start_date_str).lte("order_date", end_date_str).execute().data or []
+    order_rows = _fetch_all_for_business(business_id, "orders", "gross_revenue,final_net,quantity,order_date")
+    order_rows = [r for r in order_rows if start_date_str <= (r.get("order_date") or "") <= end_date_str]
     total_order_revenue = sum(r.get("gross_revenue") or 0 for r in order_rows)
     total_net_revenue = sum(r.get("final_net") or 0 for r in order_rows)
     total_qty_sold = sum(r.get("quantity") or 0 for r in order_rows)
@@ -4518,8 +4524,8 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
         inventory_growth_pct = round((end_inv_value - start_inv_value) / start_inv_value * 100, 1)
 
     # --- Average New Listings Per Day: count and $ (within the selected date range) ---
-    listing_rows = supabase.table("listings").select("price,created_at").eq("business_id", business_id)\
-        .gte("created_at", start_date_str).lte("created_at", end_date_str + "T23:59:59").execute().data or []
+    listing_rows = _fetch_all_for_business(business_id, "listings", "price,created_at")
+    listing_rows = [r for r in listing_rows if start_date_str <= (r.get("created_at") or "") <= end_date_str + "T23:59:59"]
     total_new_listings = len(listing_rows)
     total_new_listings_value = sum(r.get("price") or 0 for r in listing_rows)
     avg_new_listings_per_day_count = round(total_new_listings / num_days, 2)
@@ -4604,11 +4610,11 @@ async def api_net_cash_yield(request: Request, year: int = None):
         end_date_str = (row or {}).get("snapshot_date") or now.strftime("%Y-%m-%d")
     else:
         end_date_str = f"{target_year:04d}-12-31"
-        order_rows = supabase.table("orders").select("final_net").eq("business_id", business_id)\
-            .gte("order_date", start_date_str).lte("order_date", end_date_str).execute().data or []
+        order_rows = _fetch_all_for_business(business_id, "orders", "final_net,order_date")
+        order_rows = [r for r in order_rows if start_date_str <= (r.get("order_date") or "") <= end_date_str]
         total_net_revenue = sum(r.get("final_net") or 0 for r in order_rows)
-        acq_rows = supabase.table("acquisitions").select("cost").eq("business_id", business_id)\
-            .gte("date", start_date_str).lte("date", end_date_str).execute().data or []
+        acq_rows = _fetch_all_for_business(business_id, "acquisitions", "cost,date")
+        acq_rows = [r for r in acq_rows if start_date_str <= (r.get("date") or "") <= end_date_str]
         total_spend = sum(r.get("cost") or 0 for r in acq_rows)
         total_cash = _compute_cash_for_year(business_id, target_year)
 
