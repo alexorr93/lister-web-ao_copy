@@ -1667,7 +1667,7 @@ def sync_ebay_categories(token: str) -> dict:
             if cid:
                 all_nodes.append({
                     "category_id": str(cid), "name": name, "path": " > ".join(new_path),
-                    "is_leaf": not bool(children),
+                    "is_leaf": not bool(children), "tree_id": tree_id,
                 })
             for child in children:
                 walk(child, new_path)
@@ -1690,20 +1690,40 @@ def sync_ebay_categories(token: str) -> dict:
 
 def _motors_fallback_id(business_id: str) -> str:
     """The eBay Motors catch-all leaf, mirroring 26261's role in Business & Industrial.
-    Set via Settings > EBAY_DEFAULT_MOTORS_CATEGORY_ID (use the
-    /api/ebay/other-leaf-candidates helper to find it). If it's unset we fall back to
-    26261 rather than inventing an ID — a wrong category ID fails at publish time,
-    which is worse than a generic-but-valid one."""
+
+    Was previously: require a manually-configured Settings value
+    (EBAY_DEFAULT_MOTORS_CATEGORY_ID), and fall back to the WRONG id (26261, which
+    is actually a Business & Industrial category) if it was never set. That's
+    exactly what caused a real publish failure ('Category is not valid') on a
+    user's very first Motors listing -- the setting was never configured, so a
+    Business & Industrial category got submitted for a Motors-mode item.
+
+    Fixed to require zero manual setup: if a Settings override isn't present,
+    automatically queries ebay_categories for a real "Other ___" leaf category
+    from tree_id 100 (Motors) specifically -- now that sync_ebay_categories
+    stores which tree each category came from. Only falls back to the
+    (deliberately wrong-looking but non-crashing) 26261 if no Motors categories
+    have been synced at all yet, which needs a one-time /api/ebay/sync-categories
+    run to resolve, not any manual category lookup."""
     try:
         mid = str(get_ebay_settings(business_id).get("EBAY_DEFAULT_MOTORS_CATEGORY_ID", "") or "").strip()
+        if mid:
+            return mid
     except Exception:
-        mid = ""
-    if not mid:
-        print("suggest_ebay_category: EBAY_DEFAULT_MOTORS_CATEGORY_ID is not set — "
-              "Auto Parts items with no tree-100 match will land on 26261. "
-              "Set it in Settings to fix.")
-        return "26261"
-    return mid
+        pass
+
+    try:
+        res = supabase.table("ebay_categories").select("category_id,path").eq("tree_id", "100")\
+            .eq("is_leaf", True).ilike("name", "Other %").limit(1).execute()
+        if res.data:
+            return str(res.data[0]["category_id"])
+    except Exception as e:
+        print(f"_motors_fallback_id: auto-lookup failed: {e}")
+
+    print("_motors_fallback_id: no Motors 'Other' leaf found in ebay_categories (tree_id 100) -- "
+          "run Sync Categories once to populate it. Falling back to 26261, which is WRONG for "
+          "Motors and will fail at publish time.")
+    return "26261"
 
 
 def suggest_ebay_category(title: str, business_id: str, restrict: bool = True,
