@@ -2541,7 +2541,7 @@ async def migrate_cash_to_payments(request: Request):
         raise HTTPException(401, "Unauthorized")
     import datetime as _dt3
     today_str = _dt3.datetime.utcnow().strftime("%Y-%m-%d")
-    THIS_MONTH_SKUS = {"11R", "R66", "AM1"}
+    THIS_MONTH_SKUS = {"11R", "RB66", "AM1"}
 
     lots = _fetch_all_for_business(business_id, "acquisitions", "sku,cash,date")
     existing_payment_skus = {r["sku"] for r in _fetch_all_for_business(business_id, "cash_payments", "sku")}
