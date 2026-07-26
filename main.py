@@ -1916,6 +1916,14 @@ async def financials_page(request: Request):
         return RedirectResponse("/login", status_code=302)
     return templates.TemplateResponse("financials.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "financials"})
 
+@app.get("/analytics", response_class=HTMLResponse)
+async def analytics_page(request: Request):
+    nav = get_nav_context(request)
+    if nav is None:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("analytics.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "analytics"})
+
 @app.get("/acquisitions", response_class=HTMLResponse)
 async def acquisitions_page(request: Request):
     nav = get_nav_context(request)
@@ -3881,6 +3889,85 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
             "items": uncategorized_order_items,
         },
         "errors": {},
+    }
+
+@app.get("/api/analytics")
+async def api_analytics(request: Request, start: str = None, end: str = None):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import datetime as _dt
+    now = _dt.datetime.utcnow()
+    end_dt = _dt.datetime.fromisoformat(end) if end else now
+    start_dt = _dt.datetime.fromisoformat(start) if start else (end_dt - _dt.timedelta(days=30))
+    start_date_str = start_dt.strftime("%Y-%m-%d")
+    end_date_str = end_dt.strftime("%Y-%m-%d")
+    num_days = max((end_dt.date() - start_dt.date()).days + 1, 1)
+
+    def _fetch_all(table, select_cols, eq_filters=None):
+        all_rows, start_i, page_size = [], 0, 1000
+        q_base = supabase.table(table).select(select_cols).eq("business_id", business_id)
+        if eq_filters:
+            for k, v in eq_filters.items():
+                q_base = q_base.eq(k, v)
+        while True:
+            res = q_base.range(start_i, start_i + page_size - 1).execute()
+            page = res.data or []
+            all_rows.extend(page)
+            if len(page) < page_size:
+                break
+            start_i += page_size
+        return all_rows
+
+    # --- Inventory Snapshot Value ---
+    # This is a CURRENT, as-of-right-now figure -- there's no historical daily
+    # snapshot stored anywhere, so it does NOT change based on the date range
+    # above (a past inventory value would need data we don't capture). Shown
+    # alongside the period-filtered metrics but not filtered by them; the UI
+    # labels it "as of now" rather than implying otherwise.
+    inv_rows = _fetch_all("inventory_match", "ebay_id,shopify_id")
+    ebay_by_id = {r["id"]: r for r in _fetch_all("ebay_inventory", "id,price,quantity")}
+    shopify_by_id = {r["id"]: r for r in _fetch_all("shopify_inventory", "id,price,quantity,product_id")}
+    shopify_by_product_id = {r["product_id"]: r for r in shopify_by_id.values() if r.get("product_id")}
+    inventory_snapshot_value = 0.0
+    for row in inv_rows:
+        e = ebay_by_id.get(row.get("ebay_id")) or {}
+        s = shopify_by_id.get(row.get("shopify_id")) or shopify_by_product_id.get(row.get("shopify_id")) or {}
+        price = e.get("price") if e.get("price") is not None else s.get("price")
+        qty = e.get("quantity") if e.get("quantity") is not None else s.get("quantity")
+        if price is not None and qty is not None:
+            inventory_snapshot_value += float(price) * float(qty)
+
+    # --- Average Sale Price (within the selected date range) ---
+    order_rows = supabase.table("orders").select("gross_revenue,quantity").eq("business_id", business_id)\
+        .gte("order_date", start_date_str).lte("order_date", end_date_str).execute().data or []
+    total_revenue = sum(r.get("gross_revenue") or 0 for r in order_rows)
+    total_qty_sold = sum(r.get("quantity") or 0 for r in order_rows)
+    avg_sale_price = round(total_revenue / total_qty_sold, 2) if total_qty_sold else 0
+
+    # --- Average New Listings Per Day: count and $ (within the selected date range) ---
+    listing_rows = supabase.table("listings").select("price,created_at").eq("business_id", business_id)\
+        .gte("created_at", start_date_str).lte("created_at", end_date_str + "T23:59:59").execute().data or []
+    total_new_listings = len(listing_rows)
+    total_new_listings_value = sum(r.get("price") or 0 for r in listing_rows)
+    avg_new_listings_per_day_count = round(total_new_listings / num_days, 2)
+    avg_new_listings_per_day_value = round(total_new_listings_value / num_days, 2)
+
+    return {
+        "start": start_date_str,
+        "end": end_date_str,
+        "num_days": num_days,
+        "inventory_snapshot_value": round(inventory_snapshot_value, 2),
+        "avg_sale_price": avg_sale_price,
+        "avg_new_listings_per_day_count": avg_new_listings_per_day_count,
+        "avg_new_listings_per_day_value": avg_new_listings_per_day_value,
+        "totals_in_range": {
+            "orders": len(order_rows),
+            "quantity_sold": total_qty_sold,
+            "revenue": round(total_revenue, 2),
+            "new_listings": total_new_listings,
+            "new_listings_value": round(total_new_listings_value, 2),
+        },
     }
 
 @app.get("/archive", response_class=HTMLResponse)

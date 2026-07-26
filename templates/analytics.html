@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Analytics — Lister AI</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<style>
+:root {
+  --bg: #1a0611; --card: #1e2535; --border: #2d3348; --text: #f1f5f9; --muted: #64748b; --accent: #2563eb; --green: #16a34a; --red: #dc2626;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.main { max-width: 1300px; margin: 0 auto; padding: 20px 16px; }
+h1 { font-size: 20px; margin-bottom: 4px; }
+.sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+.filter-bar { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin-bottom: 18px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.field-label { font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; margin-bottom: 4px; }
+.field-input { background: #fff; color: #111; border: none; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.btn { padding: 9px 16px; border-radius: 8px; border: 1px solid var(--border); background: #1e2535; color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; }
+.btn:hover { background: var(--border); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.quick-range { display: flex; gap: 6px; }
+.quick-range button { padding: 8px 10px; font-size: 12px; }
+.summary-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
+.summary-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+.summary-card .num { font-size: 26px; font-weight: 800; }
+.summary-card .label { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.summary-card .note { font-size: 10px; color: var(--muted); margin-top: 6px; opacity: .8; }
+.sub-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.sub-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+.sub-card .num { font-size: 18px; font-weight: 700; }
+.sub-card .label { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.error-banner { background: rgba(220,38,38,0.15); border: 1px solid var(--red); color: #fca5a5; border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; }
+h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin: 22px 0 10px; }
+.nav-analytics { color: #06b6d4; }
+.nav-analytics.active { background: #0891b2; color: #fff; }
+</style>
+</head>
+<body>
+
+{% include "_nav.html" %}
+
+<div class="main">
+  <h1>Analytics</h1>
+  <div class="sub">Key business metrics for the selected date range.</div>
+
+  <div class="filter-bar">
+    <div>
+      <div class="field-label">Start Date</div>
+      <input type="date" class="field-input" id="start-date"/>
+    </div>
+    <div>
+      <div class="field-label">End Date</div>
+      <input type="date" class="field-input" id="end-date"/>
+    </div>
+    <button class="btn btn-primary" onclick="loadAnalytics()">Apply</button>
+    <div class="quick-range">
+      <button class="btn" onclick="setRange(7)">Last 7d</button>
+      <button class="btn" onclick="setRange(30)">Last 30d</button>
+      <button class="btn" onclick="setRange(90)">Last 90d</button>
+      <button class="btn" onclick="setThisMonth()">This Month</button>
+      <button class="btn" onclick="setLastMonth()">Last Month</button>
+    </div>
+  </div>
+
+  <div id="error-area"></div>
+
+  <div class="summary-row">
+    <div class="summary-card">
+      <div class="num" id="m-inventory-value">—</div>
+      <div class="label">Inventory Snapshot Value</div>
+      <div class="note">As of right now — not affected by the date range above (no historical daily snapshots are stored)</div>
+    </div>
+    <div class="summary-card">
+      <div class="num" id="m-avg-sale-price">—</div>
+      <div class="label">Average Sale Price</div>
+      <div class="note">Total revenue ÷ units sold, in range</div>
+    </div>
+    <div class="summary-card">
+      <div class="num" id="m-avg-listings-count">—</div>
+      <div class="label">Avg New Listings / Day (count)</div>
+      <div class="note">New listings in range ÷ days in range</div>
+    </div>
+    <div class="summary-card">
+      <div class="num" id="m-avg-listings-value">—</div>
+      <div class="label">Avg New Listings / Day ($)</div>
+      <div class="note">Total $ of new listings ÷ days in range</div>
+    </div>
+  </div>
+
+  <h2>Totals for the selected range</h2>
+  <div class="sub-row">
+    <div class="sub-card">
+      <div class="num" id="t-orders">—</div>
+      <div class="label">Orders</div>
+    </div>
+    <div class="sub-card">
+      <div class="num" id="t-revenue">—</div>
+      <div class="label">Revenue</div>
+    </div>
+    <div class="sub-card">
+      <div class="num" id="t-new-listings">—</div>
+      <div class="label">New Listings Created</div>
+    </div>
+  </div>
+</div>
+
+<script>
+function setRange(days) {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - days);
+  document.getElementById('end-date').value = end.toISOString().slice(0,10);
+  document.getElementById('start-date').value = start.toISOString().slice(0,10);
+  loadAnalytics();
+}
+
+function setThisMonth() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  document.getElementById('start-date').value = start.toISOString().slice(0,10);
+  document.getElementById('end-date').value = now.toISOString().slice(0,10);
+  loadAnalytics();
+}
+
+function setLastMonth() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const end = new Date(now.getFullYear(), now.getMonth(), 0);
+  document.getElementById('start-date').value = start.toISOString().slice(0,10);
+  document.getElementById('end-date').value = end.toISOString().slice(0,10);
+  loadAnalytics();
+}
+
+function fmtMoney(n) {
+  return '$' + (n || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+async function loadAnalytics() {
+  const start = document.getElementById('start-date').value;
+  const end = document.getElementById('end-date').value;
+  const errorArea = document.getElementById('error-area');
+  errorArea.innerHTML = '';
+  try {
+    const params = new URLSearchParams();
+    if (start) params.set('start', start);
+    if (end) params.set('end', end);
+    const r = await fetch('/api/analytics?' + params.toString());
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Request failed');
+
+    document.getElementById('m-inventory-value').textContent = fmtMoney(data.inventory_snapshot_value);
+    document.getElementById('m-avg-sale-price').textContent = fmtMoney(data.avg_sale_price);
+    document.getElementById('m-avg-listings-count').textContent = (data.avg_new_listings_per_day_count || 0).toLocaleString(undefined, {maximumFractionDigits: 1});
+    document.getElementById('m-avg-listings-value').textContent = fmtMoney(data.avg_new_listings_per_day_value);
+
+    document.getElementById('t-orders').textContent = data.totals_in_range.orders;
+    document.getElementById('t-revenue').textContent = fmtMoney(data.totals_in_range.revenue);
+    document.getElementById('t-new-listings').textContent = data.totals_in_range.new_listings;
+  } catch(e) {
+    errorArea.innerHTML = `<div class="error-banner">❌ ${e.message}</div>`;
+  }
+}
+
+// Default to last 30 days on load, same as Financials
+setRange(30);
+</script>
+</body>
+</html>
