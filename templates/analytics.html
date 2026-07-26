@@ -146,6 +146,18 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
   </div>
 
   <h2>Inventory Spend vs. Sales, by month</h2>
+  <div class="filter-bar" style="margin-bottom:10px;">
+    <div>
+      <div class="field-label">Start Month</div>
+      <input type="month" class="field-input" id="trend-start-month" value="2025-01"/>
+    </div>
+    <div>
+      <div class="field-label">End Month</div>
+      <input type="month" class="field-input" id="trend-end-month"/>
+    </div>
+    <button class="btn btn-primary" onclick="loadMonthlyTrend()">Apply</button>
+    <button class="btn" id="pct-toggle-btn" onclick="togglePctMultiple()">Show as % Multiple</button>
+  </div>
   <div class="summary-card" style="padding:16px;">
     <canvas id="trend-chart" height="90"></canvas>
   </div>
@@ -219,50 +231,70 @@ async function loadAnalytics() {
 
 // Default to last 30 days on load, same as Financials
 let trendChart = null;
-async function loadMonthlyTrend() {
-  try {
-    const r = await fetch('/api/analytics/monthly-trend?months=12');
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || 'Request failed');
+let showPctMultiple = false;  // starts NOT toggled, per the request
+let lastTrendData = null;
 
-    const ctx = document.getElementById('trend-chart').getContext('2d');
-    if (trendChart) trendChart.destroy();
-    trendChart = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: data.months,
-        datasets: [
-          {
-            label: 'Inventory Spend',
-            data: data.inventory_spend,
-            borderColor: '#f97316',
-            backgroundColor: 'rgba(249,115,22,0.1)',
-            tension: 0.25,
+function togglePctMultiple() {
+  showPctMultiple = !showPctMultiple;
+  document.getElementById('pct-toggle-btn').classList.toggle('btn-primary', showPctMultiple);
+  if (lastTrendData) renderTrendChart(lastTrendData);
+}
+
+function renderTrendChart(data) {
+  lastTrendData = data;
+  const ctx = document.getElementById('trend-chart').getContext('2d');
+  if (trendChart) trendChart.destroy();
+
+  const datasets = showPctMultiple
+    ? [{
+        label: 'Inventory Multiple (Spend as % of Sales)',
+        data: data.pct_multiple,
+        borderColor: '#a78bfa',
+        backgroundColor: 'rgba(167,139,250,0.15)',
+        tension: 0.25,
+      }]
+    : [
+        { label: 'Inventory Spend', data: data.inventory_spend, borderColor: '#f97316', backgroundColor: 'rgba(249,115,22,0.1)', tension: 0.25 },
+        { label: 'Sales', data: data.sales, borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.1)', tension: 0.25 },
+      ];
+
+  trendChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels: data.months, datasets },
+    options: {
+      responsive: true,
+      plugins: { legend: { labels: { color: '#f1f5f9' } } },
+      scales: {
+        x: { ticks: { color: '#64748b' }, grid: { color: '#2d3348' } },
+        y: {
+          ticks: {
+            color: '#64748b',
+            callback: v => showPctMultiple ? v + '%' : '$' + v.toLocaleString(),
           },
-          {
-            label: 'Sales',
-            data: data.sales,
-            borderColor: '#22c55e',
-            backgroundColor: 'rgba(34,197,94,0.1)',
-            tension: 0.25,
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        plugins: { legend: { labels: { color: '#f1f5f9' } } },
-        scales: {
-          x: { ticks: { color: '#64748b' }, grid: { color: '#2d3348' } },
-          y: { ticks: { color: '#64748b', callback: v => '$' + v.toLocaleString() }, grid: { color: '#2d3348' } },
+          grid: { color: '#2d3348' },
         },
       },
-    });
+    },
+  });
+}
+
+async function loadMonthlyTrend() {
+  try {
+    const startMonth = document.getElementById('trend-start-month').value || '2025-01';
+    const endMonth = document.getElementById('trend-end-month').value;
+    const params = new URLSearchParams({ start: startMonth });
+    if (endMonth) params.set('end', endMonth);
+    const r = await fetch('/api/analytics/monthly-trend?' + params.toString());
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Request failed');
+    renderTrendChart(data);
   } catch(e) {
     document.getElementById('trend-chart').parentElement.innerHTML = `<div class="error-banner">❌ ${e.message}</div>`;
   }
 }
 
 setRange(30);
+document.getElementById('trend-end-month').value = new Date().toISOString().slice(0,7);
 loadMonthlyTrend();
 </script>
 </body>

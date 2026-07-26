@@ -4127,26 +4127,22 @@ async def api_analytics_history(request: Request, days: int = 90):
     return {"snapshots": res.data or []}
 
 @app.get("/api/analytics/monthly-trend")
-async def api_analytics_monthly_trend(request: Request, months: int = 12):
+async def api_analytics_monthly_trend(request: Request, start: str = None, end: str = None):
     """Inventory spend vs. sales, grouped by month -- straight from acquisitions.cost
     (grouped by acquisitions.date) and orders.gross_revenue (grouped by
-    orders.order_date). Unlike Inventory Snapshot Value / Green Revenue, this
-    doesn't need any new snapshot/stamping mechanism -- both source fields are
-    already dated per-row, so grouping by month is just a groupby, no historical
-    tracking gap to solve."""
+    orders.order_date). No snapshot/stamping mechanism needed here -- both source
+    fields are already dated per-row, so grouping by month is just a groupby.
+
+    start/end are "YYYY-MM" strings. Defaults: start=2025-01 (the user's requested
+    default horizon), end=the current month."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     import datetime as _dt
 
     now = _dt.datetime.utcnow()
-    # First day of the month `months` months ago, e.g. months=12 -> 12 full months back
-    cutoff_month = now.month - months
-    cutoff_year = now.year
-    while cutoff_month <= 0:
-        cutoff_month += 12
-        cutoff_year -= 1
-    cutoff_str = f"{cutoff_year:04d}-{cutoff_month:02d}-01"
+    start_str = f"{start}-01" if start else "2025-01-01"
+    end_str = f"{end}-01" if end else now.strftime("%Y-%m-01")
 
     acq_rows = _fetch_all_for_business(business_id, "acquisitions", "cost,date")
     order_rows = _fetch_all_for_business(business_id, "orders", "gross_revenue,order_date")
@@ -4154,18 +4150,28 @@ async def api_analytics_monthly_trend(request: Request, months: int = 12):
     spend_by_month, sales_by_month = {}, {}
     for r in acq_rows:
         d = (r.get("date") or "")[:7]  # "YYYY-MM"
-        if d and f"{d}-01" >= cutoff_str:
+        if d and start_str <= f"{d}-01" <= end_str:
             spend_by_month[d] = spend_by_month.get(d, 0) + (r.get("cost") or 0)
     for r in order_rows:
         d = (r.get("order_date") or "")[:7]
-        if d and f"{d}-01" >= cutoff_str:
+        if d and start_str <= f"{d}-01" <= end_str:
             sales_by_month[d] = sales_by_month.get(d, 0) + (r.get("gross_revenue") or 0)
 
     all_months = sorted(set(spend_by_month.keys()) | set(sales_by_month.keys()))
+    inventory_spend = [round(spend_by_month.get(m, 0), 2) for m in all_months]
+    sales = [round(sales_by_month.get(m, 0), 2) for m in all_months]
+    # "Inventory multiple": spend as a % of sales for that month, e.g. $50k spend /
+    # $100k sales = 50%. Precomputed here (not in JS) so the toggle is just a
+    # dataset swap, not a recalculation.
+    pct_multiple = [round((s / sa * 100), 1) if sa else None for s, sa in zip(inventory_spend, sales)]
+
     return {
+        "start": start_str[:7],
+        "end": end_str[:7],
         "months": all_months,
-        "inventory_spend": [round(spend_by_month.get(m, 0), 2) for m in all_months],
-        "sales": [round(sales_by_month.get(m, 0), 2) for m in all_months],
+        "inventory_spend": inventory_spend,
+        "sales": sales,
+        "pct_multiple": pct_multiple,
     }
 
 @app.get("/archive", response_class=HTMLResponse)
