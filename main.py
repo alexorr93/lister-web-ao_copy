@@ -632,11 +632,19 @@ def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None,
     location_key       = settings.get("EBAY_MERCHANT_LOCATION_KEY", "")
     location_zip       = settings.get("EBAY_LOCATION_ZIP", "")
     location_country   = settings.get("EBAY_LOCATION_COUNTRY", "US")
-    category_id        = listing.get("ebay_category_id") or settings.get("EBAY_DEFAULT_CATEGORY_ID", "")
+    # A category_id of "0" (string) is a real, recognized "not yet categorized"
+    # sentinel elsewhere in this codebase (see the .or_(...eq.0...) filter used
+    # to find uncategorized items) -- but Python truthiness doesn't catch it,
+    # since a non-empty string like "0" is always truthy. Without this explicit
+    # check, "0" would sail straight past both the fallback AND the "is it set"
+    # guard below, and get submitted to eBay as a literal, invalid category ID
+    # -- confirmed as the actual cause of a real "Category is not valid" failure.
+    raw_category_id = listing.get("ebay_category_id")
+    category_id = raw_category_id if raw_category_id and str(raw_category_id) != "0" else settings.get("EBAY_DEFAULT_CATEGORY_ID", "")
 
     if not (payment_policy and return_policy and fulfillment_policy and location_key):
         raise Exception("Missing eBay business policy IDs or location key — set these in Settings first")
-    if not category_id:
+    if not category_id or str(category_id) == "0":
         raise Exception("This item has no eBay category set")
 
     sku = listing.get("ebay_sku") or f"lister-{listing['id']}"
@@ -792,14 +800,15 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
     payment_policy      = settings.get("EBAY_PAYMENT_POLICY_ID", "")
     return_policy        = settings.get("EBAY_RETURN_POLICY_ID", "")
     fulfillment_policy   = listing.get("ebay_fulfillment_policy_id") or settings.get("EBAY_FULFILLMENT_POLICY_ID", "")
-    category_id          = listing.get("ebay_category_id") or settings.get("EBAY_DEFAULT_CATEGORY_ID", "")
+    raw_category_id      = listing.get("ebay_category_id")
+    category_id          = raw_category_id if raw_category_id and str(raw_category_id) != "0" else settings.get("EBAY_DEFAULT_CATEGORY_ID", "")
     location_zip        = settings.get("EBAY_LOCATION_ZIP", "")
     location_country     = settings.get("EBAY_LOCATION_COUNTRY", "US")
     location_city_state = settings.get("EBAY_LOCATION_CITY_STATE", "")
 
     if not (payment_policy and return_policy and fulfillment_policy):
         raise Exception("Missing eBay business policy IDs — set these in Settings first")
-    if not category_id:
+    if not category_id or str(category_id) == "0":
         raise Exception("This item has no eBay category set")
     if not location_zip:
         raise Exception("Missing EBAY_LOCATION_ZIP — set this in Settings first")
@@ -7661,7 +7670,8 @@ async def ebay_debug_category_requirements(item_id: str, request: Request):
     listing = res.data[0]
     biz_id = listing.get("business_id")
     settings = get_ebay_settings(biz_id)
-    category_id = listing.get("ebay_category_id") or settings.get("EBAY_DEFAULT_CATEGORY_ID", "")
+    raw_category_id = listing.get("ebay_category_id")
+    category_id = raw_category_id if raw_category_id and str(raw_category_id) != "0" else settings.get("EBAY_DEFAULT_CATEGORY_ID", "")
     try:
         token = get_ebay_access_token(biz_id)
         r = _req.get(
