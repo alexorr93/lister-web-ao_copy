@@ -115,6 +115,7 @@ tr:last-child td { border-bottom: none; }
     <div style="margin-top:10px;display:flex;gap:8px;align-items:center;">
       <button class="btn btn-primary" onclick="addAcquisition()">+ Add Row</button>
       <button class="btn" onclick="recalculate()" title="Refreshes eBay/Total_Payouts/Profit for every row using the latest synced orders">🔄 Recalculate</button>
+      <button class="btn" onclick="backfillGreenTimestamps()" title="One-time fix: corrects became_green_at for lots that were already profitable before this feature existed, using their real order history instead of today's date">🕐 Fix Green Timestamps (one-time)</button>
       <button class="btn" id="edit-mode-btn" onclick="toggleEditMode()">✏️ Edit</button>
       <button class="btn btn-danger" onclick="undoLastEdit()" title="Restores the values from right before your last edit">↩️ Undo Last Edit</button>
       <button class="btn" onclick="openCashHistory()" title="See every recorded change to the Cash field over time">📜 Cash History</button>
@@ -462,6 +463,19 @@ async function undoLastEdit() {
       ? `✅ Restored ${data.restored} row(s) to their previous values.`
       : 'Nothing to undo.';
     loadAcquisitions();
+  } catch(e) {
+    document.getElementById('upload-status').textContent = `❌ ${e.message}`;
+  }
+}
+
+async function backfillGreenTimestamps() {
+  document.getElementById('upload-status').textContent = 'Reconstructing real green-crossing dates from order history...';
+  try {
+    const r = await fetch('/api/acquisitions/backfill-green-timestamps', {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    document.getElementById('upload-status').textContent =
+      `✅ Fixed ${data.fixed} lot(s) with a real historical date. ${data.no_crossing_found} lot(s) left as-is (order history never crossed profit > 1 — likely cash-driven).`;
   } catch(e) {
     document.getElementById('upload-status').textContent = `❌ ${e.message}`;
   }

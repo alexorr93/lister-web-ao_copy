@@ -2308,6 +2308,72 @@ def _apply_shopify_sales_to_profit(business_id: str):
             "became_green_at": became_green_at,
         }).eq("id", a["id"]).execute()
 
+def _backfill_became_green_at_from_history(business_id: str) -> dict:
+    """One-time fix for a real flaw in the stamping logic above: the FIRST time it
+    ran, every lot that was ALREADY profitable before this feature existed had no
+    prior became_green_at to preserve, so it got stamped 'now' -- meaning every
+    pre-existing green lot looked like it turned green today, and Green Revenue
+    (which only counts sales from that timestamp onward) collapsed to almost
+    nothing. Confirmed by the user: $314.16 for a period that should have been
+    much higher, right after their first Recalculate.
+
+    This reconstructs the REAL historical crossing date using each lot's own
+    order history (which is already fully dated) instead of accepting 'today':
+    walks that lot's orders oldest-to-newest, starting from a baseline of
+    (cash - cost), summing each order's final_net (same net figure Financials/
+    the Shopify-profit code already use) until the running total first exceeds
+    1 -- that order's date is the real became_green_at. No new snapshot table
+    needed; every order was already dated when it happened."""
+    import datetime as _dt2
+    lots = _fetch_all_for_business(business_id, "acquisitions", "id,sku,cost,cash,profit")
+    lot_by_sku = {l["sku"]: l for l in lots if l.get("sku")}
+
+    orders = _fetch_all_for_business(business_id, "orders", "sku,final_net,order_date")
+    orders_by_prefix = {}
+    for o in orders:
+        sku = o.get("sku") or ""
+        if not sku:
+            continue
+        prefix = _lot_prefix(sku)
+        if prefix in lot_by_sku:
+            orders_by_prefix.setdefault(prefix, []).append(o)
+
+    fixed, unchanged, no_crossing_found = 0, 0, 0
+    for sku, lot in lot_by_sku.items():
+        if (lot.get("profit") or 0) <= 1:
+            continue  # not green -- became_green_at should already be null from the logic above
+        cost = lot.get("cost") or 0
+        cash = lot.get("cash") or 0
+        running = cash - cost
+        lot_orders = sorted(orders_by_prefix.get(sku, []), key=lambda o: o.get("order_date") or "")
+        crossing_date = None
+        for o in lot_orders:
+            running += (o.get("final_net") or 0)
+            if running > 1:
+                crossing_date = o.get("order_date")
+                break
+        if crossing_date:
+            supabase.table("acquisitions").update({"became_green_at": crossing_date + "T00:00:00"}).eq("id", lot["id"]).execute()
+            fixed += 1
+        else:
+            # Profit > 1 but order history never actually crosses it (e.g. cash
+            # alone exceeds cost) -- leave whatever timestamp Recalculate already
+            # set rather than guess further.
+            no_crossing_found += 1
+    return {"fixed": fixed, "no_crossing_found": no_crossing_found, "total_green_lots": fixed + no_crossing_found}
+
+@app.post("/api/acquisitions/backfill-green-timestamps")
+async def backfill_green_timestamps(request: Request):
+    """One-time endpoint to run _backfill_became_green_at_from_history. Not meant
+    to be a recurring button -- run it once after the became_green_at column was
+    first added, to correct the 'stamped as today' flaw for lots that were
+    already green beforehand."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    result = _backfill_became_green_at_from_history(business_id)
+    return result
+
 @app.get("/api/acquisitions/debug-sku/{sku}")
 async def debug_acquisition_sku(sku: str, request: Request):
     business_id = require_auth(request)
