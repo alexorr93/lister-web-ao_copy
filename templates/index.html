@@ -1908,7 +1908,8 @@ function openModal(id) {
     } else if (l.ebay_status === 'draft') {
       ebayStatusEl.textContent = '📝 Saved as draft (not yet visible on eBay)';
     } else if (l.ebay_status === 'failed') {
-      ebayStatusEl.textContent = '⚠️ Last attempt failed: ' + (l.ebay_error || 'unknown error');
+      const catInfo = l.ebay_category_id ? ` (category submitted: ${l.ebay_category_id}${l.ebay_category_path ? ' — ' + l.ebay_category_path : ''})` : ' (no category was set at all)';
+      ebayStatusEl.textContent = '⚠️ Last attempt failed: ' + (l.ebay_error || 'unknown error') + catInfo;
       ebayStatusEl.style.color = 'var(--red)';
     } else {
       ebayStatusEl.textContent = 'Not yet sent to eBay';

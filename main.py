@@ -1795,6 +1795,39 @@ def suggest_ebay_category(title: str, business_id: str, restrict: bool = True,
     if exclude_id:
         results = [x for x in results if x["category_id"] != exclude_id]
 
+    # Cross-check each candidate against our OWN synced category data before
+    # trusting it. eBay's live suggestion API can hand back a category that's
+    # since been retired, merged, or isn't actually a leaf -- their suggestion
+    # service and their publish validation aren't always in sync with each
+    # other, especially with eBay actively restructuring the Motors taxonomy
+    # right now. Real failure this was built for: a driveshaft U-joint kit got
+    # 'Category is not valid' from AddFixedPriceItem despite (presumably)
+    # matching something specific, not the generic fallback. If our own synced
+    # ebay_categories doesn't confirm a candidate as a real leaf in the right
+    # tree, skip it rather than submit something that's likely to fail --
+    # falling back to the known-safe generic category is better than a
+    # plausible-but-wrong specific one.
+    if results:
+        ids = [str(x["category_id"]) for x in results if x.get("category_id")]
+        try:
+            known = supabase.table("ebay_categories").select("category_id,is_leaf,tree_id")\
+                .in_("category_id", ids).execute().data or []
+            valid_leaf_ids = {str(k["category_id"]) for k in known if k.get("is_leaf") and str(k.get("tree_id")) == tree_id}
+        except Exception as e:
+            print(f"suggest_ebay_category: leaf cross-check failed, trusting eBay's suggestion as-is: {e}")
+            valid_leaf_ids = None  # sync table unreachable -- don't block on it, just skip the extra check
+
+        if valid_leaf_ids is not None:
+            confirmed = [x for x in results if str(x["category_id"]) in valid_leaf_ids]
+            if confirmed:
+                results = confirmed
+            else:
+                print(f"suggest_ebay_category: top suggestion(s) for '{title}' "
+                      f"({[x['category_id'] for x in results[:3]]}) not confirmed as a leaf in tree {tree_id} "
+                      f"by our own synced data -- falling back instead of risking a failed publish. "
+                      f"If ebay_categories hasn't been re-synced recently, run Sync Categories.")
+                results = []
+
     return results[0] if results else _fallback()
 
 _category_sync_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
