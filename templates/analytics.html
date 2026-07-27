@@ -77,11 +77,11 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
   <div class="filter-bar">
     <div>
       <div class="field-label">Start Date</div>
-      <input type="date" class="field-input" id="start-date"/>
+      <input type="date" class="field-input" id="start-date" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="start-date-nofill-date"/>
     </div>
     <div>
       <div class="field-label">End Date</div>
-      <input type="date" class="field-input" id="end-date"/>
+      <input type="date" class="field-input" id="end-date" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="end-date-nofill-date"/>
     </div>
     <button class="btn btn-primary" onclick="loadAnalytics()">Apply</button>
     <div class="quick-range">
@@ -165,11 +165,11 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
   <div class="filter-bar" style="margin-bottom:10px;">
     <div>
       <div class="field-label">Start Month</div>
-      <input type="month" class="field-input" id="trend-start-month" value="2025-01"/>
+      <input type="month" class="field-input" id="trend-start-month" value="2025-01" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="trend-start-nofill"/>
     </div>
     <div>
       <div class="field-label">End Month</div>
-      <input type="month" class="field-input" id="trend-end-month"/>
+      <input type="month" class="field-input" id="trend-end-month" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="trend-end-nofill"/>
     </div>
     <button class="btn btn-primary" onclick="loadMonthlyTrend()">Apply</button>
     <div class="quick-range">

@@ -98,27 +98,27 @@ tr:last-child td { border-bottom: none; }
     <div class="form-grid">
       <div>
         <div class="field-label">SKU</div>
-        <input type="text" class="field-input" id="new-sku" placeholder="e.g. RJ"/>
+        <input type="text" class="field-input" id="new-sku" placeholder="e.g. RJ" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" name="new-sku-nofill-6y3b"/>
       </div>
       <div>
         <div class="field-label">Lots</div>
-        <input type="text" class="field-input" id="new-name" placeholder="who / where"/>
+        <input type="text" class="field-input" id="new-name" placeholder="who / where" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="new-name-nofill-4f8k"/>
       </div>
       <div>
         <div class="field-label">Payment_Method</div>
-        <input type="text" class="field-input" id="new-payment" placeholder="cash, venmo..."/>
+        <input type="text" class="field-input" id="new-payment" placeholder="cash, venmo..." autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="new-payment-nofill-7q2w"/>
       </div>
       <div>
         <div class="field-label">Date</div>
-        <input type="date" class="field-input" id="new-date"/>
+        <input type="date" class="field-input" id="new-date" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="new-date-nofill-date"/>
       </div>
       <div>
         <div class="field-label">Cost</div>
-        <input type="number" step="0.01" class="field-input" id="new-cost" placeholder="0.00"/>
+        <input type="number" step="0.01" class="field-input" id="new-cost" placeholder="0.00" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="new-cost-nofill-9x1e"/>
       </div>
       <div>
         <div class="field-label">Cash</div>
-        <input type="number" step="0.01" class="field-input" id="new-cash" placeholder="0.00"/>
+        <input type="number" step="0.01" class="field-input" id="new-cash" placeholder="0.00" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="new-cash-nofill-2r5t"/>
       </div>
     </div>
     <div style="margin-top:10px;display:flex;gap:8px;align-items:center;">
@@ -142,11 +142,11 @@ tr:last-child td { border-bottom: none; }
         </div>
         <div style="margin-bottom:12px;">
           <div style="font-size:11px;color:var(--muted,#64748b);font-weight:700;text-transform:uppercase;margin-bottom:4px;">Amount</div>
-          <input type="number" id="cash-pmt-amount" step="0.01" style="width:100%;padding:8px 10px;border-radius:8px;border:none;font-size:13px;" placeholder="0.00"/>
+          <input type="number" id="cash-pmt-amount" step="0.01" style="width:100%;padding:8px 10px;border-radius:8px;border:none;font-size:13px;" placeholder="0.00" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="cash-pmt-amt-nofill-8u4i"/>
         </div>
         <div style="margin-bottom:16px;">
           <div style="font-size:11px;color:var(--muted,#64748b);font-weight:700;text-transform:uppercase;margin-bottom:4px;">Date</div>
-          <input type="date" id="cash-pmt-date" style="width:100%;padding:8px 10px;border-radius:8px;border:none;font-size:13px;"/>
+          <input type="date" id="cash-pmt-date" style="width:100%;padding:8px 10px;border-radius:8px;border:none;font-size:13px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="cash-pmt-date-nofill-date"/>
         </div>
         <div id="cash-pmt-status" style="font-size:12px;margin-bottom:10px;"></div>
         <div style="display:flex;gap:8px;justify-content:flex-end;">
@@ -195,9 +195,9 @@ tr:last-child td { border-bottom: none; }
       <button class="btn" onclick="closeCashHistory()">✕ Close</button>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
-      <input type="date" class="field-input" id="ch-start-date" style="width:auto;"/>
+      <input type="date" class="field-input" id="ch-start-date" style="width:auto;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="ch-start-date-nofill-date"/>
       <span class="muted">to</span>
-      <input type="date" class="field-input" id="ch-end-date" style="width:auto;"/>
+      <input type="date" class="field-input" id="ch-end-date" style="width:auto;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="ch-end-date-nofill-date"/>
       <button class="btn btn-primary" onclick="loadCashHistory()">Filter</button>
       <button class="btn" onclick="document.getElementById('ch-start-date').value='';document.getElementById('ch-end-date').value='';loadCashHistory();">Clear</button>
     </div>
@@ -310,13 +310,13 @@ function renderUncategorizedTable() {
           : `<span style="color:var(--muted);">No matching lot</span>`);
     let editCell;
     if (it.sku_editable) {
-      editCell = `<input type="text" class="field-input uncat-sku-input" data-item-id="${it.item_id}" value="${escapeHtml(it.sku)}" style="width:110px;font-size:12px;padding:4px 6px;"/>
+      editCell = `<input type="text" class="field-input uncat-sku-input" data-item-id="${it.item_id}" value="${escapeHtml(it.sku)}" style="width:110px;font-size:12px;padding:4px 6px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" name="uncat-sku-${it.item_id}"/>
          <button class="btn" style="font-size:11px;padding:2px 8px;" onclick="saveUncatSku(this, '${it.listing_id}', '${it.item_id}')">Save</button>`;
     } else {
       const overrideNote = it.has_override
         ? `<div style="font-size:10px;color:var(--muted);">local override — eBay still shows: ${escapeHtml(it.raw_sku || '(blank)')}</div>`
         : `<div style="font-size:10px;color:var(--muted);" title="This listing was published via the old eBay Inventory API — eBay does not allow changing its SKU via any API call, on their side, not ours. This only corrects it in Lister's own records.">🔒 local-only (eBay's copy can't change)</div>`;
-      editCell = `<input type="text" class="field-input uncat-sku-input" data-item-id="${it.item_id}" value="${escapeHtml(it.sku)}" style="width:110px;font-size:12px;padding:4px 6px;"/>
+      editCell = `<input type="text" class="field-input uncat-sku-input" data-item-id="${it.item_id}" value="${escapeHtml(it.sku)}" style="width:110px;font-size:12px;padding:4px 6px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" name="uncat-sku-${it.item_id}"/>
          <button class="btn" style="font-size:11px;padding:2px 8px;" onclick="saveUncatSkuOverride(this, '${it.item_id}')">Save</button>
          ${overrideNote}`;
     }
@@ -435,7 +435,7 @@ function renderSkuOverridesTable(overrides) {
       ? `<span style="color:var(--green,#22c55e);">✓ ${escapeHtml(o.lot_name || o.lot_sku)}</span>`
       : `<span style="color:var(--muted);">No matching lot (${escapeHtml(o.lot_sku || '')})</span>`;
     const correctionCell = overridesEditMode
-      ? `<input type="text" class="field-input override-edit-input" data-item-id="${o.item_id}" value="${escapeHtml(o.your_corrected_sku || '')}" style="width:120px;font-size:12px;padding:4px 6px;"/>`
+      ? `<input type="text" class="field-input override-edit-input" data-item-id="${o.item_id}" value="${escapeHtml(o.your_corrected_sku || '')}" style="width:120px;font-size:12px;padding:4px 6px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" name="override-sku-${o.item_id}"/>`
       : `<strong>${escapeHtml(o.your_corrected_sku || '')}</strong>`;
     const saveCell = overridesEditMode
       ? `<td><button class="btn" style="font-size:11px;padding:4px 8px;" onclick="saveOverrideEdit(this, '${o.item_id}')">Save</button></td>`

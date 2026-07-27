@@ -89,11 +89,11 @@ tr.ignored:hover td { opacity: 0.85; }
     <div class="filter-bar">
       <div>
         <div class="field-label">Start Date</div>
-        <input type="date" class="field-input" id="start-date"/>
+        <input type="date" class="field-input" id="start-date" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="start-date-nofill-date"/>
       </div>
       <div>
         <div class="field-label">End Date</div>
-        <input type="date" class="field-input" id="end-date"/>
+        <input type="date" class="field-input" id="end-date" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="end-date-nofill-date"/>
       </div>
       <button class="btn btn-primary" onclick="loadToday()">Apply</button>
       <div class="quick-range">
@@ -118,7 +118,7 @@ tr.ignored:hover td { opacity: 0.85; }
     <div class="filter-bar">
       <div>
         <div class="field-label">Show Top</div>
-        <input type="number" class="field-input" id="inactive-limit" value="15" min="1" max="500" style="width:80px;"/>
+        <input type="number" class="field-input" id="inactive-limit" value="15" min="1" max="500" style="width:80px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="inactive-limit-nofill"/>
       </div>
       <button class="btn btn-primary" onclick="loadInactive()">Load</button>
       <button class="btn" onclick="syncEbayListings()" title="Pulls your real eBay Unsold-listings bucket via the Trading API — this is what actually populates this tab">🔄 Sync eBay Listings <span style="font-size:10px;opacity:.8;">(live API)</span></button>

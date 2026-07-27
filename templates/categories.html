@@ -67,7 +67,7 @@ h1 { font-size: 20px; margin-bottom: 4px; }
 <div class="main">
   <h1>📂 eBay Category Browser</h1>
   <p class="sub">Every Business & Industrial and eBay Motors category, listed in order with its ID. Green = usable for a listing. Click a green line to copy its ID. Type below to filter — no need to press Enter.</p>
-  <input type="text" class="search-box" id="search-input" placeholder="Type to filter (matches anywhere)..." oninput="filterLines()"/>
+  <input type="text" class="search-box" id="search-input" placeholder="Type to filter (matches anywhere)..." oninput="filterLines()" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="cat-search-nofill"/>
 
   <div class="section-title">Business & Industrial <span class="count" id="biz-count"></span></div>
   <div class="cat-list" id="biz-list"><div class="loading">Loading...</div></div>

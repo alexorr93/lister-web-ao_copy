@@ -79,7 +79,7 @@ tr:last-child td { border-bottom: none; }
     <button class="btn btn-primary" onclick="syncInventory()" title="Shopify: live API call, pulls fresh right now. eBay: reads from the local cache last filled by 'Sync Active Listings' on the Lots page — does NOT call eBay itself.">🔄 Sync Inventory <span style="font-size:10px;opacity:.8;">(Shopify: live · eBay: cached — sync on Lots page first)</span></button>
     <button class="btn" onclick="pullEbayPhotos()" title="Downloads up to 2 real photos per eBay-ONLY item (skips anything already matched to a Shopify product) into Lister's own storage — a one-time step needed before these items can be published to Shopify.">📥 Pull eBay-Only Photos (into our storage)</button>
     <button class="btn" id="hidden-inventory-toggle" onclick="toggleHiddenInventoryPanel()">🙈 Hidden Items</button>
-    <input type="text" class="field-input" id="search-input" placeholder="Search title/SKU..." oninput="renderTable()" style="width:260px;"/>
+    <input type="text" class="field-input" id="search-input" placeholder="Search title/SKU..." oninput="renderTable()" style="width:260px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="search-nofill-1a"/>
     <select class="field-input" id="filter-select" onchange="renderTable()">
       <option value="">All</option>
       <option value="matched">Matched (both platforms)</option>
@@ -109,7 +109,7 @@ tr:last-child td { border-bottom: none; }
       <button class="btn" onclick="closeManualMatch()">✕ Close</button>
     </div>
     <div class="sub" id="mm-source-title" style="margin-bottom:10px;"></div>
-    <input type="text" class="field-input" id="mm-search-input" placeholder="Search by title..." oninput="renderMmCandidates()" style="width:100%;margin-bottom:12px;"/>
+    <input type="text" class="field-input" id="mm-search-input" placeholder="Search by title..." oninput="renderMmCandidates()" style="width:100%;margin-bottom:12px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="mm-search-nofill-1b"/>
     <div id="mm-candidates"></div>
   </div>
 </div>

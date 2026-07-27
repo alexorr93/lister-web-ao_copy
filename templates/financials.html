@@ -81,11 +81,11 @@ tr:last-child td { border-bottom: none; }
   <div class="filter-bar">
     <div>
       <div class="field-label">Start Date</div>
-      <input type="date" class="field-input" id="start-date"/>
+      <input type="date" class="field-input" id="start-date" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="start-date-nofill-date"/>
     </div>
     <div>
       <div class="field-label">End Date</div>
-      <input type="date" class="field-input" id="end-date"/>
+      <input type="date" class="field-input" id="end-date" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="end-date-nofill-date"/>
     </div>
     <button class="btn btn-primary" onclick="loadFinancials()">Apply</button>
     <div class="quick-range">
@@ -104,7 +104,7 @@ tr:last-child td { border-bottom: none; }
     </div>
     <div>
       <div class="field-label">Search SKU</div>
-      <input type="text" class="field-input" id="sku-search" placeholder="e.g. RJ, M64" oninput="renderTable()"/>
+      <input type="text" class="field-input" id="sku-search" placeholder="e.g. RJ, M64" oninput="renderTable()" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="fin-sku-search-nofill"/>
     </div>
     <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;cursor:pointer;padding-bottom:8px;">
       <input type="checkbox" id="net-toggle" checked onchange="renderTable()"/> Net (All Fees)
@@ -128,7 +128,7 @@ tr:last-child td { border-bottom: none; }
   <div style="display:flex;gap:8px;align-items:end;margin-bottom:14px;">
     <div>
       <div class="field-label">Resync One Order (fast, seconds)</div>
-      <input type="text" class="field-input" id="resync-order-id" placeholder="e.g. 08-14824-55634" style="width:220px;"/>
+      <input type="text" class="field-input" id="resync-order-id" placeholder="e.g. 08-14824-55634" style="width:220px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="resync-order-nofill"/>
     </div>
     <button class="btn" onclick="resyncOneOrder()" title="Pulls this one order fresh from eBay">🔁 Resync This Order <span style="font-size:10px;opacity:.8;">(live API)</span></button>
   </div>
@@ -362,7 +362,7 @@ function renderTable() {
       ? `<td>${r.needs_sku ? '<span style="color:#f59e0b;font-weight:600;">Needs SKU</span>' : '<span class="muted">No matching lot</span>'}</td>`
       : '';
     const skuCell = showingUncategorized
-      ? `<input type="text" class="field-input order-sku-input" data-row-id="${r.id}" value="${escapeHtml(r.sku)}" style="width:100px;font-size:12px;padding:4px 6px;"/>
+      ? `<input type="text" class="field-input order-sku-input" data-row-id="${r.id}" value="${escapeHtml(r.sku)}" style="width:100px;font-size:12px;padding:4px 6px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" name="order-sku-${r.id}"/>
          <button class="btn" style="font-size:11px;padding:2px 8px;" onclick="saveOrderSku(this, '${r.id}')">Save</button>`
       : `<span class="sku">${escapeHtml(r.sku)}</span>`;
     html += `<tr>

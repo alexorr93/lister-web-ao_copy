@@ -589,16 +589,16 @@ select.field-input { background: #fff; color: #0f172a; }
       <div class="settings-title">🤖 Google Gemini API</div>
       <div class="settings-sub">Used for AI scanning and value research.</div>
       <div class="field-label">API Key</div>
-      <input type="password" class="field-input" id="set-gemini" placeholder="AIza..." style="margin-bottom:10px;"/>
+      <input type="password" class="field-input" id="set-gemini" placeholder="AIza..." style="margin-bottom:10px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="set-gemini-nofill-setgemini"/>
       <button class="btn btn-primary" style="width:100%;" onclick="saveSetting('GEMINI_API_KEY','set-gemini')">Save</button>
     </div>
     <div class="settings-section" style="border-left:4px solid var(--orange);">
       <div class="settings-title">🏷️ eBay API Credentials</div>
       <div class="settings-sub">For direct listing submission. Find at developer.ebay.com<br><strong style="color:var(--amber);">⚠️ If these are set as Railway environment variables, that value is used instead — this form is a fallback only. Edit in Railway for security.</strong></div>
-      <div class="field-label">App ID</div><input type="text" class="field-input" id="set-ebay-app" style="margin-bottom:8px;"/>
-      <div class="field-label">Dev ID</div><input type="text" class="field-input" id="set-ebay-dev" style="margin-bottom:8px;"/>
-      <div class="field-label">Cert ID</div><input type="password" class="field-input" id="set-ebay-cert" style="margin-bottom:8px;"/>
-      <div class="field-label">RuName (eBay redirect URL name)</div><input type="text" class="field-input" id="set-ebay-runame" style="margin-bottom:8px;"/>
+      <div class="field-label">App ID</div><input type="text" class="field-input" id="set-ebay-app" style="margin-bottom:8px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="set-ebay-app-nofill-setebayapp"/>
+      <div class="field-label">Dev ID</div><input type="text" class="field-input" id="set-ebay-dev" style="margin-bottom:8px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="set-ebay-dev-nofill-setebaydev"/>
+      <div class="field-label">Cert ID</div><input type="password" class="field-input" id="set-ebay-cert" style="margin-bottom:8px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="set-ebay-cert-nofill-setebaycert"/>
+      <div class="field-label">RuName (eBay redirect URL name)</div><input type="text" class="field-input" id="set-ebay-runame" style="margin-bottom:8px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="set-ebay-runame-nofill-setebayrunam"/>
       <button class="btn btn-primary" style="width:100%; margin-bottom:10px;" onclick="saveEbaySettings()">Save eBay Settings</button>
       <div class="settings-sub" id="ebay-connect-status" style="margin-bottom:6px;"></div>
       <button class="btn btn-primary" style="width:100%; background:var(--green,#2e8b57);" onclick="connectEbayAccount()">🔗 Connect eBay Account</button>
@@ -607,24 +607,24 @@ select.field-input { background: #fff; color: #0f172a; }
     <div class="settings-section" style="border-left:4px solid #95bf47;">
       <div class="settings-title">🛍️ Shopify API Credentials</div>
       <div class="settings-sub">Custom app via Shopify's Dev Dashboard (dev.shopify.com/dashboard) — the app must be in the same org as your store. Uses a client-credentials grant, refreshed automatically — no token to manually copy or renew.</div>
-      <div class="field-label">Store Domain</div><input type="text" class="field-input" id="set-shopify-domain" placeholder="yourstore.myshopify.com" style="margin-bottom:8px;"/>
-      <div class="field-label">Client ID</div><input type="text" class="field-input" id="set-shopify-client-id" style="margin-bottom:8px;"/>
-      <div class="field-label">Client Secret</div><input type="password" class="field-input" id="set-shopify-client-secret" style="margin-bottom:10px;"/>
+      <div class="field-label">Store Domain</div><input type="text" class="field-input" id="set-shopify-domain" placeholder="yourstore.myshopify.com" style="margin-bottom:8px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="set-shopify-domain-nofill-setshopifydo"/>
+      <div class="field-label">Client ID</div><input type="text" class="field-input" id="set-shopify-client-id" style="margin-bottom:8px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="set-shopify-client-id-nofill-setshopifycl"/>
+      <div class="field-label">Client Secret</div><input type="password" class="field-input" id="set-shopify-client-secret" style="margin-bottom:10px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="set-shopify-client-secret-nofill-setshopifycl"/>
       <button class="btn btn-primary" style="width:100%; background:#95bf47; border-color:#95bf47;" onclick="saveShopifySettings()">Save Shopify Settings</button>
     </div>
     <div class="settings-section" style="border-left:4px solid var(--orange);">
       <div class="settings-title">📦 eBay Listing Setup</div>
       <div class="settings-sub">Required before any listing can publish or schedule. Find policy IDs under Account → Business Policies on eBay.</div>
-      <div class="field-label">Payment Policy ID</div><input type="text" class="field-input" id="set-ebay-payment-policy" style="margin-bottom:8px;"/>
-      <div class="field-label">Return Policy ID</div><input type="text" class="field-input" id="set-ebay-return-policy" style="margin-bottom:8px;"/>
-      <div class="field-label">Fulfillment (Shipping) Policy ID</div><input type="text" class="field-input" id="set-ebay-fulfillment-policy" style="margin-bottom:8px;"/>
-      <div class="field-label">Merchant Location Key</div><input type="text" class="field-input" id="set-ebay-location-key" placeholder="e.g. WAREHOUSE_1" style="margin-bottom:8px;"/>
+      <div class="field-label">Payment Policy ID</div><input type="text" class="field-input" id="set-ebay-payment-policy" style="margin-bottom:8px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="set-ebay-payment-policy-nofill-setebaypayme"/>
+      <div class="field-label">Return Policy ID</div><input type="text" class="field-input" id="set-ebay-return-policy" style="margin-bottom:8px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="set-ebay-return-policy-nofill-setebayretur"/>
+      <div class="field-label">Fulfillment (Shipping) Policy ID</div><input type="text" class="field-input" id="set-ebay-fulfillment-policy" style="margin-bottom:8px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="set-ebay-fulfillment-policy-nofill-setebayfulfi"/>
+      <div class="field-label">Merchant Location Key</div><input type="text" class="field-input" id="set-ebay-location-key" placeholder="e.g. WAREHOUSE_1" style="margin-bottom:8px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="set-ebay-location-key-nofill-setebaylocat"/>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-        <div><div class="field-label">Location ZIP</div><input type="text" class="field-input" id="set-ebay-location-zip"/></div>
-        <div><div class="field-label">Location Country</div><input type="text" class="field-input" id="set-ebay-location-country" value="US"/></div>
+        <div><div class="field-label">Location ZIP</div><input type="text" class="field-input" id="set-ebay-location-zip" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="set-ebay-location-zip-nofill-setebaylocat"/></div>
+        <div><div class="field-label">Location Country</div><input type="text" class="field-input" id="set-ebay-location-country" value="US" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="set-ebay-location-country-nofill-setebaylocat"/></div>
       </div>
-      <div class="field-label">Location City, State <span style="opacity:.6;font-weight:400;">(used by the v2/Trading API publish path only)</span></div><input type="text" class="field-input" id="set-ebay-location-city-state" placeholder="e.g. Loveland, CO" style="margin-bottom:8px;"/>
-      <div class="field-label">Default eBay Category ID (fallback)</div><input type="text" class="field-input" id="set-ebay-default-category" style="margin-bottom:10px;"/>
+      <div class="field-label">Location City, State <span style="opacity:.6;font-weight:400;">(used by the v2/Trading API publish path only)</span></div><input type="text" class="field-input" id="set-ebay-location-city-state" placeholder="e.g. Loveland, CO" style="margin-bottom:8px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="set-ebay-location-city-state-nofill-setebaylocat"/>
+      <div class="field-label">Default eBay Category ID (fallback)</div><input type="text" class="field-input" id="set-ebay-default-category" style="margin-bottom:10px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="set-ebay-default-category-nofill-setebaydefau"/>
       <button class="btn btn-primary" style="width:100%;" onclick="saveEbayListingSettings()">Save Listing Setup</button>
       <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:14px;">
         <div class="field-label" style="margin-bottom:8px;">Category Auto-Match (AI)</div>
@@ -647,7 +647,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <button class="lot-picker-close" id="lot-picker-close-btn" onclick="closeLotPicker()">✕</button>
     </div>
     <input type="text" class="lot-picker-input" id="lot-picker-input" placeholder="Type to filter, e.g. MF"
-      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+      autocomplete="new-password" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" name="lot-picker-nofill-2k8v"
       oninput="renderLotWheel(this.value)" onkeydown="if(event.key==='Enter') selectTopLotMatch()"/>
     <div class="lot-wheel-wrap">
       <div class="lot-wheel" id="lot-wheel" onscroll="onLotWheelScroll()"></div>
@@ -671,12 +671,12 @@ select.field-input { background: #fff; color: #0f172a; }
       <div class="modal-fields">
         <div>
           <div class="field-label">Title</div>
-          <input type="text" class="field-input" id="modal-title-input" maxlength="80" oninput="modalDirty=true"/>
+          <input type="text" class="field-input" id="modal-title-input" maxlength="80" oninput="modalDirty=true" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" name="modal-title-nofill-7h2p"/>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
           <div>
             <div class="field-label">Price</div>
-            <input type="number" class="field-input" id="modal-price-input" step="0.01" oninput="modalDirty=true"/>
+            <input type="number" class="field-input" id="modal-price-input" step="0.01" oninput="modalDirty=true" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="modal-price-nofill-3m8q"/>
           </div>
           <div>
             <div class="field-label">Condition</div>
@@ -719,12 +719,12 @@ select.field-input { background: #fff; color: #0f172a; }
         </div>
         <button class="btn" style="width:100%;margin-bottom:8px;" onclick="autoCategoryModal()">🎯 Auto-pick eBay Category</button>
         <div style="display:flex;gap:8px;margin-bottom:8px;">
-          <input type="text" inputmode="numeric" class="field-input" id="modal-category-manual-input" placeholder="Or enter eBay category ID manually" style="flex:1;"/>
+          <input type="text" inputmode="numeric" class="field-input" id="modal-category-manual-input" placeholder="Or enter eBay category ID manually" style="flex:1;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="modal-cat-nofill-9w1z"/>
           <button class="btn" onclick="setModalCategoryManual()">Set</button>
         </div>
         <div id="modal-category-status" style="font-size:11px;color:var(--muted);margin-bottom:8px;"></div>
         <div style="display:flex;gap:8px;align-items:center;">
-          <input type="number" class="field-input" id="modal-ebay-hours" value="24" min="0.5" step="0.5" style="width:80px;" title="Hours from now"/>
+          <input type="number" class="field-input" id="modal-ebay-hours" value="24" min="0.5" step="0.5" style="width:80px;" title="Hours from now" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="modal-hours-nofill-5r6t"/>
           <span style="font-size:12px;color:var(--muted);">hours from now (for Schedule)</span>
         </div>
       </div>
@@ -732,7 +732,7 @@ select.field-input { background: #fff; color: #0f172a; }
         <div class="field-label" style="margin-bottom:8px;color:#a78bfa;">🧪 New eBay System (Testing)</div>
         <div id="modal-ebayv2-status" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></div>
         <div style="display:flex;gap:8px;margin-bottom:8px;">
-          <input type="text" class="field-input" id="modal-ebayv2-sku-input" placeholder="SKU / Custom Label"/>
+          <input type="text" class="field-input" id="modal-ebayv2-sku-input" placeholder="SKU / Custom Label" autocomplete="new-password" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" name="modal-sku-nofill-4x9k"/>
           <button class="btn" onclick="updateSkuV2()">Update SKU</button>
         </div>
         <div style="display:flex;gap:8px;">
@@ -1213,7 +1213,7 @@ function renderTiles() {
         </div>
       </div>
       <div class="tile-body">
-        <textarea class="tile-title-input${fieldClassFor(l.id,'title')}" rows="1" data-id="${l.id}" placeholder="Title">${(dirtyTitles[l.id] ?? (l.title||'')).replace(/</g,'&lt;')}</textarea>
+        <textarea class="tile-title-input${fieldClassFor(l.id,'title')}" rows="1" data-id="${l.id}" placeholder="Title" autocomplete="off" spellcheck="false">${(dirtyTitles[l.id] ?? (l.title||'')).replace(/</g,'&lt;')}</textarea>
         <div class="tile-search-btns">
           <button class="tile-search-btn${isResearched(l.id,'google')?' active':''}" onclick="markResearched('${l.id}','google',this); window.open('https://www.google.com/search?q='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value),'popupwin','noopener,width=1200,height=800')">Google</button>
           <button class="tile-search-btn${isResearched(l.id,'ebay_active')?' active':''}" onclick="markResearched('${l.id}','ebay_active',this); window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value)+'&LH_Sold=0&LH_Complete=0','popupwin','noopener,width=1200,height=800')">eBay Active</button>
@@ -1221,14 +1221,14 @@ function renderTiles() {
         </div>
         <div class="tile-price-cond-row">
           <span style="color:var(--muted);font-size:11px;">$</span>
-          <input class="tile-price-input${fieldClassFor(l.id,'price')}" type="number" step="0.01" value="${dirtyPrices[l.id] ?? l.price.toFixed(2)}" data-id="${l.id}">
+          <input class="tile-price-input${fieldClassFor(l.id,'price')}" type="number" step="0.01" value="${dirtyPrices[l.id] ?? l.price.toFixed(2)}" data-id="${l.id}" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="price-${l.id}">
           <input class="tile-lotsku-input${fieldClassFor(l.id,'lotsku')}${lotSkuFor(l) ? '' : ' missing'}" type="text" value="${(dirtyLotSkus[l.id] ?? lotSkuFor(l)).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Lot SKU" title="Must match a real Lot SKU from the Lots page — required before this item can publish to eBay or Shopify" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" name="lot-sku-${l.id}">
           <div class="tile-cond-toggle">
             <button class="tile-cond-btn${isNew?'' :' active'}" data-id="${l.id}" data-cond="used">Used</button>
             <button class="tile-cond-btn${isNew?' active':''}" data-id="${l.id}" data-cond="new">New</button>
           </div>
         </div>
-        <textarea class="tile-cat-input${fieldClassFor(l.id,'category')}${l.ebay_category_is_default ? ' default-warn' : ''}" rows="2" data-id="${l.id}" data-catid="${l.ebay_category_id||''}" placeholder="eBay category" title="Click to edit — type a phrase to re-match, or a number to set the ID directly. Double-click to open full editor." ondblclick="openModal('${l.id}')">${(dirtyCats[l.id] ?? (l.ebay_category_path||'No category yet')).replace(/</g,'&lt;')}</textarea>
+        <textarea class="tile-cat-input${fieldClassFor(l.id,'category')}${l.ebay_category_is_default ? ' default-warn' : ''}" rows="2" data-id="${l.id}" data-catid="${l.ebay_category_id||''}" placeholder="eBay category" autocomplete="off" spellcheck="false" title="Click to edit — type a phrase to re-match, or a number to set the ID directly. Double-click to open full editor." ondblclick="openModal('${l.id}')">${(dirtyCats[l.id] ?? (l.ebay_category_path||'No category yet')).replace(/</g,'&lt;')}</textarea>
         ${l.ebay_category_is_default ? '<div class="tile-cat-warn-label">⚠️ Generic fallback — needs a real match</div>' : ''}
         <input class="tile-brand-input${fieldClassFor(l.id,'brand')}" type="text" value="${(dirtyBrands[l.id] ?? (l.brand || guessBrand(l.title||''))).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Brand" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="brand-${l.id}">
       </div>
