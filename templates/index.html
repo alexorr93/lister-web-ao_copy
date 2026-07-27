@@ -562,6 +562,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <button class="btn" onclick="stopSelectedCapture()">⏸️ Stop Capture</button>
       <button class="btn" onclick="shareSelectedCaptureSession()">🔗 Share</button>
       <button class="btn" id="lot-select-mode-btn" onclick="toggleSelectMode()">☑️ Select Lots</button>
+      <button class="btn btn-primary" onclick="runAllFields()">▶️ Run All Fields</button>
       <button class="btn" style="background:#7a2020;color:#fff;" onclick="deleteSelectedCaptureSession()">🗑️ Delete Session</button>
     </div>
     <div id="metric-progress" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px;">
@@ -2504,6 +2505,23 @@ async function runMetric(metric) {
   } catch(e) {
     toast('Failed to start: ' + e.message, 'error');
   }
+}
+
+async function runAllFields() {
+  if (!activeSession) { toast('Select a session first', 'error'); return; }
+  const metrics = ['resale_value', 'liquidity', 'weight', 'max_bid'];
+  for (const metric of metrics) {
+    try {
+      const r = await api('POST', `/api/auction/capture/sessions/${activeSession}/compute-metric`, {metric});
+      if (!r.total) continue; // nothing left to fill in for this metric, move on
+      toast(`Running ${METRIC_LABELS[metric]} for ${r.total} lot(s)...`);
+      localStorage.setItem(`auctionMetricJob_${activeSession}`, JSON.stringify({jobId: r.job_id, metric}));
+      await pollMetricJob(r.job_id, metric); // each metric's own focused prompt, run one at a time
+    } catch(e) {
+      toast(`Failed to run ${METRIC_LABELS[metric]}: ` + e.message, 'error');
+    }
+  }
+  toast('Run All Fields complete');
 }
 
 async function pollMetricJob(jobId, metric) {
