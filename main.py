@@ -7728,6 +7728,97 @@ async def get_metric_job(job_id: str):
     return job
 
 
+def _scrape_current_bid(listing_url: str) -> Optional[float]:
+    """Generic (site-agnostic) current-bid scrape: works off the plain text near a
+    'Current bid'/'Current Bid' label rather than a bespoke DOM selector per site,
+    since a session's lots can come from BidSpotter, Roller, Dickensheet, etc. Less
+    precise than a tailored selector but avoids maintaining one scraper per site
+    just for a single number."""
+    import re
+    import requests as _requests
+    from bs4 import BeautifulSoup
+
+    resp = _requests.get(listing_url, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    }, timeout=20)
+    if resp.status_code != 200:
+        raise Exception(f"listing page returned {resp.status_code}")
+    soup = BeautifulSoup(resp.text, "html.parser")
+    text = soup.get_text(" ", strip=True)
+    m = (re.search(r"Current\s+[Bb]id[:\s]*\$?\s?([\d,]+\.?\d*)", text)
+         or re.search(r"\$\s?([\d,]+\.?\d*)\s*Current\s+[Bb]id", text)
+         or re.search(r"Opening\s+[Bb]id[:\s]*\$?\s?([\d,]+\.?\d*)", text))
+    if not m:
+        return None
+    return float(m.group(1).replace(",", ""))
+
+_bid_refresh_jobs: dict = {}  # job_id -> progress state, same shape/lifetime as _metric_jobs
+
+@app.post("/api/auction/capture/sessions/{session_id}/refresh-bids")
+async def refresh_session_bids(session_id: str):
+    """Starts a background job that re-scrapes each lot's own listing page for its
+    live current bid, one at a time with a delay between requests -- these source
+    sites (esp. BidSpotter) have bot-protection that a rapid burst of requests can
+    trip, so this deliberately trades speed for not getting the session's IP
+    temporarily blocked. Safe to close the tab; poll /refresh-bids-jobs/{job_id}."""
+    import asyncio, uuid as _uuid, time
+
+    lots = (supabase.table("auction_lots").select("id,lot_number,title,listing_url,current_bid")
+            .eq("session_id", session_id).execute().data)
+    lots = [l for l in lots if l.get("listing_url")]
+
+    job_id = _uuid.uuid4().hex
+    _bid_refresh_jobs[job_id] = {
+        "job_id": job_id, "session_id": session_id,
+        "total": len(lots), "processed": 0, "ok": 0, "errors": 0, "changed": 0,
+        "status": "running", "last": None,
+    }
+
+    async def run_job():
+        job = _bid_refresh_jobs[job_id]
+        if not lots:
+            job["status"] = "done"
+            return
+        loop = asyncio.get_event_loop()
+        from concurrent.futures import ThreadPoolExecutor
+        executor = ThreadPoolExecutor(max_workers=1)
+        try:
+            for lot in lots:
+                try:
+                    new_bid = await loop.run_in_executor(executor, _scrape_current_bid, lot["listing_url"])
+                    if new_bid is not None:
+                        changed = lot.get("current_bid") != new_bid
+                        supabase.table("auction_lots").update({"current_bid": new_bid}).eq("id", lot["id"]).execute()
+                        job["ok"] += 1
+                        if changed:
+                            job["changed"] += 1
+                        job["last"] = {"lot_id": lot["id"], "lot_number": lot.get("lot_number"), "title": lot.get("title"),
+                                        "status": "ok", "old_bid": lot.get("current_bid"), "new_bid": new_bid}
+                    else:
+                        job["errors"] += 1
+                        job["last"] = {"lot_id": lot["id"], "lot_number": lot.get("lot_number"), "title": lot.get("title"),
+                                        "status": "error", "error": "no bid found on page"}
+                except Exception as e:
+                    job["errors"] += 1
+                    job["last"] = {"lot_id": lot["id"], "lot_number": lot.get("lot_number"), "title": lot.get("title"),
+                                    "status": "error", "error": str(e)}
+                job["processed"] += 1
+                await asyncio.sleep(2)  # pace requests against the source site
+        finally:
+            job["status"] = "done"
+
+    asyncio.create_task(run_job())
+    return {"job_id": job_id, "total": len(lots)}
+
+@app.get("/api/auction/capture/refresh-bids-jobs/{job_id}")
+async def get_bid_refresh_job(job_id: str):
+    job = _bid_refresh_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found (server may have restarted)")
+    return job
+
+
 # ── EBAY OAUTH ────────────────────────────────────────────────── #
 
 @app.get("/api/ebay/oauth/start")

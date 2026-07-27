@@ -563,6 +563,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <button class="btn" onclick="shareSelectedCaptureSession()">🔗 Share</button>
       <button class="btn" id="lot-select-mode-btn" onclick="toggleSelectMode()">☑️ Select Lots</button>
       <button class="btn btn-primary" onclick="runAllFields()">▶️ Run All Fields</button>
+      <button class="btn" onclick="refreshBids()">🔄 Refresh Bids</button>
       <button class="btn" style="background:#7a2020;color:#fff;" onclick="deleteSelectedCaptureSession()">🗑️ Delete Session</button>
     </div>
     <div id="metric-progress" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px;">
@@ -2543,6 +2544,59 @@ async function runMetric(metric) {
     pollMetricJob(r.job_id, metric);
   } catch(e) {
     toast('Failed to start: ' + e.message, 'error');
+  }
+}
+
+async function refreshBids() {
+  if (!activeSession) { toast('Select a session first', 'error'); return; }
+  try {
+    const r = await api('POST', `/api/auction/capture/sessions/${activeSession}/refresh-bids`, {});
+    if (!r.total) { toast('No lots with a listing link to refresh', 'error'); return; }
+    toast(`Refreshing bids for ${r.total} lot(s) — paced to avoid getting blocked, safe to close this tab`);
+    pollBidRefreshJob(r.job_id);
+  } catch(e) {
+    toast('Failed to start bid refresh: ' + e.message, 'error');
+  }
+}
+
+async function pollBidRefreshJob(jobId) {
+  const progWrap = document.getElementById('metric-progress');
+  const bar = document.getElementById('metric-progress-bar');
+  const label = document.getElementById('metric-progress-label');
+  const pct = document.getElementById('metric-progress-pct');
+  progWrap.style.display = '';
+
+  while (true) {
+    let job;
+    try {
+      job = await api('GET', `/api/auction/capture/refresh-bids-jobs/${jobId}`);
+    } catch(e) {
+      progWrap.style.display = 'none';
+      if (activeSession) loadAuctionItems(activeSession);
+      return;
+    }
+    const p = job.total ? Math.round((job.processed / job.total) * 100) : 100;
+    bar.style.width = p + '%';
+    pct.textContent = p + '%';
+    if (job.last) {
+      label.textContent = `Lot ${job.last.lot_number || '?'} (${job.processed}/${job.total}): ${(job.last.title||'').slice(0,40)} — ${job.last.status === 'ok' ? '$' + job.last.new_bid : 'failed'}`;
+      const lotIdx = auctionLotsCache.findIndex(l => l.id === job.last.lot_id);
+      if (lotIdx >= 0 && job.last.status === 'ok') {
+        auctionLotsCache[lotIdx].current_bid = job.last.new_bid;
+        renderAuctionTable();
+      }
+    } else {
+      label.textContent = 'Starting bid refresh...';
+    }
+    if (job.status === 'done') {
+      bar.style.width = '100%';
+      pct.textContent = '100%';
+      label.textContent = `Done — ${job.ok} refreshed (${job.changed} changed)${job.errors ? ', ' + job.errors + ' failed' : ''}`;
+      setTimeout(() => { progWrap.style.display = 'none'; }, 2000);
+      if (activeSession) loadAuctionItems(activeSession);
+      return;
+    }
+    await new Promise(res => setTimeout(res, 1500));
   }
 }
 
