@@ -2406,8 +2406,35 @@ async function loadAuctionItems(sessionId) {
   } catch(e) { toast('Failed to load lots', 'error'); }
 }
 
+let lotSortDir = null; // null = capture order, 'asc' or 'desc' = by lot number
+
+function lotNumberSortKey(lotNumber) {
+  const s = String(lotNumber || '');
+  const m = s.match(/\d+/);
+  return [m ? parseInt(m[0], 10) : Infinity, s];
+}
+
+function toggleLotSort() {
+  lotSortDir = lotSortDir === null ? 'asc' : (lotSortDir === 'asc' ? 'desc' : null);
+  renderAuctionTable();
+}
+
+function lotSortArrow() {
+  if (lotSortDir === 'asc') return ' ▲';
+  if (lotSortDir === 'desc') return ' ▼';
+  return ' ⇅';
+}
+
 function renderAuctionTable() {
-  const lots = auctionLotsCache;
+  let lots = auctionLotsCache;
+  if (lotSortDir) {
+    lots = lots.slice().sort((a, b) => {
+      const [an, as_] = lotNumberSortKey(a.lot_number);
+      const [bn, bs] = lotNumberSortKey(b.lot_number);
+      const cmp = an - bn || as_.localeCompare(bs);
+      return lotSortDir === 'asc' ? cmp : -cmp;
+    });
+  }
   if (!lots.length) {
     document.getElementById('auction-list').innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px;">No lots captured yet for this session.</div>';
     return;
@@ -2468,7 +2495,7 @@ function renderAuctionTable() {
         <thead><tr>
           ${lotSelectMode ? `<th><input type="checkbox" onclick="toggleSelectAllLots(this)"></th>` : ''}
           <th></th>
-          <th>Lot</th>
+          <th style="cursor:pointer;user-select:none;" onclick="toggleLotSort()" title="Sort by lot number">Lot${lotSortArrow()}</th>
           <th>Itemization</th>
           <th>Resale Value ${metricRunBtn('resale_value')}</th>
           <th>Liquidity ${metricRunBtn('liquidity')}</th>
