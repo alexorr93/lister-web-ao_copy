@@ -1089,7 +1089,15 @@ async def update_ebay_v2_sku(item_id: str, body: UpdateSkuV2, request: Request):
 # ── PAGES ─────────────────────────────────────────────────────── #
 
 @app.get("/auction/research", response_class=HTMLResponse)
-async def auction_research_page(request: Request):
+@app.get("/auction/research/{share_id}", response_class=HTMLResponse)
+async def auction_research_page(request: Request, share_id: str = None):
+    """Same page whether visited plain (the owner's own working session) or with
+    a /share_id suffix (a shared, read-only view sent to someone else) -- the
+    page's own tryLoadShared() JS already parses the URL and calls
+    /api/auction/load-research/{share_id} correctly on its own. This route was
+    missing the {share_id} path entirely before, so a shared link 404'd for
+    anyone who clicked it despite the frontend logic being fully built and
+    ready -- the actual bug was just this one missing route."""
     import os
     with open(os.path.join(os.path.dirname(__file__), "templates", "auction_research.html")) as f:
         html = f.read()
