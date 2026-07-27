@@ -8362,9 +8362,35 @@ def _rematch_inventory_from_cache_inner(business_id: str) -> dict:
                 "shopify_id": s_id,
                 "matched_by": "title_exact" if (e_id and s_id) else None,
                 "hd_id": str(_uuid.uuid4()) if (e_id and s_id) else None,
+                "hidden": False,  # baseline for every row -- see hidden_before below,
+                                  # which overwrites this to True for rows that were
+                                  # hidden before this rebuild. Must stay present on
+                                  # every row (never conditionally added), since a
+                                  # batch insert with inconsistent key sets across
+                                  # rows fails (PGRST102), same constraint noted above.
             })
 
     newly_confirmed = sum(1 for r in inventory_rows if r["hd_id"])
+
+    # Preserve `hidden` across this rebuild. Rows without a confirmed hd_id get
+    # wiped and re-inserted fresh on every sync (by design, to re-run title
+    # matching) -- but a fresh insert has no way to know a row used to be
+    # hidden, so every hide would silently get undone on the next sync. Look
+    # up what was hidden before the wipe, keyed by the (ebay_id, shopify_id)
+    # pairing (not the row's own id, which is regenerated every rebuild), and
+    # re-apply it to whichever new row represents that same pairing.
+    hidden_before = {}
+    try:
+        hidden_res = supabase.table("inventory_match").select("ebay_id,shopify_id").eq("business_id", business_id)\
+            .is_("hd_id", "null").eq("hidden", True).execute()
+        hidden_before = {(r.get("ebay_id"), r.get("shopify_id")) for r in (hidden_res.data or [])}
+    except Exception as e:
+        print(f"inventory sync: couldn't look up previously-hidden rows, hidden flags may not survive this sync: {e}")
+
+    for row in inventory_rows:
+        if (row["ebay_id"], row["shopify_id"]) in hidden_before:
+            row["hidden"] = True
+
     try:
         supabase.table("inventory_match").delete().eq("business_id", business_id)\
             .is_("hd_id", "null").execute()
