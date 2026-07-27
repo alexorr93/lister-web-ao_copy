@@ -10049,6 +10049,7 @@ async def shopify_publish_batch_status(request: Request, response: Response):
     return _shopify_batch_publish_job_status.get(business_id, {"running": False, "result": None, "progress": None, "started_at": None, "finished_at": None})
 
 
+@app.post("/api/inventory/{row_id}/publish-ebay-only-to-shopify")
 async def publish_ebay_only_to_shopify(row_id: str, request: Request):
     """Publishes a genuinely eBay-only inventory item (no Lister listings row behind
     it at all — a plain eBay-native item Lister never touched) to Shopify, using the
