@@ -169,6 +169,7 @@ async def start_background_jobs():
     asyncio.create_task(order_sync_worker())
     asyncio.create_task(shopify_sync_worker())
     asyncio.create_task(analytics_snapshot_worker())
+    asyncio.create_task(analytics_cache_refresh_worker())
 
 async def shopify_sync_worker():
     """Runs the eBay-live-qty -> Shopify-qty sync automatically once per hour, at
@@ -332,6 +333,41 @@ async def analytics_snapshot_worker():
                     print(f"analytics_snapshot_worker: business {biz_id} failed: {e}")
         except Exception as e:
             print(f"analytics_snapshot_worker error: {e}")
+
+async def analytics_cache_refresh_worker():
+    """Runs every 2 hours, for every business, proactively recomputing the
+    Analytics page's own DEFAULT view (last 30 days for /api/analytics,
+    2025-01 through the current month for monthly-trend) and saving it into
+    analytics_query_cache -- so opening the page with the default filters
+    (the overwhelming majority of page loads) hits a warm cache instead of
+    recomputing everything live, every single time. A genuinely different
+    date range (a custom filter change) still computes live on that first
+    request and gets cached from there, same read-through pattern -- this
+    worker just makes sure the COMMON case never has to pay that cost."""
+    import asyncio, datetime as _dt
+    while True:
+        await asyncio.sleep(2 * 60 * 60)  # every 2 hours
+        try:
+            biz_res = supabase.table("businesses").select("id").execute()
+            business_ids = [b["id"] for b in (biz_res.data or [])]
+            for biz_id in business_ids:
+                try:
+                    now = _dt.datetime.utcnow()
+                    a_end = now.strftime("%Y-%m-%d")
+                    a_start = (now - _dt.timedelta(days=30)).strftime("%Y-%m-%d")
+                    a_payload = await asyncio.to_thread(_compute_analytics_payload, biz_id, a_start, a_end)
+                    _set_analytics_cache(biz_id, "analytics", a_start, a_end, a_payload)
+
+                    mt_start = "2025-01-01"
+                    mt_end = now.strftime("%Y-%m-01")
+                    mt_payload = await asyncio.to_thread(_compute_monthly_trend_payload, biz_id, mt_start, mt_end)
+                    _set_analytics_cache(biz_id, "monthly_trend", mt_start, mt_end, mt_payload)
+
+                    print(f"analytics_cache_refresh_worker: refreshed business {biz_id}")
+                except Exception as e:
+                    print(f"analytics_cache_refresh_worker: business {biz_id} failed: {e}")
+        except Exception as e:
+            print(f"analytics_cache_refresh_worker error: {e}")
 
 def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
     """One row per business per day in analytics_snapshots -- inventory value
@@ -4512,6 +4548,53 @@ def _nearest_inventory_snapshot(business_id: str, date_str: str):
     row = (res.data or [None])[0]
     return (row.get("inventory_snapshot_value"), row.get("snapshot_date")) if row else (None, None)
 
+# ── Generic Analytics query cache ─────────────────────────────────────────
+# Why this exists: the Analytics page's heaviest cost isn't any one figure --
+# it's that /api/analytics and /api/analytics/monthly-trend recompute
+# everything live, on every single page load, even though most loads are
+# just "open the page and look at the default view" (same date range as
+# last time, nothing actually changed). This is the same 'precompute it,
+# don't recalculate live' principle already applied to Net Cash Yield,
+# generalized to any date range instead of just YTD.
+#
+# Design: a plain read-through cache keyed by (business_id, endpoint,
+# start, end). A request first checks for a cached row fresher than
+# ANALYTICS_CACHE_MAX_AGE_SECONDS; if found, returns it instantly with zero
+# computation. If not (first time, or stale), it falls through to computing
+# live -- exactly as before -- then SAVES that result into the cache before
+# returning, so the next request for the same range is fast. On top of that,
+# analytics_cache_refresh_worker (below) proactively recomputes the page's
+# own DEFAULT range every 2 hours regardless of whether anyone's looking, so
+# it's essentially always warm for the common case.
+ANALYTICS_CACHE_MAX_AGE_SECONDS = 2 * 60 * 60  # 2 hours
+
+def _get_analytics_cache(business_id: str, endpoint: str, start: str, end: str):
+    import datetime as _dt4
+    res = supabase.table("analytics_query_cache").select("payload,computed_at")\
+        .eq("business_id", business_id).eq("endpoint", endpoint)\
+        .eq("start_date", start).eq("end_date", end).limit(1).execute()
+    row = (res.data or [None])[0]
+    if not row:
+        return None
+    computed_at = _dt4.datetime.fromisoformat(row["computed_at"].replace("Z", "+00:00"))
+    age = (_dt4.datetime.now(_dt4.timezone.utc) - computed_at).total_seconds()
+    if age > ANALYTICS_CACHE_MAX_AGE_SECONDS:
+        return None
+    return row["payload"]
+
+def _set_analytics_cache(business_id: str, endpoint: str, start: str, end: str, payload: dict):
+    import datetime as _dt4
+    record = {
+        "business_id": business_id, "endpoint": endpoint, "start_date": start, "end_date": end,
+        "payload": payload, "computed_at": _dt4.datetime.now(_dt4.timezone.utc).isoformat(),
+    }
+    existing = supabase.table("analytics_query_cache").select("id").eq("business_id", business_id)\
+        .eq("endpoint", endpoint).eq("start_date", start).eq("end_date", end).limit(1).execute()
+    if existing.data:
+        supabase.table("analytics_query_cache").update(record).eq("id", existing.data[0]["id"]).execute()
+    else:
+        supabase.table("analytics_query_cache").insert(record).execute()
+
 def _compute_green_revenue(business_id: str, start_date_str: str, end_date_str: str) -> float:
     """'Green Revenue' -- sum of actual order revenue (gross_revenue, per the
     user's own flag: is lot profit > 1 = Green) PLUS cash payments belonging to
@@ -4606,7 +4689,24 @@ async def api_analytics(request: Request, start: str = None, end: str = None):
     start_dt = _dt.datetime.fromisoformat(start) if start else (end_dt - _dt.timedelta(days=30))
     start_date_str = start_dt.strftime("%Y-%m-%d")
     end_date_str = end_dt.strftime("%Y-%m-%d")
-    num_days = max((end_dt.date() - start_dt.date()).days + 1, 1)
+
+    cached = _get_analytics_cache(business_id, "analytics", start_date_str, end_date_str)
+    if cached is not None:
+        return cached
+
+    payload = _compute_analytics_payload(business_id, start_date_str, end_date_str)
+    _set_analytics_cache(business_id, "analytics", start_date_str, end_date_str, payload)
+    return payload
+
+def _compute_analytics_payload(business_id: str, start_date_str: str, end_date_str: str) -> dict:
+    """The actual heavy computation behind /api/analytics -- extracted out of the
+    route handler so both the live endpoint (on a cache miss) and
+    analytics_cache_refresh_worker (proactively, every 2 hours) can call the
+    exact same logic instead of duplicating it."""
+    import datetime as _dt
+    start_dt = _dt.date.fromisoformat(start_date_str)
+    end_dt = _dt.date.fromisoformat(end_date_str)
+    num_days = max((end_dt - start_dt).days + 1, 1)
 
     # --- Inventory Snapshot Value ---
     # This is a CURRENT, as-of-right-now figure -- there's no historical daily
@@ -4803,6 +4903,28 @@ async def api_net_cash_yield(request: Request, year: int = None):
 
 @app.get("/api/analytics/monthly-trend")
 async def api_analytics_monthly_trend(request: Request, start: str = None, end: str = None):
+    """See _compute_monthly_trend_payload for what this actually computes --
+    this route is now just a thin cache-check wrapper around it (same
+    read-through cache pattern as /api/analytics), since Green Revenue by
+    month alone makes one live computation PER MONTH in range, which was
+    almost certainly the single biggest source of the page feeling slow."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import datetime as _dt
+    now = _dt.datetime.utcnow()
+    start_str = f"{start}-01" if start else "2025-01-01"
+    end_str = f"{end}-01" if end else now.strftime("%Y-%m-01")
+
+    cached = _get_analytics_cache(business_id, "monthly_trend", start_str, end_str)
+    if cached is not None:
+        return cached
+
+    payload = _compute_monthly_trend_payload(business_id, start_str, end_str)
+    _set_analytics_cache(business_id, "monthly_trend", start_str, end_str, payload)
+    return payload
+
+def _compute_monthly_trend_payload(business_id: str, start_str: str, end_str: str) -> dict:
     """Inventory spend vs. sales, grouped by month -- straight from acquisitions.cost
     (grouped by acquisitions.date), orders.gross_revenue (grouped by
     orders.order_date), and cash payments in that same month (via
@@ -4824,16 +4946,10 @@ async def api_analytics_monthly_trend(request: Request, start: str = None, end: 
     transaction history to reconstruct it from, so it genuinely can only go as
     far back as real snapshots exist (the CSV backfill + daily tracking).
 
-    start/end are "YYYY-MM" strings. Defaults: start=2025-01 (the user's requested
-    default horizon), end=the current month."""
-    business_id = require_auth(request)
-    if not business_id:
-        raise HTTPException(401, "Unauthorized")
+    start_str/end_str are "YYYY-MM-01" full date strings, already resolved by
+    the route handler above (defaults: start=2025-01, end=the current month)."""
     import datetime as _dt
-
     now = _dt.datetime.utcnow()
-    start_str = f"{start}-01" if start else "2025-01-01"
-    end_str = f"{end}-01" if end else now.strftime("%Y-%m-01")
 
     # Full calendar month list between start and end (not just months that
     # happen to have acquisitions/order activity), so all three charts share a
