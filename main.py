@@ -3187,11 +3187,19 @@ async def list_acquisitions(request: Request):
         # eBay-generated SKU like "AM-1024" that coincidentally looks like a valid
         # lot-prefixed SKU) was being counted as correctly matched -- but that match
         # was never actually verified by anyone through Lister's own lot system for
-        # legacy v1 listings. Now: a locked listing with NO explicit sku_override on
-        # record always needs review, regardless of whether its raw SKU happens to
-        # look plausible, since a coincidental format match isn't the same as a
-        # confirmed assignment.
-        needs_review = needs_sku or (not sku_editable and not override_sku)
+        # legacy v1 listings. A locked listing (one Lister actually tracks via a real
+        # listings row, published through the v1 pusher) with NO explicit sku_override
+        # on record needs review, regardless of whether its raw SKU looks plausible.
+        #
+        # BUG FIXED HERE: the first version of this check fired for ANY item with no
+        # matched_listing at all -- which is the completely normal state for most
+        # eBay-native items Lister never touched, not a sign of anything wrong. That
+        # made nearly everything show up as "needs review" (confirmed: user reported
+        # Uncategorized was suddenly showing basically the whole inventory). Only
+        # apply this check when matched_listing actually exists -- i.e. Lister
+        # genuinely knows about this item via a real listing row, which is the actual
+        # case this was built for.
+        needs_review = needs_sku or (matched_listing is not None and not sku_editable and not override_sku)
 
         if sku and not needs_review and prefix in known_lot_skus:
             value_by_prefix[prefix] = value_by_prefix.get(prefix, 0) + value
@@ -3205,6 +3213,7 @@ async def list_acquisitions(request: Request):
                 "value": round(value, 2), "needs_sku": needs_sku,
                 "listing_id": matched_listing.get("id") if matched_listing else None,
                 "sku_editable": sku_editable, "has_override": bool(override_sku),
+                "has_matched_listing": matched_listing is not None,
             })
     uncategorized_items.sort(key=lambda r: r["value"], reverse=True)
     active_synced_at = max((r.get("updated_at") for r in active_rows if r.get("updated_at")), default=None)
