@@ -334,12 +334,12 @@ select.field-input { background: #fff; color: #0f172a; }
     <div class="action-bar">
       <button class="btn" onclick="selectAll()">☑ Select All</button>
       <button class="btn" onclick="deselectAll()">☐ Deselect</button>
-      <button class="btn" style="color:#a78bfa;border-color:#7c3aed;" onclick="autofillLotSku()" title="Fills in the Lot SKU for selected items using the lot that was active when each was scanned — no waiting on scan completion">🏷️ Autofill Lot SKU</button>
       <button class="btn" style="color:#f59e0b;border-color:#b45309;" onclick="rematchCategory()" title="Re-runs eBay category matching on selected items (or everything stuck on the generic 'Other Business & Industrial' fallback) — needed because already-scanned items never get re-checked automatically once they're inside the allowed category root, even if the matching logic gets fixed later">📂 Re-match Category</button>
       <div class="tile-cond-toggle" style="margin-left:0;" title="Which category tree matching stays inside. Stays where you set it until you change it.">
         <button class="tile-cond-btn catmode-btn" data-catmode="industrial" onclick="setCategoryMode('industrial')">B&amp;I</button>
         <button class="tile-cond-btn catmode-btn" data-catmode="motors" onclick="setCategoryMode('motors')">Auto Parts</button>
       </div>
+      <button class="btn" style="color:#a78bfa;border-color:#7c3aed;" onclick="autofillLotSku()" title="Fills in the Lot SKU for selected items using the lot that was active when each was scanned — no waiting on scan completion">🏷️ Autofill Lot SKU</button>
       <div style="display:flex;align-items:center;gap:4px;" title="Sets the active lot — same as the dropdown on the Fast Scan/Upload tabs.">
         <span style="font-size:11px;color:var(--muted);white-space:nowrap;">SKU:</span>
         <select class="field-input" id="actionbar-lot-select" onchange="setActiveLotSku(this.value)" style="font-size:12px;padding:5px 8px;width:100px;">
