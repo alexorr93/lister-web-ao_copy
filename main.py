@@ -7424,7 +7424,22 @@ def _scrape_all_lot_photos(listing_url: str, lot_title: Optional[str] = None) ->
     Best-effort: works for server-rendered pages, may return few/no results on
     heavily JS-rendered sites. If lot_title is given, tries to scope the search to the
     DOM container holding that title first (avoids sweeping up unrelated 'related
-    lots'/sidebar thumbnails elsewhere on the page); falls back to whole-page search."""
+    lots'/sidebar thumbnails elsewhere on the page); falls back to whole-page search.
+
+    Two bugs fixed here after they silently broke every Roller "Flag as LOT" re-scrape:
+    1. soup.find(string=...) also matches the invisible <title> tag in <head> (which
+       repeats the lot title) -- that node has no images, so the climb-up-the-DOM
+       loop below it kept climbing until it hit <html>/[document], scoping to the
+       ENTIRE page instead of the actual photo gallery. Searching soup.body instead
+       of soup keeps it out of <head> entirely.
+    2. Even body-scoped, the real content container still mixes in the site's own
+       nav/UI graphics (logos, badges, a Facebook tracking pixel), pushing the count
+       over the ">6 images = untrustworthy" sanity check below and silently
+       reverting to the single already-known photo every time. Real listing photos
+       are essentially always .jpg/.jpeg (camera/phone photos); site UI chrome is
+       .png/.svg/.gif. Preferring .jpg/.jpeg when any are present filters that
+       chrome out without needing a per-site selector."""
+    import re
     import requests as _requests
     from bs4 import BeautifulSoup
     from urllib.parse import urljoin
@@ -7453,8 +7468,8 @@ def _scrape_all_lot_photos(listing_url: str, lot_title: Optional[str] = None) ->
         soup = BeautifulSoup(resp.text, "html.parser")
 
         scoped = None
-        if lot_title:
-            title_node = soup.find(string=lambda t: t and lot_title.strip()[:40] in t)
+        if lot_title and soup.body:
+            title_node = soup.body.find(string=lambda t: t and lot_title.strip()[:40] in t)
             if title_node:
                 container = title_node.parent
                 for _ in range(6):
@@ -7466,7 +7481,11 @@ def _scrape_all_lot_photos(listing_url: str, lot_title: Optional[str] = None) ->
         if scoped is not None:
             _collect(scoped.find_all("img"))
         if not urls:
-            _collect(soup.find_all("img"))
+            _collect((soup.body or soup).find_all("img"))
+
+        jpg_urls = [u for u in urls if re.search(r"\.jpe?g(?:$|\?)", u, re.IGNORECASE)]
+        if jpg_urls:
+            urls = jpg_urls
     except Exception as e:
         print(f"lot photo re-scrape failed for {listing_url}: {e}")
     return urls[:10]
