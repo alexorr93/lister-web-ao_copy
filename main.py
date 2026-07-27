@@ -7856,6 +7856,8 @@ def push_listing_to_shopify(listing: dict, image_urls_override: list = None) -> 
 
     data = r.json().get("product", {})
     product_id = data.get("id")
+    variants = data.get("variants") or []
+    variant_id = variants[0].get("id") if variants else None
 
     channel_result = {}
     if product_id:
@@ -7865,7 +7867,42 @@ def push_listing_to_shopify(listing: dict, image_urls_override: list = None) -> 
             # product itself was created successfully — a channel-publish failure shouldn't fail the whole call
             channel_result = {"error": str(e)}
 
-    return {"product_id": product_id, "status": data.get("status"), "handle": data.get("handle"), "channels": channel_result}
+    return {
+        "product_id": product_id, "variant_id": variant_id, "status": data.get("status"),
+        "handle": data.get("handle"), "channels": channel_result,
+        "sku": variants[0].get("sku") if variants else sku,
+        "price": float(variants[0].get("price")) if variants else price,
+        "quantity": variants[0].get("inventory_quantity") if variants else qty,
+        "title": data.get("title") or title,
+    }
+
+def _record_new_shopify_publish_locally(business_id: str, result: dict, ebay_id: str = None) -> None:
+    """Writes the just-created Shopify product/variant into shopify_inventory and
+    links it on the matching inventory_match row directly, using the data
+    push_listing_to_shopify already returned -- instead of triggering a full
+    eBay+Shopify catalog re-sync just to reflect ONE new item, which is what
+    the frontend was doing before (confirmed: this was the actual cause of
+    publishing feeling 'crazy slow' and blocking back-to-back publishes,
+    since a full re-sync ran after every single one). Same column mapping
+    fetch_shopify_inventory_items/api_inventory_sync already use, so this
+    row looks identical to one the normal sync would have produced."""
+    variant_id = result.get("variant_id")
+    if not variant_id:
+        return  # nothing to record locally if Shopify didn't return a variant
+    try:
+        supabase.table("shopify_inventory").upsert({
+            "id": str(variant_id), "business_id": business_id, "product_id": str(result.get("product_id") or ""),
+            "sku": result.get("sku"), "title": result.get("title"), "price": result.get("price"),
+            "quantity": result.get("quantity"), "status": result.get("status"), "handle": result.get("handle"),
+        }).execute()
+        if ebay_id:
+            supabase.table("inventory_match").update({"shopify_id": str(variant_id)})\
+                .eq("business_id", business_id).eq("ebay_id", ebay_id).execute()
+    except Exception as e:
+        # Never let this block the publish response -- the Shopify product itself
+        # already exists successfully at this point; worst case here is the local
+        # tables stay stale until the next real sync, same as before this existed.
+        print(f"_record_new_shopify_publish_locally failed (publish itself still succeeded): {e}")
 
 def publish_product_to_channels(domain: str, token: str, product_id, target_channel_names=None) -> dict:
     """Publishes an already-created product to additional sales channels (e.g. Google & YouTube),
@@ -9990,6 +10027,7 @@ async def api_shopify_publish(item_id: str, request: Request):
         listing = res.data[0]
         _require_valid_lot_sku_for_publish(business_id, listing)
         result = push_listing_to_shopify(listing)
+        _record_new_shopify_publish_locally(business_id, result)  # writes shopify_inventory only here (no ebay_id arg) -- inventory_match linking is _maybe_confirm_inventory_match's job below, already existing
         try:
             supabase.table("listings").update({
                 "shopify_product_id": str(result.get("product_id") or ""),
@@ -10134,6 +10172,7 @@ async def publish_ebay_only_to_shopify(row_id: str, request: Request):
     _require_valid_lot_sku_for_publish(business_id, synthetic_listing)
     try:
         result = push_listing_to_shopify(synthetic_listing, image_urls_override=image_urls)
+        _record_new_shopify_publish_locally(business_id, result, ebay_id=row_id)
         return {"ok": True, **result}
     except HTTPException:
         raise

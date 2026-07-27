@@ -343,7 +343,9 @@ async function publishRowToShopify(btn, listingId) {
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed');
     toast('Published to Shopify ✓');
-    syncInventory();
+    loadInventory();  // lightweight local reload -- the publish endpoint already wrote
+                       // the new Shopify product into local tables directly, no need
+                       // for a full eBay+Shopify catalog re-sync just to reflect this
   } catch(e) {
     alert(`Failed to publish: ${e.message}`);
     btn.disabled = false;
@@ -360,7 +362,7 @@ async function publishEbayOnlyToShopify(btn, rowId) {
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed');
     toast('Published to Shopify ✓');
-    syncInventory();
+    loadInventory();  // same reasoning as the other publish path above
   } catch(e) {
     alert(`Failed to publish: ${e.message}`);
     btn.disabled = false;
