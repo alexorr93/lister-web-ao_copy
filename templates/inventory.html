@@ -78,6 +78,7 @@ tr:last-child td { border-bottom: none; }
   <div class="filter-bar">
     <button class="btn btn-primary" onclick="syncInventory()" title="Shopify: live API call, pulls fresh right now. eBay: reads from the local cache last filled by 'Sync Active Listings' on the Lots page — does NOT call eBay itself.">🔄 Sync Inventory <span style="font-size:10px;opacity:.8;">(Shopify: live · eBay: cached — sync on Lots page first)</span></button>
     <button class="btn" onclick="pullEbayPhotos()" title="Downloads up to 2 real photos per eBay-ONLY item (skips anything already matched to a Shopify product) into Lister's own storage — a one-time step needed before these items can be published to Shopify.">📥 Pull eBay-Only Photos (into our storage)</button>
+    <button class="btn" id="hidden-inventory-toggle" onclick="toggleHiddenInventoryPanel()">🙈 Hidden Items</button>
     <input type="text" class="field-input" id="search-input" placeholder="Search title/SKU..." oninput="renderTable()" style="width:260px;"/>
     <select class="field-input" id="filter-select" onchange="renderTable()">
       <option value="">All</option>
@@ -89,6 +90,7 @@ tr:last-child td { border-bottom: none; }
   </div>
   <div id="sync-status" class="status-msg"></div>
   <div id="photo-pull-status" class="status-msg"></div>
+  <div id="hidden-inventory-area" style="display:none;margin-bottom:14px;"></div>
 
   <div class="summary-row" id="summary-row" style="display:none;">
     <div class="summary-card"><div class="num" id="stat-total">0</div><div class="label">Total Rows</div></div>
@@ -268,7 +270,7 @@ function renderTable() {
 
   const th = (key, label) => `<th onclick="setInvSort('${key}')" style="cursor:pointer;">${label}${invSortKey===key ? (invSortDir===1?' ▲':' ▼') : ''}</th>`;
   let html = `<table><thead><tr>
-    <th></th>${th('title','Title')}${th('ebay_item_id','eBay Item ID')}${th('ebay_sku','eBay SKU')}${th('ebay_qty','eBay Qty')}${th('ebay_created_at','Created')}${th('shopify_product_id','Shopify Product ID')}${th('shopify_sku','Shopify SKU')}${th('shopify_qty','Shopify Qty')}${th('shopify_price','Shopify Price')}<th>Status</th><th>Matched By</th><th>HD_ID</th><th>Action</th><th>Match</th>
+    <th></th>${th('title','Title')}${th('ebay_item_id','eBay Item ID')}${th('ebay_sku','eBay SKU')}${th('ebay_qty','eBay Qty')}${th('ebay_created_at','Created')}${th('shopify_product_id','Shopify Product ID')}${th('shopify_sku','Shopify SKU')}${th('shopify_qty','Shopify Qty')}${th('shopify_price','Shopify Price')}<th>Status</th><th>Matched By</th><th>HD_ID</th><th>Action</th><th>Match</th><th>Hide</th>
   </tr></thead><tbody>`;
   for (const r of filtered) {
     const status = !r.ebay_item_id ? '<span class="missing">Shopify only</span>'
@@ -325,6 +327,7 @@ function renderTable() {
       <td>${hdCell}</td>
       <td>${actionCell}</td>
       <td>${matchCell}</td>
+      <td><button class="btn" style="font-size:11px;padding:4px 8px;color:var(--red,#ef4444);" onclick="hideInventoryRow(this, '${r.id}', '${escapeHtml(r.title).replace(/'/g, "\\'")}')" title="Permanently removes this row from the list. Undo any time from the Unhide panel at the top.">🙈 Hide</button></td>
     </tr>`;
   }
   html += '</tbody></table>';
@@ -363,6 +366,73 @@ async function publishEbayOnlyToShopify(btn, rowId) {
     btn.disabled = false;
     btn.textContent = '🛍️ Publish to Shopify (eBay-only)';
   }
+}
+
+async function hideInventoryRow(btn, rowId, title) {
+  if (!confirm(`Hide "${title}" from this list? It won't show up here again unless you unhide it from the panel at the top.`)) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/api/inventory/${rowId}/hide`, {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    toast('Hidden ✓');
+    loadInventory();
+    loadHiddenInventory();
+  } catch(e) {
+    alert(`Failed to hide: ${e.message}`);
+    btn.disabled = false;
+  }
+}
+
+async function unhideInventoryRow(btn, rowId) {
+  btn.disabled = true;
+  btn.textContent = 'Unhiding...';
+  try {
+    const r = await fetch(`/api/inventory/${rowId}/unhide`, {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    toast('Unhidden ✓');
+    loadInventory();
+    loadHiddenInventory();
+  } catch(e) {
+    alert(`Failed to unhide: ${e.message}`);
+    btn.disabled = false;
+    btn.textContent = 'Unhide';
+  }
+}
+
+async function loadHiddenInventory() {
+  try {
+    const r = await fetch('/api/inventory/hidden');
+    const data = await r.json();
+    const hidden = data.hidden || [];
+    const area = document.getElementById('hidden-inventory-area');
+    const toggleBtn = document.getElementById('hidden-inventory-toggle');
+    toggleBtn.textContent = `🙈 Hidden Items (${hidden.length})`;
+    if (!hidden.length) {
+      area.innerHTML = '<div class="empty">No hidden items.</div>';
+      return;
+    }
+    let html = '<table><thead><tr><th>Title</th><th>HD_ID</th><th></th></tr></thead><tbody>';
+    for (const h of hidden) {
+      html += `<tr>
+        <td>${escapeHtml(h.title || '')}</td>
+        <td class="muted">${escapeHtml(h.hd_id || '—')}</td>
+        <td><button class="btn" style="font-size:11px;padding:4px 8px;" onclick="unhideInventoryRow(this, '${h.id}')">Unhide</button></td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    area.innerHTML = html;
+  } catch(e) {
+    console.error('Failed to load hidden inventory', e);
+  }
+}
+
+function toggleHiddenInventoryPanel() {
+  const area = document.getElementById('hidden-inventory-area');
+  const isOpen = area.style.display !== 'none';
+  area.style.display = isOpen ? 'none' : '';
+  if (!isOpen) loadHiddenInventory();
 }
 
 let mmSourceRowId = null;
@@ -426,6 +496,7 @@ async function confirmManualMatch(candidateRowId) {
 }
 
 loadInventory();
+loadHiddenInventory();
 </script>
 </body>
 </html>

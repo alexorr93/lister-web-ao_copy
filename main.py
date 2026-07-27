@@ -9859,6 +9859,8 @@ async def list_inventory(request: Request):
 
     results = []
     for row in inv_rows:
+        if row.get("hidden"):
+            continue
         e = ebay_by_id.get(row.get("ebay_id")) or {}
         s = shopify_by_id.get(row.get("shopify_id")) or shopify_by_product_id.get(row.get("shopify_id")) or {}
         matching_listing = listing_by_ebay_id.get(row.get("ebay_id"))
@@ -9875,6 +9877,43 @@ async def list_inventory(request: Request):
             "qty_variance": (e.get("quantity") is not None and s.get("quantity") is not None and e.get("quantity") != s.get("quantity")),
         })
     return {"inventory": results}
+
+@app.post("/api/inventory/{row_id}/hide")
+async def hide_inventory_row(row_id: str, request: Request):
+    """Permanently removes a row from the main Inventory list, without deleting
+    any underlying data -- just a hidden flag on inventory_match. Reversible
+    via the Unhide list at the top of the page."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    res = supabase.table("inventory_match").update({"hidden": True})\
+        .eq("id", row_id).eq("business_id", business_id).execute()
+    if not res.data:
+        raise HTTPException(404, "Row not found")
+    return {"ok": True, "id": row_id, "hidden": True}
+
+@app.post("/api/inventory/{row_id}/unhide")
+async def unhide_inventory_row(row_id: str, request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    res = supabase.table("inventory_match").update({"hidden": False})\
+        .eq("id", row_id).eq("business_id", business_id).execute()
+    if not res.data:
+        raise HTTPException(404, "Row not found")
+    return {"ok": True, "id": row_id, "hidden": False}
+
+@app.get("/api/inventory/hidden")
+async def list_hidden_inventory(request: Request):
+    """Every currently-hidden row, for the Unhide panel -- title is enough to
+    identify what you're restoring, doesn't need the full eBay/Shopify detail
+    the main list shows."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    res = supabase.table("inventory_match").select("id,title,hd_id").eq("business_id", business_id)\
+        .eq("hidden", True).execute()
+    return {"hidden": res.data or []}
 
 @app.get("/api/ebay/debug-raw-order/{order_id}")
 async def ebay_debug_raw_order(order_id: str, request: Request):
