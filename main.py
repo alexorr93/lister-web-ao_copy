@@ -7359,20 +7359,31 @@ distinct item present. Rules:
 - If a photo shows only a closed box/case/container and the title/description claims specific
   contents you cannot see, still list the claimed contents as one entry but set confidence to
   "low" and note in item_description that contents are unverified from the photo.
+- Multiple photos may show the SAME physical item from different angles, or the same item
+  repeated across photos. Treat all attached photos as views of ONE lot: return one entry per
+  distinct physical item/item-group in the whole lot, not one entry per photo. Do not duplicate
+  an item just because it appears in more than one photo.
 - quantity: a short string like "1", "4", "unknown".
 
 Return ONLY a raw JSON array, no markdown, no backticks:
 [{{"item_name": "...", "item_description": "...", "quantity": "...", "confidence": "high"|"low"}}]
 If you truly cannot identify anything, return []."""
 
-def _gemini_itemize_call(model, prompt: str, photo_url: Optional[str]) -> list:
-    """One Gemini call. If photo_url is given, fetches and attaches that single image."""
+def _gemini_itemize_call(model, prompt: str, photo_urls) -> list:
+    """One Gemini call with all of a lot's photos attached together, so the model can
+    see the whole lot at once and dedupe items that appear in multiple photos instead
+    of emitting one copy per photo. photo_urls may be a single url string, a list of
+    urls, or None/empty for a text-only call."""
     import json, re
     from json_repair import repair_json
     import requests as _requests
 
+    if isinstance(photo_urls, str):
+        photo_urls = [photo_urls]
+    photo_urls = photo_urls or []
+
     parts = [prompt]
-    if photo_url:
+    for photo_url in photo_urls:
         try:
             img = _requests.get(photo_url, timeout=20)
             img.raise_for_status()
@@ -7396,8 +7407,10 @@ def _gemini_itemize_call(model, prompt: str, photo_url: Optional[str]) -> list:
         return json.loads(repair_json(raw))
 
 def _itemize_lot_deep(lot: dict) -> list:
-    """Bulk-lot itemization: one Gemini call PER PHOTO, results merged. Deletes any
-    existing (e.g. title-only) items first."""
+    """Bulk-lot itemization: ONE Gemini call with all of the lot's photos attached
+    together, so the model can dedupe items that show up in multiple photos itself
+    instead of us getting one copy of each item per photo. Deletes any existing
+    (e.g. title-only) items first."""
     import google.generativeai as genai
 
     gemini_key = os.getenv("GEMINI_API_KEY", "")
@@ -7412,18 +7425,10 @@ def _itemize_lot_deep(lot: dict) -> list:
                                     description=lot.get("description") or "(no description)")
     photo_urls = lot.get("photo_urls") or []
 
-    all_items = []
-    if photo_urls:
-        for url in photo_urls:
-            try:
-                all_items.extend(_gemini_itemize_call(model, prompt, url))
-            except Exception as e:
-                print(f"itemize: skipping photo {url} after Gemini error: {e}")
-    else:
-        try:
-            all_items.extend(_gemini_itemize_call(model, prompt, None))
-        except Exception as e:
-            raise HTTPException(500, f"Gemini itemize error: {e}")
+    try:
+        all_items = _gemini_itemize_call(model, prompt, photo_urls)
+    except Exception as e:
+        raise HTTPException(500, f"Gemini itemize error: {e}")
 
     supabase.table("auction_lot_items").delete().eq("lot_id", lot_id).execute()
     inserted = []
