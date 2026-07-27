@@ -2417,8 +2417,8 @@ function renderAuctionTable() {
   const rows = lots.map(lot => {
     const photos = lot.photo_urls || [];
     const imgHtml = photos.length
-      ? `<img src="${photos[0]}" style="width:56px;height:56px;border-radius:8px;object-fit:cover;" onerror="this.style.display='none'"/>`
-      : `<div class="auction-img" style="width:56px;height:56px;">🔨</div>`;
+      ? `<img src="${photos[0]}" style="width:220px;height:220px;border-radius:10px;object-fit:cover;cursor:zoom-in;" onerror="this.style.display='none'" onclick="window.open('${photos[0]}','_blank')"/>`
+      : `<div class="auction-img" style="width:220px;height:220px;font-size:3rem;">🔨</div>`;
     const itemsHtml = lot.items && lot.items.length
       ? lot.items.map(it => `<div><b>${it.item_name || 'Unknown item'}</b>${it.quantity ? ' × ' + it.quantity : ''}</div>`).join('')
       : '';
