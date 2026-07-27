@@ -6970,6 +6970,30 @@ SITE_SCRAPERS = {
     "dickensheet": _fetch_dickensheet_lots,
 }
 
+@app.get("/api/auction/capture/_debug/scrape-photos")
+async def debug_scrape_photos(request: Request, url: str, title: str = ""):
+    """Diagnostic: runs _scrape_all_lot_photos exactly as flag-as-lot does, but
+    returns the raw result (pre-sanity-check) instead of writing anything, so we can
+    see from the server's own network vantage point (which may behave differently
+    than a local/dev machine -- datacenter IPs sometimes get treated differently by
+    a site's bot-detection) whether the scrape itself is finding photos at all."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import requests as _requests
+    try:
+        probe = _requests.get(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        }, timeout=20)
+        probe_status = probe.status_code
+        probe_len = len(probe.text)
+    except Exception as e:
+        probe_status, probe_len = None, None
+        print(f"debug_scrape_photos probe failed: {e}")
+    found = _scrape_all_lot_photos(url, title or None)
+    return {"probe_status": probe_status, "probe_html_length": probe_len, "found_count": len(found), "found": found}
+
 @app.get("/api/auction/capture/_debug/roller-schema")
 async def debug_roller_schema(request: Request):
     """One-time diagnostic: asks Roller's own GraphQL API what its real 'lots' field
