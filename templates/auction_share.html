@@ -14,9 +14,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .page-sub a{color:#93c5fd;}
 .loading, .error{color:#64748b;font-size:14px;padding:40px 0;text-align:center;}
 .error{color:#f87171;}
-.lot-card{background:#1e2535;border:1px solid #2d3348;border-radius:14px;overflow:hidden;margin-bottom:14px;display:grid;grid-template-columns:140px 1fr;}
-.lot-img{background:#161b28;display:flex;align-items:center;justify-content:center;}
-.lot-img img{width:100%;height:100%;object-fit:cover;display:block;min-height:140px;}
+.lot-card{background:#1e2535;border:1px solid #2d3348;border-radius:14px;overflow:hidden;margin-bottom:14px;display:grid;grid-template-columns:140px 1fr;align-items:start;}
+.lot-img{background:#161b28;display:flex;align-items:center;justify-content:center;width:140px;height:140px;overflow:hidden;}
+.lot-img img{width:100%;height:100%;object-fit:cover;display:block;}
 .lot-img .placeholder{font-size:32px;color:#2d3348;}
 .lot-body{padding:14px 16px;display:flex;flex-direction:column;gap:8px;}
 .lot-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
@@ -44,6 +44,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 <script>
 function money(v){ return v == null ? '' : '$' + Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function hiRes(url){
+  // BidSpotter's CDN serves a tiny ?h=175 thumbnail by default (fine for a 56px table row,
+  // but blurry/upscaled when shown in this larger card) -- ask for a bigger one directly.
+  if (!url || !url.includes('globalauctionplatform.com')) return url;
+  return url.replace(/([?&])h=\d+/, '$1h=400');
+}
 
 async function load() {
   const sessionId = location.pathname.split('/').filter(Boolean).pop();
@@ -70,7 +76,7 @@ function renderLots(lots) {
   }
   document.getElementById('lots-container').innerHTML = lots.map(lot => {
     const photo = (lot.photo_urls && lot.photo_urls[0]) || null;
-    const imgHtml = photo ? `<img src="${esc(photo)}" alt="">` : `<div class="placeholder">🔨</div>`;
+    const imgHtml = photo ? `<img src="${esc(hiRes(photo))}" alt="">` : `<div class="placeholder">🔨</div>`;
     const itemsHtml = (lot.items && lot.items.length)
       ? `<div class="items">${lot.items.map(it => `${esc(it.item_name || 'Unknown item')}${it.quantity ? ' × ' + esc(it.quantity) : ''}`).join('<br>')}</div>`
       : '';
