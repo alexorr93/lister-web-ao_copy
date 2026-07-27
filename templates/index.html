@@ -2392,6 +2392,29 @@ async function deleteOneLot(lotId) {
   } catch(e) { toast('Failed to remove lot', 'error'); }
 }
 
+function copyResearchPrompt(lotId) {
+  const lot = auctionLotsCache.find(l => l.id === lotId);
+  if (!lot) return;
+  const photos = lot.photo_urls || [];
+  const lines = [
+    `Research this auction lot and give me your own best estimate (look at the photos directly and do real web research, don't just repeat a generic guess):`,
+    ``,
+    `Lot ${lot.lot_number || '?'}: ${lot.title || 'Unknown'}`,
+    lot.description ? `Description: ${lot.description}` : null,
+    lot.listing_url ? `Listing: ${lot.listing_url}` : null,
+    photos.length ? `Photos:\n${photos.map(p => '- ' + p).join('\n')}` : null,
+    ``,
+    `Reply in EXACTLY this format, one line each, numbers only (no ranges unless truly warranted):`,
+    `Resale value = $X`,
+    `Price to pay (max bid) = $X`,
+    `Liquidity = High/Medium/Low`,
+  ].filter(Boolean).join('\n');
+  navigator.clipboard.writeText(lines).then(
+    () => toast('Research prompt copied — paste into Claude', 'success'),
+    () => toast('Could not copy to clipboard', 'error')
+  );
+}
+
 async function deleteSelectedLots() {
   if (!selectedLotIds.size) { toast('Nothing selected', 'error'); return; }
   const n = selectedLotIds.size;
@@ -2477,7 +2500,10 @@ function renderAuctionTable() {
       <td style="max-width:220px;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
           <div style="font-weight:700;font-size:12px;color:var(--text);">Lot ${lot.lot_number || '?'}: ${lot.title || 'Unknown'}</div>
-          <button onclick="deleteOneLot('${lot.id}')" title="Remove this lot" style="flex-shrink:0;background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;padding:2px;">✕</button>
+          <div style="flex-shrink:0;display:flex;gap:2px;">
+            <button onclick="copyResearchPrompt('${lot.id}')" title="Copy a research prompt for this lot to paste into Claude" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;line-height:1;padding:2px;">🧠</button>
+            <button onclick="deleteOneLot('${lot.id}')" title="Remove this lot" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;padding:2px;">✕</button>
+          </div>
         </div>
         ${lot.current_bid != null ? `<div style="font-size:11px;color:var(--muted);">Bid: $${parseFloat(lot.current_bid).toFixed(2)}</div>` : ''}
         ${lot.listing_url ? `<a href="${lot.listing_url}" target="_blank" style="font-size:10px;color:var(--accent);">View ↗</a>` : ''}
