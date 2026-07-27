@@ -7896,8 +7896,24 @@ def _record_new_shopify_publish_locally(business_id: str, result: dict, ebay_id:
             "quantity": result.get("quantity"), "status": result.get("status"), "handle": result.get("handle"),
         }).execute()
         if ebay_id:
-            supabase.table("inventory_match").update({"shopify_id": str(variant_id)})\
-                .eq("business_id", business_id).eq("ebay_id", ebay_id).execute()
+            # Fetch by business_id only (a safe, definitely-consistent comparison)
+            # and match ebay_id as a plain STRING comparison in Python, rather
+            # than a SQL-level .eq("ebay_id", ebay_id) -- a row_id/ebay_id coming
+            # in as a plain string from a URL path, compared directly against
+            # whatever type that column actually is in Postgres, is exactly the
+            # class of silent-zero-rows-matched bug that's hit this session
+            # multiple times already (text vs uuid, text vs date). Comparing as
+            # strings in Python sidesteps that risk entirely, at the cost of
+            # fetching more rows than strictly needed -- an acceptable tradeoff
+            # for a once-per-publish operation, not something on the hot path.
+            candidates = _fetch_all_for_business(business_id, "inventory_match", "id,ebay_id")
+            match_row = next((r for r in candidates if str(r.get("ebay_id")) == str(ebay_id)), None)
+            if match_row:
+                supabase.table("inventory_match").update({"shopify_id": str(variant_id)})\
+                    .eq("id", match_row["id"]).execute()
+            else:
+                print(f"_record_new_shopify_publish_locally: no inventory_match row found for ebay_id={ebay_id} -- "
+                      f"local link not made, item may keep showing as eBay-only until the next full sync")
     except Exception as e:
         # Never let this block the publish response -- the Shopify product itself
         # already exists successfully at this point; worst case here is the local
