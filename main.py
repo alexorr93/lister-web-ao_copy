@@ -170,6 +170,40 @@ async def start_background_jobs():
     asyncio.create_task(shopify_sync_worker())
     asyncio.create_task(analytics_snapshot_worker())
     asyncio.create_task(analytics_cache_refresh_worker())
+    asyncio.create_task(auction_archive_worker())
+
+async def auction_archive_worker():
+    """Runs once a day (00:20 UTC) and archives any capture session whose lots'
+    auction(s) have all closed -- keyed off the LATEST auction_ends_at among that
+    session's lots, since a single capture (e.g. one multi-day watchlist scan) can
+    span lots from several different closing dates. Archived sessions are hidden
+    from the normal picker (list_capture_sessions) but never deleted -- all lots,
+    pricing, and notes stay intact in Supabase in case they're needed later."""
+    import asyncio, datetime as _dt
+    while True:
+        now = _dt.datetime.now(_dt.timezone.utc)
+        next_run = now.replace(hour=0, minute=20, second=0, microsecond=0)
+        if next_run <= now:
+            next_run += _dt.timedelta(days=1)
+        await asyncio.sleep(max((next_run - now).total_seconds(), 5))
+        try:
+            sessions = supabase.table("auction_capture_sessions").select("id").eq("archived", False).execute().data
+            for sess in sessions:
+                try:
+                    lots = supabase.table("auction_lots").select("auction_ends_at").eq("session_id", sess["id"]).execute().data
+                    end_dates = [l["auction_ends_at"] for l in lots if l.get("auction_ends_at")]
+                    if not end_dates:
+                        continue  # no known auction date yet for any lot in this session -- leave it alone
+                    latest = max(_dt.datetime.fromisoformat(d.replace("Z", "+00:00")) for d in end_dates)
+                    if latest < now:
+                        supabase.table("auction_capture_sessions").update({
+                            "archived": True, "archived_at": now.isoformat(),
+                        }).eq("id", sess["id"]).execute()
+                        print(f"auction_archive_worker: archived session {sess['id']} (latest auction ended {latest.isoformat()})")
+                except Exception as e:
+                    print(f"auction_archive_worker: session {sess['id']} failed: {e}")
+        except Exception as e:
+            print(f"auction_archive_worker error: {e}")
 
 async def shopify_sync_worker():
     """Runs the eBay-live-qty -> Shopify-qty sync automatically once per hour, at
@@ -7042,16 +7076,16 @@ async def create_capture_session(request: Request, body: AuctionCaptureSessionCr
     return session
 
 @app.get("/api/auction/capture/sessions")
-async def list_capture_sessions(request: Request):
+async def list_capture_sessions(request: Request, include_archived: bool = False):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
-    res = (supabase.table("auction_capture_sessions")
-           .select("*")
-           .eq("business_id", str(business_id))
-           .order("created_at", desc=True)
-           .limit(100)
-           .execute())
+    q = (supabase.table("auction_capture_sessions")
+         .select("*")
+         .eq("business_id", str(business_id)))
+    if not include_archived:
+        q = q.eq("archived", False)
+    res = q.order("created_at", desc=True).limit(100).execute()
     return res.data
 
 @app.patch("/api/auction/capture/sessions/{session_id}")
@@ -7143,6 +7177,7 @@ class AuctionLotCreate(BaseModel):
     current_bid: Optional[float] = None
     photo_urls: List[str] = []  # external URLs found while browsing; server re-hosts them
     is_bulk_lot: bool = False  # False (default): single item, no AI call, item = title. True: deep multi-photo itemize.
+    auction_ends_at: Optional[str] = None  # ISO datetime, when known — drives auto-archiving
 
 def _create_one_lot(body: AuctionLotCreate) -> dict:
     stored_urls = []
@@ -7160,6 +7195,7 @@ def _create_one_lot(body: AuctionLotCreate) -> dict:
         "photo_urls": stored_urls,
         "is_bulk_lot": body.is_bulk_lot,
         "itemized": False,
+        "auction_ends_at": body.auction_ends_at,
     }
     res = supabase.table("auction_lots").insert(row).execute()
     lot = res.data[0]
@@ -7192,6 +7228,7 @@ class AuctionLotBulkItem(BaseModel):
     current_bid: Optional[float] = None
     photo_urls: List[str] = []
     is_bulk_lot: bool = False
+    auction_ends_at: Optional[str] = None
 
 class AuctionLotBulkCreate(BaseModel):
     session_id: str
