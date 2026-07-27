@@ -79,6 +79,7 @@ tr:last-child td { border-bottom: none; }
     <button class="btn btn-primary" onclick="syncInventory()" title="Shopify: live API call, pulls fresh right now. eBay: reads from the local cache last filled by 'Sync Active Listings' on the Lots page — does NOT call eBay itself.">🔄 Sync Inventory <span style="font-size:10px;opacity:.8;">(Shopify: live · eBay: cached — sync on Lots page first)</span></button>
     <button class="btn" onclick="pullEbayPhotos()" title="Downloads up to 2 real photos per eBay-ONLY item (skips anything already matched to a Shopify product) into Lister's own storage — a one-time step needed before these items can be published to Shopify.">📥 Pull eBay-Only Photos (into our storage)</button>
     <button class="btn" id="hidden-inventory-toggle" onclick="toggleHiddenInventoryPanel()">🙈 Hidden Items</button>
+    <button class="btn" onclick="hideNoCreatedDate()" title="Hides every eBay-only row with no Created date in one go, instead of one at a time">🙈 Hide All eBay-Only (No Created Date)</button>
     <input type="text" class="field-input" id="search-input" placeholder="Search title/SKU..." oninput="renderTable()" style="width:260px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="search-nofill-1a"/>
     <select class="field-input" id="filter-select" onchange="renderTable()">
       <option value="">All</option>
@@ -367,6 +368,20 @@ async function publishEbayOnlyToShopify(btn, rowId) {
     alert(`Failed to publish: ${e.message}`);
     btn.disabled = false;
     btn.textContent = '🛍️ Publish to Shopify (eBay-only)';
+  }
+}
+
+async function hideNoCreatedDate() {
+  if (!confirm('Hide every eBay-only row with no Created date? This is permanent (undo any time from the Hidden Items panel).')) return;
+  try {
+    const r = await fetch('/api/inventory/hide-no-created-date', {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    toast(`Hid ${data.hidden_count} item(s) ✓`);
+    loadInventory();
+    loadHiddenInventory();
+  } catch(e) {
+    alert(`Failed: ${e.message}`);
   }
 }
 

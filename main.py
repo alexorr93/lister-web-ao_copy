@@ -10040,6 +10040,37 @@ async def list_hidden_inventory(request: Request):
         .eq("hidden", True).execute()
     return {"hidden": res.data or []}
 
+@app.post("/api/inventory/hide-no-created-date")
+async def hide_no_created_date(request: Request):
+    """Bulk-hides every eBay-only row (has an ebay_id, no shopify_id -- the
+    'eBay only' status) whose ebay_inventory.start_time is empty. Per explicit
+    request: these are treated as safe to clear out in bulk rather than
+    reviewing one at a time. Skips already-hidden rows and anything with a
+    real hd_id (a confirmed/permanent match), same protection every other
+    part of this feature already respects."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+
+    match_rows = _fetch_all_for_business(business_id, "inventory_match", "id,ebay_id,shopify_id,hidden,hd_id")
+    ebay_rows = _fetch_all_for_business(business_id, "ebay_inventory", "id,start_time")
+    start_time_by_id = {str(r.get("id")): r.get("start_time") for r in ebay_rows}
+
+    to_hide = []
+    for row in match_rows:
+        if row.get("hidden") or row.get("hd_id"):
+            continue
+        if not row.get("ebay_id") or row.get("shopify_id"):
+            continue  # not "eBay only"
+        if not start_time_by_id.get(str(row.get("ebay_id"))):
+            to_hide.append(row["id"])
+
+    for row_id in to_hide:
+        supabase.table("inventory_match").update({"hidden": True}).eq("id", row_id).execute()
+
+    return {"hidden_count": len(to_hide)}
+
+
 @app.get("/api/ebay/debug-raw-order/{order_id}")
 async def ebay_debug_raw_order(order_id: str, request: Request):
     business_id = require_auth(request)
