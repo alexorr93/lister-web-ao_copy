@@ -5757,6 +5757,45 @@ Text:
         print(f"Gemini lot extraction failed for {filename}: {e}")
         return []
 
+def _extract_catalog_metadata_via_gemini(raw_text: str, filename: str) -> dict:
+    """Auction catalog PDFs almost always state their location and sale date
+    somewhere on the cover page or header -- pulls auctioneer/state/zip_code/
+    end_date out of the raw text automatically, so the VA doesn't have to type
+    them in by hand every single upload. Called once per upload, only to fill in
+    whichever of these fields the upload form was left blank for -- a value
+    actually typed into the form always wins over whatever this finds."""
+    import os, json
+    import google.generativeai as genai
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    if not gemini_key:
+        return {}
+    genai.configure(api_key=gemini_key)
+    model = genai.GenerativeModel("gemini-2.5-flash")
+    prompt = f"""This is raw text extracted from an auction catalog PDF named "{filename}".
+Find the auction's own details, usually stated on the cover page or in a header/footer:
+the auctioneer/company name running the sale, the US state the auction or item pickup
+location is in (2-letter abbreviation if possible, e.g. "CO"), the ZIP code of that
+location, and the auction's sale/closing date.
+
+Return ONLY a JSON object, no other text, in this exact shape (use null for anything
+not found -- do not guess):
+{{"auctioneer": "..." or null, "state": "..." or null, "zip_code": "..." or null, "end_date": "..." or null}}
+
+Text:
+{raw_text[:20000]}"""
+    try:
+        resp = model.generate_content(prompt)
+        text = resp.text.strip()
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        parsed = json.loads(text.strip())
+        return {k: v for k, v in parsed.items() if v}
+    except Exception as e:
+        print(f"Gemini catalog metadata extraction failed for {filename}: {e}")
+        return {}
+
 @app.post("/api/auction-monitor/upload-pdf")
 async def auction_monitor_upload_pdf(request: Request):
     """The VA-facing path: drop in a catalog PDF (any layout -- doesn't have to
@@ -5829,6 +5868,16 @@ async def auction_monitor_upload_pdf(request: Request):
 
         if not lots:
             raise ValueError("Could not find any lots in this PDF -- the layout may not be recognized")
+
+        # Auto-fill any of auctioneer/state/zip_code/end_date the form left blank,
+        # by reading the catalog PDF's own cover page/header -- a value actually
+        # typed into the form always wins over what this finds.
+        if not (auctioneer and state and zip_code and end_date):
+            auto_meta = _extract_catalog_metadata_via_gemini(raw_text, file.filename)
+            auctioneer = auctioneer or auto_meta.get("auctioneer", "")
+            state = state or auto_meta.get("state", "")
+            zip_code = zip_code or auto_meta.get("zip_code", "")
+            end_date = end_date or auto_meta.get("end_date", "")
 
         meta = {"title": title, "auctioneer": auctioneer, "end_date": end_date, "state": state, "zip_code": zip_code}
         result = _ingest_one_catalog(business_id, catalog_url, "\n".join(f"{l['lot_number']} {l['description']}" for l in lots), meta)
