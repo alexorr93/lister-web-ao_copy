@@ -34,9 +34,36 @@ a { color: #60a5fa; }
   <h1>Auction Monitor</h1>
   <div class="sub">Tracked BidSpotter auction catalogs — title, end date, location, and lot count. Lot Count is a real number but currently an estimate (summed from category tags on the list page, not the exact per-catalog total).</div>
 
+  <div style="background:var(--card);border:2px solid var(--accent);border-radius:12px;padding:18px;margin-bottom:22px;">
+    <div style="font-size:16px;font-weight:700;margin-bottom:4px;">📄 Upload a Catalog PDF</div>
+    <div class="sub" style="margin-bottom:14px;">Drop in a catalog PDF and it gets read automatically — lots go straight into the system, no typing required. Title/auctioneer/date/state below are optional (the filename is used as the title if left blank). Upload as many, as often as you want — every one shows up in the log below either way.</div>
+    <div id="pdf-drop-zone" style="border:2px dashed var(--border);border-radius:10px;padding:30px;text-align:center;cursor:pointer;margin-bottom:12px;transition:border-color .15s;"
+         onclick="document.getElementById('pdf-file-input').click()"
+         ondragover="event.preventDefault();this.style.borderColor='var(--accent)';"
+         ondragleave="this.style.borderColor='var(--border)';"
+         ondrop="handlePdfDrop(event)">
+      <div style="font-size:32px;margin-bottom:6px;">📎</div>
+      <div style="font-weight:600;">Click to choose a PDF, or drag one here</div>
+      <div class="sub" style="margin-top:4px;margin-bottom:0;">One at a time or several at once</div>
+      <input type="file" id="pdf-file-input" accept="application/pdf" multiple style="display:none;" onchange="handlePdfPick(this.files)"/>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+      <input type="text" class="field-input" id="pdf-title-input" placeholder="Title (optional)" style="flex:1;min-width:160px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="pdf-title-nofill"/>
+      <input type="text" class="field-input" id="pdf-auctioneer-input" placeholder="Auctioneer (optional)" style="flex:1;min-width:160px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="pdf-auctioneer-nofill"/>
+      <input type="text" class="field-input" id="pdf-enddate-input" placeholder="End date (optional)" style="width:150px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="pdf-enddate-nofill"/>
+      <input type="text" class="field-input" id="pdf-state-input" placeholder="State (optional)" style="width:110px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="pdf-state-nofill"/>
+    </div>
+    <div id="pdf-upload-status"></div>
+  </div>
+
+  <div style="margin-bottom:22px;">
+    <div style="font-size:15px;font-weight:700;margin-bottom:8px;">📋 Upload Log</div>
+    <div id="pdf-upload-log"><div class="empty">Loading...</div></div>
+  </div>
+
   <div class="filter-bar">
     <button class="btn btn-primary" onclick="scanNow()">🔎 Scan for Catalogs</button>
-    <input type="text" class="field-input" id="search-input" placeholder="Search title/auctioneer..." oninput="renderTable()" style="width:260px;"/>
+    <input type="text" class="field-input" id="search-input" placeholder="Search title/auctioneer..." oninput="renderTable()" style="width:260px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="am-search-nofill"/>
   </div>
   <div id="scan-status" class="status-msg"></div>
 
@@ -251,7 +278,82 @@ async function ingestLots() {
   }
 }
 
+function handlePdfDrop(event) {
+  event.preventDefault();
+  event.currentTarget.style.borderColor = 'var(--border)';
+  const files = event.dataTransfer.files;
+  if (files && files.length) handlePdfPick(files);
+}
+
+function handlePdfPick(fileList) {
+  const files = Array.from(fileList).filter(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
+  if (!files.length) { alert('Please choose PDF file(s)'); return; }
+  for (const f of files) uploadPdfFile(f);
+  document.getElementById('pdf-file-input').value = '';
+}
+
+async function uploadPdfFile(file) {
+  const statusEl = document.getElementById('pdf-upload-status');
+  const line = document.createElement('div');
+  line.className = 'status-msg';
+  line.textContent = `⏳ Uploading and reading ${file.name}...`;
+  statusEl.prepend(line);
+
+  const fd = new FormData();
+  fd.append('file', file);
+  const title = document.getElementById('pdf-title-input').value.trim();
+  const auctioneer = document.getElementById('pdf-auctioneer-input').value.trim();
+  const endDate = document.getElementById('pdf-enddate-input').value.trim();
+  const state = document.getElementById('pdf-state-input').value.trim();
+  if (title) fd.append('title', title);
+  if (auctioneer) fd.append('auctioneer', auctioneer);
+  if (endDate) fd.append('end_date', endDate);
+  if (state) fd.append('state', state);
+
+  try {
+    const r = await fetch('/api/auction-monitor/upload-pdf', {method: 'POST', body: fd});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Upload failed');
+    line.textContent = `✅ ${file.name} — found ${data.lots_parsed} lot(s)`;
+    loadCatalogs();
+  } catch(e) {
+    line.textContent = `❌ ${file.name} — ${e.message}`;
+  } finally {
+    loadPdfUploadLog();
+  }
+}
+
+async function loadPdfUploadLog() {
+  const el = document.getElementById('pdf-upload-log');
+  try {
+    const r = await fetch('/api/auction-monitor/pdf-uploads');
+    const data = await r.json();
+    const uploads = data.uploads || [];
+    if (!uploads.length) { el.innerHTML = '<div class="empty">No PDFs uploaded yet.</div>'; return; }
+    let html = `<table><thead><tr><th>File</th><th>Uploaded</th><th>Catalog</th><th>Lots Found</th><th>Status</th></tr></thead><tbody>`;
+    for (const u of uploads) {
+      const statusHtml = u.status === 'success'
+        ? `<span style="color:var(--green);">✓ Success</span>`
+        : u.status === 'error'
+          ? `<span style="color:var(--red);" title="${(u.error_message||'').replace(/"/g,'&quot;')}">✗ Error — ${u.error_message||'unknown'}</span>`
+          : `<span class="muted">⏳ Processing</span>`;
+      html += `<tr>
+        <td>${u.filename}</td>
+        <td class="muted">${u.uploaded_at ? new Date(u.uploaded_at).toLocaleString() : ''}</td>
+        <td>${u.catalog_title || '—'}</td>
+        <td>${u.parsed_lot_count ?? 0}</td>
+        <td>${statusHtml}</td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div class="empty">Failed to load: ${e.message}</div>`;
+  }
+}
+
 loadCatalogs();
+loadPdfUploadLog();
 </script>
 </body>
 </html>

@@ -5708,6 +5708,142 @@ def _parse_bulk_catalog_file(text: str) -> list:
             out.append({"meta": meta, "raw_text": raw_text})
     return out
 
+def _extract_lots_via_gemini(raw_text: str, filename: str) -> list:
+    """Fallback for catalog PDFs whose layout doesn't match the regex parser
+    (built for BidSpotter's own Print Catalog text format) -- asks Gemini to
+    pull lot number + description pairs out of arbitrary catalog text instead.
+    Only called when the fast, free regex pass finds too few lots to trust,
+    same reasoning as everywhere else in this app that layers a smarter
+    fallback on top of a cheap first attempt rather than always paying for
+    an LLM call."""
+    import os, json
+    import google.generativeai as genai
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    if not gemini_key:
+        return []
+    genai.configure(api_key=gemini_key)
+    model = genai.GenerativeModel("gemini-2.5-flash")
+    prompt = f"""This is raw text extracted from an auction catalog PDF named "{filename}".
+Pull out every individual lot as a lot number and its description. Auction catalogs
+list lots sequentially, usually as "LOT ###" or "Lot ###:" or similar, followed by a
+description of the item(s) in that lot. Skip page headers, footers, terms & conditions,
+and anything that isn't an actual lot listing.
+
+Return ONLY a JSON array, no other text, in this exact shape:
+[{{"lot_number": "123", "description": "..."}}, ...]
+
+Text:
+{raw_text[:100000]}"""
+    try:
+        resp = model.generate_content(prompt)
+        text = resp.text.strip()
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        parsed = json.loads(text.strip())
+        return [{"lot_number": str(r.get("lot_number", "")).strip(), "description": (r.get("description") or "")[:2000]}
+                for r in parsed if r.get("lot_number") and r.get("description")]
+    except Exception as e:
+        print(f"Gemini lot extraction failed for {filename}: {e}")
+        return []
+
+@app.post("/api/auction-monitor/upload-pdf")
+async def auction_monitor_upload_pdf(request: Request):
+    """The VA-facing path: drop in a catalog PDF (any layout -- doesn't have to
+    be a BidSpotter export specifically), get the lots into Supabase, and leave
+    a visible record of the upload either way. Every file is logged to
+    auction_pdf_uploads regardless of outcome, so nothing silently disappears
+    if parsing fails -- the whole point of this endpoint existing instead of
+    just extending the developer-facing bulk-text-paste flow."""
+    import os, fitz, uuid
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+
+    form = await request.form()
+    file = form.get("file")
+    if not file or not hasattr(file, "read"):
+        raise HTTPException(400, "file is required")
+    title = (form.get("title") or "").strip() or file.filename
+    auctioneer = (form.get("auctioneer") or "").strip()
+    end_date = (form.get("end_date") or "").strip()
+    state = (form.get("state") or "").strip()
+
+    contents = await file.read()
+    upload_id = str(uuid.uuid4())
+    catalog_url = f"pdf-upload:{upload_id}"  # a stable, unique key for this catalog --
+                                              # these PDFs have no real source URL like
+                                              # BidSpotter listings do, but auction_catalogs/
+                                              # auction_lots both key off catalog_url, so this
+                                              # gives every upload its own consistent identity
+
+    log_row = {
+        "business_id": business_id, "filename": file.filename, "status": "processing",
+        "catalog_url": catalog_url, "catalog_title": title,
+    }
+    log_res = supabase.table("auction_pdf_uploads").insert(log_row).execute()
+    log_id = log_res.data[0]["id"] if log_res.data else None
+
+    storage_path = None
+    try:
+        storage_path = f"{upload_id}.pdf"
+        supabase.storage.from_("auction-pdfs").upload(
+            path=storage_path, file=contents,
+            file_options={"content-type": "application/pdf", "upsert": "true"}
+        )
+    except Exception as e:
+        print(f"PDF storage warning (upload still proceeds): {e}")
+        storage_path = None
+
+    try:
+        doc = fitz.open(stream=contents, filetype="pdf")
+        raw_text = ""
+        for page in doc:
+            raw_text += page.get_text() + "\n"
+        doc.close()
+
+        if not raw_text.strip():
+            raise ValueError("No text found in this PDF (may be scanned images with no text layer -- not supported yet)")
+
+        lots = _parse_print_catalog_lots(raw_text)
+        if len(lots) < 3:
+            # Regex pass found too little to trust -- likely a different layout
+            gemini_lots = _extract_lots_via_gemini(raw_text, file.filename)
+            if len(gemini_lots) > len(lots):
+                lots = gemini_lots
+
+        if not lots:
+            raise ValueError("Could not find any lots in this PDF -- the layout may not be recognized")
+
+        meta = {"title": title, "auctioneer": auctioneer, "end_date": end_date, "state": state}
+        result = _ingest_one_catalog(business_id, catalog_url, "\n".join(f"{l['lot_number']} {l['description']}" for l in lots), meta)
+
+        if log_id:
+            supabase.table("auction_pdf_uploads").update({
+                "status": "success", "storage_path": storage_path, "parsed_lot_count": result.get("parsed", 0),
+            }).eq("id", log_id).execute()
+
+        return {"ok": True, "lots_parsed": result.get("parsed", 0), "catalog_url": catalog_url}
+
+    except Exception as e:
+        if log_id:
+            supabase.table("auction_pdf_uploads").update({
+                "status": "error", "storage_path": storage_path, "error_message": str(e),
+            }).eq("id", log_id).execute()
+        raise HTTPException(500, str(e))
+
+@app.get("/api/auction-monitor/pdf-uploads")
+async def auction_monitor_pdf_uploads(request: Request):
+    """Upload history for the visibility view -- so nothing the VA drops in
+    ever disappears without a trace, success or failure."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    res = supabase.table("auction_pdf_uploads").select("*").eq("business_id", business_id)\
+        .order("uploaded_at", desc=True).limit(500).execute()
+    return {"uploads": res.data or []}
+
 @app.post("/api/auction-monitor/ingest-bulk")
 async def auction_monitor_ingest_bulk(request: Request):
     """The real mechanism for covering many/all 349 catalogs and new ones as they
