@@ -5637,7 +5637,13 @@ def _ingest_one_catalog(business_id: str, catalog_url: str, raw_text: str, meta:
     """Shared logic for ingesting one catalog's lot text -- used by both the
     single-catalog endpoint (one-off / testing) and the bulk endpoint (the real
     mechanism: one Claude-in-Chrome pass across many catalogs, one file upload,
-    every catalog processed in the same request instead of one submission each)."""
+    every catalog processed in the same request instead of one submission each).
+
+    Writes to bidspotter_catalog_lots, NOT auction_lots -- confirmed that table
+    belongs entirely to the separate research/capture-session feature (session_id,
+    itemized, is_bulk_lot, and many more research-specific columns none of this
+    needs), queried and updated independently of this simple catalog feed. Keeping
+    these fully separate avoids any further collision with that feature's schema."""
     lots = _parse_print_catalog_lots(raw_text)
     if not lots:
         return {"catalog_url": catalog_url, "parsed": 0, "error": "No lot lines matched"}
@@ -5651,12 +5657,12 @@ def _ingest_one_catalog(business_id: str, catalog_url: str, raw_text: str, meta:
             "description": lot["description"],
             "last_seen_at": now_iso,
         }
-        existing = supabase.table("auction_lots").select("id")\
+        existing = supabase.table("bidspotter_catalog_lots").select("id")\
             .eq("business_id", business_id).eq("catalog_url", catalog_url).eq("lot_number", lot["lot_number"]).limit(1).execute()
         if existing.data:
-            supabase.table("auction_lots").update(record).eq("id", existing.data[0]["id"]).execute()
+            supabase.table("bidspotter_catalog_lots").update(record).eq("id", existing.data[0]["id"]).execute()
         else:
-            supabase.table("auction_lots").insert(record).execute()
+            supabase.table("bidspotter_catalog_lots").insert(record).execute()
 
     catalog_fields = {k: meta[k] for k in ("title", "auctioneer", "end_date", "state") if meta.get(k)}
     catalog_existing = supabase.table("auction_catalogs").select("id")\
