@@ -5796,8 +5796,33 @@ Text:
         print(f"Gemini catalog metadata extraction failed for {filename}: {e}")
         return {}
 
+def _backfill_catalog_metadata(business_id: str, catalog_url: str, raw_text: str, filename: str,
+                                 auctioneer: str, state: str, zip_code: str, end_date: str) -> None:
+    """Runs AFTER the upload response has already gone out -- the actual fix for
+    uploads feeling slow. Reads the PDF's cover page for whatever metadata the
+    form left blank and updates the already-inserted lot rows in place, a few
+    seconds later, instead of making the VA wait on this Gemini call before she
+    even sees 'upload successful'."""
+    try:
+        auto_meta = _extract_catalog_metadata_via_gemini(raw_text, filename)
+        # bidspotter_catalog_lots only has state/zip_code/date columns -- auctioneer
+        # isn't one of them (it's a per-catalog field, not a per-lot one), so it's
+        # deliberately not included in this patch even if Gemini found it
+        patch = {}
+        if not state and auto_meta.get("state"):
+            patch["state"] = auto_meta["state"]
+        if not zip_code and auto_meta.get("zip_code"):
+            patch["zip_code"] = auto_meta["zip_code"]
+        if not end_date and auto_meta.get("end_date"):
+            patch["date"] = auto_meta["end_date"]
+        if patch:
+            supabase.table("bidspotter_catalog_lots").update(patch)\
+                .eq("business_id", business_id).eq("catalog_url", catalog_url).execute()
+    except Exception as e:
+        print(f"Background metadata backfill failed for {filename} (lots themselves are unaffected): {e}")
+
 @app.post("/api/auction-monitor/upload-pdf")
-async def auction_monitor_upload_pdf(request: Request):
+async def auction_monitor_upload_pdf(request: Request, background_tasks: BackgroundTasks):
     """The VA-facing path: drop in a catalog PDF (any layout -- doesn't have to
     be a BidSpotter export specifically), get the lots into Supabase, and leave
     a visible record of the upload either way. Every file is logged to
@@ -5869,16 +5894,12 @@ async def auction_monitor_upload_pdf(request: Request):
         if not lots:
             raise ValueError("Could not find any lots in this PDF -- the layout may not be recognized")
 
-        # Auto-fill any of auctioneer/state/zip_code/end_date the form left blank,
-        # by reading the catalog PDF's own cover page/header -- a value actually
-        # typed into the form always wins over what this finds.
-        if not (auctioneer and state and zip_code and end_date):
-            auto_meta = _extract_catalog_metadata_via_gemini(raw_text, file.filename)
-            auctioneer = auctioneer or auto_meta.get("auctioneer", "")
-            state = state or auto_meta.get("state", "")
-            zip_code = zip_code or auto_meta.get("zip_code", "")
-            end_date = end_date or auto_meta.get("end_date", "")
-
+        # Ingest with whatever was actually typed into the form -- no Gemini call
+        # blocking this. If anything's still blank, a background task (scheduled
+        # below, after the response is already sent) fills it in moments later by
+        # reading the PDF's own cover page. This used to run inline before the
+        # response went out, which is exactly what made uploads feel slow -- an
+        # extra full Gemini round trip on every single upload, every time.
         meta = {"title": title, "auctioneer": auctioneer, "end_date": end_date, "state": state, "zip_code": zip_code}
         result = _ingest_one_catalog(business_id, catalog_url, "\n".join(f"{l['lot_number']} {l['description']}" for l in lots), meta)
 
@@ -5886,6 +5907,10 @@ async def auction_monitor_upload_pdf(request: Request):
             supabase.table("auction_pdf_uploads").update({
                 "status": "success", "storage_path": storage_path, "parsed_lot_count": result.get("parsed", 0),
             }).eq("id", log_id).execute()
+
+        if not (auctioneer and state and zip_code and end_date):
+            background_tasks.add_task(_backfill_catalog_metadata, business_id, catalog_url, raw_text, file.filename,
+                                       auctioneer, state, zip_code, end_date)
 
         return {"ok": True, "lots_parsed": result.get("parsed", 0), "catalog_url": catalog_url}
 
