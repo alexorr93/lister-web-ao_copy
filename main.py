@@ -5892,7 +5892,17 @@ async def auction_monitor_upload_pdf(request: Request, background_tasks: Backgro
                 lots = gemini_lots
 
         if not lots:
-            raise ValueError("Could not find any lots in this PDF -- the layout may not be recognized")
+            # Not a parse failure -- the PDF read fine, the auction genuinely has
+            # no lots posted yet (confirmed real case: BidSpotter/Wavebid lets an
+            # auction get created with just a title/date/location before any
+            # lots are added). Logged as its own distinct 'empty' status rather
+            # than 'error', so it lands in the Needs Update queue instead of
+            # looking like a broken upload.
+            if log_id:
+                supabase.table("auction_pdf_uploads").update({
+                    "status": "empty", "storage_path": storage_path, "parsed_lot_count": 0,
+                }).eq("id", log_id).execute()
+            return {"ok": True, "lots_parsed": 0, "empty": True, "catalog_url": catalog_url}
 
         # Ingest with whatever was actually typed into the form -- no Gemini call
         # blocking this. If anything's still blank, a background task (scheduled
@@ -5931,6 +5941,33 @@ async def auction_monitor_pdf_uploads(request: Request):
     res = supabase.table("auction_pdf_uploads").select("*").eq("business_id", business_id)\
         .order("uploaded_at", desc=True).limit(500).execute()
     return {"uploads": res.data or []}
+
+@app.get("/api/auction-monitor/needs-update")
+async def auction_monitor_needs_update(request: Request):
+    """The 'Needs Update' queue: auctions that were created on BidSpotter/Wavebid
+    but have no lots posted yet. Takes the MOST RECENT upload attempt per
+    catalog_url and returns only the ones still sitting at 'empty' -- so once
+    the VA re-uploads an updated PDF for the same catalog (same filename, same
+    catalog_url) and it actually has lots now, that catalog's latest attempt
+    becomes 'success' and it naturally drops out of this list on its own,
+    without needing to delete or touch the old 'empty' row at all -- the full
+    upload history stays intact underneath."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    all_uploads = supabase.table("auction_pdf_uploads").select("*").eq("business_id", business_id)\
+        .order("uploaded_at", desc=True).limit(500).execute().data or []
+    latest_by_catalog = {}
+    for u in all_uploads:
+        key = u.get("catalog_url")
+        if not key:
+            continue
+        existing = latest_by_catalog.get(key)
+        if not existing or (u.get("uploaded_at") or "") > (existing.get("uploaded_at") or ""):
+            latest_by_catalog[key] = u
+    needs_update = [u for u in latest_by_catalog.values() if u.get("status") == "empty"]
+    needs_update.sort(key=lambda u: u.get("uploaded_at") or "", reverse=True)
+    return {"needs_update": needs_update}
 
 @app.post("/api/auction-monitor/ingest-bulk")
 async def auction_monitor_ingest_bulk(request: Request):

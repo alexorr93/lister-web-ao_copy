@@ -58,6 +58,12 @@ a { color: #60a5fa; }
   </div>
 
   <div style="margin-bottom:22px;">
+    <div style="font-size:15px;font-weight:700;margin-bottom:8px;">⏳ Needs Update — No Lots Yet</div>
+    <div class="sub" style="margin-bottom:8px;">These auctions exist on the site but had zero lots posted when uploaded. Once she re-uploads a newer PDF for the same auction with lots in it, it disappears from this list on its own.</div>
+    <div id="pdf-needs-update"><div class="empty">Loading...</div></div>
+  </div>
+
+  <div style="margin-bottom:22px;">
     <div style="font-size:15px;font-weight:700;margin-bottom:8px;">📋 Upload Log</div>
     <div id="pdf-upload-log"><div class="empty">Loading...</div></div>
   </div>
@@ -317,12 +323,33 @@ async function uploadPdfFile(file) {
     const r = await fetch('/api/auction-monitor/upload-pdf', {method: 'POST', body: fd});
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Upload failed');
-    line.textContent = `✅ ${file.name} — found ${data.lots_parsed} lot(s)`;
+    line.textContent = data.empty
+      ? `⏳ ${file.name} — auction exists but has no lots yet, added to the Needs Update queue`
+      : `✅ ${file.name} — found ${data.lots_parsed} lot(s)`;
     loadCatalogs();
   } catch(e) {
     line.textContent = `❌ ${file.name} — ${e.message}`;
   } finally {
     loadPdfUploadLog();
+    loadNeedsUpdateQueue();
+  }
+}
+
+async function loadNeedsUpdateQueue() {
+  const el = document.getElementById('pdf-needs-update');
+  try {
+    const r = await fetch('/api/auction-monitor/needs-update');
+    const data = await r.json();
+    const items = data.needs_update || [];
+    if (!items.length) { el.innerHTML = '<div class="empty">Nothing waiting — every uploaded auction has lots.</div>'; return; }
+    let html = `<table><thead><tr><th>File</th><th>First Uploaded Empty</th></tr></thead><tbody>`;
+    for (const u of items) {
+      html += `<tr><td>${u.filename}</td><td class="muted">${u.uploaded_at ? new Date(u.uploaded_at).toLocaleString() : ''}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div class="empty">Failed to load: ${e.message}</div>`;
   }
 }
 
@@ -337,9 +364,11 @@ async function loadPdfUploadLog() {
     for (const u of uploads) {
       const statusHtml = u.status === 'success'
         ? `<span style="color:var(--green);">✓ Success</span>`
-        : u.status === 'error'
-          ? `<span style="color:var(--red);" title="${(u.error_message||'').replace(/"/g,'&quot;')}">✗ Error — ${u.error_message||'unknown'}</span>`
-          : `<span class="muted">⏳ Processing</span>`;
+        : u.status === 'empty'
+          ? `<span style="color:#eab308;">⏳ No lots yet</span>`
+          : u.status === 'error'
+            ? `<span style="color:var(--red);" title="${(u.error_message||'').replace(/"/g,'&quot;')}">✗ Error — ${u.error_message||'unknown'}</span>`
+            : `<span class="muted">⏳ Processing</span>`;
       html += `<tr>
         <td>${u.filename}</td>
         <td class="muted">${u.uploaded_at ? new Date(u.uploaded_at).toLocaleString() : ''}</td>
@@ -357,6 +386,7 @@ async function loadPdfUploadLog() {
 
 loadCatalogs();
 loadPdfUploadLog();
+loadNeedsUpdateQueue();
 </script>
 </body>
 </html>
