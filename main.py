@@ -5756,7 +5756,7 @@ async def auction_monitor_upload_pdf(request: Request):
     auction_pdf_uploads regardless of outcome, so nothing silently disappears
     if parsing fails -- the whole point of this endpoint existing instead of
     just extending the developer-facing bulk-text-paste flow."""
-    import os, fitz, uuid
+    import os, fitz, uuid, re
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
@@ -5771,12 +5771,16 @@ async def auction_monitor_upload_pdf(request: Request):
     state = (form.get("state") or "").strip()
 
     contents = await file.read()
-    upload_id = str(uuid.uuid4())
-    catalog_url = f"pdf-upload:{upload_id}"  # a stable, unique key for this catalog --
-                                              # these PDFs have no real source URL like
-                                              # BidSpotter listings do, but auction_catalogs/
-                                              # auction_lots both key off catalog_url, so this
-                                              # gives every upload its own consistent identity
+    # Use the filename itself as the stable catalog identity, since the VA names
+    # each file after the catalog's own URL -- this means re-uploading an updated
+    # PDF for a catalog she already uploaded correctly UPDATES that same catalog's
+    # lots (via the existing upsert-by-catalog_url logic in _ingest_one_catalog),
+    # instead of creating a duplicate entry every time, which a random ID here
+    # would have caused. Strip the extension and anything that isn't safe as a
+    # Supabase Storage path (mainly slashes, which would be read as folders).
+    raw_name = file.filename.rsplit(".", 1)[0] if file.filename else str(uuid.uuid4())
+    catalog_key = re.sub(r'[^A-Za-z0-9._-]', '_', raw_name)
+    catalog_url = catalog_key
 
     log_row = {
         "business_id": business_id, "filename": file.filename, "status": "processing",
@@ -5787,7 +5791,7 @@ async def auction_monitor_upload_pdf(request: Request):
 
     storage_path = None
     try:
-        storage_path = f"{upload_id}.pdf"
+        storage_path = f"{catalog_key}.pdf"
         supabase.storage.from_("auction-pdfs").upload(
             path=storage_path, file=contents,
             file_options={"content-type": "application/pdf", "upsert": "true"}
