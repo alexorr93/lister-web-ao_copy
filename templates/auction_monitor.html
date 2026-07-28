@@ -52,6 +52,7 @@ a { color: #60a5fa; }
       <input type="text" class="field-input" id="pdf-auctioneer-input" placeholder="Auctioneer (optional)" style="flex:1;min-width:160px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="pdf-auctioneer-nofill"/>
       <input type="text" class="field-input" id="pdf-enddate-input" placeholder="End date (optional)" style="width:150px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="pdf-enddate-nofill"/>
       <input type="text" class="field-input" id="pdf-state-input" placeholder="State (optional)" style="width:110px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="pdf-state-nofill"/>
+      <input type="text" class="field-input" id="pdf-zip-input" placeholder="ZIP (optional)" style="width:100px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="pdf-zip-nofill"/>
     </div>
     <div id="pdf-upload-status"></div>
   </div>
@@ -305,10 +306,12 @@ async function uploadPdfFile(file) {
   const auctioneer = document.getElementById('pdf-auctioneer-input').value.trim();
   const endDate = document.getElementById('pdf-enddate-input').value.trim();
   const state = document.getElementById('pdf-state-input').value.trim();
+  const zip = document.getElementById('pdf-zip-input').value.trim();
   if (title) fd.append('title', title);
   if (auctioneer) fd.append('auctioneer', auctioneer);
   if (endDate) fd.append('end_date', endDate);
   if (state) fd.append('state', state);
+  if (zip) fd.append('zip_code', zip);
 
   try {
     const r = await fetch('/api/auction-monitor/upload-pdf', {method: 'POST', body: fd});

@@ -5656,6 +5656,9 @@ def _ingest_one_catalog(business_id: str, catalog_url: str, raw_text: str, meta:
             "lot_number": lot["lot_number"],
             "description": lot["description"],
             "last_seen_at": now_iso,
+            "state": meta.get("state") or None,
+            "zip_code": meta.get("zip_code") or None,
+            "date": meta.get("end_date") or None,
         }
         existing = supabase.table("bidspotter_catalog_lots").select("id")\
             .eq("business_id", business_id).eq("catalog_url", catalog_url).eq("lot_number", lot["lot_number"]).limit(1).execute()
@@ -5775,6 +5778,7 @@ async def auction_monitor_upload_pdf(request: Request):
     auctioneer = (form.get("auctioneer") or "").strip()
     end_date = (form.get("end_date") or "").strip()
     state = (form.get("state") or "").strip()
+    zip_code = (form.get("zip_code") or "").strip()
 
     contents = await file.read()
     # Use the filename itself as the stable catalog identity, since the VA names
@@ -5826,7 +5830,7 @@ async def auction_monitor_upload_pdf(request: Request):
         if not lots:
             raise ValueError("Could not find any lots in this PDF -- the layout may not be recognized")
 
-        meta = {"title": title, "auctioneer": auctioneer, "end_date": end_date, "state": state}
+        meta = {"title": title, "auctioneer": auctioneer, "end_date": end_date, "state": state, "zip_code": zip_code}
         result = _ingest_one_catalog(business_id, catalog_url, "\n".join(f"{l['lot_number']} {l['description']}" for l in lots), meta)
 
         if log_id:
