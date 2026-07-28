@@ -5651,7 +5651,7 @@ def _parse_print_catalog_lots(raw_text: str) -> list:
     for line in body_lines:
         if not line:
             continue
-        m = _re.match(r'^(\d+[A-Za-z]?)\s+(.+)$', line)
+        m = _re.match(r'^(\d+(?:[.\-]\d+)*(?:-?[A-Za-z]{1,3})?)\s+(.+)$', line)
         if m:
             rows.append({"lot_number": m.group(1), "description": m.group(2)[:2000]})
     return rows
