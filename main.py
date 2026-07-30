@@ -4579,6 +4579,7 @@ async def debug_sku_lookup(request: Request, order_id: str = None, title: str = 
     return out
 
 
+@app.get("/api/financials")
 async def api_financials(request: Request, start: str = None, end: str = None, include_shopify: bool = True):
     business_id = require_auth(request)
     if not business_id:
