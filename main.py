@@ -4559,7 +4559,26 @@ async def update_order_sku(body: OrderSkuUpdate, request: Request):
     recategorized = _lot_prefix(new_sku) in known_lot_skus
     return {"ok": True, "id": body.order_row_id, "sku": new_sku, "recategorized": recategorized}
 
-@app.get("/api/financials")
+@app.get("/api/debug/sku-lookup")
+async def debug_sku_lookup(request: Request, order_id: str = None, title: str = None):
+    """TEMPORARY diagnostic endpoint — remove after use. Shows the raw order
+    row and any ebay_listing_status row(s) that could match it by item_id or
+    title, so we can see directly whether a real sku_override exists or not."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    out = {}
+    if order_id:
+        out["order"] = (supabase.table("orders").select("*")
+                         .eq("business_id", business_id).eq("order_id", order_id).execute().data)
+    if title:
+        out["listing_status_matches"] = (
+            supabase.table("ebay_listing_status")
+            .select("item_id,title,sku,sku_override,updated_at")
+            .eq("business_id", business_id).ilike("title", f"%{title}%").execute().data)
+    return out
+
+
 async def api_financials(request: Request, start: str = None, end: str = None, include_shopify: bool = True):
     business_id = require_auth(request)
     if not business_id:
