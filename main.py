@@ -4651,6 +4651,15 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
     uncategorized_order_net = 0
     for r in rows:
         sku = _effective_sku(r)
+        override = _lookup_override(r)
+        # A manual override is a deliberate, explicit resolution by the person —
+        # it shouldn't be re-flagged here just because the value they chose
+        # doesn't happen to look like a real lot-prefixed SKU (e.g. "lister-960").
+        # Requiring it to also match a known lot double-gates something that's
+        # already been handled. Only fall through to the lot-prefix check when
+        # there's no override at all.
+        if override:
+            continue
         # Deliberately NOT using _sku_needs_assignment's stricter "PREFIX- with
         # nothing after the dash still needs assignment" rule here -- that's the
         # right bar for the Lots page (flagging items that need a specific
@@ -4665,7 +4674,7 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
             continue
         uncategorized_order_net += r.get("final_net") or 0
         uncategorized_order_items.append({
-            "id": r["id"], "sku": r.get("sku") or "", "sku_override": _lookup_override(r),
+            "id": r["id"], "sku": r.get("sku") or "", "sku_override": override,
             "title": r.get("title"), "platform": r.get("platform"),
             "order_id": r.get("order_id"), "order_date": r.get("order_date", ""),
             "quantity": r.get("quantity"), "revenue": r.get("gross_revenue"),
