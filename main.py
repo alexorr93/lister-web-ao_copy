@@ -4554,7 +4554,10 @@ async def update_order_sku(body: OrderSkuUpdate, request: Request):
            .eq("business_id", business_id).eq("id", body.order_row_id).execute())
     if not res.data:
         raise HTTPException(404, "Order line not found")
-    return {"ok": True, "id": body.order_row_id, "sku": new_sku}
+    known_lot_skus = {a["sku"] for a in (supabase.table("acquisitions").select("sku")
+                       .eq("business_id", business_id).execute().data or []) if a.get("sku")}
+    recategorized = _lot_prefix(new_sku) in known_lot_skus
+    return {"ok": True, "id": body.order_row_id, "sku": new_sku, "recategorized": recategorized}
 
 @app.get("/api/financials")
 async def api_financials(request: Request, start: str = None, end: str = None, include_shopify: bool = True):

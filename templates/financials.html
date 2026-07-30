@@ -416,7 +416,15 @@ async function saveOrderSku(btn, rowId) {
     // to "all orders" and lose your spot in the Uncategorized filter.
     const lineRow = allOrderLines.find(r => r.id === rowId);
     if (lineRow) lineRow.sku = newSku;
-    uncategorizedItems = uncategorizedItems.filter(r => r.id !== rowId);
+    // Update the SKU in place so it's actually visible, instead of silently
+    // deleting the row — that hid the value you just typed and made it look
+    // like nothing happened. Only drop it from the Uncategorized list once
+    // the server confirms it now matches a known lot (data.recategorized).
+    const uncatRow = uncategorizedItems.find(r => r.id === rowId);
+    if (uncatRow) { uncatRow.sku = newSku; uncatRow.needs_sku = false; }
+    if (data.recategorized) {
+      uncategorizedItems = uncategorizedItems.filter(r => r.id !== rowId);
+    }
     document.getElementById('sum-uncat').textContent =
       fmtNum(uncategorizedItems.length) + ' (' + fmtMoney(uncategorizedItems.reduce((n, r) => n + (r.net || 0), 0)) + ')';
     currentData = showingUncategorized ? uncategorizedItems : allOrderLines;
