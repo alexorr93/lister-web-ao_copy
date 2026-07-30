@@ -4592,7 +4592,14 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
     uncategorized_order_net = 0
     for r in rows:
         sku = r.get("sku") or ""
-        needs_sku = _sku_needs_assignment(sku)
+        # Deliberately NOT using _sku_needs_assignment's stricter "PREFIX- with
+        # nothing after the dash still needs assignment" rule here -- that's the
+        # right bar for the Lots page (flagging items that need a specific
+        # per-item SKU), but for financial categorization of an already-sold
+        # order, a bare "14R-" already identifies which lot it belongs to,
+        # which is all that matters here. Only a genuinely blank SKU, or one
+        # whose prefix matches no known lot at all, counts as uncategorized.
+        needs_sku = not sku
         prefix = _lot_prefix(sku) if sku else None
         is_uncategorized = needs_sku or (sku and prefix not in known_lot_skus)
         if not is_uncategorized:
