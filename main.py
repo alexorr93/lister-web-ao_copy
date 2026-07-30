@@ -4599,13 +4599,8 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
     # prefer it everywhere below an order's sku would otherwise be used, so
     # a correction made after the fact is actually reflected here instead of
     # showing the stale original value forever.
-    override_res = supabase.table("ebay_listing_status").select("item_id,title,sku_override")\
-        .eq("business_id", business_id).execute()
-    # Keys cast to str explicitly -- item_id and legacy_item_id being different
-    # types (one a native int, one a string) would make this dict lookup
-    # silently miss every time despite the values looking identical, the exact
-    # class of bug that's hit this project repeatedly elsewhere.
-    override_by_item_id = {str(r["item_id"]): r["sku_override"] for r in (override_res.data or [])
+    override_rows = _fetch_all_for_business(business_id, "ebay_listing_status", "item_id,title,sku_override")
+    override_by_item_id = {str(r["item_id"]): r["sku_override"] for r in override_rows
                             if r.get("item_id") and r.get("sku_override")}
     # Real gap found: legacy_item_id comes straight from eBay's API response
     # (li.get("legacyItemId", "")) and can legitimately come back empty for
@@ -4625,7 +4620,7 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
         # matches between genuinely different items.
         return re.sub(r'[^a-z0-9]', '', (t or '').lower())
 
-    override_by_title = {_norm_title(r["title"]): r["sku_override"] for r in (override_res.data or [])
+    override_by_title = {_norm_title(r["title"]): r["sku_override"] for r in override_rows
                           if r.get("title") and r.get("sku_override")}
 
     def _lookup_override(r):
@@ -4665,8 +4660,7 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
     # tab, but for actual ORDERS in this date range rather than active listings —
     # a separate view on purpose, since a SKU can be fine on the listing but still
     # show up here if it was sold before ever getting assigned.
-    known_lot_skus = {a["sku"] for a in (supabase.table("acquisitions").select("sku")
-                       .eq("business_id", business_id).execute().data or []) if a.get("sku")}
+    known_lot_skus = {r["sku"] for r in _fetch_all_for_business(business_id, "acquisitions", "sku") if r.get("sku")}
     uncategorized_order_items = []
     uncategorized_order_net = 0
     for r in rows:
