@@ -4590,14 +4590,26 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
     # on at all, no matter how it's cast. Title is virtually always present on
     # both sides, so it's a reliable second path to the same override when the
     # item_id link isn't there.
-    override_by_title = {(r["title"] or "").strip().lower(): r["sku_override"] for r in (override_res.data or [])
+    def _norm_title(t):
+        import re
+        # Aggressive on purpose: strips everything except letters and digits,
+        # lowercased. orders.title and ebay_listing_status.title come from two
+        # separate eBay API calls (order sync vs listing sync) -- a plain
+        # .strip().lower() match kept silently failing, which points at some
+        # punctuation/whitespace/formatting difference between the two that a
+        # simpler normalization wasn't catching. These titles are long and
+        # specific enough that this level of normalization won't cause false
+        # matches between genuinely different items.
+        return re.sub(r'[^a-z0-9]', '', (t or '').lower())
+
+    override_by_title = {_norm_title(r["title"]): r["sku_override"] for r in (override_res.data or [])
                           if r.get("title") and r.get("sku_override")}
 
     def _lookup_override(r):
         legacy_id = r.get("legacy_item_id")
         override = override_by_item_id.get(str(legacy_id)) if legacy_id else None
         if not override:
-            override = override_by_title.get((r.get("title") or "").strip().lower())
+            override = override_by_title.get(_norm_title(r.get("title")))
         return override
 
     def _effective_sku(r):
