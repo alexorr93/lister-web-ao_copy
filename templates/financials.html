@@ -364,13 +364,17 @@ function renderTable() {
   const th = (key, label) => `<th onclick="setSort('${key}')">${label}${sortKey===key ? (sortDir===1?' ▲':' ▼') : ''}</th>`;
   const amtLabel = netMode ? 'Net $' : 'Gross $';
   const reasonHeader = showingUncategorized ? '<th>Reason</th>' : '';
+  const overrideHeader = showingUncategorized ? '<th>Custom SKU (override)</th>' : '';
   let html = `<table><thead><tr>
-    ${th('sku','SKU')}${reasonHeader}${th('order_id','Order #')}${th('order_date','Date')}${th('platform','Platform')}${th('quantity','Qty')}${th('buyer_shipping','Buyer Paid Ship $')}${th('shipping_cost','Label Cost $')}${th('total_amount',amtLabel)}${th('title','Item')}
+    ${th('sku','SKU')}${overrideHeader}${reasonHeader}${th('order_id','Order #')}${th('order_date','Date')}${th('platform','Platform')}${th('quantity','Qty')}${th('buyer_shipping','Buyer Paid Ship $')}${th('shipping_cost','Label Cost $')}${th('total_amount',amtLabel)}${th('title','Item')}
   </tr></thead><tbody>`;
   for (const r of rows) {
     const tag = r.platform === 'eBay' ? '<span class="platform-tag ebay">eBay</span>' : '<span class="platform-tag shopify">Shopify</span>';
     const reasonCell = showingUncategorized
       ? `<td>${r.needs_sku ? '<span style="color:#f59e0b;font-weight:600;">Needs SKU</span>' : '<span class="muted">No matching lot</span>'}</td>`
+      : '';
+    const overrideCell = showingUncategorized
+      ? `<td>${r.sku_override ? `<span style="color:var(--green,#16a34a);font-weight:600;">${escapeHtml(r.sku_override)}</span>` : '<span class="muted">—</span>'}</td>`
       : '';
     const skuCell = showingUncategorized
       ? `<input type="text" class="field-input order-sku-input" data-row-id="${r.id}" value="${escapeHtml(r.sku)}" style="width:100px;font-size:12px;padding:4px 6px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" name="order-sku-${r.id}"/>
@@ -378,6 +382,7 @@ function renderTable() {
       : `<span class="sku">${escapeHtml(r.sku)}</span>`;
     html += `<tr>
       <td>${skuCell}</td>
+      ${overrideCell}
       ${reasonCell}
       <td class="muted">${escapeHtml(r.order_id)}</td>
       <td class="muted">${escapeHtml(r.order_date)}</td>

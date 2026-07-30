@@ -4593,11 +4593,15 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
     override_by_title = {(r["title"] or "").strip().lower(): r["sku_override"] for r in (override_res.data or [])
                           if r.get("title") and r.get("sku_override")}
 
-    def _effective_sku(r):
+    def _lookup_override(r):
         legacy_id = r.get("legacy_item_id")
         override = override_by_item_id.get(str(legacy_id)) if legacy_id else None
         if not override:
             override = override_by_title.get((r.get("title") or "").strip().lower())
+        return override
+
+    def _effective_sku(r):
+        override = _lookup_override(r)
         return override if override else (r.get("sku") or "")
 
     # Financials reads straight from the local `orders` table — shipping_cost and final_net
@@ -4646,7 +4650,8 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
             continue
         uncategorized_order_net += r.get("final_net") or 0
         uncategorized_order_items.append({
-            "id": r["id"], "sku": sku, "title": r.get("title"), "platform": r.get("platform"),
+            "id": r["id"], "sku": r.get("sku") or "", "sku_override": _lookup_override(r),
+            "title": r.get("title"), "platform": r.get("platform"),
             "order_id": r.get("order_id"), "order_date": r.get("order_date", ""),
             "quantity": r.get("quantity"), "revenue": r.get("gross_revenue"),
             "net": r.get("final_net"), "buyer_shipping": r.get("buyer_shipping") or 0,
