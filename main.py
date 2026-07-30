@@ -4578,11 +4578,16 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
     # showing the stale original value forever.
     override_res = supabase.table("ebay_listing_status").select("item_id,sku_override")\
         .eq("business_id", business_id).execute()
-    override_by_item_id = {r["item_id"]: r["sku_override"] for r in (override_res.data or [])
+    # Keys cast to str explicitly -- item_id and legacy_item_id being different
+    # types (one a native int, one a string) would make this dict lookup
+    # silently miss every time despite the values looking identical, the exact
+    # class of bug that's hit this project repeatedly elsewhere.
+    override_by_item_id = {str(r["item_id"]): r["sku_override"] for r in (override_res.data or [])
                             if r.get("item_id") and r.get("sku_override")}
 
     def _effective_sku(r):
-        override = override_by_item_id.get(r.get("legacy_item_id"))
+        legacy_id = r.get("legacy_item_id")
+        override = override_by_item_id.get(str(legacy_id)) if legacy_id else None
         return override if override else (r.get("sku") or "")
 
     # Financials reads straight from the local `orders` table — shipping_cost and final_net
