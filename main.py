@@ -4576,7 +4576,7 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
     # prefer it everywhere below an order's sku would otherwise be used, so
     # a correction made after the fact is actually reflected here instead of
     # showing the stale original value forever.
-    override_res = supabase.table("ebay_listing_status").select("item_id,sku_override")\
+    override_res = supabase.table("ebay_listing_status").select("item_id,title,sku_override")\
         .eq("business_id", business_id).execute()
     # Keys cast to str explicitly -- item_id and legacy_item_id being different
     # types (one a native int, one a string) would make this dict lookup
@@ -4584,10 +4584,20 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
     # class of bug that's hit this project repeatedly elsewhere.
     override_by_item_id = {str(r["item_id"]): r["sku_override"] for r in (override_res.data or [])
                             if r.get("item_id") and r.get("sku_override")}
+    # Real gap found: legacy_item_id comes straight from eBay's API response
+    # (li.get("legacyItemId", "")) and can legitimately come back empty for
+    # some orders -- when that happens, the lookup above has nothing to match
+    # on at all, no matter how it's cast. Title is virtually always present on
+    # both sides, so it's a reliable second path to the same override when the
+    # item_id link isn't there.
+    override_by_title = {(r["title"] or "").strip().lower(): r["sku_override"] for r in (override_res.data or [])
+                          if r.get("title") and r.get("sku_override")}
 
     def _effective_sku(r):
         legacy_id = r.get("legacy_item_id")
         override = override_by_item_id.get(str(legacy_id)) if legacy_id else None
+        if not override:
+            override = override_by_title.get((r.get("title") or "").strip().lower())
         return override if override else (r.get("sku") or "")
 
     # Financials reads straight from the local `orders` table — shipping_cost and final_net
