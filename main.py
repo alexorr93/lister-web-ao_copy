@@ -4507,13 +4507,21 @@ async def backfill_tracking_now(request: Request):
     return {"ok": True, "started": True}
 
 @app.post("/api/financials/sync-now")
-async def sync_now(request: Request, days_back: int = 90, resume: bool = True):
+async def sync_now(request: Request, days_back: int = None, resume: bool = True):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     import asyncio, datetime as _dt
     if _sync_status.get(business_id, {}).get("running"):
         return {"ok": True, "already_running": True}
+    if days_back is None:
+        # Safety net for any caller that doesn't explicitly choose -- once the
+        # historical backfill is done, a normal sync only needs to catch up
+        # recent data (matches the automated worker's own steady-state
+        # window), not walk the full ~2-year range every single time.
+        settings = get_ebay_settings(business_id)
+        backfilled = settings.get("ORDERS_BACKFILLED", "") == "true"
+        days_back = 14 if backfilled else 720
     _sync_status[business_id] = {"running": True, "result": None, "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None}
     asyncio.create_task(_run_sync_background(business_id, days_back, resume))
     return {"ok": True, "started": True}

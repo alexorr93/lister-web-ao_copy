@@ -254,11 +254,20 @@ async function backfillTracking() {
   }
 }
 
+let _lastSyncWasForceRestart = false;
+
 async function syncNow() {
   document.getElementById('shipping-status').textContent = 'Starting sync (this runs in the background — safe to leave this page open, or come back later)...';
   try {
     const forceRestart = document.getElementById('force-restart-toggle').checked;
-    const r = await fetch(`/api/financials/sync-now?days_back=720&resume=${!forceRestart}`, {method: 'POST'});
+    _lastSyncWasForceRestart = forceRestart;
+    // A normal click only needs to catch up the last couple weeks -- the
+    // automated background worker already keeps everything else current
+    // every 20 minutes. Only walk the full ~2-year range when force restart
+    // is explicitly checked (e.g. after a fix that needs historical months
+    // re-pulled), which is what that option is actually for.
+    const daysBack = forceRestart ? 720 : 14;
+    const r = await fetch(`/api/financials/sync-now?days_back=${daysBack}&resume=${!forceRestart}`, {method: 'POST'});
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Sync failed to start');
     pollSyncStatus();
@@ -272,7 +281,9 @@ async function pollSyncStatus() {
     const r = await fetch('/api/financials/sync-status');
     const data = await r.json();
     if (data.running) {
-      document.getElementById('shipping-status').textContent = 'Syncing (month by month) — this can take a few minutes, safe to leave open...';
+      document.getElementById('shipping-status').textContent = _lastSyncWasForceRestart
+        ? 'Full resync running (month by month, ~2 years) — this can take a few minutes, safe to leave open...'
+        : 'Catching up the last couple weeks — usually quick, safe to leave open...';
       setTimeout(pollSyncStatus, 5000);
       return;
     }
