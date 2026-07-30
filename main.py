@@ -4563,7 +4563,9 @@ async def update_order_sku(body: OrderSkuUpdate, request: Request):
 async def debug_sku_lookup(request: Request, order_id: str = None, title: str = None):
     """TEMPORARY diagnostic endpoint — remove after use. Shows the raw order
     row and any ebay_listing_status row(s) that could match it by item_id or
-    title, so we can see directly whether a real sku_override exists or not."""
+    title, so we can see directly whether a real sku_override exists or not.
+    Also reports the true total row count in ebay_listing_status, unpaginated,
+    to directly confirm or rule out the 1000-row Supabase cap theory."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
@@ -4576,6 +4578,9 @@ async def debug_sku_lookup(request: Request, order_id: str = None, title: str = 
             supabase.table("ebay_listing_status")
             .select("item_id,title,sku,sku_override,updated_at")
             .eq("business_id", business_id).ilike("title", f"%{title}%").execute().data)
+    uncapped_res = (supabase.table("ebay_listing_status").select("item_id", count="exact")
+                    .eq("business_id", business_id).limit(1).execute())
+    out["total_ebay_listing_status_rows"] = uncapped_res.count
     return out
 
 
@@ -4656,44 +4661,27 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
         .order("synced_at", desc=True).limit(1).execute()
     last_synced_at = (last_sync_res.data or [{}])[0].get("synced_at")
 
-    # Same "needs SKU / no matching lot" breakdown as the Lots page's Uncategorized
-    # tab, but for actual ORDERS in this date range rather than active listings —
-    # a separate view on purpose, since a SKU can be fine on the listing but still
-    # show up here if it was sold before ever getting assigned.
-    known_lot_skus = {r["sku"] for r in _fetch_all_for_business(business_id, "acquisitions", "sku") if r.get("sku")}
+    # Uncategorized breakdown is now sourced directly from the
+    # finance_uncategorized_order_skus view -- it does the same
+    # override-lookup + lot-prefix join in Postgres itself, so it can never
+    # be silently truncated by a REST-layer row cap the way the old
+    # Python-side loop (which had to pull the *entire* listings table into
+    # memory to build its lookup) could be. Scoped to the same date range
+    # as everything else on this page.
+    view_res = (supabase.table("finance_uncategorized_order_skus").select("*")
+                .eq("business_id", business_id)
+                .gte("order_date", start_date_str).lte("order_date", end_date_str).execute())
     uncategorized_order_items = []
     uncategorized_order_net = 0
-    for r in rows:
-        sku = _effective_sku(r)
-        override = _lookup_override(r)
-        # A manual override is a deliberate, explicit resolution by the person —
-        # it shouldn't be re-flagged here just because the value they chose
-        # doesn't happen to look like a real lot-prefixed SKU (e.g. "lister-960").
-        # Requiring it to also match a known lot double-gates something that's
-        # already been handled. Only fall through to the lot-prefix check when
-        # there's no override at all.
-        if override:
-            continue
-        # Deliberately NOT using _sku_needs_assignment's stricter "PREFIX- with
-        # nothing after the dash still needs assignment" rule here -- that's the
-        # right bar for the Lots page (flagging items that need a specific
-        # per-item SKU), but for financial categorization of an already-sold
-        # order, a bare "14R-" already identifies which lot it belongs to,
-        # which is all that matters here. Only a genuinely blank SKU, or one
-        # whose prefix matches no known lot at all, counts as uncategorized.
-        needs_sku = not sku
-        prefix = _lot_prefix(sku) if sku else None
-        is_uncategorized = needs_sku or (sku and prefix not in known_lot_skus)
-        if not is_uncategorized:
-            continue
-        uncategorized_order_net += r.get("final_net") or 0
+    for r in (view_res.data or []):
+        uncategorized_order_net += r.get("net") or 0
         uncategorized_order_items.append({
-            "id": r["id"], "sku": r.get("sku") or "", "sku_override": override,
+            "id": r["id"], "sku": r.get("raw_sku") or "", "sku_override": r.get("sku_override"),
             "title": r.get("title"), "platform": r.get("platform"),
             "order_id": r.get("order_id"), "order_date": r.get("order_date", ""),
-            "quantity": r.get("quantity"), "revenue": r.get("gross_revenue"),
-            "net": r.get("final_net"), "buyer_shipping": r.get("buyer_shipping") or 0,
-            "shipping_cost": r.get("shipping_cost") or 0, "needs_sku": needs_sku,
+            "quantity": r.get("quantity"), "revenue": r.get("revenue"),
+            "net": r.get("net"), "buyer_shipping": r.get("buyer_shipping") or 0,
+            "shipping_cost": r.get("shipping_cost") or 0, "needs_sku": not (r.get("raw_sku") or ""),
         })
     uncategorized_order_items.sort(key=lambda r: r.get("order_date", ""), reverse=True)
 
