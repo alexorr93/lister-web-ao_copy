@@ -4677,6 +4677,7 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
         uncategorized_order_net += r.get("net") or 0
         uncategorized_order_items.append({
             "id": r["id"], "sku": r.get("raw_sku") or "", "sku_override": r.get("sku_override"),
+            "matched_ebay_sku": r.get("matched_ebay_sku"),
             "title": r.get("title"), "platform": r.get("platform"),
             "order_id": r.get("order_id"), "order_date": r.get("order_date", ""),
             "quantity": r.get("quantity"), "revenue": r.get("revenue"),
