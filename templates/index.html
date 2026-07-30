@@ -662,6 +662,7 @@ select.field-input { background: #fff; color: #0f172a; }
   <div class="modal" onclick="event.stopPropagation()">
     <div style="position:relative;z-index:5;">
       <img class="modal-img" id="modal-img" src="" alt="" style="pointer-events:none;"/>
+      <div id="modal-mpn-flag" class="tile-mpn-flag" style="display:none;" title="eBay MPN set to &quot;Does Not Apply&quot; — fix before publishing or eBay may reject/flag this listing" onclick="event.stopPropagation();document.getElementById('modal-mpn-input').scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('modal-mpn-input').focus();"></div>
       <button id="rotate-ccw-btn" onclick="event.stopPropagation();rotatePhoto('ccw')" title="Rotate left" style="position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,0.6);border:none;color:#fff;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;z-index:10;">↺</button><button id="rotate-cw-btn" onclick="event.stopPropagation();rotatePhoto('cw')" title="Rotate right" style="position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,0.6);border:none;color:#fff;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;z-index:10;">↻</button>
     </div>
     <div class="modal-body">
@@ -704,7 +705,11 @@ select.field-input { background: #fff; color: #0f172a; }
         </div>
         <div style="margin-bottom:8px;">
           <div class="field-label">MPN (for eBay item specifics)</div>
-          <input type="text" class="field-input" id="modal-mpn-input" placeholder="e.g. 2CDS271337R0217 — leave blank to auto-guess" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="modal-mpn-nofill"/>
+          <div style="display:flex;gap:6px;align-items:flex-start;">
+            <input type="text" class="field-input" id="modal-mpn-input" placeholder="e.g. 2CDS271337R0217 — leave blank to auto-guess" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="modal-mpn-nofill" style="flex:1;"/>
+            <button class="btn" id="modal-find-mpn-btn" onclick="findMpn()" title="Reads the part number off the actual photos" style="display:none;white-space:nowrap;">🔍 Find MPN</button>
+          </div>
+          <div id="modal-find-mpn-status" style="display:none;font-size:11px;color:var(--muted);margin-top:4px;"></div>
           <div id="modal-mpn-warn" style="display:none;font-size:11px;color:var(--red,#dc2626);margin-top:4px;">⚠️ Last submitted as "Does Not Apply" — eBay may want a real MPN here</div>
         </div>
         <div style="margin-bottom:8px;">
@@ -1896,6 +1901,9 @@ function openModal(id) {
   document.getElementById('modal-brand-input').value = l.brand || guessBrand(l.title || '');
   document.getElementById('modal-mpn-input').value = (l.ebay_mpn_is_fallback ? '' : (l.ebay_mpn || guessMpn(l.title || '', l.brand || guessBrand(l.title || ''))));
   document.getElementById('modal-mpn-warn').style.display = l.ebay_mpn_is_fallback ? 'block' : 'none';
+  document.getElementById('modal-mpn-flag').style.display = l.ebay_mpn_is_fallback ? 'block' : 'none';
+  document.getElementById('modal-find-mpn-btn').style.display = (l.category_mode === 'motors') ? '' : 'none';
+  document.getElementById('modal-find-mpn-status').style.display = 'none';
   document.getElementById('modal-shipping-policy-select').value = l.ebay_fulfillment_policy_id || '';
   document.getElementById('modal-price-input').value = l.price.toFixed(2);
   document.getElementById('modal-cond-input').value  = l.condition || 'used';
@@ -2018,6 +2026,30 @@ function guessMpn(title, brand) {
     .filter(w => w.toLowerCase() !== brandLower && /[0-9]/.test(w) && /[a-zA-Z]/.test(w));
   if (!candidates.length) return '';
   return candidates.reduce((a, b) => b.length > a.length ? b : a, '');
+}
+
+async function findMpn() {
+  if (!modalItemId) return;
+  const btn = document.getElementById('modal-find-mpn-btn');
+  const statusEl = document.getElementById('modal-find-mpn-status');
+  btn.disabled = true;
+  btn.textContent = '🔍 Looking...';
+  statusEl.style.display = 'block';
+  statusEl.textContent = 'Reading the part number off the photos...';
+  try {
+    const r = await api('POST', `/api/listings/${modalItemId}/find-mpn`, {});
+    if (r.found) {
+      document.getElementById('modal-mpn-input').value = r.mpn;
+      statusEl.textContent = `Found: ${r.mpn} (${r.confidence} confidence) — fills both MPN and Manufacturer Part Number on publish`;
+    } else {
+      statusEl.textContent = "Couldn't find a part number in the photos — enter it manually if you know it";
+    }
+  } catch(e) {
+    statusEl.textContent = `Failed: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔍 Find MPN';
+  }
 }
 
 let lastCategoryTried = {}; // itemId -> category_id, so re-clicking Auto-pick tries the NEXT suggestion, not the same one

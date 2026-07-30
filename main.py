@@ -937,6 +937,11 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
         f"<NameValueList><Name>Brand</Name><Value>{_xesc(brand)}</Value></NameValueList>"
         f"<NameValueList><Name>MPN</Name><Value>{_xesc(mpn)}</Value></NameValueList>"
     )
+    if listing.get("category_mode") == "motors":
+        # Auto parts specifically: eBay Motors expects "Manufacturer Part Number" as
+        # its own separate item specific, distinct from the "MPN" aspect used
+        # elsewhere -- both need the same value sent, not just one or the other.
+        item_specifics_xml += f"<NameValueList><Name>Manufacturer Part Number</Name><Value>{_xesc(mpn)}</Value></NameValueList>"
 
     result = {"offer_id": None, "sku": sku, "item_id": None, "status": "draft", "scheduled_at": None, "brand": brand, "mpn": mpn, "mpn_is_fallback": mpn_is_fallback}
 
@@ -1623,6 +1628,75 @@ class EbaySubmit(BaseModel):
     brand: Optional[str] = None
     mpn: Optional[str] = None
 
+
+@app.post("/api/listings/{item_id}/find-mpn")
+async def find_mpn(item_id: str, request: Request):
+    """Auto parts specifically: looks at the item's actual photos for a real
+    manufacturer part number physically marked on the part (stamp, sticker,
+    casting, tag) -- auto parts almost always have this somewhere. Returns
+    the value to fill into the MPN field, which then gets sent to eBay as
+    BOTH the 'MPN' and 'Manufacturer Part Number' aspects at publish time
+    (see push_listing_to_ebay_v2) -- two genuinely separate fields in eBay's
+    item specifics for this category, both need the same value."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+
+    res = supabase.table("listings").select("title,photo_id").eq("id", item_id).limit(1).execute()
+    if not res.data:
+        raise HTTPException(404, "Listing not found")
+    listing = res.data[0]
+    title = listing.get("title") or ""
+    pid = str(listing.get("photo_id") or "")
+    photo_ids = get_all_photo_ids(pid) if pid else []
+    if not photo_ids:
+        raise HTTPException(400, "No photos available for this item")
+
+    import os, json
+    import google.generativeai as genai
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    if not gemini_key:
+        raise HTTPException(400, "GEMINI_API_KEY not set")
+    genai.configure(api_key=gemini_key)
+    model = genai.GenerativeModel("gemini-2.5-flash")
+
+    prompt = f"""This is an auto part being listed for sale on eBay. Its listing title is: "{title}"
+
+Look carefully at the photos for a manufacturer part number physically marked on the
+part or its packaging -- stamped, etched, printed, or on a label/tag/sticker. Auto
+parts almost always have this marked somewhere directly on the item. This is
+different from a generic model or product name -- it's usually a specific
+alphanumeric code unique to this exact part.
+
+Return ONLY a JSON object, no other text, in this exact shape:
+{{"mpn": "the part number you found" or null if you genuinely cannot find one, "confidence": "high", "medium", or "low"}}
+
+Only return a real value if you can actually see it in the photos or are highly
+confident from context -- never guess or make one up."""
+
+    parts = [prompt]
+    for photo_id in photo_ids[:4]:
+        try:
+            img_bytes = supabase.storage.from_("part-photos").download(photo_id)
+            parts.append({"mime_type": "image/jpeg", "data": img_bytes})
+        except Exception as e:
+            print(f"find_mpn: failed to fetch photo {photo_id}: {e}")
+            continue
+
+    try:
+        response = model.generate_content(parts, generation_config={"max_output_tokens": 500})
+        text = response.text.strip()
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        parsed = json.loads(text.strip())
+        mpn = (parsed.get("mpn") or "").strip()
+        if not mpn:
+            return {"ok": True, "found": False}
+        return {"ok": True, "found": True, "mpn": mpn, "confidence": parsed.get("confidence", "low")}
+    except Exception as e:
+        raise HTTPException(500, f"Find MPN failed: {e}")
 
 @app.post("/api/listings/{item_id}/rematch-category")
 async def rematch_category(item_id: str, request: Request, mode: str = "industrial"):
