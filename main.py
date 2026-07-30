@@ -4560,6 +4560,23 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
     start_date_str = start_dt.strftime("%Y-%m-%d")
     end_date_str = end_dt.strftime("%Y-%m-%d")
 
+    # A manual SKU override (set via the Uncategorized/My SKU Overrides tools)
+    # lives on ebay_listing_status, keyed by the eBay item id -- it's applied
+    # to the LISTING, but a historical order row's own `sku` column never
+    # automatically updates to match, since those are two separate places
+    # the SKU lives. Build the mapping once (legacy_item_id -> override) and
+    # prefer it everywhere below an order's sku would otherwise be used, so
+    # a correction made after the fact is actually reflected here instead of
+    # showing the stale original value forever.
+    override_res = supabase.table("ebay_listing_status").select("item_id,sku_override")\
+        .eq("business_id", business_id).execute()
+    override_by_item_id = {r["item_id"]: r["sku_override"] for r in (override_res.data or [])
+                            if r.get("item_id") and r.get("sku_override")}
+
+    def _effective_sku(r):
+        override = override_by_item_id.get(r.get("legacy_item_id"))
+        return override if override else (r.get("sku") or "")
+
     # Financials reads straight from the local `orders` table — shipping_cost and final_net
     # are already-computed, stored columns (written by apply_shipping_matches whenever a
     # Pirate Ship CSV is uploaded, and by the sync jobs). No computation happens here.
@@ -4572,7 +4589,7 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
     rows.sort(key=lambda r: r.get("order_date", ""), reverse=True)
 
     order_lines = [{
-        "id": r["id"], "sku": r["sku"], "title": r["title"], "platform": r["platform"], "order_id": r["order_id"],
+        "id": r["id"], "sku": _effective_sku(r), "title": r["title"], "platform": r["platform"], "order_id": r["order_id"],
         "quantity": r["quantity"], "revenue": r["gross_revenue"], "net": r["final_net"],
         "buyer_shipping": r.get("buyer_shipping") or 0,
         "shipping_cost": r.get("shipping_cost") or 0, "order_date": r.get("order_date", ""),
@@ -4591,7 +4608,7 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
     uncategorized_order_items = []
     uncategorized_order_net = 0
     for r in rows:
-        sku = r.get("sku") or ""
+        sku = _effective_sku(r)
         # Deliberately NOT using _sku_needs_assignment's stricter "PREFIX- with
         # nothing after the dash still needs assignment" rule here -- that's the
         # right bar for the Lots page (flagging items that need a specific
