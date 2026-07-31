@@ -6289,7 +6289,7 @@ async def flags_data(request: Request, keywords: str = ""):
     catalogs = []
     start = 0
     while True:
-        page = supabase.table("auction_catalogs").select("catalog_url,title,display_title,auctioneer,state,lot_count,end_date,capture_session_id,flags_viewed_at,flags_not_interested")\
+        page = supabase.table("auction_catalogs").select("catalog_url,title,display_title,auctioneer,state,lot_count,end_date,capture_session_id,flags_viewed_at,flags_not_interested,flags_favorite")\
             .eq("business_id", business_id).gt("lot_count", 0)\
             .or_(f"end_date.gte.{stale_cutoff},end_date.is.null")\
             .range(start, start + 999).execute().data or []
@@ -6328,6 +6328,7 @@ async def flags_data(request: Request, keywords: str = ""):
             "capture_session_id": c.get("capture_session_id"),
             "viewed": bool(c.get("flags_viewed_at")),
             "not_interested": bool(c.get("flags_not_interested")),
+            "favorite": bool(c.get("flags_favorite")),
             "zip": z,
             "distance_miles": distance,
             "distance_is_estimate": z is None or z not in centroids,
@@ -6470,6 +6471,23 @@ async def flags_mark_viewed(request: Request, body: dict):
         supabase.table("auction_catalogs").update({"flags_viewed_at": datetime.now(timezone.utc).isoformat()})\
             .eq("id", catalog["id"]).execute()
     return {"ok": True}
+
+@app.post("/api/flags/favorite")
+async def flags_favorite(request: Request, body: dict):
+    """Persists the favorite star on the Flags tab -- same pattern as
+    Not Interested, a normal toggle saved permanently."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    catalog_url = body.get("catalog_url")
+    favorite = bool(body.get("favorite"))
+    if not catalog_url:
+        raise HTTPException(400, "catalog_url is required")
+    res = (supabase.table("auction_catalogs").update({"flags_favorite": favorite})
+           .eq("business_id", business_id).eq("catalog_url", catalog_url).execute())
+    if not res.data:
+        raise HTTPException(404, "Catalog not found")
+    return {"ok": True, "favorite": favorite}
 
 @app.post("/api/flags/not-interested")
 async def flags_not_interested(request: Request, body: dict):
