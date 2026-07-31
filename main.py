@@ -1940,6 +1940,14 @@ async def auction_monitor_page(request: Request):
         return RedirectResponse("/login", status_code=302)
     return templates.TemplateResponse("auction_monitor.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "auction_monitor"})
 
+@app.get("/analytics", response_class=HTMLResponse)
+async def analytics_page(request: Request):
+    nav = get_nav_context(request)
+    if nav is None:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("analytics.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "analytics"})
+
 @app.get("/shopify-sync", response_class=HTMLResponse)
 async def shopify_sync_page(request: Request):
     nav = get_nav_context(request)
@@ -6126,6 +6134,90 @@ async def auction_monitor_list(request: Request):
             break
         start += 1000
     return {"catalogs": rows}
+
+_ZIP_CENTROID_CACHE = None
+
+def _load_zip_centroids() -> dict:
+    """US zip -> (lat, lng) centroid lookup, loaded once and cached in memory.
+    Bundled directly in the repo (us_zip_centroids.csv) so this endpoint never
+    depends on an external network call at request time."""
+    global _ZIP_CENTROID_CACHE
+    if _ZIP_CENTROID_CACHE is None:
+        import csv as _csv
+        path = os.path.join(os.path.dirname(__file__), "us_zip_centroids.csv")
+        cache = {}
+        with open(path, newline="", encoding="utf-8") as f:
+            for row in _csv.DictReader(f):
+                try:
+                    cache[row["zip"]] = (float(row["lat"]), float(row["lng"]))
+                except (ValueError, KeyError):
+                    continue
+        _ZIP_CENTROID_CACHE = cache
+    return _ZIP_CENTROID_CACHE
+
+# Rough geographic center per state -- only used as a fallback when a catalog
+# has no zip code on file, so its auction still shows up on the map somewhere
+# reasonable instead of being dropped.
+_STATE_CENTROID_FALLBACK = {
+    "AL": (32.8, -86.8), "AK": (64.2, -152.4), "AZ": (34.2, -111.7), "AR": (34.9, -92.4),
+    "CA": (37.2, -119.6), "CO": (39.0, -105.5), "CT": (41.6, -72.7), "DE": (39.0, -75.5),
+    "FL": (28.6, -81.5), "GA": (32.6, -83.4), "HI": (20.3, -156.3), "ID": (44.4, -114.6),
+    "IL": (40.3, -89.0), "IN": (39.9, -86.3), "IA": (42.0, -93.5), "KS": (38.5, -98.4),
+    "KY": (37.5, -85.3), "LA": (31.0, -92.0), "ME": (45.4, -69.2), "MD": (39.0, -76.7),
+    "MA": (42.2, -71.5), "MI": (44.3, -85.6), "MN": (46.3, -94.3), "MS": (32.7, -89.7),
+    "MO": (38.5, -92.5), "MT": (46.9, -110.4), "NE": (41.5, -99.8), "NV": (39.3, -116.6),
+    "NH": (43.7, -71.6), "NJ": (40.1, -74.7), "NM": (34.4, -106.1), "NY": (42.9, -75.5),
+    "NC": (35.6, -79.4), "ND": (47.5, -100.5), "OH": (40.4, -82.9), "OK": (35.5, -97.5),
+    "OR": (44.0, -120.5), "PA": (40.9, -77.8), "RI": (41.7, -71.5), "SC": (33.9, -80.9),
+    "SD": (44.4, -100.2), "TN": (35.9, -86.4), "TX": (31.5, -99.3), "UT": (39.3, -111.7),
+    "VT": (44.0, -72.7), "VA": (37.5, -78.9), "WA": (47.4, -120.5), "WV": (38.6, -80.6),
+    "WI": (44.6, -89.9), "WY": (43.0, -107.5),
+}
+
+@app.get("/api/analytics/auction-map")
+async def analytics_auction_map(request: Request):
+    """One point per auction catalog with a real lot count, positioned by zip
+    code (falls back to a rough state centroid if no zip is on file for that
+    catalog) -- feeds the heat map on the Analytics tab."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+
+    catalogs = []
+    start = 0
+    while True:
+        page = supabase.table("auction_catalogs").select("catalog_url,title,auctioneer,state,lot_count")\
+            .eq("business_id", business_id).gt("lot_count", 0)\
+            .range(start, start + 999).execute().data or []
+        catalogs.extend(page)
+        if len(page) < 1000:
+            break
+        start += 1000
+
+    zip_rows = supabase.rpc("get_catalog_zips", {"p_business_id": business_id}).execute().data or []
+    zip_by_catalog = {r["catalog_url"]: r["zip_code"] for r in zip_rows if r.get("zip_code")}
+
+    centroids = _load_zip_centroids()
+    points = []
+    for c in catalogs:
+        z = zip_by_catalog.get(c["catalog_url"])
+        approx = True
+        lat = lng = None
+        if z and z in centroids:
+            lat, lng = centroids[z]
+            approx = False
+        elif c.get("state") in _STATE_CENTROID_FALLBACK:
+            lat, lng = _STATE_CENTROID_FALLBACK[c["state"]]
+        else:
+            continue
+        points.append({
+            "lat": round(lat, 4), "lng": round(lng, 4),
+            "l": c.get("lot_count") or 0,
+            "a": c.get("auctioneer") or c.get("title") or "Unknown",
+            "s": c.get("state") or "",
+            "approx": approx,
+        })
+    return {"points": points}
 
 def _fetch_bidspotter_lots(source_url: str, capture_scope: Optional[str]) -> list:
     """Fetches lots from a BidSpotter auction-catalogue page. Unlike Roller, this
