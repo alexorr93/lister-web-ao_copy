@@ -355,6 +355,12 @@ select.field-input { background: #fff; color: #0f172a; }
       <button class="btn btn-primary" id="publish-now-v2-btn" style="display:none;background:#ea580c;border-color:#ea580c;" onclick="submitSelectedNowV2()" title="SKU stays editable after publishing">⚡ Publish Immediately</button>
       <button class="btn btn-primary" id="submit-shopify-btn" style="display:none;background:#95bf47;border-color:#95bf47;" onclick="submitSelectedToShopify()">🛍️ Publish to Shopify</button>
       <button class="btn" id="archive-selected-btn" style="display:none;color:var(--red);border-color:#991b1b;" onclick="archiveSelected()">🗄️ Archive Selected</button>
+      <div style="display:none;align-items:center;gap:4px;" id="bulk-shipping-wrap" title="Applies a shipping policy to every currently selected item">
+        <select class="field-input" id="bulk-shipping-select" style="font-size:12px;padding:5px 8px;width:170px;">
+          <option value="">Select shipping policy...</option>
+        </select>
+        <button class="btn" id="bulk-shipping-btn" style="font-size:12px;color:#38bdf8;border-color:#0284c7;" onclick="applyBulkShipping()">🚚 Apply Shipping</button>
+      </div>
       <div class="spacer"></div>
       <button class="btn" style="color:#dc2626;border-color:#dc2626;" onclick="archiveBothPublished()">🗄️ Archive Published</button>
     </div>
@@ -706,11 +712,11 @@ select.field-input { background: #fff; color: #0f172a; }
         <div style="margin-bottom:8px;">
           <div class="field-label">MPN (for eBay item specifics)</div>
           <div style="display:flex;gap:6px;align-items:flex-start;">
-            <input type="text" class="field-input" id="modal-mpn-input" placeholder="e.g. 2CDS271337R0217 — leave blank to auto-guess" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="modal-mpn-nofill" style="flex:1;"/>
+            <input type="text" class="field-input" id="modal-mpn-input" placeholder="e.g. 2CDS271337R0217 — leave blank to auto-guess" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="modal-mpn-nofill" style="flex:1;" oninput="modalDirty=true"/>
             <button class="btn" id="modal-find-mpn-btn" onclick="findMpn()" title="Reads the part number off the actual photos" style="display:none;white-space:nowrap;">🔍 Find MPN</button>
           </div>
           <div id="modal-find-mpn-status" style="display:none;font-size:11px;color:var(--muted);margin-top:4px;"></div>
-          <div id="modal-mpn-warn" style="display:none;font-size:11px;color:var(--red,#dc2626);margin-top:4px;">⚠️ Last submitted as "Does Not Apply" — eBay may want a real MPN here</div>
+          <div id="modal-mpn-warn" style="display:none;font-size:11px;color:var(--red,#dc2626);margin-top:4px;">⚠️ No confirmed MPN on file — will publish/republish as "Does Not Apply" unless fixed here first</div>
         </div>
         <div style="margin-bottom:8px;">
           <div class="field-label">Shipping Policy</div>
@@ -1211,7 +1217,7 @@ function renderTiles() {
         ${photoNavHtml}
         <div class="tile-badge-tl" style="color:${condCol};">${isNew?'NEW':'USED'}</div>
         <div class="tile-badge-tr">${statusBadge}</div>
-        ${l.ebay_mpn_is_fallback ? `<div class="tile-mpn-flag" title="eBay MPN set to &quot;Does Not Apply&quot; — click to fix" onclick="event.stopPropagation();openModal('${l.id}')"></div>` : ''}
+        ${needsMpnAttention(l) ? `<div class="tile-mpn-flag" title="${l.ebay_mpn_is_fallback ? 'eBay MPN set to &quot;Does Not Apply&quot; — click to fix' : 'No confirmed MPN on file — will publish as &quot;Does Not Apply&quot; unless fixed first'}" onclick="event.stopPropagation();openModal('${l.id}')"></div>` : ''}
         ${(onEbay || onShopify) ? `<div class="tile-platform-badges">${onEbay ? `<div class="tile-platform-badge ebay">${onEbayLabel}</div>` : ''}${onShopify ? '<div class="tile-platform-badge shopify">Shopify</div>' : ''}</div>` : ''}
         <div class="tile-price-overlay">
           <div class="tile-price-main">$${l.price.toFixed(2)}</div>
@@ -1642,6 +1648,9 @@ function updateSubmitBtn() {
   const archBtn = document.getElementById('archive-selected-btn');
   archBtn.style.display = selected.size > 0 ? 'inline-block' : 'none';
   archBtn.textContent = `🗄️ Archive ${selected.size} Selected`;
+  const bulkShipWrap = document.getElementById('bulk-shipping-wrap');
+  bulkShipWrap.style.display = selected.size > 0 ? 'flex' : 'none';
+  document.getElementById('bulk-shipping-btn').textContent = `🚚 Apply Shipping to ${selected.size}`;
 }
 
 async function archiveSelected() {
@@ -1900,8 +1909,8 @@ function openModal(id) {
   document.getElementById('modal-title-input').value = l.title || '';
   document.getElementById('modal-brand-input').value = l.brand || guessBrand(l.title || '');
   document.getElementById('modal-mpn-input').value = (l.ebay_mpn_is_fallback ? '' : (l.ebay_mpn || guessMpn(l.title || '', l.brand || guessBrand(l.title || ''))));
-  document.getElementById('modal-mpn-warn').style.display = l.ebay_mpn_is_fallback ? 'block' : 'none';
-  document.getElementById('modal-mpn-flag').style.display = l.ebay_mpn_is_fallback ? 'block' : 'none';
+  document.getElementById('modal-mpn-warn').style.display = needsMpnAttention(l) ? 'block' : 'none';
+  document.getElementById('modal-mpn-flag').style.display = needsMpnAttention(l) ? 'block' : 'none';
   document.getElementById('modal-find-mpn-btn').style.display = (l.category_mode === 'motors') ? '' : 'none';
   document.getElementById('modal-find-mpn-status').style.display = 'none';
   document.getElementById('modal-shipping-policy-select').value = l.ebay_fulfillment_policy_id || '';
@@ -2001,15 +2010,22 @@ async function saveModal() {
       if (l) l.brand = brand;
     }
     if (mpn && mpn !== (l && l.ebay_mpn)) {
-      try {
-        await api('PATCH', `/api/listings/${modalItemId}`, {field:'ebay_mpn', value:mpn});
-        await api('PATCH', `/api/listings/${modalItemId}`, {field:'ebay_mpn_is_fallback', value:false});
-        if (l) { l.ebay_mpn = mpn; l.ebay_mpn_is_fallback = false; }
-      } catch(e) { /* ebay_mpn column may not exist yet on this Supabase project */ }
+      await api('PATCH', `/api/listings/${modalItemId}`, {field:'ebay_mpn', value:mpn});
+      await api('PATCH', `/api/listings/${modalItemId}`, {field:'ebay_mpn_is_fallback', value:false});
+      if (l) { l.ebay_mpn = mpn; l.ebay_mpn_is_fallback = false; }
     }
     renderTiles();
   } catch(e) { toast('Save failed', 'error'); }
   document.getElementById('modal').classList.remove('open');
+}
+
+function needsMpnAttention(l) {
+  // Pre-publish check, not just post-publish: an item in Motors mode with no
+  // real saved MPN would send "Does Not Apply" to eBay if published right
+  // now, whether or not it's ever actually been published before. Also still
+  // flags anything that WAS already published with the fallback, so a past
+  // mistake stays visible until it's actually fixed.
+  return (l.category_mode === 'motors' && !l.ebay_mpn) || !!l.ebay_mpn_is_fallback;
 }
 
 function guessBrand(title) {
@@ -2040,7 +2056,21 @@ async function findMpn() {
     const r = await api('POST', `/api/listings/${modalItemId}/find-mpn`, {});
     if (r.found) {
       document.getElementById('modal-mpn-input').value = r.mpn;
-      statusEl.textContent = `Found: ${r.mpn} (${r.confidence} confidence) — fills both MPN and Manufacturer Part Number on publish`;
+      // Real bug fixed here: this used to only fill the input and leave saving
+      // to a separate manual "Save" click that nothing prompted the user to
+      // make -- if the modal was closed any other way, the found value was
+      // silently discarded and never actually reached the database. Now
+      // saves immediately, the moment a value is found.
+      try {
+        await api('PATCH', `/api/listings/${modalItemId}`, {field: 'ebay_mpn', value: r.mpn});
+        await api('PATCH', `/api/listings/${modalItemId}`, {field: 'ebay_mpn_is_fallback', value: false});
+        const l = listings.find(x => x.id === modalItemId);
+        if (l) { l.ebay_mpn = r.mpn; l.ebay_mpn_is_fallback = false; }
+        renderTiles();
+        statusEl.textContent = `Found and saved: ${r.mpn} (${r.confidence} confidence) — fills both MPN and Manufacturer Part Number on publish`;
+      } catch (saveErr) {
+        statusEl.textContent = `Found "${r.mpn}" but failed to save it: ${saveErr.message} — try clicking 💾 Save manually`;
+      }
     } else {
       statusEl.textContent = "Couldn't find a part number in the photos — enter it manually if you know it";
     }
@@ -3176,12 +3206,15 @@ async function loadShippingPolicyOptions() {
   try {
     const r = await fetch('/api/ebay/shipping-policy-options');
     const data = await r.json();
+    const options = data.options || [];
     const sel = document.getElementById('modal-shipping-policy-select');
-    for (const opt of (data.options || [])) {
+    const bulkSel = document.getElementById('bulk-shipping-select');
+    for (const opt of options) {
       const o = document.createElement('option');
       o.value = opt.id;
       o.textContent = opt.label;
       sel.appendChild(o);
+      bulkSel.appendChild(o.cloneNode(true));
     }
     sel.onchange = async () => {
       if (!modalItemId) return;
@@ -3196,6 +3229,28 @@ async function loadShippingPolicyOptions() {
       }
     };
   } catch(e) { /* non-critical, dropdown just stays at Default */ }
+}
+
+async function applyBulkShipping() {
+  if (!selected.size) return;
+  const sel = document.getElementById('bulk-shipping-select');
+  const val = sel.value || null;
+  if (!val) { toast('Pick a shipping policy first', 'error'); return; }
+  const ids = Array.from(selected);
+  const btn = document.getElementById('bulk-shipping-btn');
+  btn.disabled = true;
+  let ok = 0, failed = 0;
+  for (const id of ids) {
+    try {
+      await api('PATCH', `/api/listings/${id}`, {field: 'ebay_fulfillment_policy_id', value: val});
+      const l = listings.find(x => x.id === id);
+      if (l) l.ebay_fulfillment_policy_id = val;
+      ok++;
+    } catch(e) { failed++; }
+  }
+  btn.disabled = false;
+  renderTiles();
+  toast(`Shipping policy applied to ${ok} item(s)${failed ? ', ' + failed + ' failed' : ''}`);
 }
 
 // ── INIT ───────────────────────────────────────────────────────
