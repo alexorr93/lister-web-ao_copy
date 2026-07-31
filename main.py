@@ -6263,13 +6263,10 @@ async def flags_data(request: Request, keywords: str = ""):
 
     import re
 
-    default_keywords = [
-        "citizen lathe", "cummins parts", "CAT parts", "fire alarm", "Gas Analyzer",
-        "horiba", "hytorc", "enerpac", "IPG laser", "john deere parts", "notifier",
-        "rego-fix", "renishaw", "royal chuck", "smartscope", "bore micrometer",
-        "truck parts", "california Analytical",
-        "part lot", "part room", "parts", "cummins", "parker", "mitutoyo", "starrett", "allen bradley",
-    ]
+    kw_rows_db = supabase.table("flag_keywords").select("keyword,layer").eq("business_id", business_id).execute().data or []
+    layer1_keywords = [r["keyword"] for r in kw_rows_db if r["layer"] == 1]
+    layer2_keywords = [r["keyword"] for r in kw_rows_db if r["layer"] == 2]
+    default_keywords = layer1_keywords + layer2_keywords
     kw_list = [k.strip() for k in keywords.split(",") if k.strip()] or default_keywords
 
     from datetime import timedelta
@@ -6322,7 +6319,27 @@ async def flags_data(request: Request, keywords: str = ""):
             "multi_day": "day" in title.lower(),
             "keyword_counts": kw_by_catalog.get(c["catalog_url"], {}),
         })
-    return {"origin_zip": _FLAG_ORIGIN_ZIP, "radius_miles": _FLAG_RADIUS_MILES, "keywords": kw_list, "catalogs": out}
+    return {"origin_zip": _FLAG_ORIGIN_ZIP, "radius_miles": _FLAG_RADIUS_MILES, "keywords": kw_list,
+            "layer1_keywords": layer1_keywords, "layer2_keywords": layer2_keywords, "catalogs": out}
+
+@app.post("/api/flags/keywords")
+async def flags_add_keyword(request: Request, body: dict):
+    """Adds a new keyword to Layer 1 or Layer 2, permanently, from the Flags UI --
+    no code change needed to track a new part/brand name going forward."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    keyword = (body.get("keyword") or "").strip()
+    layer = body.get("layer")
+    if not keyword:
+        raise HTTPException(400, "keyword is required")
+    if layer not in (1, 2):
+        raise HTTPException(400, "layer must be 1 or 2")
+    supabase.table("flag_keywords").upsert(
+        {"business_id": business_id, "keyword": keyword, "layer": layer},
+        on_conflict="business_id,keyword",
+    ).execute()
+    return {"ok": True, "keyword": keyword, "layer": layer}
 
 def _reconstruct_bidspotter_url(catalog_url: str) -> Optional[str]:
     """Same reconstruction the Flags page does client-side: catalog_url is the
