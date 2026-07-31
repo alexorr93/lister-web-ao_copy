@@ -133,7 +133,7 @@ function keywordSumLayer1(c) {
   return layer1Keywords().reduce((sum, k) => sum + (keywordOn[k] ? ((c.keyword_counts || {})[k] || 0) : 0), 0);
 }
 function keywordSumLayer2(c) {
-  return layer2Keywords().reduce((sum, k) => sum + (keywordOn[k] ? ((c.keyword_counts || {})[k] || 0) : 0), 0);
+  return keywordSumLayer1(c) + layer2Keywords().reduce((sum, k) => sum + (keywordOn[k] ? ((c.keyword_counts || {})[k] || 0) : 0), 0);
 }
 
 function realUrlFromCatalogUrl(catalogUrl) {
