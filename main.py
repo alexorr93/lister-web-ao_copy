@@ -6275,7 +6275,7 @@ async def flags_data(request: Request, keywords: str = ""):
     catalogs = []
     start = 0
     while True:
-        page = supabase.table("auction_catalogs").select("catalog_url,title,display_title,auctioneer,state,lot_count,end_date,capture_session_id")\
+        page = supabase.table("auction_catalogs").select("catalog_url,title,display_title,auctioneer,state,lot_count,end_date,capture_session_id,flags_viewed_at,flags_not_interested")\
             .eq("business_id", business_id).gt("lot_count", 0)\
             .or_(f"end_date.gte.{stale_cutoff},end_date.is.null")\
             .range(start, start + 999).execute().data or []
@@ -6312,6 +6312,8 @@ async def flags_data(request: Request, keywords: str = ""):
             "lot_count": c.get("lot_count") or 0,
             "end_date": c.get("end_date"),
             "capture_session_id": c.get("capture_session_id"),
+            "viewed": bool(c.get("flags_viewed_at")),
+            "not_interested": bool(c.get("flags_not_interested")),
             "zip": z,
             "distance_miles": distance,
             "distance_is_estimate": z is None or z not in centroids,
@@ -6429,6 +6431,46 @@ def _fetch_bidspotter_catalog_meta(real_catalog_url: str, display_title: str) ->
             if end_date_iso or state_found:
                 return {"end_date": end_date_iso, "state": state_found}
     return None
+
+@app.post("/api/flags/mark-viewed")
+async def flags_mark_viewed(request: Request, body: dict):
+    """Permanently marks a catalog as viewed the first time its title link is
+    clicked on the Flags tab -- never overwrites an existing timestamp, so
+    this stays the true 'first looked at' time."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    catalog_url = body.get("catalog_url")
+    if not catalog_url:
+        raise HTTPException(400, "catalog_url is required")
+    cat_res = (supabase.table("auction_catalogs").select("id,flags_viewed_at")
+               .eq("business_id", business_id).eq("catalog_url", catalog_url).limit(1).execute())
+    if not cat_res.data:
+        raise HTTPException(404, "Catalog not found")
+    catalog = cat_res.data[0]
+    if not catalog.get("flags_viewed_at"):
+        from datetime import timezone
+        supabase.table("auction_catalogs").update({"flags_viewed_at": datetime.now(timezone.utc).isoformat()})\
+            .eq("id", catalog["id"]).execute()
+    return {"ok": True}
+
+@app.post("/api/flags/not-interested")
+async def flags_not_interested(request: Request, body: dict):
+    """Persists the 'Not interested' checkbox on the Flags tab -- a normal
+    toggle (checking again un-marks it), just saved permanently instead of
+    resetting on reload."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    catalog_url = body.get("catalog_url")
+    not_interested = bool(body.get("not_interested"))
+    if not catalog_url:
+        raise HTTPException(400, "catalog_url is required")
+    res = (supabase.table("auction_catalogs").update({"flags_not_interested": not_interested})
+           .eq("business_id", business_id).eq("catalog_url", catalog_url).execute())
+    if not res.data:
+        raise HTTPException(404, "Catalog not found")
+    return {"ok": True, "not_interested": not_interested}
 
 @app.post("/api/flags/recast-metadata")
 async def flags_recast_metadata(request: Request, body: dict):
