@@ -138,10 +138,7 @@ function realUrlFromCatalogUrl(catalogUrl) {
 }
 
 function displayTitle(c) {
-  const looksLikeRawUrl = (c.title || '').startsWith('httpswww.bidspotter');
-  if (c.title && !looksLikeRawUrl) return c.title;
-  // no real title on file for this catalog -- fall back to something readable
-  return (c.auctioneer ? c.auctioneer + ' — ' : '') + 'View catalog';
+  return c.title || (c.auctioneer ? c.auctioneer + ' — ' : '') + 'View catalog';
 }
 
 function isFlagged(c) {
