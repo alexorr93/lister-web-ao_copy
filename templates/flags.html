@@ -38,7 +38,7 @@ label.check { display: flex; align-items: center; gap: 6px; font-size: 13px; col
 .kw-chip { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; user-select: none; transition: all .15s; }
 .kw-chip input { display: none; }
 .kw-chip.on { background: rgba(37,99,235,.15); border-color: var(--accent); color: #60a5fa; }
-table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+table { min-width: 100%; width: max-content; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
 th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; white-space: nowrap; }
 th { background: #161b29; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
 tr:last-child td { border-bottom: none; }
