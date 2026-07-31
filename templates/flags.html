@@ -75,13 +75,6 @@ let keywords = [];
 let sortKey = 'distance_miles';
 let sortDir = 1;
 
-async function api(method, url) {
-  const r = await fetch(url, { method });
-  const data = await r.json();
-  if (!r.ok) throw new Error(data.detail || 'Request failed');
-  return data;
-}
-
 function setSort(key) {
   if (sortKey === key) { sortDir *= -1; } else { sortKey = key; sortDir = 1; }
   renderTable();
@@ -176,7 +169,7 @@ function renderTable() {
 
   const th = (key, label) => `<th onclick="setSort('${key}')" style="cursor:pointer;">${label}${sortKey===key ? (sortDir===1?' ▲':' ▼') : ''}</th>`;
   let html = `<table><thead><tr>
-    ${th('title','Auction')}${th('auctioneer','Auctioneer')}${th('end_date','Date')}${th('state','State')}${th('lot_count','Lots')}${th('distance_miles','Distance')}${th('multi_day','Multi-day')}${th('kw_sum','Keyword Count')}
+    ${th('title','Auction')}${th('auctioneer','Auctioneer')}${th('end_date','Date')}${th('state','State')}${th('lot_count','Lots')}${th('distance_miles','Distance')}${th('multi_day','Multi-day')}${th('kw_sum','Keyword Count')}<th>Send to Gemini</th>
   </tr></thead><tbody>`;
 
   for (const c of filtered) {
@@ -187,7 +180,10 @@ function renderTable() {
     const kwSum = keywordSum(c);
     const kwCell = kwSum > 0 ? `<span class="badge badge-kw">${kwSum}</span>` : '<span class="muted">0</span>';
     const href = realUrlFromCatalogUrl(c.catalog_url) || c.catalog_url;
-    html += `<tr>
+    const sendCell = c.capture_session_id
+      ? `<a href="/?tab=auction&session=${c.capture_session_id}" style="font-size:12px;">✅ Sent — view</a>`
+      : `<button class="btn" style="font-size:11px;padding:4px 10px;" onclick="sendToGemini('${c.catalog_url}', this)">📤 Send</button>`;
+    html += `<tr data-catalog-url="${c.catalog_url}">
       <td><a href="${href}" target="_blank">${displayTitle(c).replace(/</g,'&lt;')}</a></td>
       <td class="muted">${(c.auctioneer || '—').replace(/</g,'&lt;')}</td>
       <td class="muted">${c.end_date || '—'}</td>
@@ -196,13 +192,52 @@ function renderTable() {
       <td>${dist}</td>
       <td>${dayBadge}</td>
       <td>${kwCell}</td>
+      <td>${sendCell}</td>
     </tr>`;
   }
   html += '</tbody></table>';
   document.getElementById('table-area').innerHTML = html;
 }
 
-loadFlags();
+async function sendToGemini(catalogUrl, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+  try {
+    const r = await api('POST', '/api/flags/send-to-capture', { catalog_url: catalogUrl });
+    const row = rows.find(x => x.catalog_url === catalogUrl);
+    if (row) row.capture_session_id = r.session_id;
+    renderTable();
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '📤 Send';
+    alert('Failed to send: ' + e.message);
+  }
+}
+
+async function api(method, url, body) {
+  const opts = { method, headers: {} };
+  if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+  const r = await fetch(url, opts);
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.detail || 'Request failed');
+  return data;
+}
+
+function highlightFromUrlParam() {
+  const params = new URLSearchParams(window.location.search);
+  const wantCatalog = params.get('catalog');
+  if (!wantCatalog) return;
+  setTimeout(() => {
+    const row = document.querySelector(`tr[data-catalog-url="${CSS.escape(wantCatalog)}"]`);
+    if (row) {
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      row.style.outline = '2px solid var(--accent)';
+      row.style.outlineOffset = '-2px';
+    }
+  }, 300); // let the table finish rendering first
+}
+
+loadFlags().then(highlightFromUrlParam);
 </script>
 </body>
 </html>
