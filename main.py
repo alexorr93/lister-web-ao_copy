@@ -1030,6 +1030,13 @@ async def dashboard(request: Request):
     if nav is None:
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/login", status_code=302)
+    if not request.query_params.get("tab"):
+        # This environment's nav only shows Auctions/Auction Monitor/Analytics/Flags --
+        # Intake isn't reachable from anywhere in the nav here, so landing on bare "/"
+        # shouldn't show it either. Reuses the existing tab=... mechanism (already used
+        # by every other page's nav links) rather than adding new client-side logic.
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/?tab=auction", status_code=302)
     return templates.TemplateResponse("index.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "intake"})
 
 # ── API: LISTINGS ─────────────────────────────────────────────── #
