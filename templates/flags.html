@@ -294,7 +294,7 @@ function renderTable() {
 
   const th = (key, label) => `<th onclick="setSort('${key}')" style="cursor:pointer;">${label}${sortKey===key ? (sortDir===1?' ▲':' ▼') : ''}</th>`;
   let html = `<table><thead><tr>
-    ${th('title','Auction')}<th style="max-width:140px;">Auctioneer</th>${th('end_date','Date')}${th('state','State')}${th('distance_miles','Distance')}${th('lot_count','Lots')}${th('kw_sum1','Layer 1 Count')}${th('kw_sum2','Layer 2 Count')}${th('multi_day','Multi-day')}<th>Send to Gemini</th><th>Not Interested</th>
+    ${th('title','Auction')}<th style="max-width:140px;">Auctioneer</th>${th('end_date','Date')}${th('state','State')}${th('distance_miles','Distance')}${th('lot_count','Lots')}${th('kw_sum1','Layer 1 Count')}${th('kw_sum2','Layer 2 Count')}<th onclick="setSort('multi_day')" style="cursor:pointer;max-width:70px;">Multi-day${sortKey==='multi_day' ? (sortDir===1?' ▲':' ▼') : ''}</th><th>Send to Gemini</th><th>Not Interested</th>
   </tr></thead><tbody>`;
 
   for (const c of filtered) {
@@ -320,7 +320,7 @@ function renderTable() {
       <td>${c.lot_count}</td>
       <td>${kwCell1}</td>
       <td>${kwCell2}</td>
-      <td>${dayBadge}</td>
+      <td style="max-width:70px;">${dayBadge}</td>
       <td>${sendCell}</td>
       <td style="text-align:center;"><input type="checkbox" ${c.not_interested ? 'checked' : ''} onchange="toggleNotInterested('${c.catalog_url}', this.checked)"/></td>
     </tr>`;
