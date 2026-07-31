@@ -7,6 +7,22 @@
 <link rel="icon" type="image/png" href="/static/favicon.png">
 <style>
 :root { --bg: #1a0611; --card: #1e2535; --border: #2d3348; --text: #f1f5f9; --muted: #64748b; --accent: #2563eb; }
+.nav { background: var(--card); border-bottom: 1px solid var(--border); padding: 0 16px; display: flex; align-items: center; gap: 6px; overflow-x: auto; height: 52px; position: sticky; top: 0; z-index: 100; }
+.nav-btn { padding: 6px 14px; border-radius: 8px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; background: transparent; color: var(--muted); transition: all 0.15s; text-decoration: none; display: inline-block; font-family: inherit; }
+.nav-btn:hover { background: #1e2535; color: var(--text); }
+.nav-spacer { flex: 1; }
+.nav-download { padding: 6px 12px; background: #1e2535; border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; }
+.nav-account { font-size: 12px; color: var(--muted); margin-right: 4px; white-space: nowrap; }
+.nav-auction { color: #f59e0b; }
+.nav-auctionmonitor { color: #38bdf8; }
+.nav-analytics { color: #a78bfa; }
+.nav-flags { color: #fb7185; }
+.nav-settings { color: #94a3b8; }
+.nav-auction.active { background: #f59e0b; color: #1a0611; }
+.nav-auctionmonitor.active { background: #0284c7; color: #fff; }
+.nav-analytics.active { background: #7c3aed; color: #fff; }
+.nav-flags.active { background: #e11d48; color: #fff; }
+.nav-settings.active { background: #475569; color: #fff; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { overflow-x: hidden; max-width: 100%; }
 body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
