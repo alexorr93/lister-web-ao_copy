@@ -65,14 +65,29 @@ a { color: #60a5fa; }
   <div class="sub">Flags every tracked auction within <b>250 miles of 80537</b> (Loveland, CO), any <b>multi-day</b> auction (title contains "day"), and how many times each keyword shows up across a catalog's lots. Auctions that ended more than 5 days ago drop off this list.</div>
 
   <div class="filter-bar" style="position:relative;">
+    <select class="field-input" id="filter-auctioneer" style="min-width:180px;" onchange="renderTable()">
+      <option value="">All auctioneers</option>
+    </select>
+    <select class="field-input" id="filter-state" style="min-width:100px;" onchange="renderTable()">
+      <option value="">All states</option>
+    </select>
     <input type="text" class="field-input" id="search-input" placeholder="Search title/auctioneer/state..." style="min-width:220px;" oninput="renderTable()"/>
+    <input type="number" class="field-input" id="filter-max-distance" placeholder="Max distance (mi)" style="width:150px;" oninput="renderTable()"/>
+    <input type="number" class="field-input" id="filter-min-lots" placeholder="Min lots" style="width:100px;" oninput="renderTable()"/>
+    <input type="number" class="field-input" id="filter-min-layer1" placeholder="Min Layer 1" style="width:100px;" oninput="renderTable()"/>
+    <input type="number" class="field-input" id="filter-min-layer2" placeholder="Min Layer 2" style="width:100px;" oninput="renderTable()"/>
+    <select class="field-input" id="filter-multiday" style="min-width:130px;" onchange="renderTable()">
+      <option value="">Multi-day: any</option>
+      <option value="yes">Multi-day: yes</option>
+      <option value="no">Multi-day: no</option>
+    </select>
     <label class="check"><input type="checkbox" id="flagged-only" onchange="renderTable()"/> Flagged only</label>
     <div style="position:relative;">
-      <button class="btn" onclick="toggleLayerDropdown(1, event)">Layer 1 ▾</button>
+      <button class="btn" onclick="toggleLayerDropdown(1, event)">Layer 1 keywords ▾</button>
       <div id="layer1-dropdown" class="kw-dropdown" style="display:none;"></div>
     </div>
     <div style="position:relative;">
-      <button class="btn" onclick="toggleLayerDropdown(2, event)">Layer 2 ▾</button>
+      <button class="btn" onclick="toggleLayerDropdown(2, event)">Layer 2 keywords ▾</button>
       <div id="layer2-dropdown" class="kw-dropdown" style="display:none;"></div>
     </div>
   </div>
@@ -106,12 +121,24 @@ async function loadFlags() {
     layer1List = r.layer1_keywords || [];
     layer2List = r.layer2_keywords || [];
     keywords.forEach(k => { if (!(k in keywordOn)) keywordOn[k] = true; });
+    populateFilterDropdowns();
     const flaggedCount = rows.filter(isFlagged).length;
     statusEl.textContent = `${rows.length} auctions — ${flaggedCount} flagged (within ${r.radius_miles}mi of ${r.origin_zip}, multi-day, or keyword match)`;
     renderTable();
   } catch (e) {
     statusEl.textContent = `❌ ${e.message}`;
   }
+}
+
+function populateFilterDropdowns() {
+  const auctioneers = [...new Set(rows.map(c => c.auctioneer).filter(Boolean))].sort();
+  const states = [...new Set(rows.map(c => c.state).filter(Boolean))].sort();
+  const aSel = document.getElementById('filter-auctioneer');
+  const sSel = document.getElementById('filter-state');
+  const keepA = aSel.value, keepS = sSel.value;
+  aSel.innerHTML = '<option value="">All auctioneers</option>' + auctioneers.map(a => `<option value="${a.replace(/"/g,'&quot;')}">${a}</option>`).join('');
+  sSel.innerHTML = '<option value="">All states</option>' + states.map(s => `<option value="${s}">${s}</option>`).join('');
+  aSel.value = keepA; sSel.value = keepS;
 }
 
 function layer1Keywords() { return layer1List; }
@@ -202,6 +229,13 @@ function renderTable() {
   }
   const search = document.getElementById('search-input').value.trim().toLowerCase();
   const flaggedOnly = document.getElementById('flagged-only').checked;
+  const fAuctioneer = document.getElementById('filter-auctioneer').value;
+  const fState = document.getElementById('filter-state').value;
+  const fMaxDistance = parseFloat(document.getElementById('filter-max-distance').value);
+  const fMinLots = parseFloat(document.getElementById('filter-min-lots').value);
+  const fMinLayer1 = parseFloat(document.getElementById('filter-min-layer1').value);
+  const fMinLayer2 = parseFloat(document.getElementById('filter-min-layer2').value);
+  const fMultiday = document.getElementById('filter-multiday').value;
   let filtered = rows;
   if (search) {
     filtered = filtered.filter(c =>
@@ -209,6 +243,14 @@ function renderTable() {
       (c.auctioneer || '').toLowerCase().includes(search) ||
       (c.state || '').toLowerCase().includes(search));
   }
+  if (fAuctioneer) filtered = filtered.filter(c => c.auctioneer === fAuctioneer);
+  if (fState) filtered = filtered.filter(c => c.state === fState);
+  if (!isNaN(fMaxDistance)) filtered = filtered.filter(c => c.distance_miles != null && c.distance_miles <= fMaxDistance);
+  if (!isNaN(fMinLots)) filtered = filtered.filter(c => c.lot_count >= fMinLots);
+  if (!isNaN(fMinLayer1)) filtered = filtered.filter(c => keywordSumLayer1(c) >= fMinLayer1);
+  if (!isNaN(fMinLayer2)) filtered = filtered.filter(c => keywordSumLayer2(c) >= fMinLayer2);
+  if (fMultiday === 'yes') filtered = filtered.filter(c => c.multi_day);
+  if (fMultiday === 'no') filtered = filtered.filter(c => !c.multi_day);
   if (flaggedOnly) filtered = filtered.filter(isFlagged);
 
   filtered = [...filtered].sort((a, b) => {
@@ -225,7 +267,7 @@ function renderTable() {
 
   const th = (key, label) => `<th onclick="setSort('${key}')" style="cursor:pointer;">${label}${sortKey===key ? (sortDir===1?' ▲':' ▼') : ''}</th>`;
   let html = `<table><thead><tr>
-    ${th('title','Auction')}${th('end_date','Date')}${th('state','State')}${th('distance_miles','Distance')}${th('lot_count','Lots')}${th('kw_sum1','Layer 1 Count')}${th('kw_sum2','Layer 2 Count')}${th('multi_day','Multi-day')}<th>Send to Gemini</th>
+    ${th('title','Auction')}<th style="max-width:140px;">Auctioneer</th>${th('end_date','Date')}${th('state','State')}${th('distance_miles','Distance')}${th('lot_count','Lots')}${th('kw_sum1','Layer 1 Count')}${th('kw_sum2','Layer 2 Count')}${th('multi_day','Multi-day')}<th>Send to Gemini</th>
   </tr></thead><tbody>`;
 
   for (const c of filtered) {
@@ -243,6 +285,7 @@ function renderTable() {
       : `<button class="btn" style="font-size:11px;padding:4px 10px;" onclick="sendToGemini('${c.catalog_url}', this)">📤 Send</button>`;
     html += `<tr data-catalog-url="${c.catalog_url}">
       <td><a href="${href}" target="_blank">${displayTitle(c).replace(/</g,'&lt;')}</a></td>
+      <td class="muted" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(c.auctioneer || '').replace(/"/g,'&quot;')}">${c.auctioneer || '—'}</td>
       <td class="muted">${c.end_date ? c.end_date : `<button class="btn" style="font-size:11px;padding:3px 8px;" onclick="recastMetadata('${c.catalog_url}', this)">🔁 Recast</button>`}</td>
       <td class="muted">${c.state || '—'}</td>
       <td>${dist}</td>
