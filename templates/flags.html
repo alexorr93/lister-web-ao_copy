@@ -242,6 +242,15 @@ function parseDateForSort(raw) {
   return isNaN(d.getTime()) ? null : d.getTime();
 }
 
+function isEndingSoon(raw) {
+  const t = parseDateForSort(raw);
+  if (t === null) return false;
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const fiveDaysOut = startOfToday + 5 * 86400000;
+  return t >= startOfToday && t <= fiveDaysOut;
+}
+
 function formatDate(raw) {
   if (!raw) return '—';
   let d;
@@ -352,7 +361,7 @@ function renderTable() {
     html += `<tr data-catalog-url="${c.catalog_url}"${rowStyle}>
       <td><a href="${href}" target="_blank" onclick="markViewed('${c.catalog_url}')">${displayTitle(c).replace(/</g,'&lt;')}</a></td>
       <td class="muted" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(c.auctioneer || '').replace(/"/g,'&quot;')}">${c.auctioneer || '—'}</td>
-      <td class="muted">${c.end_date ? formatDate(c.end_date) : `<button class="btn" style="font-size:11px;padding:3px 8px;" onclick="recastMetadata('${c.catalog_url}', this)">🔁 Recast</button>`}</td>
+      <td class="muted">${c.end_date ? (isEndingSoon(c.end_date) ? `<span style="color:var(--amber);font-weight:700;">${formatDate(c.end_date)}</span>` : formatDate(c.end_date)) : `<button class="btn" style="font-size:11px;padding:3px 8px;" onclick="recastMetadata('${c.catalog_url}', this)">🔁 Recast</button>`}</td>
       <td class="muted">${c.state || '—'}</td>
       <td>${dist}</td>
       <td>${c.lot_count}</td>
