@@ -6267,7 +6267,7 @@ async def flags_data(request: Request, keywords: str = ""):
     catalogs = []
     start = 0
     while True:
-        page = supabase.table("auction_catalogs").select("catalog_url,title,display_title,auctioneer,state,lot_count")\
+        page = supabase.table("auction_catalogs").select("catalog_url,title,display_title,auctioneer,state,lot_count,end_date")\
             .eq("business_id", business_id).gt("lot_count", 0)\
             .range(start, start + 999).execute().data or []
         catalogs.extend(page)
@@ -6301,6 +6301,7 @@ async def flags_data(request: Request, keywords: str = ""):
             "auctioneer": c.get("auctioneer") or "",
             "state": c.get("state") or "",
             "lot_count": c.get("lot_count") or 0,
+            "end_date": c.get("end_date"),
             "zip": z,
             "distance_miles": distance,
             "distance_is_estimate": z is None or z not in centroids,
