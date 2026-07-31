@@ -141,6 +141,7 @@ async function loadMap() {
         .style('left', (event.clientX + 14) + 'px')
         .style('top', (event.clientY - 10) + 'px')
         .html(`<div style="font-weight:600;margin-bottom:4px;color:#f1f5f9;">${d.a}</div>
+               ${d.auctioneer ? `<div style="color:#94a3b8;">Auctioneer: <span style="color:#f1f5f9;font-weight:600;">${d.auctioneer}</span></div>` : ''}
                <div style="color:#94a3b8;">Lots: <span style="color:#f1f5f9;font-weight:600;">${d.l.toLocaleString()}</span></div>
                <div style="color:#94a3b8;">State: <span style="color:#f1f5f9;font-weight:600;">${d.s}</span></div>
                ${d.approx ? '<div style="color:#64748b;margin-top:4px;">approximate — no zip on file</div>' : ''}`);
