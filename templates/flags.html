@@ -176,7 +176,7 @@ function renderTable() {
 
   const th = (key, label) => `<th onclick="setSort('${key}')" style="cursor:pointer;">${label}${sortKey===key ? (sortDir===1?' ▲':' ▼') : ''}</th>`;
   let html = `<table><thead><tr>
-    ${th('title','Auction')}${th('auctioneer','Auctioneer')}${th('state','State')}${th('lot_count','Lots')}${th('distance_miles','Distance')}${th('multi_day','Multi-day')}${th('kw_sum','Keyword Count')}
+    ${th('title','Auction')}${th('auctioneer','Auctioneer')}${th('end_date','Date')}${th('state','State')}${th('lot_count','Lots')}${th('distance_miles','Distance')}${th('multi_day','Multi-day')}${th('kw_sum','Keyword Count')}
   </tr></thead><tbody>`;
 
   for (const c of filtered) {
@@ -190,6 +190,7 @@ function renderTable() {
     html += `<tr>
       <td><a href="${href}" target="_blank">${displayTitle(c).replace(/</g,'&lt;')}</a></td>
       <td class="muted">${(c.auctioneer || '—').replace(/</g,'&lt;')}</td>
+      <td class="muted">${c.end_date || '—'}</td>
       <td class="muted">${c.state || '—'}</td>
       <td>${c.lot_count}</td>
       <td>${dist}</td>
