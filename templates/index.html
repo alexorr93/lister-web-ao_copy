@@ -566,6 +566,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <button class="btn" onclick="stopSelectedCapture()">⏸️ Stop Capture</button>
       <button class="btn" style="background:#7a2020;color:#fff;" onclick="deleteSelectedCaptureSession()">🗑️ Delete Session</button>
     </div>
+    <div id="auction-back-to-flags" style="margin-bottom:14px;"></div>
     <div id="metric-progress" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
         <div style="font-size:12px;font-weight:600;color:var(--amber);text-transform:uppercase;letter-spacing:0.06em;" id="metric-progress-label">Running...</div>
@@ -2341,6 +2342,11 @@ async function loadAuctionItems(sessionId) {
   if (!sessionId) { document.getElementById('auction-list').innerHTML = ''; return; }
   const isNewSession = activeSession !== sessionId;
   activeSession = sessionId;
+  const backEl = document.getElementById('auction-back-to-flags');
+  const sessionInfo = (auctionSessions || []).find(s => s.id === sessionId);
+  backEl.innerHTML = (sessionInfo && sessionInfo.source_catalog_url)
+    ? `<a href="/flags?catalog=${encodeURIComponent(sessionInfo.source_catalog_url)}" style="font-size:12px;">← Back to Flags</a>`
+    : '';
   try {
     const lots = await api('GET', `/api/auction/capture/sessions/${sessionId}/lots`);
     auctionLotsCache = lots;
@@ -2968,12 +2974,19 @@ loadShippingPolicyOptions();
 loadLotSkus();
 
 // Allow linking directly to a tab from other pages, e.g. /?tab=upload
-(function() {
+(async function() {
   const params = new URLSearchParams(window.location.search);
   const wantTab = params.get('tab');
+  const wantSession = params.get('session');
   if (wantTab) {
     const btn = document.querySelector('.nav-btn[data-tab="' + wantTab + '"]');
     if (btn) btn.click();
+  }
+  if (wantTab === 'auction' && wantSession) {
+    await loadAuctionSessions(); // make sure the dropdown is populated before overriding its selection
+    const sel = document.getElementById('auction-session-select');
+    sel.value = wantSession;
+    loadAuctionItems(wantSession);
   }
 })();
 
