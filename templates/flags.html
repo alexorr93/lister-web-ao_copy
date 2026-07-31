@@ -295,7 +295,7 @@ function renderTable() {
 
   const th = (key, label) => `<th onclick="setSort('${key}')" style="cursor:pointer;">${label}${sortKey===key ? (sortDir===1?' ▲':' ▼') : ''}</th>`;
   let html = `<table><thead><tr>
-    ${th('title','Auction')}<th style="max-width:140px;">Auctioneer</th>${th('end_date','Date')}${th('state','State')}${th('distance_miles','Distance')}${th('lot_count','Lots')}${th('kw_sum1','Layer 1 Count')}${th('kw_sum2','Layer 2 Count')}${th('multi_day','Multi-day')}<th>Send to Gemini</th>
+    ${th('title','Auction')}<th style="max-width:140px;">Auctioneer</th>${th('end_date','Date')}${th('state','State')}${th('distance_miles','Distance')}${th('lot_count','Lots')}${th('kw_sum1','Layer 1 Count')}${th('kw_sum2','Layer 2 Count')}${th('multi_day','Multi-day')}<th>Send to Gemini</th><th>Not Interested</th>
   </tr></thead><tbody>`;
 
   for (const c of filtered) {
@@ -311,8 +311,9 @@ function renderTable() {
     const sendCell = c.capture_session_id
       ? `<a href="/?tab=auction&session=${c.capture_session_id}" style="font-size:12px;">✅ Sent — view</a>`
       : `<button class="btn" style="font-size:11px;padding:4px 10px;" onclick="sendToGemini('${c.catalog_url}', this)">📤 Send</button>`;
-    html += `<tr data-catalog-url="${c.catalog_url}">
-      <td><a href="${href}" target="_blank">${displayTitle(c).replace(/</g,'&lt;')}</a></td>
+    const rowStyle = c.viewed ? ' style="background:rgba(22,163,74,.15);"' : '';
+    html += `<tr data-catalog-url="${c.catalog_url}"${rowStyle}>
+      <td><a href="${href}" target="_blank" onclick="markViewed('${c.catalog_url}')">${displayTitle(c).replace(/</g,'&lt;')}</a></td>
       <td class="muted" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(c.auctioneer || '').replace(/"/g,'&quot;')}">${c.auctioneer || '—'}</td>
       <td class="muted">${c.end_date ? c.end_date : `<button class="btn" style="font-size:11px;padding:3px 8px;" onclick="recastMetadata('${c.catalog_url}', this)">🔁 Recast</button>`}</td>
       <td class="muted">${c.state || '—'}</td>
@@ -322,10 +323,33 @@ function renderTable() {
       <td>${kwCell2}</td>
       <td>${dayBadge}</td>
       <td>${sendCell}</td>
+      <td style="text-align:center;"><input type="checkbox" ${c.not_interested ? 'checked' : ''} onchange="toggleNotInterested('${c.catalog_url}', this.checked)"/></td>
     </tr>`;
   }
   html += '</tbody></table>';
   document.getElementById('table-area').innerHTML = html;
+}
+
+function markViewed(catalogUrl) {
+  // fire-and-forget -- don't block the new-tab navigation on this
+  api('POST', '/api/flags/mark-viewed', { catalog_url: catalogUrl }).catch(() => {});
+  const row = rows.find(x => x.catalog_url === catalogUrl);
+  if (row && !row.viewed) {
+    row.viewed = true;
+    const tr = document.querySelector(`tr[data-catalog-url="${CSS.escape(catalogUrl)}"]`);
+    if (tr) tr.style.background = 'rgba(22,163,74,.15)';
+  }
+}
+
+async function toggleNotInterested(catalogUrl, checked) {
+  const row = rows.find(x => x.catalog_url === catalogUrl);
+  try {
+    await api('POST', '/api/flags/not-interested', { catalog_url: catalogUrl, not_interested: checked });
+    if (row) row.not_interested = checked;
+  } catch (e) {
+    alert('Failed to save: ' + e.message);
+    renderTable(); // revert the checkbox visually
+  }
 }
 
 async function recastMetadata(catalogUrl, btn) {
