@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Flags — Lister AI</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<style>
+:root { --bg: #1a0611; --card: #1e2535; --border: #2d3348; --text: #f1f5f9; --muted: #64748b; --accent: #2563eb; --green: #16a34a; --red: #dc2626; --amber: #f59e0b; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { overflow-x: hidden; max-width: 100%; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.main { max-width: 1300px; margin: 0 auto; padding: 24px 20px 60px; overflow-x: auto; }
+h1 { font-size: 22px; margin-bottom: 4px; }
+.sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; max-width: 900px; }
+.filter-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.btn { padding: 9px 16px; border-radius: 8px; border: 1px solid var(--border); background: #1e2535; color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; }
+.btn-primary { background: var(--accent); border-color: var(--accent); }
+.field-input { background: #fff; color: #111; border: none; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+label.check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
+table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; white-space: nowrap; }
+th { background: #161b29; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+tr:last-child td { border-bottom: none; }
+.muted { color: var(--muted); }
+.status-msg { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+.empty { padding: 40px; text-align: center; color: var(--muted); }
+a { color: #60a5fa; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+.badge-radius { background: rgba(22,163,74,.15); color: var(--green); border: 1px solid rgba(22,163,74,.4); }
+.badge-day { background: rgba(245,158,11,.15); color: var(--amber); border: 1px solid rgba(245,158,11,.4); }
+.badge-kw { background: rgba(37,99,235,.15); color: #60a5fa; border: 1px solid rgba(37,99,235,.4); }
+</style>
+</head>
+<body>
+{% include "_nav.html" %}
+
+<div class="main">
+  <h1>🚩 Flags</h1>
+  <div class="sub">Flags every tracked auction within <b>250 miles of 80537</b> (Loveland, CO), any <b>multi-day</b> auction (title contains "day"), and how many times each keyword shows up across a catalog's lots.</div>
+
+  <div class="filter-bar">
+    <input type="text" class="field-input" id="search-input" placeholder="Search title/auctioneer/state..." style="min-width:220px;" oninput="renderTable()"/>
+    <input type="text" class="field-input" id="keyword-input" placeholder="Keywords, comma separated" style="min-width:260px;" value="Renishaw, Allen Bradley"/>
+    <button class="btn btn-primary" onclick="loadFlags()">Apply keywords</button>
+    <label class="check"><input type="checkbox" id="flagged-only" onchange="renderTable()"/> Flagged only</label>
+  </div>
+
+  <div id="status" class="status-msg">Loading…</div>
+  <div id="table-area"></div>
+</div>
+
+<script>
+let rows = [];
+let keywords = [];
+let sortKey = 'distance_miles';
+let sortDir = 1;
+
+async function api(method, url) {
+  const r = await fetch(url, { method });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.detail || 'Request failed');
+  return data;
+}
+
+function setSort(key) {
+  if (sortKey === key) { sortDir *= -1; } else { sortKey = key; sortDir = 1; }
+  renderTable();
+}
+
+async function loadFlags() {
+  const statusEl = document.getElementById('status');
+  statusEl.textContent = 'Loading…';
+  const kwInput = document.getElementById('keyword-input').value.trim();
+  try {
+    const r = await api('GET', '/api/flags/data?keywords=' + encodeURIComponent(kwInput));
+    rows = r.catalogs || [];
+    keywords = r.keywords || [];
+    const flaggedCount = rows.filter(isFlagged).length;
+    statusEl.textContent = `${rows.length} auctions — ${flaggedCount} flagged (within ${r.radius_miles}mi of ${r.origin_zip}, multi-day, or keyword match)`;
+    renderTable();
+  } catch (e) {
+    statusEl.textContent = `❌ ${e.message}`;
+  }
+}
+
+function isFlagged(c) {
+  if (c.within_radius || c.multi_day) return true;
+  return Object.values(c.keyword_counts || {}).some(n => n > 0);
+}
+
+function renderTable() {
+  if (!rows.length) {
+    document.getElementById('table-area').innerHTML = '<div class="empty">No auctions tracked yet.</div>';
+    return;
+  }
+  const search = document.getElementById('search-input').value.trim().toLowerCase();
+  const flaggedOnly = document.getElementById('flagged-only').checked;
+  let filtered = rows;
+  if (search) {
+    filtered = filtered.filter(c =>
+      (c.title || '').toLowerCase().includes(search) ||
+      (c.auctioneer || '').toLowerCase().includes(search) ||
+      (c.state || '').toLowerCase().includes(search));
+  }
+  if (flaggedOnly) filtered = filtered.filter(isFlagged);
+
+  filtered = [...filtered].sort((a, b) => {
+    let av = a[sortKey], bv = b[sortKey];
+    av = av ?? -Infinity; bv = bv ?? -Infinity;
+    const cmp = av > bv ? 1 : (av < bv ? -1 : 0);
+    return cmp * sortDir;
+  });
+
+  const th = (key, label) => `<th onclick="setSort('${key}')" style="cursor:pointer;">${label}${sortKey===key ? (sortDir===1?' ▲':' ▼') : ''}</th>`;
+  const kwHeaders = keywords.map(k => th(`kw_${k}`, k)).join('');
+  let html = `<table><thead><tr>
+    ${th('title','Auction')}${th('auctioneer','Auctioneer')}${th('state','State')}${th('lot_count','Lots')}${th('distance_miles','Distance')}${th('multi_day','Multi-day')}${kwHeaders}
+  </tr></thead><tbody>`;
+
+  for (const c of filtered) {
+    const dist = c.distance_miles != null
+      ? `${c.within_radius ? '<span class="badge badge-radius">' : ''}${c.distance_miles} mi${c.distance_is_estimate ? ' (est.)' : ''}${c.within_radius ? '</span>' : ''}`
+      : '<span class="muted">—</span>';
+    const dayBadge = c.multi_day ? '<span class="badge badge-day">multi-day</span>' : '<span class="muted">—</span>';
+    const kwCells = keywords.map(k => {
+      const n = (c.keyword_counts || {})[k] || 0;
+      return `<td>${n > 0 ? `<span class="badge badge-kw">${n}</span>` : '<span class="muted">0</span>'}</td>`;
+    }).join('');
+    html += `<tr>
+      <td><a href="${c.catalog_url}" target="_blank">${(c.title || c.catalog_url).replace(/</g,'&lt;')}</a></td>
+      <td class="muted">${(c.auctioneer || '—').replace(/</g,'&lt;')}</td>
+      <td class="muted">${c.state || '—'}</td>
+      <td>${c.lot_count}</td>
+      <td>${dist}</td>
+      <td>${dayBadge}</td>
+      ${kwCells}
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('table-area').innerHTML = html;
+}
+
+loadFlags();
+</script>
+</body>
+</html>
