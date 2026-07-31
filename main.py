@@ -6268,7 +6268,7 @@ async def flags_data(request: Request, keywords: str = ""):
     catalogs = []
     start = 0
     while True:
-        page = supabase.table("auction_catalogs").select("catalog_url,title,display_title,auctioneer,state,lot_count,end_date")\
+        page = supabase.table("auction_catalogs").select("catalog_url,title,display_title,auctioneer,state,lot_count,end_date,capture_session_id")\
             .eq("business_id", business_id).gt("lot_count", 0)\
             .range(start, start + 999).execute().data or []
         catalogs.extend(page)
@@ -6303,6 +6303,7 @@ async def flags_data(request: Request, keywords: str = ""):
             "state": c.get("state") or "",
             "lot_count": c.get("lot_count") or 0,
             "end_date": c.get("end_date"),
+            "capture_session_id": c.get("capture_session_id"),
             "zip": z,
             "distance_miles": distance,
             "distance_is_estimate": z is None or z not in centroids,
@@ -6311,6 +6312,94 @@ async def flags_data(request: Request, keywords: str = ""):
             "keyword_counts": kw_by_catalog.get(c["catalog_url"], {}),
         })
     return {"origin_zip": _FLAG_ORIGIN_ZIP, "radius_miles": _FLAG_RADIUS_MILES, "keywords": kw_list, "catalogs": out}
+
+def _reconstruct_bidspotter_url(catalog_url: str) -> Optional[str]:
+    """Same reconstruction the Flags page does client-side: catalog_url is the
+    original BidSpotter URL with 'https://' and every '/' stripped out, so the
+    fixed prefix + the literal 'catalogue-id-' marker are enough to split it
+    back into (auctioneer slug, catalogue id) and rebuild a real link."""
+    prefix = "httpswww.bidspotter.comen-usauction-catalogues"
+    if not catalog_url.startswith(prefix):
+        return None
+    rest = catalog_url[len(prefix):]
+    marker = "catalogue-id-"
+    idx = rest.find(marker)
+    if idx == -1:
+        return None
+    slug = rest[:idx]
+    cid = rest[idx + len(marker):]
+    return f"https://www.bidspotter.com/en-us/auction-catalogues/{slug}/{marker}{cid}"
+
+def _send_catalog_lots_to_capture(session_id: str, business_id: str, catalog_url: str):
+    """Runs in the background -- bulk-inserts every already-parsed BidSpotter lot
+    as a Live Lot Capture line item (is_bulk_lot=False, so each one captures
+    instantly with no Gemini cost, same as a normal single-item capture)."""
+    lots = []
+    start = 0
+    while True:
+        page = supabase.table("bidspotter_catalog_lots").select("lot_number,description")\
+            .eq("business_id", business_id).eq("catalog_url", catalog_url)\
+            .range(start, start + 999).execute().data or []
+        lots.extend(page)
+        if len(page) < 1000:
+            break
+        start += 1000
+
+    for lot in lots:
+        try:
+            _create_one_lot(AuctionLotCreate(
+                session_id=session_id,
+                lot_number=lot.get("lot_number"),
+                title=(lot.get("description") or "")[:300],
+                description=lot.get("description"),
+                is_bulk_lot=False,
+            ))
+        except Exception as e:
+            print(f"[send-to-capture] failed lot {lot.get('lot_number')} in session {session_id}: {e}")
+
+    supabase.table("auction_capture_sessions").update({"status": "done"}).eq("id", session_id).execute()
+
+@app.post("/api/flags/send-to-capture")
+async def flags_send_to_capture(request: Request, body: dict, background_tasks: BackgroundTasks):
+    """The 'Send to Gemini API' action on the Flags tab: takes a BidSpotter catalog
+    we already parsed and turns it into a real Live Lot Capture session on the
+    Auctions tab, so it can go through the same resale-value/liquidity/weight
+    research (Settings > Auctions tab) as any manually captured auction. Permanent
+    once sent -- capture_session_id on the catalog is what the Flags badge checks."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+
+    catalog_url = body.get("catalog_url")
+    if not catalog_url:
+        raise HTTPException(400, "catalog_url is required")
+
+    cat_res = (supabase.table("auction_catalogs").select("*")
+               .eq("business_id", business_id).eq("catalog_url", catalog_url).limit(1).execute())
+    if not cat_res.data:
+        raise HTTPException(404, "Catalog not found")
+    catalog = cat_res.data[0]
+
+    if catalog.get("capture_session_id"):
+        return {"session_id": catalog["capture_session_id"], "already_sent": True}
+
+    real_url = _reconstruct_bidspotter_url(catalog_url) or catalog_url
+    session_row = {
+        "business_id": str(business_id),
+        "source_url": real_url,
+        "name": catalog.get("display_title") or catalog.get("title") or catalog_url,
+        "capture_scope": "all",
+        "status": "capturing:0/?",
+        "source_catalog_url": catalog_url,
+    }
+    sess_res = supabase.table("auction_capture_sessions").insert(session_row).execute()
+    session = sess_res.data[0]
+
+    supabase.table("auction_catalogs").update({"capture_session_id": session["id"]})\
+        .eq("business_id", business_id).eq("catalog_url", catalog_url).execute()
+
+    background_tasks.add_task(_send_catalog_lots_to_capture, session["id"], business_id, catalog_url)
+    return {"session_id": session["id"], "already_sent": False}
 
 def _fetch_bidspotter_lots(source_url: str, capture_scope: Optional[str]) -> list:
     """Fetches lots from a BidSpotter auction-catalogue page. Unlike Roller, this
