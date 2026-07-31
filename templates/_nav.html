@@ -26,7 +26,7 @@
     <a class="nav-btn nav-auction" href="/?tab=auction">🔨 Auctions</a>
     {% endif %}
   {% endif %}
-  <a class="nav-btn nav-auctionmonitor{{ ' active' if active_tab == 'auction_monitor' else '' }}" href="/auction-monitor">🔎 Auction Monitor</a>
+  <a class="nav-btn nav-auctionmonitor{{ ' active' if active_tab == 'auction_monitor' else '' }}" href="/auction-monitor">🔎 Feed</a>
   <a class="nav-btn nav-analytics{{ ' active' if active_tab == 'analytics' else '' }}" href="/analytics">📊 Analytics</a>
   <div class="nav-spacer"></div>
   <span class="nav-account" style="opacity:.6;" title="When this server process last started (Mountain time) — Railway restarts it on every deploy, so this is effectively 'last deployed at'">🚀 {{ deploy_time_mt.strftime('%b %d, %I:%M %p') }} MT</span>
