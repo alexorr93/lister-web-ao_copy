@@ -233,6 +233,30 @@ function keywordSumLayer2(c) {
   return keywordSumLayer1(c) + layer2Keywords().reduce((sum, k) => sum + (keywordOn[k] ? ((c.keyword_counts || {})[k] || 0) : 0), 0);
 }
 
+function parseDateForSort(raw) {
+  if (!raw) return null;
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(raw).trim());
+  const d = isoMatch
+    ? new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]))
+    : new Date(raw);
+  return isNaN(d.getTime()) ? null : d.getTime();
+}
+
+function formatDate(raw) {
+  if (!raw) return '—';
+  let d;
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(raw).trim());
+  if (isoMatch) {
+    // Build from local date components -- new Date("YYYY-MM-DD") parses as UTC
+    // midnight, which shifts a day backward once converted to a US local timezone.
+    d = new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
+  } else {
+    d = new Date(raw);
+  }
+  if (isNaN(d.getTime())) return raw; // fall back to the raw string if genuinely unparseable
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
 function realUrlFromCatalogUrl(catalogUrl) {
   const prefix = 'httpswww.bidspotter.comen-usauction-catalogues';
   if (!catalogUrl.startsWith(prefix)) return null;
@@ -295,8 +319,8 @@ function renderTable() {
   renderKeywordLeaderboards(filtered);
 
   filtered = [...filtered].sort((a, b) => {
-    let av = sortKey === 'kw_sum1' ? keywordSumLayer1(a) : sortKey === 'kw_sum2' ? keywordSumLayer2(a) : a[sortKey];
-    let bv = sortKey === 'kw_sum1' ? keywordSumLayer1(b) : sortKey === 'kw_sum2' ? keywordSumLayer2(b) : b[sortKey];
+    let av = sortKey === 'kw_sum1' ? keywordSumLayer1(a) : sortKey === 'kw_sum2' ? keywordSumLayer2(a) : sortKey === 'end_date' ? parseDateForSort(a.end_date) : a[sortKey];
+    let bv = sortKey === 'kw_sum1' ? keywordSumLayer1(b) : sortKey === 'kw_sum2' ? keywordSumLayer2(b) : sortKey === 'end_date' ? parseDateForSort(b.end_date) : b[sortKey];
     const aNull = (av === null || av === undefined);
     const bNull = (bv === null || bv === undefined);
     if (aNull && bNull) return 0;
@@ -328,7 +352,7 @@ function renderTable() {
     html += `<tr data-catalog-url="${c.catalog_url}"${rowStyle}>
       <td><a href="${href}" target="_blank" onclick="markViewed('${c.catalog_url}')">${displayTitle(c).replace(/</g,'&lt;')}</a></td>
       <td class="muted" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(c.auctioneer || '').replace(/"/g,'&quot;')}">${c.auctioneer || '—'}</td>
-      <td class="muted">${c.end_date ? c.end_date : `<button class="btn" style="font-size:11px;padding:3px 8px;" onclick="recastMetadata('${c.catalog_url}', this)">🔁 Recast</button>`}</td>
+      <td class="muted">${c.end_date ? formatDate(c.end_date) : `<button class="btn" style="font-size:11px;padding:3px 8px;" onclick="recastMetadata('${c.catalog_url}', this)">🔁 Recast</button>`}</td>
       <td class="muted">${c.state || '—'}</td>
       <td>${dist}</td>
       <td>${c.lot_count}</td>
