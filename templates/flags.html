@@ -38,6 +38,11 @@ label.check { display: flex; align-items: center; gap: 6px; font-size: 13px; col
 .kw-chip { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; user-select: none; transition: all .15s; }
 .kw-chip input { display: none; }
 .kw-chip.on { background: rgba(37,99,235,.15); border-color: var(--accent); color: #60a5fa; }
+.kw-dropdown { position: absolute; top: 100%; left: 0; margin-top: 6px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; min-width: 260px; max-height: 320px; overflow-y: auto; z-index: 50; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+.kw-dropdown label { display: flex; align-items: center; gap: 8px; padding: 5px 4px; font-size: 13px; cursor: pointer; border-radius: 6px; }
+.kw-dropdown label:hover { background: #1e2535; }
+.kw-add-row { display: flex; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.kw-add-row input { flex: 1; }
 table { width: max-content; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
 th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; white-space: nowrap; }
 th { background: #161b29; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
@@ -59,18 +64,16 @@ a { color: #60a5fa; }
   <h1>🚩 Flags</h1>
   <div class="sub">Flags every tracked auction within <b>250 miles of 80537</b> (Loveland, CO), any <b>multi-day</b> auction (title contains "day"), and how many times each keyword shows up across a catalog's lots. Auctions that ended more than 5 days ago drop off this list.</div>
 
-  <div class="filter-bar">
+  <div class="filter-bar" style="position:relative;">
     <input type="text" class="field-input" id="search-input" placeholder="Search title/auctioneer/state..." style="min-width:220px;" oninput="renderTable()"/>
     <label class="check"><input type="checkbox" id="flagged-only" onchange="renderTable()"/> Flagged only</label>
-  </div>
-  <div style="display:flex;gap:32px;margin-bottom:16px;flex-wrap:wrap;">
-    <div>
-      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin-bottom:8px;">Layer 1</div>
-      <div id="layer1-toggles" style="display:flex;flex-wrap:wrap;gap:8px;max-width:700px;"></div>
+    <div style="position:relative;">
+      <button class="btn" onclick="toggleLayerDropdown(1, event)">Layer 1 ▾</button>
+      <div id="layer1-dropdown" class="kw-dropdown" style="display:none;"></div>
     </div>
-    <div>
-      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin-bottom:8px;">Layer 2</div>
-      <div id="layer2-toggles" style="display:flex;flex-wrap:wrap;gap:8px;max-width:500px;"></div>
+    <div style="position:relative;">
+      <button class="btn" onclick="toggleLayerDropdown(2, event)">Layer 2 ▾</button>
+      <div id="layer2-dropdown" class="kw-dropdown" style="display:none;"></div>
     </div>
   </div>
 
@@ -90,6 +93,8 @@ function setSort(key) {
 }
 
 let keywordOn = {};
+let layer1List = [];
+let layer2List = [];
 
 async function loadFlags() {
   const statusEl = document.getElementById('status');
@@ -98,8 +103,9 @@ async function loadFlags() {
     const r = await api('GET', '/api/flags/data');
     rows = r.catalogs || [];
     keywords = r.keywords || [];
+    layer1List = r.layer1_keywords || [];
+    layer2List = r.layer2_keywords || [];
     keywords.forEach(k => { if (!(k in keywordOn)) keywordOn[k] = true; });
-    renderKeywordToggles();
     const flaggedCount = rows.filter(isFlagged).length;
     statusEl.textContent = `${rows.length} auctions — ${flaggedCount} flagged (within ${r.radius_miles}mi of ${r.origin_zip}, multi-day, or keyword match)`;
     renderTable();
@@ -108,25 +114,58 @@ async function loadFlags() {
   }
 }
 
-const LAYER2_KEYWORDS = new Set(['part lot', 'part room', 'parts', 'cummins', 'parker', 'mitutoyo', 'starrett', 'allen bradley']);
-function isLayer2(k) { return LAYER2_KEYWORDS.has(k.toLowerCase()); }
-function layer1Keywords() { return keywords.filter(k => !isLayer2(k)); }
-function layer2Keywords() { return keywords.filter(k => isLayer2(k)); }
+function layer1Keywords() { return layer1List; }
+function layer2Keywords() { return layer2List; }
 
-function renderKeywordToggles() {
+function toggleLayerDropdown(layer, event) {
+  event.stopPropagation();
+  const id = `layer${layer}-dropdown`;
+  const el = document.getElementById(id);
+  const isOpen = el.style.display !== 'none';
+  document.querySelectorAll('.kw-dropdown').forEach(d => d.style.display = 'none');
+  if (!isOpen) {
+    renderLayerDropdown(layer);
+    el.style.display = 'block';
+  }
+}
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.kw-dropdown') && !e.target.closest('.filter-bar button')) {
+    document.querySelectorAll('.kw-dropdown').forEach(d => d.style.display = 'none');
+  }
+});
+
+function renderLayerDropdown(layer) {
+  const list = layer === 1 ? layer1List : layer2List;
   const chip = k => `
-    <label class="kw-chip ${keywordOn[k] ? 'on' : ''}" onclick="toggleKeyword(event, '${k}')">
-      <input type="checkbox" ${keywordOn[k] ? 'checked' : ''}/> ${k}
+    <label onclick="event.stopPropagation();">
+      <input type="checkbox" ${keywordOn[k] ? 'checked' : ''} onchange="toggleKeyword('${k.replace(/'/g,"\\'")}')"/> ${k}
     </label>`;
-  document.getElementById('layer1-toggles').innerHTML = layer1Keywords().map(chip).join('');
-  document.getElementById('layer2-toggles').innerHTML = layer2Keywords().map(chip).join('');
+  const html = list.map(chip).join('') + `
+    <div class="kw-add-row" onclick="event.stopPropagation();">
+      <input type="text" class="field-input" id="kw-add-input-${layer}" placeholder="Add keyword..." onkeydown="if(event.key==='Enter') addKeyword(${layer})"/>
+      <button class="btn btn-primary" style="font-size:12px;padding:6px 10px;" onclick="addKeyword(${layer})">Add</button>
+    </div>`;
+  document.getElementById(`layer${layer}-dropdown`).innerHTML = html;
 }
 
-function toggleKeyword(event, k) {
-  event.preventDefault();
+function toggleKeyword(k) {
   keywordOn[k] = !keywordOn[k];
-  renderKeywordToggles();
   renderTable();
+}
+
+async function addKeyword(layer) {
+  const input = document.getElementById(`kw-add-input-${layer}`);
+  const keyword = input.value.trim();
+  if (!keyword) return;
+  try {
+    await api('POST', '/api/flags/keywords', { keyword, layer });
+    input.value = '';
+    await loadFlags();
+    renderLayerDropdown(layer);
+    document.getElementById(`layer${layer}-dropdown`).style.display = 'block';
+  } catch (e) {
+    alert('Failed to add keyword: ' + e.message);
+  }
 }
 
 function keywordSumLayer1(c) {
