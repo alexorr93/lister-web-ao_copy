@@ -83,6 +83,11 @@ a { color: #60a5fa; }
       <option value="yes">Multi-day: yes</option>
       <option value="no">Multi-day: no</option>
     </select>
+    <select class="field-input" id="filter-sent" style="min-width:130px;" onchange="renderTable()">
+      <option value="">Sent: any</option>
+      <option value="yes">Sent: yes</option>
+      <option value="no">Sent: no</option>
+    </select>
     <label class="check"><input type="checkbox" id="flagged-only" onchange="renderTable()"/> Flagged only</label>
     <div style="position:relative;">
       <button class="btn" onclick="toggleLayerDropdown(1, event)">Layer 1 keywords ▾</button>
@@ -263,6 +268,7 @@ function renderTable() {
   const fMinLayer1 = parseFloat(document.getElementById('filter-min-layer1').value);
   const fMinLayer2 = parseFloat(document.getElementById('filter-min-layer2').value);
   const fMultiday = document.getElementById('filter-multiday').value;
+  const fSent = document.getElementById('filter-sent').value;
   let filtered = rows;
   if (search) {
     filtered = filtered.filter(c =>
@@ -282,6 +288,8 @@ function renderTable() {
   if (!isNaN(fMinLayer2)) filtered = filtered.filter(c => keywordSumLayer2(c) >= fMinLayer2);
   if (fMultiday === 'yes') filtered = filtered.filter(c => c.multi_day);
   if (fMultiday === 'no') filtered = filtered.filter(c => !c.multi_day);
+  if (fSent === 'yes') filtered = filtered.filter(c => !!c.capture_session_id);
+  if (fSent === 'no') filtered = filtered.filter(c => !c.capture_session_id);
   if (flaggedOnly) filtered = filtered.filter(isFlagged);
 
   renderKeywordLeaderboards(filtered);
