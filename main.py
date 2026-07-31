@@ -1033,10 +1033,10 @@ async def dashboard(request: Request):
     if not request.query_params.get("tab"):
         # This environment's nav only shows Auctions/Auction Monitor/Analytics/Flags --
         # Intake isn't reachable from anywhere in the nav here, so landing on bare "/"
-        # shouldn't show it either. Reuses the existing tab=... mechanism (already used
-        # by every other page's nav links) rather than adding new client-side logic.
+        # shouldn't show it either. Flags (a real separate page, not a JS tab inside
+        # index.html) is the main working view here, so that's the actual landing page.
         from fastapi.responses import RedirectResponse
-        return RedirectResponse("/?tab=auction", status_code=302)
+        return RedirectResponse("/flags", status_code=302)
     return templates.TemplateResponse("index.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "intake"})
 
 # ── API: LISTINGS ─────────────────────────────────────────────── #
