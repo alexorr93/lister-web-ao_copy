@@ -66,6 +66,7 @@ a { color: #60a5fa; }
   <h1>🚩 Flags</h1>
 
   <div class="filter-bar" style="position:relative;">
+    <label class="check"><input type="checkbox" id="filter-today" onchange="renderTable()"/> Today</label>
     <select class="field-input" id="filter-auctioneer" style="min-width:180px;" onchange="renderTable()">
       <option value="">All auctioneers</option>
     </select>
@@ -254,6 +255,7 @@ function renderTable() {
   }
   const search = document.getElementById('search-input').value.trim().toLowerCase();
   const flaggedOnly = document.getElementById('flagged-only').checked;
+  const fToday = document.getElementById('filter-today').checked;
   const fAuctioneer = document.getElementById('filter-auctioneer').value;
   const fState = document.getElementById('filter-state').value;
   const fMaxDistance = parseFloat(document.getElementById('filter-max-distance').value);
@@ -267,6 +269,10 @@ function renderTable() {
       (c.title || '').toLowerCase().includes(search) ||
       (c.auctioneer || '').toLowerCase().includes(search) ||
       (c.state || '').toLowerCase().includes(search));
+  }
+  if (fToday) {
+    const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD, local time
+    filtered = filtered.filter(c => c.end_date === todayStr);
   }
   if (fAuctioneer) filtered = filtered.filter(c => c.auctioneer === fAuctioneer);
   if (fState) filtered = filtered.filter(c => c.state === fState);
