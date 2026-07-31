@@ -63,9 +63,9 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .nav-analytics.active  { background: #7c3aed; color: #fff; }
 .nav-flags.active      { background: #e11d48; color: #fff; }
 .nav-settings.active   { background: #475569; color: #fff; }
-.pdf-drop-zone { border: 2px dashed var(--border); border-radius: 12px; padding: 28px; text-align: center; cursor: pointer; transition: border-color 0.15s; position: relative; overflow: hidden; margin-bottom: 14px; }
-.pdf-drop-zone:hover { border-color: var(--amber); }
-.pdf-drop-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.pdf-upload-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; margin-bottom: 14px; transition: border-color 0.15s; }
+.pdf-upload-btn:hover { border-color: var(--amber); }
+.pdf-upload-btn input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .pdf-result-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
 .pdf-result-table th { background: var(--surface); color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-size: 10px; padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
 .pdf-result-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text); vertical-align: top; }
@@ -519,13 +519,10 @@ select.field-input { background: #fff; color: #0f172a; }
   <div class="tab-content" id="tab-auction">
     <!-- PDF Auction Scanner -->
     <div style="margin-bottom:20px;">
-      <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:10px;">📄 PDF Auction Scanner</div>
-      <div class="pdf-drop-zone" id="pdf-drop-zone">
+      <label class="pdf-upload-btn" id="pdf-drop-zone" for="pdf-input">
         <input type="file" id="pdf-input" accept=".pdf" onchange="scanPdfAuction(this)">
-        <div style="font-size:2rem;margin-bottom:8px;">📄</div>
-        <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;">Upload auction PDF</div>
-        <div style="font-size:12px;color:var(--muted);">Gemini will extract all items and estimate values</div>
-      </div>
+        📄 Upload auction PDF
+      </label>
       <div id="pdf-scanning" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
           <div style="font-size:12px;font-weight:600;color:var(--amber);text-transform:uppercase;letter-spacing:0.06em;" id="pdf-scan-label">Reading PDF...</div>
