@@ -1948,6 +1948,14 @@ async def analytics_page(request: Request):
         return RedirectResponse("/login", status_code=302)
     return templates.TemplateResponse("analytics.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "analytics"})
 
+@app.get("/flags", response_class=HTMLResponse)
+async def flags_page(request: Request):
+    nav = get_nav_context(request)
+    if nav is None:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("flags.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "flags"})
+
 @app.get("/shopify-sync", response_class=HTMLResponse)
 async def shopify_sync_page(request: Request):
     nav = get_nav_context(request)
@@ -6218,6 +6226,80 @@ async def analytics_auction_map(request: Request):
             "approx": approx,
         })
     return {"points": points}
+
+_FLAG_ORIGIN_ZIP = "80537"
+_FLAG_ORIGIN_LATLNG = (40.37544, -105.18294)  # Loveland, CO
+_FLAG_RADIUS_MILES = 250
+
+def _haversine_miles(lat1, lng1, lat2, lng2) -> float:
+    import math
+    R = 3958.8  # earth radius in miles
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lng2 - lng1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
+
+@app.get("/api/flags/data")
+async def flags_data(request: Request, keywords: str = ""):
+    """Backs the Flags tab. Three independent flags per catalog:
+    - within_radius: catalog's zip is within _FLAG_RADIUS_MILES of _FLAG_ORIGIN_ZIP
+      (falls back to state centroid, same as the Analytics heat map, when no zip is on file)
+    - multi_day: catalog title contains the word "day" (e.g. "Day 2 of 5")
+    - keyword_counts: how many lots in the catalog mention each keyword (default
+      Renishaw + Allen Bradley; pass ?keywords=a,b,c to check any other list on demand)
+    """
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+
+    kw_list = [k.strip() for k in keywords.split(",") if k.strip()] or ["Renishaw", "Allen Bradley"]
+
+    catalogs = []
+    start = 0
+    while True:
+        page = supabase.table("auction_catalogs").select("catalog_url,title,auctioneer,state,lot_count")\
+            .eq("business_id", business_id).gt("lot_count", 0)\
+            .range(start, start + 999).execute().data or []
+        catalogs.extend(page)
+        if len(page) < 1000:
+            break
+        start += 1000
+
+    zip_rows = supabase.rpc("get_catalog_zips", {"p_business_id": business_id}).execute().data or []
+    zip_by_catalog = {r["catalog_url"]: r["zip_code"] for r in zip_rows if r.get("zip_code")}
+
+    kw_rows = supabase.rpc("get_catalog_keyword_counts", {"p_business_id": business_id, "p_keywords": kw_list}).execute().data or []
+    kw_by_catalog = {r["catalog_url"]: (r.get("keyword_counts") or {}) for r in kw_rows}
+
+    centroids = _load_zip_centroids()
+    origin_lat, origin_lng = _FLAG_ORIGIN_LATLNG
+
+    out = []
+    for c in catalogs:
+        z = zip_by_catalog.get(c["catalog_url"])
+        distance = None
+        if z and z in centroids:
+            lat, lng = centroids[z]
+            distance = round(_haversine_miles(origin_lat, origin_lng, lat, lng), 1)
+        elif c.get("state") in _STATE_CENTROID_FALLBACK:
+            lat, lng = _STATE_CENTROID_FALLBACK[c["state"]]
+            distance = round(_haversine_miles(origin_lat, origin_lng, lat, lng), 1)
+        title = c.get("title") or ""
+        out.append({
+            "catalog_url": c["catalog_url"],
+            "title": title,
+            "auctioneer": c.get("auctioneer") or "",
+            "state": c.get("state") or "",
+            "lot_count": c.get("lot_count") or 0,
+            "zip": z,
+            "distance_miles": distance,
+            "distance_is_estimate": z is None or z not in centroids,
+            "within_radius": (distance is not None and distance <= _FLAG_RADIUS_MILES),
+            "multi_day": "day" in title.lower(),
+            "keyword_counts": kw_by_catalog.get(c["catalog_url"], {}),
+        })
+    return {"origin_zip": _FLAG_ORIGIN_ZIP, "radius_miles": _FLAG_RADIUS_MILES, "keywords": kw_list, "catalogs": out}
 
 def _fetch_bidspotter_lots(source_url: str, capture_scope: Optional[str]) -> list:
     """Fetches lots from a BidSpotter auction-catalogue page. Unlike Roller, this
