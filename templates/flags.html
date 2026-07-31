@@ -48,6 +48,7 @@ label.check { display: flex; align-items: center; gap: 6px; font-size: 13px; col
 .kw-leaderboard-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; margin-bottom: 6px; }
 table { width: max-content; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
 th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; white-space: nowrap; }
+td.kw-count-cell { white-space: normal; max-width: 240px; }
 th { background: #161b29; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
 tr:last-child td { border-bottom: none; }
 .muted { color: var(--muted); }
@@ -91,6 +92,11 @@ a { color: #60a5fa; }
       <option value="">Sent: any</option>
       <option value="yes">Sent: yes</option>
       <option value="no">Sent: no</option>
+    </select>
+    <select class="field-input" id="filter-favorite" style="min-width:130px;" onchange="renderTable()">
+      <option value="">Favorites: any</option>
+      <option value="yes">Favorites: yes</option>
+      <option value="no">Favorites: no</option>
     </select>
     <label class="check"><input type="checkbox" id="flagged-only" onchange="renderTable()"/> Flagged only</label>
     <div style="position:relative;">
@@ -328,6 +334,7 @@ function renderTable() {
   const fMinLayer2 = parseFloat(document.getElementById('filter-min-layer2').value);
   const fMultiday = document.getElementById('filter-multiday').value;
   const fSent = document.getElementById('filter-sent').value;
+  const fFavorite = document.getElementById('filter-favorite').value;
   const fFilterPast = document.getElementById('filter-past').checked;
   let filtered = rows;
   if (search) {
@@ -350,6 +357,8 @@ function renderTable() {
   if (fMultiday === 'no') filtered = filtered.filter(c => !c.multi_day);
   if (fSent === 'yes') filtered = filtered.filter(c => !!c.capture_session_id);
   if (fSent === 'no') filtered = filtered.filter(c => !c.capture_session_id);
+  if (fFavorite === 'yes') filtered = filtered.filter(c => c.favorite);
+  if (fFavorite === 'no') filtered = filtered.filter(c => !c.favorite);
   if (fFilterPast) {
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -375,7 +384,7 @@ function renderTable() {
 
   const th = (key, label) => `<th onclick="setSort('${key}')" style="cursor:pointer;">${label}${sortKey===key ? (sortDir===1?' ▲':' ▼') : ''}</th>`;
   let html = `<table><thead><tr>
-    <th onclick="setSort('title')" style="cursor:pointer;">Auction${sortKey==='title' ? (sortDir===1?' ▲':' ▼') : ''}</th><th style="max-width:140px;">Auctioneer</th>${th('end_date','Date')}${th('state','State')}${th('distance_miles','Distance')}${th('lot_count','Lots')}${th('kw_sum1','Layer 1 Count')}${th('kw_sum2','Layer 2 Count')}<th onclick="setSort('multi_day')" style="cursor:pointer;max-width:70px;">Multi-day${sortKey==='multi_day' ? (sortDir===1?' ▲':' ▼') : ''}</th><th>Send to Gemini</th><th>Not Interested</th>
+    <th style="max-width:36px;">★</th><th onclick="setSort('title')" style="cursor:pointer;">Auction${sortKey==='title' ? (sortDir===1?' ▲':' ▼') : ''}</th><th style="max-width:140px;">Auctioneer</th>${th('end_date','Date')}${th('state','State')}${th('distance_miles','Distance')}${th('lot_count','Lots')}${th('kw_sum1','Layer 1 Count')}${th('kw_sum2','Layer 2 Count')}<th onclick="setSort('multi_day')" style="cursor:pointer;max-width:70px;">Multi-day${sortKey==='multi_day' ? (sortDir===1?' ▲':' ▼') : ''}</th><th>Send to Gemini</th><th>Not Interested</th>
   </tr></thead><tbody>`;
 
   for (const c of filtered) {
@@ -393,14 +402,15 @@ function renderTable() {
       : `<button class="btn" style="font-size:11px;padding:4px 10px;" onclick="sendToGemini('${c.catalog_url}', this)">📤 Send</button>`;
     const rowStyle = c.viewed ? ' style="background:rgba(22,163,74,.15);"' : '';
     html += `<tr data-catalog-url="${c.catalog_url}"${rowStyle}>
+      <td style="text-align:center;padding:10px 4px;"><span style="cursor:pointer;font-size:14px;color:${c.favorite ? '#f59e0b' : 'var(--border)'};" onclick="toggleFavorite('${c.catalog_url}', ${!c.favorite})">★</span></td>
       <td><a href="${href}" target="_blank" onclick="markViewed('${c.catalog_url}')">${displayTitle(c).replace(/</g,'&lt;')}</a></td>
       <td class="muted" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(c.auctioneer || '').replace(/"/g,'&quot;')}">${c.auctioneer || '—'}</td>
       <td class="muted">${c.end_date ? renderDateCell(c.end_date) : `<button class="btn" style="font-size:11px;padding:3px 8px;" onclick="recastMetadata('${c.catalog_url}', this)">🔁 Recast</button>`}</td>
       <td class="muted">${c.state || '—'}</td>
       <td>${dist}</td>
       <td>${c.lot_count}</td>
-      <td>${kwCell1}</td>
-      <td>${kwCell2}</td>
+      <td class="kw-count-cell">${kwCell1}</td>
+      <td class="kw-count-cell">${kwCell2}</td>
       <td style="max-width:70px;">${dayBadge}</td>
       <td>${sendCell}</td>
       <td style="text-align:center;"><input type="checkbox" ${c.not_interested ? 'checked' : ''} onchange="toggleNotInterested('${c.catalog_url}', this.checked)"/></td>
@@ -418,6 +428,17 @@ function markViewed(catalogUrl) {
     row.viewed = true;
     const tr = document.querySelector(`tr[data-catalog-url="${CSS.escape(catalogUrl)}"]`);
     if (tr) tr.style.background = 'rgba(22,163,74,.15)';
+  }
+}
+
+async function toggleFavorite(catalogUrl, favorite) {
+  const row = rows.find(x => x.catalog_url === catalogUrl);
+  try {
+    await api('POST', '/api/flags/favorite', { catalog_url: catalogUrl, favorite });
+    if (row) row.favorite = favorite;
+    renderTable();
+  } catch (e) {
+    alert('Failed to save favorite: ' + e.message);
   }
 }
 
