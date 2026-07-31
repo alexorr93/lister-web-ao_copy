@@ -35,6 +35,9 @@ h1 { font-size: 22px; margin-bottom: 4px; }
 .btn-primary { background: var(--accent); border-color: var(--accent); }
 .field-input { background: #fff; color: #111; border: none; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
 label.check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.kw-chip { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; user-select: none; transition: all .15s; }
+.kw-chip input { display: none; }
+.kw-chip.on { background: rgba(37,99,235,.15); border-color: var(--accent); color: #60a5fa; }
 table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; white-space: nowrap; }
 th { background: #161b29; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
@@ -58,10 +61,9 @@ a { color: #60a5fa; }
 
   <div class="filter-bar">
     <input type="text" class="field-input" id="search-input" placeholder="Search title/auctioneer/state..." style="min-width:220px;" oninput="renderTable()"/>
-    <input type="text" class="field-input" id="keyword-input" placeholder="Keywords, comma separated" style="min-width:260px;" value="Renishaw, Allen Bradley"/>
-    <button class="btn btn-primary" onclick="loadFlags()">Apply keywords</button>
     <label class="check"><input type="checkbox" id="flagged-only" onchange="renderTable()"/> Flagged only</label>
   </div>
+  <div id="keyword-toggles" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;"></div>
 
   <div id="status" class="status-msg">Loading…</div>
   <div id="table-area"></div>
@@ -85,20 +87,43 @@ function setSort(key) {
   renderTable();
 }
 
+let keywordOn = {};
+
 async function loadFlags() {
   const statusEl = document.getElementById('status');
   statusEl.textContent = 'Loading…';
-  const kwInput = document.getElementById('keyword-input').value.trim();
   try {
-    const r = await api('GET', '/api/flags/data?keywords=' + encodeURIComponent(kwInput));
+    const r = await api('GET', '/api/flags/data');
     rows = r.catalogs || [];
     keywords = r.keywords || [];
+    keywords.forEach(k => { if (!(k in keywordOn)) keywordOn[k] = true; });
+    renderKeywordToggles();
     const flaggedCount = rows.filter(isFlagged).length;
     statusEl.textContent = `${rows.length} auctions — ${flaggedCount} flagged (within ${r.radius_miles}mi of ${r.origin_zip}, multi-day, or keyword match)`;
     renderTable();
   } catch (e) {
     statusEl.textContent = `❌ ${e.message}`;
   }
+}
+
+function renderKeywordToggles() {
+  const wrap = document.getElementById('keyword-toggles');
+  wrap.innerHTML = keywords.map(k => `
+    <label class="kw-chip ${keywordOn[k] ? 'on' : ''}" onclick="toggleKeyword(event, '${k}')">
+      <input type="checkbox" ${keywordOn[k] ? 'checked' : ''}/> ${k}
+    </label>
+  `).join('');
+}
+
+function toggleKeyword(event, k) {
+  event.preventDefault();
+  keywordOn[k] = !keywordOn[k];
+  renderKeywordToggles();
+  renderTable();
+}
+
+function keywordSum(c) {
+  return keywords.reduce((sum, k) => sum + (keywordOn[k] ? ((c.keyword_counts || {})[k] || 0) : 0), 0);
 }
 
 function realUrlFromCatalogUrl(catalogUrl) {
@@ -121,7 +146,7 @@ function displayTitle(c) {
 
 function isFlagged(c) {
   if (c.within_radius || c.multi_day) return true;
-  return Object.values(c.keyword_counts || {}).some(n => n > 0);
+  return keywordSum(c) > 0;
 }
 
 function renderTable() {
@@ -141,16 +166,16 @@ function renderTable() {
   if (flaggedOnly) filtered = filtered.filter(isFlagged);
 
   filtered = [...filtered].sort((a, b) => {
-    let av = a[sortKey], bv = b[sortKey];
+    let av = sortKey === 'kw_sum' ? keywordSum(a) : a[sortKey];
+    let bv = sortKey === 'kw_sum' ? keywordSum(b) : b[sortKey];
     av = av ?? -Infinity; bv = bv ?? -Infinity;
     const cmp = av > bv ? 1 : (av < bv ? -1 : 0);
     return cmp * sortDir;
   });
 
   const th = (key, label) => `<th onclick="setSort('${key}')" style="cursor:pointer;">${label}${sortKey===key ? (sortDir===1?' ▲':' ▼') : ''}</th>`;
-  const kwHeaders = keywords.map(k => th(`kw_${k}`, k)).join('');
   let html = `<table><thead><tr>
-    ${th('title','Auction')}${th('auctioneer','Auctioneer')}${th('state','State')}${th('lot_count','Lots')}${th('distance_miles','Distance')}${th('multi_day','Multi-day')}${kwHeaders}
+    ${th('title','Auction')}${th('auctioneer','Auctioneer')}${th('state','State')}${th('lot_count','Lots')}${th('distance_miles','Distance')}${th('multi_day','Multi-day')}${th('kw_sum','Keyword Count')}
   </tr></thead><tbody>`;
 
   for (const c of filtered) {
@@ -158,10 +183,8 @@ function renderTable() {
       ? `${c.within_radius ? '<span class="badge badge-radius">' : ''}${c.distance_miles} mi${c.distance_is_estimate ? ' (est.)' : ''}${c.within_radius ? '</span>' : ''}`
       : '<span class="muted">—</span>';
     const dayBadge = c.multi_day ? '<span class="badge badge-day">multi-day</span>' : '<span class="muted">—</span>';
-    const kwCells = keywords.map(k => {
-      const n = (c.keyword_counts || {})[k] || 0;
-      return `<td>${n > 0 ? `<span class="badge badge-kw">${n}</span>` : '<span class="muted">0</span>'}</td>`;
-    }).join('');
+    const kwSum = keywordSum(c);
+    const kwCell = kwSum > 0 ? `<span class="badge badge-kw">${kwSum}</span>` : '<span class="muted">0</span>';
     const href = realUrlFromCatalogUrl(c.catalog_url) || c.catalog_url;
     html += `<tr>
       <td><a href="${href}" target="_blank">${displayTitle(c).replace(/</g,'&lt;')}</a></td>
@@ -170,7 +193,7 @@ function renderTable() {
       <td>${c.lot_count}</td>
       <td>${dist}</td>
       <td>${dayBadge}</td>
-      ${kwCells}
+      <td>${kwCell}</td>
     </tr>`;
   }
   html += '</tbody></table>';
