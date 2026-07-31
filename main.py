@@ -6268,7 +6268,7 @@ async def flags_data(request: Request, keywords: str = ""):
         "horiba", "hytorc", "enerpac", "IPG laser", "john deere parts", "notifier",
         "rego-fix", "renishaw", "royal chuck", "smartscope", "bore micrometer",
         "truck parts", "california Analytical",
-        "part lot", "part room", "parts", "cummins", "parker", "mitutoyo", "starrett",
+        "part lot", "part room", "parts", "cummins", "parker", "mitutoyo", "starrett", "allen bradley",
     ]
     kw_list = [k.strip() for k in keywords.split(",") if k.strip()] or default_keywords
 
