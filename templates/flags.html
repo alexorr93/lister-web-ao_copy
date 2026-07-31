@@ -89,7 +89,8 @@ async function loadFlags() {
     const r = await api('GET', '/api/flags/data');
     rows = r.catalogs || [];
     keywords = r.keywords || [];
-    keywords.forEach(k => { if (!(k in keywordOn)) keywordOn[k] = true; });
+const DEFAULT_OFF_KEYWORDS = new Set(['part lot', 'part room', 'parts', 'cummins', 'parker', 'mitutoyo', 'starrett']);
+    keywords.forEach(k => { if (!(k in keywordOn)) keywordOn[k] = !DEFAULT_OFF_KEYWORDS.has(k.toLowerCase()); });
     renderKeywordToggles();
     const flaggedCount = rows.filter(isFlagged).length;
     statusEl.textContent = `${rows.length} auctions — ${flaggedCount} flagged (within ${r.radius_miles}mi of ${r.origin_zip}, multi-day, or keyword match)`;
