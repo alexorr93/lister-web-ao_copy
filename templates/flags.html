@@ -26,7 +26,8 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { overflow-x: hidden; max-width: 100%; }
 body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-.main { max-width: 1300px; margin: 0 auto; padding: 24px 20px 60px; overflow-x: auto; }
+.main { max-width: 1300px; margin: 0 auto; padding: 24px 20px 60px; }
+#table-area { overflow-x: auto; }
 h1 { font-size: 22px; margin-bottom: 4px; }
 .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; max-width: 900px; }
 .filter-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
@@ -100,6 +101,24 @@ async function loadFlags() {
   }
 }
 
+function realUrlFromCatalogUrl(catalogUrl) {
+  const prefix = 'httpswww.bidspotter.comen-usauction-catalogues';
+  if (!catalogUrl.startsWith(prefix)) return null;
+  const rest = catalogUrl.slice(prefix.length);
+  const idx = rest.indexOf('catalogue-id-');
+  if (idx === -1) return null;
+  const slug = rest.slice(0, idx);
+  const id = rest.slice(idx + 'catalogue-id-'.length);
+  return `https://www.bidspotter.com/en-us/auction-catalogues/${slug}/catalogue-id-${id}`;
+}
+
+function displayTitle(c) {
+  const looksLikeRawUrl = (c.title || '').startsWith('httpswww.bidspotter');
+  if (c.title && !looksLikeRawUrl) return c.title;
+  // no real title on file for this catalog -- fall back to something readable
+  return (c.auctioneer ? c.auctioneer + ' — ' : '') + 'View catalog';
+}
+
 function isFlagged(c) {
   if (c.within_radius || c.multi_day) return true;
   return Object.values(c.keyword_counts || {}).some(n => n > 0);
@@ -143,8 +162,9 @@ function renderTable() {
       const n = (c.keyword_counts || {})[k] || 0;
       return `<td>${n > 0 ? `<span class="badge badge-kw">${n}</span>` : '<span class="muted">0</span>'}</td>`;
     }).join('');
+    const href = realUrlFromCatalogUrl(c.catalog_url) || c.catalog_url;
     html += `<tr>
-      <td><a href="${c.catalog_url}" target="_blank">${(c.title || c.catalog_url).replace(/</g,'&lt;')}</a></td>
+      <td><a href="${href}" target="_blank">${displayTitle(c).replace(/</g,'&lt;')}</a></td>
       <td class="muted">${(c.auctioneer || '—').replace(/</g,'&lt;')}</td>
       <td class="muted">${c.state || '—'}</td>
       <td>${c.lot_count}</td>
