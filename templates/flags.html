@@ -63,7 +63,16 @@ a { color: #60a5fa; }
     <input type="text" class="field-input" id="search-input" placeholder="Search title/auctioneer/state..." style="min-width:220px;" oninput="renderTable()"/>
     <label class="check"><input type="checkbox" id="flagged-only" onchange="renderTable()"/> Flagged only</label>
   </div>
-  <div id="keyword-toggles" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;"></div>
+  <div style="display:flex;gap:32px;margin-bottom:16px;flex-wrap:wrap;">
+    <div>
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin-bottom:8px;">Layer 1</div>
+      <div id="layer1-toggles" style="display:flex;flex-wrap:wrap;gap:8px;max-width:700px;"></div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin-bottom:8px;">Layer 2</div>
+      <div id="layer2-toggles" style="display:flex;flex-wrap:wrap;gap:8px;max-width:500px;"></div>
+    </div>
+  </div>
 
   <div id="status" class="status-msg">Loading…</div>
   <div id="table-area"></div>
@@ -89,8 +98,7 @@ async function loadFlags() {
     const r = await api('GET', '/api/flags/data');
     rows = r.catalogs || [];
     keywords = r.keywords || [];
-const DEFAULT_OFF_KEYWORDS = new Set(['part lot', 'part room', 'parts', 'cummins', 'parker', 'mitutoyo', 'starrett']);
-    keywords.forEach(k => { if (!(k in keywordOn)) keywordOn[k] = !DEFAULT_OFF_KEYWORDS.has(k.toLowerCase()); });
+    keywords.forEach(k => { if (!(k in keywordOn)) keywordOn[k] = true; });
     renderKeywordToggles();
     const flaggedCount = rows.filter(isFlagged).length;
     statusEl.textContent = `${rows.length} auctions — ${flaggedCount} flagged (within ${r.radius_miles}mi of ${r.origin_zip}, multi-day, or keyword match)`;
@@ -100,13 +108,18 @@ const DEFAULT_OFF_KEYWORDS = new Set(['part lot', 'part room', 'parts', 'cummins
   }
 }
 
+const LAYER2_KEYWORDS = new Set(['part lot', 'part room', 'parts', 'cummins', 'parker', 'mitutoyo', 'starrett', 'allen bradley']);
+function isLayer2(k) { return LAYER2_KEYWORDS.has(k.toLowerCase()); }
+function layer1Keywords() { return keywords.filter(k => !isLayer2(k)); }
+function layer2Keywords() { return keywords.filter(k => isLayer2(k)); }
+
 function renderKeywordToggles() {
-  const wrap = document.getElementById('keyword-toggles');
-  wrap.innerHTML = keywords.map(k => `
+  const chip = k => `
     <label class="kw-chip ${keywordOn[k] ? 'on' : ''}" onclick="toggleKeyword(event, '${k}')">
       <input type="checkbox" ${keywordOn[k] ? 'checked' : ''}/> ${k}
-    </label>
-  `).join('');
+    </label>`;
+  document.getElementById('layer1-toggles').innerHTML = layer1Keywords().map(chip).join('');
+  document.getElementById('layer2-toggles').innerHTML = layer2Keywords().map(chip).join('');
 }
 
 function toggleKeyword(event, k) {
@@ -116,8 +129,11 @@ function toggleKeyword(event, k) {
   renderTable();
 }
 
-function keywordSum(c) {
-  return keywords.reduce((sum, k) => sum + (keywordOn[k] ? ((c.keyword_counts || {})[k] || 0) : 0), 0);
+function keywordSumLayer1(c) {
+  return layer1Keywords().reduce((sum, k) => sum + (keywordOn[k] ? ((c.keyword_counts || {})[k] || 0) : 0), 0);
+}
+function keywordSumLayer2(c) {
+  return layer2Keywords().reduce((sum, k) => sum + (keywordOn[k] ? ((c.keyword_counts || {})[k] || 0) : 0), 0);
 }
 
 function realUrlFromCatalogUrl(catalogUrl) {
@@ -137,7 +153,7 @@ function displayTitle(c) {
 
 function isFlagged(c) {
   if (c.within_radius || c.multi_day) return true;
-  return keywordSum(c) > 0;
+  return keywordSumLayer1(c) > 0 || keywordSumLayer2(c) > 0;
 }
 
 function renderTable() {
@@ -157,8 +173,8 @@ function renderTable() {
   if (flaggedOnly) filtered = filtered.filter(isFlagged);
 
   filtered = [...filtered].sort((a, b) => {
-    let av = sortKey === 'kw_sum' ? keywordSum(a) : a[sortKey];
-    let bv = sortKey === 'kw_sum' ? keywordSum(b) : b[sortKey];
+    let av = sortKey === 'kw_sum1' ? keywordSumLayer1(a) : sortKey === 'kw_sum2' ? keywordSumLayer2(a) : a[sortKey];
+    let bv = sortKey === 'kw_sum1' ? keywordSumLayer1(b) : sortKey === 'kw_sum2' ? keywordSumLayer2(b) : b[sortKey];
     const aNull = (av === null || av === undefined);
     const bNull = (bv === null || bv === undefined);
     if (aNull && bNull) return 0;
@@ -170,7 +186,7 @@ function renderTable() {
 
   const th = (key, label) => `<th onclick="setSort('${key}')" style="cursor:pointer;">${label}${sortKey===key ? (sortDir===1?' ▲':' ▼') : ''}</th>`;
   let html = `<table><thead><tr>
-    ${th('title','Auction')}${th('end_date','Date')}${th('state','State')}${th('distance_miles','Distance')}${th('lot_count','Lots')}${th('kw_sum','Keyword Count')}${th('multi_day','Multi-day')}<th>Send to Gemini</th>
+    ${th('title','Auction')}${th('end_date','Date')}${th('state','State')}${th('distance_miles','Distance')}${th('lot_count','Lots')}${th('kw_sum1','Layer 1 Count')}${th('kw_sum2','Layer 2 Count')}${th('multi_day','Multi-day')}<th>Send to Gemini</th>
   </tr></thead><tbody>`;
 
   for (const c of filtered) {
@@ -178,8 +194,10 @@ function renderTable() {
       ? `${c.within_radius ? '<span class="badge badge-radius">' : ''}${c.distance_miles} mi${c.distance_is_estimate ? ' (est.)' : ''}${c.within_radius ? '</span>' : ''}`
       : '<span class="muted">—</span>';
     const dayBadge = c.multi_day ? '<span class="badge badge-day">multi-day</span>' : '<span class="muted">—</span>';
-    const kwSum = keywordSum(c);
-    const kwCell = kwSum > 0 ? `<span class="badge badge-kw">${kwSum}</span>` : '<span class="muted">0</span>';
+    const kwSum1 = keywordSumLayer1(c);
+    const kwSum2 = keywordSumLayer2(c);
+    const kwCell1 = kwSum1 > 0 ? `<span class="badge badge-kw">${kwSum1}</span>` : '<span class="muted">0</span>';
+    const kwCell2 = kwSum2 > 0 ? `<span class="badge badge-kw">${kwSum2}</span>` : '<span class="muted">0</span>';
     const href = realUrlFromCatalogUrl(c.catalog_url) || c.catalog_url;
     const sendCell = c.capture_session_id
       ? `<a href="/?tab=auction&session=${c.capture_session_id}" style="font-size:12px;">✅ Sent — view</a>`
@@ -190,7 +208,8 @@ function renderTable() {
       <td class="muted">${c.state || '—'}</td>
       <td>${dist}</td>
       <td>${c.lot_count}</td>
-      <td>${kwCell}</td>
+      <td>${kwCell1}</td>
+      <td>${kwCell2}</td>
       <td>${dayBadge}</td>
       <td>${sendCell}</td>
     </tr>`;
