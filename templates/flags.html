@@ -100,6 +100,7 @@ a { color: #60a5fa; }
       <button class="btn" onclick="toggleLayerDropdown(2, event)">Layer 2 keywords ▾</button>
       <div id="layer2-dropdown" class="kw-dropdown" style="display:none;"></div>
     </div>
+    <label class="check"><input type="checkbox" id="filter-past" checked onchange="renderTable()"/> Filter past</label>
   </div>
 
   <div id="status" class="status-msg">Loading…</div>
@@ -315,6 +316,7 @@ function renderTable() {
   const fMinLayer2 = parseFloat(document.getElementById('filter-min-layer2').value);
   const fMultiday = document.getElementById('filter-multiday').value;
   const fSent = document.getElementById('filter-sent').value;
+  const fFilterPast = document.getElementById('filter-past').checked;
   let filtered = rows;
   if (search) {
     filtered = filtered.filter(c =>
@@ -336,6 +338,14 @@ function renderTable() {
   if (fMultiday === 'no') filtered = filtered.filter(c => !c.multi_day);
   if (fSent === 'yes') filtered = filtered.filter(c => !!c.capture_session_id);
   if (fSent === 'no') filtered = filtered.filter(c => !c.capture_session_id);
+  if (fFilterPast) {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    filtered = filtered.filter(c => {
+      const t = parseDateForSort(c.end_date);
+      return t === null || t >= startOfToday; // keep blanks visible -- unknown isn't the same as past
+    });
+  }
   if (flaggedOnly) filtered = filtered.filter(isFlagged);
 
   renderKeywordLeaderboards(filtered);
