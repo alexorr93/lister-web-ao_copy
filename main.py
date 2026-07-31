@@ -6272,11 +6272,15 @@ async def flags_data(request: Request, keywords: str = ""):
     ]
     kw_list = [k.strip() for k in keywords.split(",") if k.strip()] or default_keywords
 
+    from datetime import timedelta
+    stale_cutoff = (datetime.now().date() - timedelta(days=5)).isoformat()
+
     catalogs = []
     start = 0
     while True:
         page = supabase.table("auction_catalogs").select("catalog_url,title,display_title,auctioneer,state,lot_count,end_date,capture_session_id")\
             .eq("business_id", business_id).gt("lot_count", 0)\
+            .or_(f"end_date.gte.{stale_cutoff},end_date.is.null")\
             .range(start, start + 999).execute().data or []
         catalogs.extend(page)
         if len(page) < 1000:
