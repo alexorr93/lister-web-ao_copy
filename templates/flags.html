@@ -43,6 +43,8 @@ label.check { display: flex; align-items: center; gap: 6px; font-size: 13px; col
 .kw-dropdown label:hover { background: #1e2535; }
 .kw-add-row { display: flex; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
 .kw-add-row input { flex: 1; }
+.kw-tag { display: inline-block; padding: 5px 12px; border-radius: 999px; background: #2d3348; color: var(--text); font-size: 12px; font-weight: 600; margin-right: 6px; margin-bottom: 6px; }
+.kw-leaderboard-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; margin-bottom: 6px; }
 table { width: max-content; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
 th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; white-space: nowrap; }
 th { background: #161b29; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
@@ -93,6 +95,7 @@ a { color: #60a5fa; }
   </div>
 
   <div id="status" class="status-msg">Loading…</div>
+  <div id="kw-leaderboards" style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:14px;"></div>
   <div id="table-area"></div>
 </div>
 
@@ -195,6 +198,29 @@ async function addKeyword(layer) {
   }
 }
 
+const KW_DISPLAY_LABEL = { 'allen bradley': 'AB' };
+
+function renderKeywordLeaderboards(filteredRows) {
+  const buildLeaderboard = (kwList) => {
+    const totals = kwList.map(k => ({
+      k,
+      total: filteredRows.reduce((sum, c) => sum + ((c.keyword_counts || {})[k] || 0), 0),
+    }));
+    return totals.filter(t => t.total > 0).sort((a, b) => b.total - a.total).slice(0, 4);
+  };
+  const renderTags = (top) => top.map(t =>
+    `<span class="kw-tag">${KW_DISPLAY_LABEL[t.k.toLowerCase()] || t.k} (${t.total})</span>`
+  ).join('');
+
+  const top1 = buildLeaderboard(layer1Keywords());
+  const top2 = buildLeaderboard(layer2Keywords());
+  const el = document.getElementById('kw-leaderboards');
+  el.innerHTML = `
+    <div><div class="kw-leaderboard-label">Layer 1 — biggest groups</div>${top1.length ? renderTags(top1) : '<span class="muted" style="font-size:12px;">none</span>'}</div>
+    <div><div class="kw-leaderboard-label">Layer 2 — biggest groups</div>${top2.length ? renderTags(top2) : '<span class="muted" style="font-size:12px;">none</span>'}</div>
+  `;
+}
+
 function keywordSumLayer1(c) {
   return layer1Keywords().reduce((sum, k) => sum + (keywordOn[k] ? ((c.keyword_counts || {})[k] || 0) : 0), 0);
 }
@@ -252,6 +278,8 @@ function renderTable() {
   if (fMultiday === 'yes') filtered = filtered.filter(c => c.multi_day);
   if (fMultiday === 'no') filtered = filtered.filter(c => !c.multi_day);
   if (flaggedOnly) filtered = filtered.filter(isFlagged);
+
+  renderKeywordLeaderboards(filtered);
 
   filtered = [...filtered].sort((a, b) => {
     let av = sortKey === 'kw_sum1' ? keywordSumLayer1(a) : sortKey === 'kw_sum2' ? keywordSumLayer2(a) : a[sortKey];
