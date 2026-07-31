@@ -6307,7 +6307,7 @@ async def flags_data(request: Request, keywords: str = ""):
             "distance_miles": distance,
             "distance_is_estimate": z is None or z not in centroids,
             "within_radius": (distance is not None and distance <= _FLAG_RADIUS_MILES),
-            "multi_day": bool(re.search(r'day\s*[0-9]|day\s*\d+\s*of\s*\d+', title, re.I)),
+            "multi_day": "day" in title.lower(),
             "keyword_counts": kw_by_catalog.get(c["catalog_url"], {}),
         })
     return {"origin_zip": _FLAG_ORIGIN_ZIP, "radius_miles": _FLAG_RADIUS_MILES, "keywords": kw_list, "catalogs": out}
