@@ -6248,6 +6248,20 @@ def _haversine_miles(lat1, lng1, lat2, lng2) -> float:
     a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
     return 2 * R * math.asin(math.sqrt(a))
 
+@app.get("/api/last-catalog-added")
+async def last_catalog_added(request: Request):
+    """Backs the small 'last new catalog' indicator on Feed/Flags. A single
+    MAX() on an indexed timestamp column -- genuinely cheap no matter how large
+    the table gets, so this just runs on page load, no background caching needed."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    res = (supabase.table("auction_catalogs").select("first_seen_at")
+           .eq("business_id", business_id).gt("lot_count", 0)
+           .order("first_seen_at", desc=True).limit(1).execute())
+    last_at = res.data[0]["first_seen_at"] if res.data else None
+    return {"last_added_at": last_at}
+
 @app.get("/api/flags/data")
 async def flags_data(request: Request, keywords: str = ""):
     """Backs the Flags tab. Three independent flags per catalog:
