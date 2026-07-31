@@ -47,7 +47,10 @@ a { color: #60a5fa; }
 {% include "_nav.html" %}
 
 <div class="main">
-  <h1>Feed</h1>
+  <div style="display:flex;justify-content:space-between;align-items:baseline;">
+    <h1>Feed</h1>
+    <span id="last-catalog-added" style="font-size:12px;color:var(--muted);"></span>
+  </div>
   <div class="sub">Tracked BidSpotter auction catalogs — title, end date, location, and lot count. Lot Count is a real number but currently an estimate (summed from category tags on the list page, not the exact per-catalog total).</div>
 
   <div style="background:var(--card);border:2px solid var(--accent);border-radius:12px;padding:18px;margin-bottom:22px;">
@@ -399,6 +402,28 @@ async function loadPdfUploadLog() {
     el.innerHTML = `<div class="empty">Failed to load: ${e.message}</div>`;
   }
 }
+
+function relativeTime(iso) {
+  if (!iso) return '';
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hr ago`;
+  const days = Math.round(hrs / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
+async function loadLastCatalogAdded() {
+  try {
+    const r = await api('GET', '/api/last-catalog-added');
+    const el = document.getElementById('last-catalog-added');
+    if (el) el.textContent = r.last_added_at ? `Last new catalog: ${relativeTime(r.last_added_at)}` : '';
+  } catch (e) { /* non-critical, just skip it */ }
+}
+loadLastCatalogAdded();
+setInterval(loadLastCatalogAdded, 5 * 60 * 1000); // cheap query, refreshing every 5 min is effectively free
 
 loadCatalogs();
 loadPdfUploadLog();
