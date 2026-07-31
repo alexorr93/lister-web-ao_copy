@@ -6260,12 +6260,14 @@ async def flags_data(request: Request, keywords: str = ""):
     if not business_id:
         raise HTTPException(401, "Unauthorized")
 
+    import re
+
     kw_list = [k.strip() for k in keywords.split(",") if k.strip()] or ["Renishaw", "Allen Bradley"]
 
     catalogs = []
     start = 0
     while True:
-        page = supabase.table("auction_catalogs").select("catalog_url,title,auctioneer,state,lot_count")\
+        page = supabase.table("auction_catalogs").select("catalog_url,title,display_title,auctioneer,state,lot_count")\
             .eq("business_id", business_id).gt("lot_count", 0)\
             .range(start, start + 999).execute().data or []
         catalogs.extend(page)
@@ -6292,7 +6294,7 @@ async def flags_data(request: Request, keywords: str = ""):
         elif c.get("state") in _STATE_CENTROID_FALLBACK:
             lat, lng = _STATE_CENTROID_FALLBACK[c["state"]]
             distance = round(_haversine_miles(origin_lat, origin_lng, lat, lng), 1)
-        title = c.get("title") or ""
+        title = c.get("display_title") or c.get("title") or ""
         out.append({
             "catalog_url": c["catalog_url"],
             "title": title,
@@ -6303,7 +6305,7 @@ async def flags_data(request: Request, keywords: str = ""):
             "distance_miles": distance,
             "distance_is_estimate": z is None or z not in centroids,
             "within_radius": (distance is not None and distance <= _FLAG_RADIUS_MILES),
-            "multi_day": "day" in title.lower(),
+            "multi_day": bool(re.search(r'day\s*[0-9]|day\s*\d+\s*of\s*\d+', title, re.I)),
             "keyword_counts": kw_by_catalog.get(c["catalog_url"], {}),
         })
     return {"origin_zip": _FLAG_ORIGIN_ZIP, "radius_miles": _FLAG_RADIUS_MILES, "keywords": kw_list, "catalogs": out}
