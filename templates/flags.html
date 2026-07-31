@@ -384,7 +384,7 @@ function renderTable() {
 
   const th = (key, label) => `<th onclick="setSort('${key}')" style="cursor:pointer;">${label}${sortKey===key ? (sortDir===1?' ▲':' ▼') : ''}</th>`;
   let html = `<table><thead><tr>
-    <th style="max-width:36px;">★</th><th onclick="setSort('title')" style="cursor:pointer;">Auction${sortKey==='title' ? (sortDir===1?' ▲':' ▼') : ''}</th><th style="max-width:140px;">Auctioneer</th>${th('end_date','Date')}${th('state','State')}${th('distance_miles','Distance')}${th('lot_count','Lots')}${th('kw_sum1','Layer 1 Count')}${th('kw_sum2','Layer 2 Count')}<th onclick="setSort('multi_day')" style="cursor:pointer;max-width:70px;">Multi-day${sortKey==='multi_day' ? (sortDir===1?' ▲':' ▼') : ''}</th><th>Send to Gemini</th><th>Not Interested</th>
+    <th style="max-width:24px;padding:10px 4px;">★</th><th onclick="setSort('title')" style="cursor:pointer;">Auction${sortKey==='title' ? (sortDir===1?' ▲':' ▼') : ''}</th><th style="max-width:140px;">Auctioneer</th><th onclick="setSort('end_date')" style="cursor:pointer;max-width:90px;">Date${sortKey==='end_date' ? (sortDir===1?' ▲':' ▼') : ''}</th>${th('state','State')}${th('distance_miles','Distance')}${th('lot_count','Lots')}${th('kw_sum1','Layer 1 Count')}${th('kw_sum2','Layer 2 Count')}<th onclick="setSort('multi_day')" style="cursor:pointer;max-width:70px;">Multi-day${sortKey==='multi_day' ? (sortDir===1?' ▲':' ▼') : ''}</th><th>Send to Gemini</th><th>Not Interested</th>
   </tr></thead><tbody>`;
 
   for (const c of filtered) {
@@ -402,10 +402,10 @@ function renderTable() {
       : `<button class="btn" style="font-size:11px;padding:4px 10px;" onclick="sendToGemini('${c.catalog_url}', this)">📤 Send</button>`;
     const rowStyle = c.viewed ? ' style="background:rgba(22,163,74,.15);"' : '';
     html += `<tr data-catalog-url="${c.catalog_url}"${rowStyle}>
-      <td style="text-align:center;padding:10px 4px;"><span style="cursor:pointer;font-size:14px;color:${c.favorite ? '#f59e0b' : 'var(--border)'};" onclick="toggleFavorite('${c.catalog_url}', ${!c.favorite})">★</span></td>
+      <td style="text-align:center;padding:10px 2px;max-width:24px;"><span style="cursor:pointer;font-size:13px;color:${c.favorite ? '#f59e0b' : 'var(--border)'};" onclick="toggleFavorite('${c.catalog_url}', ${!c.favorite})">★</span></td>
       <td><a href="${href}" target="_blank" onclick="markViewed('${c.catalog_url}')">${displayTitle(c).replace(/</g,'&lt;')}</a></td>
       <td class="muted" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(c.auctioneer || '').replace(/"/g,'&quot;')}">${c.auctioneer || '—'}</td>
-      <td class="muted">${c.end_date ? renderDateCell(c.end_date) : `<button class="btn" style="font-size:11px;padding:3px 8px;" onclick="recastMetadata('${c.catalog_url}', this)">🔁 Recast</button>`}</td>
+      <td class="muted" style="max-width:90px;">${c.end_date ? renderDateCell(c.end_date) : `<button class="btn" style="font-size:11px;padding:3px 8px;" onclick="recastMetadata('${c.catalog_url}', this)">🔁 Recast</button>`}</td>
       <td class="muted">${c.state || '—'}</td>
       <td>${dist}</td>
       <td>${c.lot_count}</td>
