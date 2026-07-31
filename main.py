@@ -6201,7 +6201,7 @@ async def analytics_auction_map(request: Request):
     catalogs = []
     start = 0
     while True:
-        page = supabase.table("auction_catalogs").select("catalog_url,title,auctioneer,state,lot_count")\
+        page = supabase.table("auction_catalogs").select("catalog_url,title,display_title,auctioneer,state,lot_count")\
             .eq("business_id", business_id).gt("lot_count", 0)\
             .range(start, start + 999).execute().data or []
         catalogs.extend(page)
@@ -6228,7 +6228,8 @@ async def analytics_auction_map(request: Request):
         points.append({
             "lat": round(lat, 4), "lng": round(lng, 4),
             "l": c.get("lot_count") or 0,
-            "a": c.get("auctioneer") or c.get("title") or "Unknown",
+            "a": c.get("display_title") or c.get("auctioneer") or c.get("title") or "Unknown",
+            "auctioneer": c.get("auctioneer") or "",
             "s": c.get("state") or "",
             "approx": approx,
         })
