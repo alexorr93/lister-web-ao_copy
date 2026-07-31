@@ -6337,6 +6337,118 @@ def _reconstruct_bidspotter_url(catalog_url: str) -> Optional[str]:
     cid = rest[idx + len(marker):]
     return f"https://www.bidspotter.com/en-us/auction-catalogues/{slug}/{marker}{cid}"
 
+_US_STATE_NAMES = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR", "california": "CA",
+    "colorado": "CO", "connecticut": "CT", "delaware": "DE", "florida": "FL", "georgia": "GA",
+    "hawaii": "HI", "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA",
+    "kansas": "KS", "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS",
+    "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV", "new hampshire": "NH",
+    "new jersey": "NJ", "new mexico": "NM", "new york": "NY", "north carolina": "NC",
+    "north dakota": "ND", "ohio": "OH", "oklahoma": "OK", "oregon": "OR", "pennsylvania": "PA",
+    "rhode island": "RI", "south carolina": "SC", "south dakota": "SD", "tennessee": "TN",
+    "texas": "TX", "utah": "UT", "vermont": "VT", "virginia": "VA", "washington": "WA",
+    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+}
+
+def _fetch_bidspotter_catalog_meta(real_catalog_url: str, display_title: str) -> Optional[dict]:
+    """'Recast': pulls the auctioneer's own live BidSpotter listing page (not the
+    specific catalog page, which needs its own separate fetch path) -- every
+    catalog card on that page already shows its real 'Ends from <date>' and
+    location, in plain server-rendered HTML with no bot-wall (unlike the
+    catalog-list scanner that hit BidSpotter's WAF earlier). Finds the matching
+    card by searching for distinctive words from our own already-known title."""
+    import requests, re as _re2
+    from datetime import datetime
+    from bs4 import BeautifulSoup
+
+    m = _re2.match(r'(https://www\.bidspotter\.com/en-us/auction-catalogues/[^/]+)/', real_catalog_url)
+    if not m:
+        return None
+    auctioneer_url = m.group(1)
+
+    try:
+        resp = requests.get(auctioneer_url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Referer": "https://www.bidspotter.com/en-us/auction-catalogues",
+        }, timeout=20)
+    except Exception:
+        return None
+    if resp.status_code >= 400:
+        return None
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    text = soup.get_text("\n")
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    joined = "\n".join(lines)
+
+    title_words = [w.strip("—-:,.()") for w in (display_title or "").split() if len(w.strip("—-:,.()")) > 3][:4]
+    if len(title_words) < 2:
+        return None
+
+    cards = _re2.split(r'(?=Ends from)', joined)
+    for card in cards:
+        if all(w.lower() in card.lower() for w in title_words[:2]):
+            date_m = _re2.search(r'Ends from\s*([A-Za-z]{3,9} \d{1,2}, \d{4})', card)
+            end_date_iso = None
+            if date_m:
+                for fmt in ("%b %d, %Y", "%B %d, %Y"):
+                    try:
+                        end_date_iso = datetime.strptime(date_m.group(1), fmt).strftime("%Y-%m-%d")
+                        break
+                    except ValueError:
+                        continue
+            state_found = None
+            for state_name, abbr in _US_STATE_NAMES.items():
+                if _re2.search(r'\b' + _re2.escape(state_name) + r'\b', card, _re2.I):
+                    state_found = abbr
+                    break
+            if end_date_iso or state_found:
+                return {"end_date": end_date_iso, "state": state_found}
+    return None
+
+@app.post("/api/flags/recast-metadata")
+async def flags_recast_metadata(request: Request, body: dict):
+    """Manual, one-off action from the Flags tab for a row showing blank
+    date/state -- fetches BidSpotter's own live page and, if it finds real
+    data, writes it permanently. Never overwrites a value that's already
+    there, and once written there's nothing left to recast (the blank that
+    triggered the button in the first place is gone)."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+
+    catalog_url = body.get("catalog_url")
+    if not catalog_url:
+        raise HTTPException(400, "catalog_url is required")
+
+    real_url = _reconstruct_bidspotter_url(catalog_url)
+    if not real_url:
+        raise HTTPException(400, "Could not reconstruct a real BidSpotter URL for this catalog")
+
+    cat_res = (supabase.table("auction_catalogs").select("*")
+               .eq("business_id", business_id).eq("catalog_url", catalog_url).limit(1).execute())
+    if not cat_res.data:
+        raise HTTPException(404, "Catalog not found")
+    catalog = cat_res.data[0]
+
+    meta = _fetch_bidspotter_catalog_meta(real_url, catalog.get("display_title") or catalog.get("title") or "")
+    if not meta:
+        raise HTTPException(422, "Couldn't find this catalog's info on BidSpotter's live page")
+
+    patch = {}
+    if meta.get("end_date") and not catalog.get("end_date"):
+        patch["end_date"] = meta["end_date"]
+    if meta.get("state") and not catalog.get("state"):
+        patch["state"] = meta["state"]
+    if not patch:
+        raise HTTPException(422, "Found the catalog but no new state/date to fill in")
+
+    supabase.table("auction_catalogs").update(patch).eq("id", catalog["id"]).execute()
+    return {"ok": True, **patch}
+
 def _send_catalog_lots_to_capture(session_id: str, business_id: str, catalog_url: str):
     """Runs in the background -- bulk-inserts every already-parsed BidSpotter lot
     as a Live Lot Capture line item (is_bulk_lot=False, so each one captures
