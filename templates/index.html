@@ -552,8 +552,8 @@ select.field-input { background: #fff; color: #0f172a; }
       <input type="url" id="capture-url-input" class="field-input" style="flex:1;min-width:200px;" placeholder="https://bid.rollerauction.com/account/watchlist" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="capture-url-nofill"/>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
-      <input type="text" id="capture-name-input" class="field-input" style="flex:1;min-width:160px;" placeholder="Session name (optional)" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="capture-name-nofill"/>
-      <input type="text" id="capture-scope-input" class="field-input" style="flex:1;min-width:160px;" placeholder="Pages/lots to capture (default: all)" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="capture-scope-nofill"/>
+      <input type="text" id="capture-name-input" class="field-input" style="flex:1;min-width:160px;" placeholder="Session name (optional)" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" name="cap-label-8f2k"/>
+      <input type="text" id="capture-scope-input" class="field-input" style="flex:1;min-width:160px;" placeholder="Pages/lots to capture (default: all)" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" name="cap-range-3q7v"/>
       <button class="btn btn-primary" onclick="startCaptureSession()">Create Session</button>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
@@ -562,6 +562,10 @@ select.field-input { background: #fff; color: #0f172a; }
       </select>
       <button class="btn" onclick="stopSelectedCapture()">⏸️ Stop Capture</button>
       <button class="btn" style="background:#7a2020;color:#fff;" onclick="deleteSelectedCaptureSession()">🗑️ Delete Session</button>
+      <button class="btn" onclick="shareSelectedCaptureSession()">🔗 Share</button>
+      <button class="btn" id="lot-select-mode-btn" onclick="toggleSelectMode()">☑️ Select Lots</button>
+      <button class="btn btn-primary" onclick="runAllFields()">▶️ Run All Fields</button>
+      <button class="btn" onclick="refreshBids()">🔄 Refresh Bids</button>
     </div>
     <div id="auction-back-to-flags" style="margin-bottom:14px;"></div>
     <div id="metric-progress" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px;">
@@ -2320,6 +2324,19 @@ async function stopSelectedCapture() {
   } catch(e) { toast('Failed to stop capture', 'error'); }
 }
 
+async function shareSelectedCaptureSession() {
+  const sel = document.getElementById('auction-session-select');
+  const id = sel.value;
+  if (!id) { toast('Select a session first', 'error'); return; }
+  const url = `${location.origin}/auction/share/${id}`;
+  try {
+    await navigator.clipboard.writeText(url);
+    toast('Share link copied to clipboard — anyone with it can view this catalog (read-only, no login)');
+  } catch(e) {
+    prompt('Copy this link to share (read-only, no login needed):', url);
+  }
+}
+
 async function deleteSelectedCaptureSession() {
   const sel = document.getElementById('auction-session-select');
   const id = sel.value;
@@ -2334,6 +2351,82 @@ async function deleteSelectedCaptureSession() {
 }
 
 let auctionLotsCache = [];
+let lotSelectMode = false;
+let selectedLotIds = new Set();
+let lastClickedLotId = null;
+
+function toggleSelectMode() {
+  lotSelectMode = !lotSelectMode;
+  selectedLotIds.clear();
+  document.getElementById('lot-select-mode-btn').textContent = lotSelectMode ? '✕ Cancel Select' : '☑️ Select Lots';
+  renderAuctionTable();
+}
+
+function toggleLotSelect(evt, lotId) {
+  const checked = evt.target.checked;
+  if (evt.shiftKey && lastClickedLotId) {
+    const ids = auctionLotsCache.map(l => l.id);
+    const a = ids.indexOf(lastClickedLotId), b = ids.indexOf(lotId);
+    if (a >= 0 && b >= 0) {
+      const [lo, hi] = a < b ? [a, b] : [b, a];
+      for (let i = lo; i <= hi; i++) { if (checked) selectedLotIds.add(ids[i]); else selectedLotIds.delete(ids[i]); }
+    }
+  } else {
+    if (checked) selectedLotIds.add(lotId); else selectedLotIds.delete(lotId);
+  }
+  lastClickedLotId = lotId;
+  renderAuctionTable();
+}
+
+function toggleSelectAllLots(headerCb) {
+  if (headerCb.checked) auctionLotsCache.forEach(l => selectedLotIds.add(l.id));
+  else selectedLotIds.clear();
+  renderAuctionTable();
+}
+
+async function deleteOneLot(lotId) {
+  try {
+    await api('POST', '/api/auction/capture/lots/bulk-delete', {lot_ids: [lotId]});
+    auctionLotsCache = auctionLotsCache.filter(l => l.id !== lotId);
+    selectedLotIds.delete(lotId);
+    renderAuctionTable();
+  } catch(e) { toast('Failed to remove lot', 'error'); }
+}
+
+function copyResearchPrompt(lotId) {
+  const lot = auctionLotsCache.find(l => l.id === lotId);
+  if (!lot) return;
+  const photos = lot.photo_urls || [];
+  const lines = [
+    `Research this auction lot and give me your own best estimate (look at the photos directly and do real web research, don't just repeat a generic guess):`,
+    ``,
+    `Lot ${lot.lot_number || '?'}: ${lot.title || 'Unknown'}`,
+    lot.description ? `Description: ${lot.description}` : null,
+    lot.listing_url ? `Listing: ${lot.listing_url}` : null,
+    photos.length ? `Photos:\n${photos.map(p => '- ' + p).join('\n')}` : null,
+    ``,
+    `Reply in EXACTLY this format, one line each, numbers only (no ranges unless truly warranted):`,
+    `Resale value = $X`,
+    `Price to pay (max bid) = $X`,
+    `Liquidity = High/Medium/Low`,
+  ].filter(Boolean).join('\n');
+  navigator.clipboard.writeText(lines).then(
+    () => toast('Research prompt copied — paste into Claude', 'success'),
+    () => toast('Could not copy to clipboard', 'error')
+  );
+}
+
+async function deleteSelectedLots() {
+  if (!selectedLotIds.size) { toast('Nothing selected', 'error'); return; }
+  const n = selectedLotIds.size;
+  if (!confirm(`Delete ${n} selected lot(s)? This cannot be undone.`)) return;
+  try {
+    const r = await api('POST', '/api/auction/capture/lots/bulk-delete', {lot_ids: Array.from(selectedLotIds)});
+    toast(`Deleted ${r.deleted} lot(s)`);
+    selectedLotIds.clear();
+    loadAuctionItems(activeSession);
+  } catch(e) { toast('Failed to delete selected lots', 'error'); }
+}
 
 async function loadAuctionItems(sessionId) {
   if (!sessionId) { document.getElementById('auction-list').innerHTML = ''; return; }
@@ -2352,8 +2445,35 @@ async function loadAuctionItems(sessionId) {
   } catch(e) { toast('Failed to load lots', 'error'); }
 }
 
+let lotSortDir = null; // null = capture order, 'asc' or 'desc' = by lot number
+
+function lotNumberSortKey(lotNumber) {
+  const s = String(lotNumber || '');
+  const m = s.match(/\d+/);
+  return [m ? parseInt(m[0], 10) : Infinity, s];
+}
+
+function toggleLotSort() {
+  lotSortDir = lotSortDir === null ? 'asc' : (lotSortDir === 'asc' ? 'desc' : null);
+  renderAuctionTable();
+}
+
+function lotSortArrow() {
+  if (lotSortDir === 'asc') return ' ▲';
+  if (lotSortDir === 'desc') return ' ▼';
+  return ' ⇅';
+}
+
 function renderAuctionTable() {
-  const lots = auctionLotsCache;
+  let lots = auctionLotsCache;
+  if (lotSortDir) {
+    lots = lots.slice().sort((a, b) => {
+      const [an, as_] = lotNumberSortKey(a.lot_number);
+      const [bn, bs] = lotNumberSortKey(b.lot_number);
+      const cmp = an - bn || as_.localeCompare(bs);
+      return lotSortDir === 'asc' ? cmp : -cmp;
+    });
+  }
   if (!lots.length) {
     document.getElementById('auction-list').innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px;">No lots captured yet for this session.</div>';
     return;
@@ -2363,8 +2483,8 @@ function renderAuctionTable() {
   const rows = lots.map(lot => {
     const photos = lot.photo_urls || [];
     const imgHtml = photos.length
-      ? `<img src="${photos[0]}" style="width:56px;height:56px;border-radius:8px;object-fit:cover;" onerror="this.style.display='none'"/>`
-      : `<div class="auction-img" style="width:56px;height:56px;">🔨</div>`;
+      ? `<img src="${photos[0]}" style="width:220px;height:220px;border-radius:10px;object-fit:cover;cursor:zoom-in;" onerror="this.style.display='none'" onclick="window.open('${photos[0]}','_blank')"/>`
+      : `<div class="auction-img" style="width:220px;height:220px;font-size:3rem;">🔨</div>`;
     const itemsHtml = lot.items && lot.items.length
       ? lot.items.map(it => `<div><b>${it.item_name || 'Unknown item'}</b>${it.quantity ? ' × ' + it.quantity : ''}</div>`).join('')
       : '';
@@ -2377,10 +2497,20 @@ function renderAuctionTable() {
       <a href="https://www.ebay.com/sch/i.html?_nkw=${q}" target="_blank" style="flex:1;text-align:center;font-size:10px;font-weight:700;padding:4px 0;border-radius:6px;background:#e53238;color:#fff;text-decoration:none;">eBay Active</a>
       <a href="https://www.ebay.com/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1" target="_blank" style="flex:1;text-align:center;font-size:10px;font-weight:700;padding:4px 0;border-radius:6px;background:#2e8b57;color:#fff;text-decoration:none;">eBay Sold</a>
     </div>`;
+    const selectCell = lotSelectMode
+      ? `<td><input type="checkbox" ${selectedLotIds.has(lot.id) ? 'checked' : ''} onclick="toggleLotSelect(event,'${lot.id}')"></td>`
+      : '';
     return `<tr id="lot-row-${lot.id}">
+      ${selectCell}
       <td>${imgHtml}</td>
       <td style="max-width:220px;">
-        <div style="font-weight:700;font-size:12px;color:var(--text);">Lot ${lot.lot_number || '?'}: ${lot.title || 'Unknown'}</div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
+          <div style="font-weight:700;font-size:12px;color:var(--text);">Lot ${lot.lot_number || '?'}: ${lot.title || 'Unknown'}</div>
+          <div style="flex-shrink:0;display:flex;gap:2px;">
+            <button onclick="copyResearchPrompt('${lot.id}')" title="Copy a research prompt for this lot to paste into Claude" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;line-height:1;padding:2px;">🧠</button>
+            <button onclick="deleteOneLot('${lot.id}')" title="Remove this lot" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;padding:2px;">✕</button>
+          </div>
+        </div>
         ${lot.current_bid != null ? `<div style="font-size:11px;color:var(--muted);">Bid: $${parseFloat(lot.current_bid).toFixed(2)}</div>` : ''}
         ${lot.listing_url ? `<a href="${lot.listing_url}" target="_blank" style="font-size:10px;color:var(--accent);">View ↗</a>` : ''}
         <div style="margin-top:4px;">${bulkBadge}</div>
@@ -2397,12 +2527,20 @@ function renderAuctionTable() {
       </td>
     </tr>`;
   }).join('');
+  const selectToolbar = lotSelectMode
+    ? `<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+        <span style="font-size:11px;color:var(--muted);">${selectedLotIds.size} selected · shift-click to select a range</span>
+        <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="deleteSelectedLots()">🗑️ Delete Selected</button>
+      </div>`
+    : '';
   document.getElementById('auction-list').innerHTML = `
+    ${selectToolbar}
     <div style="overflow-x:auto;">
       <table class="pdf-result-table" style="width:100%;">
         <thead><tr>
+          ${lotSelectMode ? `<th><input type="checkbox" onclick="toggleSelectAllLots(this)"></th>` : ''}
           <th></th>
-          <th>Lot</th>
+          <th style="cursor:pointer;user-select:none;" onclick="toggleLotSort()" title="Sort by lot number">Lot${lotSortArrow()}</th>
           <th>Itemization</th>
           <th>Resale Value ${metricRunBtn('resale_value')}</th>
           <th>Liquidity ${metricRunBtn('liquidity')}</th>
@@ -2439,6 +2577,76 @@ async function runMetric(metric) {
   } catch(e) {
     toast('Failed to start: ' + e.message, 'error');
   }
+}
+
+async function refreshBids() {
+  if (!activeSession) { toast('Select a session first', 'error'); return; }
+  try {
+    const r = await api('POST', `/api/auction/capture/sessions/${activeSession}/refresh-bids`, {});
+    if (!r.total) { toast('No lots with a listing link to refresh', 'error'); return; }
+    toast(`Refreshing bids for ${r.total} lot(s) — paced to avoid getting blocked, safe to close this tab`);
+    pollBidRefreshJob(r.job_id);
+  } catch(e) {
+    toast('Failed to start bid refresh: ' + e.message, 'error');
+  }
+}
+
+async function pollBidRefreshJob(jobId) {
+  const progWrap = document.getElementById('metric-progress');
+  const bar = document.getElementById('metric-progress-bar');
+  const label = document.getElementById('metric-progress-label');
+  const pct = document.getElementById('metric-progress-pct');
+  progWrap.style.display = '';
+
+  while (true) {
+    let job;
+    try {
+      job = await api('GET', `/api/auction/capture/refresh-bids-jobs/${jobId}`);
+    } catch(e) {
+      progWrap.style.display = 'none';
+      if (activeSession) loadAuctionItems(activeSession);
+      return;
+    }
+    const p = job.total ? Math.round((job.processed / job.total) * 100) : 100;
+    bar.style.width = p + '%';
+    pct.textContent = p + '%';
+    if (job.last) {
+      label.textContent = `Lot ${job.last.lot_number || '?'} (${job.processed}/${job.total}): ${(job.last.title||'').slice(0,40)} — ${job.last.status === 'ok' ? '$' + job.last.new_bid : 'failed'}`;
+      const lotIdx = auctionLotsCache.findIndex(l => l.id === job.last.lot_id);
+      if (lotIdx >= 0 && job.last.status === 'ok') {
+        auctionLotsCache[lotIdx].current_bid = job.last.new_bid;
+        renderAuctionTable();
+      }
+    } else {
+      label.textContent = 'Starting bid refresh...';
+    }
+    if (job.status === 'done') {
+      bar.style.width = '100%';
+      pct.textContent = '100%';
+      label.textContent = `Done — ${job.ok} refreshed (${job.changed} changed)${job.errors ? ', ' + job.errors + ' failed' : ''}`;
+      setTimeout(() => { progWrap.style.display = 'none'; }, 2000);
+      if (activeSession) loadAuctionItems(activeSession);
+      return;
+    }
+    await new Promise(res => setTimeout(res, 1500));
+  }
+}
+
+async function runAllFields() {
+  if (!activeSession) { toast('Select a session first', 'error'); return; }
+  const metrics = ['resale_value', 'liquidity', 'weight', 'max_bid'];
+  for (const metric of metrics) {
+    try {
+      const r = await api('POST', `/api/auction/capture/sessions/${activeSession}/compute-metric`, {metric});
+      if (!r.total) continue; // nothing left to fill in for this metric, move on
+      toast(`Running ${METRIC_LABELS[metric]} for ${r.total} lot(s)...`);
+      localStorage.setItem(`auctionMetricJob_${activeSession}`, JSON.stringify({jobId: r.job_id, metric}));
+      await pollMetricJob(r.job_id, metric); // each metric's own focused prompt, run one at a time
+    } catch(e) {
+      toast(`Failed to run ${METRIC_LABELS[metric]}: ` + e.message, 'error');
+    }
+  }
+  toast('Run All Fields complete');
 }
 
 async function pollMetricJob(jobId, metric) {
