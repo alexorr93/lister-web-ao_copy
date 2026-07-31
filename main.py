@@ -6881,11 +6881,23 @@ def _create_one_lot(body: AuctionLotCreate) -> dict:
 
     if not body.is_bulk_lot:
         # Default case: single item, no Gemini call — the item IS the title.
+        # Real bug fixed here: quantity was always hardcoded to "1", even when the
+        # lot's own text plainly states a bulk quantity (e.g. "Lot of (90) Allen-
+        # Bradley starters"), silently making a 90-unit lot look like a single
+        # item everywhere downstream (resale-value math, listing counts, etc).
+        # Cheap regex extraction instead of a Gemini call, since the number is
+        # already sitting right there in plain text.
+        import re as _qty_re
+        combined_text = f"{body.title or ''} {body.description or ''}"
+        qty_match = (_qty_re.search(r'lot\s+of\s*\(?\s*(\d+)\s*\)?', combined_text, _qty_re.I)
+                     or _qty_re.search(r'\((\d+)\)', combined_text)
+                     or _qty_re.search(r'\bqty[:\s]+(\d+)\b', combined_text, _qty_re.I))
+        quantity = qty_match.group(1) if qty_match else "1"
         item_row = {
             "lot_id": lot["id"],
             "item_name": (body.title or "")[:300],
             "item_description": (body.description or "")[:1000],
-            "quantity": "1",
+            "quantity": quantity,
             "confidence": "high",
         }
         ins = supabase.table("auction_lot_items").insert(item_row).execute()
