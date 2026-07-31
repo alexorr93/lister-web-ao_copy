@@ -112,14 +112,14 @@ async function loadMap() {
     .attr('role', 'img').attr('aria-label', 'US map with auctions plotted by zip code, sized and colored by lot count');
   const g = svg.append('g');
   const projection = d3.geoAlbersUsa().scale(1300).translate([487.5, 305]);
-  const path = d3.geoPath(projection);
+  const mapPath = d3.geoPath(); // states-albers-10m.json is pre-projected -- draw with identity, no projection
   const tooltip = d3.select('#tooltip');
 
   const us = await d3.json('https://cdn.jsdelivr.net/npm/us-atlas@3/states-albers-10m.json');
   const states = topojson.feature(us, us.objects.states).features;
 
   g.selectAll('path.state').data(states).join('path')
-    .attr('d', path)
+    .attr('d', mapPath)
     .attr('fill', '#242422')
     .attr('stroke', '#3a3a37')
     .attr('stroke-width', 0.75);
