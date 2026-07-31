@@ -44,6 +44,7 @@ label.check { display: flex; align-items: center; gap: 6px; font-size: 13px; col
 .kw-add-row { display: flex; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
 .kw-add-row input { flex: 1; }
 .kw-tag { display: inline-block; padding: 5px 12px; border-radius: 999px; background: #2d3348; color: var(--text); font-size: 12px; font-weight: 600; margin-right: 6px; margin-bottom: 6px; }
+.kw-mini-tag { display: inline-block; padding: 2px 6px; border-radius: 999px; background: #2d3348; color: var(--muted); font-size: 10px; font-weight: 600; margin-right: 3px; white-space: nowrap; }
 .kw-leaderboard-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; margin-bottom: 6px; }
 table { width: max-content; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
 th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; white-space: nowrap; }
@@ -208,6 +209,18 @@ async function addKeyword(layer) {
 }
 
 const KW_DISPLAY_LABEL = { 'allen bradley': 'AB' };
+
+function kwBreakdownCell(total, keywordList, c) {
+  if (total === 0) return '<span class="muted">0</span>';
+  const parts = keywordList
+    .map(k => ({ k, n: (c.keyword_counts || {})[k] || 0 }))
+    .filter(x => x.n > 0)
+    .sort((a, b) => b.n - a.n);
+  const pills = parts.map(x =>
+    `<span class="kw-mini-tag">${KW_DISPLAY_LABEL[x.k.toLowerCase()] || x.k} ${x.n}</span>`
+  ).join('');
+  return `<span class="badge badge-kw" style="margin-right:4px;">${total}</span>${pills}`;
+}
 
 function renderKeywordLeaderboards(filteredRows) {
   const buildLeaderboard = (kwList) => {
@@ -374,8 +387,8 @@ function renderTable() {
     const dayBadge = c.multi_day ? '<span class="badge badge-day">multi-day</span>' : '<span class="muted">—</span>';
     const kwSum1 = keywordSumLayer1(c);
     const kwSum2 = keywordSumLayer2(c);
-    const kwCell1 = kwSum1 > 0 ? `<span class="badge badge-kw">${kwSum1}</span>` : '<span class="muted">0</span>';
-    const kwCell2 = kwSum2 > 0 ? `<span class="badge badge-kw">${kwSum2}</span>` : '<span class="muted">0</span>';
+    const kwCell1 = kwBreakdownCell(kwSum1, layer1Keywords(), c);
+    const kwCell2 = kwBreakdownCell(kwSum2, [...layer1Keywords(), ...layer2Keywords()], c);
     const href = realUrlFromCatalogUrl(c.catalog_url) || c.catalog_url;
     const sendCell = c.capture_session_id
       ? `<a href="/?tab=auction&session=${c.capture_session_id}" style="font-size:12px;">✅ Sent — view</a>`
