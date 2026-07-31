@@ -6486,13 +6486,56 @@ async def flags_not_interested(request: Request, body: dict):
         raise HTTPException(404, "Catalog not found")
     return {"ok": True, "not_interested": not_interested}
 
+def _extract_meta_from_stored_pdf(catalog_url: str) -> Optional[dict]:
+    """The real, durable path for Recast: reads the actual PDF this catalog
+    was uploaded from (saved to the shared 'auction-pdfs' Supabase Storage
+    bucket by auction-catalog-feed at upload time) and extracts state/end_date
+    directly from its own text -- no dependency on BidSpotter's live site
+    still listing the auction, matching titles correctly, or anything else
+    fragile. Only catalogs uploaded before the storage bucket existed (a real
+    bug, fixed) will have nothing here; everything uploaded since should.
+    Returns None (not an error) if no stored PDF is found, so the caller can
+    fall back to the live-fetch path for those older catalogs."""
+    import fitz, re as _re3
+    try:
+        pdf_bytes = supabase.storage.from_("auction-pdfs").download(f"{catalog_url}.pdf")
+    except Exception:
+        return None
+    if not pdf_bytes:
+        return None
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        text = "".join(p.get_text() for p in doc[:2])
+    except Exception:
+        return None
+
+    date_m = _re3.search(r'Ends? (?:from )?(\w{3})\w* (\d{1,2}),?\s+(\d{4})', text)
+    end_date_iso = None
+    if date_m and date_m.group(1) in _MONTHS_ABBR:
+        end_date_iso = f"{date_m.group(3)}-{_MONTHS_ABBR[date_m.group(1)]}-{int(date_m.group(2)):02d}"
+
+    state_found = None
+    for state_name, abbr in _US_STATE_NAMES.items():
+        if _re3.search(r'\b' + _re3.escape(state_name) + r'\b', text, _re3.I):
+            state_found = abbr
+            break
+
+    if end_date_iso or state_found:
+        return {"end_date": end_date_iso, "state": state_found}
+    return None
+
+_MONTHS_ABBR = {"Jan":"01","Feb":"02","Mar":"03","Apr":"04","May":"05","Jun":"06",
+                "Jul":"07","Aug":"08","Sep":"09","Oct":"10","Nov":"11","Dec":"12"}
+
 @app.post("/api/flags/recast-metadata")
 async def flags_recast_metadata(request: Request, body: dict):
     """Manual, one-off action from the Flags tab for a row showing blank
-    date/state -- fetches BidSpotter's own live page and, if it finds real
-    data, writes it permanently. Never overwrites a value that's already
-    there, and once written there's nothing left to recast (the blank that
-    triggered the button in the first place is gone)."""
+    date/state. Tries the actual stored PDF first (the real, durable source
+    of truth -- see _extract_meta_from_stored_pdf), and only falls back to
+    BidSpotter's live page for catalogs uploaded before the storage bucket
+    existed. Never overwrites a value that's already there, and once written
+    there's nothing left to recast (the blank that triggered the button in
+    the first place is gone)."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
@@ -6501,19 +6544,19 @@ async def flags_recast_metadata(request: Request, body: dict):
     if not catalog_url:
         raise HTTPException(400, "catalog_url is required")
 
-    real_url = _reconstruct_bidspotter_url(catalog_url)
-    if not real_url:
-        raise HTTPException(400, "Could not reconstruct a real BidSpotter URL for this catalog")
-
     cat_res = (supabase.table("auction_catalogs").select("*")
                .eq("business_id", business_id).eq("catalog_url", catalog_url).limit(1).execute())
     if not cat_res.data:
         raise HTTPException(404, "Catalog not found")
     catalog = cat_res.data[0]
 
-    meta = _fetch_bidspotter_catalog_meta(real_url, catalog.get("display_title") or catalog.get("title") or "")
+    meta = _extract_meta_from_stored_pdf(catalog_url)
     if not meta:
-        raise HTTPException(422, "Couldn't find this catalog's info on BidSpotter's live page")
+        real_url = _reconstruct_bidspotter_url(catalog_url)
+        if real_url:
+            meta = _fetch_bidspotter_catalog_meta(real_url, catalog.get("display_title") or catalog.get("title") or "")
+    if not meta:
+        raise HTTPException(422, "No stored PDF for this catalog, and couldn't find it on BidSpotter's live page either")
 
     patch = {}
     if meta.get("end_date") and not catalog.get("end_date"):
