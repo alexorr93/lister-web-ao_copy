@@ -204,7 +204,7 @@ function renderTable() {
       : `<button class="btn" style="font-size:11px;padding:4px 10px;" onclick="sendToGemini('${c.catalog_url}', this)">📤 Send</button>`;
     html += `<tr data-catalog-url="${c.catalog_url}">
       <td><a href="${href}" target="_blank">${displayTitle(c).replace(/</g,'&lt;')}</a></td>
-      <td class="muted">${c.end_date || '—'}</td>
+      <td class="muted">${c.end_date ? c.end_date : `<button class="btn" style="font-size:11px;padding:3px 8px;" onclick="recastMetadata('${c.catalog_url}', this)">🔁 Recast</button>`}</td>
       <td class="muted">${c.state || '—'}</td>
       <td>${dist}</td>
       <td>${c.lot_count}</td>
@@ -216,6 +216,24 @@ function renderTable() {
   }
   html += '</tbody></table>';
   document.getElementById('table-area').innerHTML = html;
+}
+
+async function recastMetadata(catalogUrl, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Fetching...';
+  try {
+    const r = await api('POST', '/api/flags/recast-metadata', { catalog_url: catalogUrl });
+    const row = rows.find(x => x.catalog_url === catalogUrl);
+    if (row) {
+      if (r.end_date) row.end_date = r.end_date;
+      if (r.state) row.state = r.state;
+    }
+    renderTable();
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '🔁 Recast';
+    alert('Recast failed: ' + e.message);
+  }
 }
 
 async function sendToGemini(catalogUrl, btn) {
