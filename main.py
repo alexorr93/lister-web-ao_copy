@@ -6438,10 +6438,13 @@ def _fetch_bidspotter_catalog_meta(real_catalog_url: str, display_title: str) ->
                     except ValueError:
                         continue
             state_found = None
-            for state_name, abbr in _US_STATE_NAMES.items():
-                if _re2.search(r'\b' + _re2.escape(state_name) + r'\b', card, _re2.I):
-                    state_found = abbr
-                    break
+            if _re2.search(r'multi[\s-]?location', card, _re2.I):
+                state_found = "Multi-Location"
+            else:
+                for state_name, abbr in _US_STATE_NAMES.items():
+                    if _re2.search(r'\b' + _re2.escape(state_name) + r'\b', card, _re2.I):
+                        state_found = abbr
+                        break
             if end_date_iso or state_found:
                 return {"end_date": end_date_iso, "state": state_found}
     return None
@@ -6515,10 +6518,13 @@ def _extract_meta_from_stored_pdf(catalog_url: str) -> Optional[dict]:
         end_date_iso = f"{date_m.group(3)}-{_MONTHS_ABBR[date_m.group(1)]}-{int(date_m.group(2)):02d}"
 
     state_found = None
-    for state_name, abbr in _US_STATE_NAMES.items():
-        if _re3.search(r'\b' + _re3.escape(state_name) + r'\b', text, _re3.I):
-            state_found = abbr
-            break
+    if _re3.search(r'multi[\s-]?location', text, _re3.I):
+        state_found = "Multi-Location"
+    else:
+        for state_name, abbr in _US_STATE_NAMES.items():
+            if _re3.search(r'\b' + _re3.escape(state_name) + r'\b', text, _re3.I):
+                state_found = abbr
+                break
 
     if end_date_iso or state_found:
         return {"end_date": end_date_iso, "state": state_found}
