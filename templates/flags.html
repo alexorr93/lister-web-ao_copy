@@ -27,7 +27,7 @@
 html, body { overflow-x: hidden; max-width: 100%; }
 body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 .main { max-width: 1300px; margin: 0 auto; padding: 24px 20px 60px; }
-#table-area { overflow-x: auto; }
+#table-area { overflow-x: auto; width: 100%; }
 h1 { font-size: 22px; margin-bottom: 4px; }
 .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; max-width: 900px; }
 .filter-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
@@ -38,7 +38,7 @@ label.check { display: flex; align-items: center; gap: 6px; font-size: 13px; col
 .kw-chip { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; user-select: none; transition: all .15s; }
 .kw-chip input { display: none; }
 .kw-chip.on { background: rgba(37,99,235,.15); border-color: var(--accent); color: #60a5fa; }
-table { min-width: 100%; width: max-content; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+table { width: max-content; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
 th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; white-space: nowrap; }
 th { background: #161b29; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
 tr:last-child td { border-bottom: none; }
@@ -169,7 +169,7 @@ function renderTable() {
 
   const th = (key, label) => `<th onclick="setSort('${key}')" style="cursor:pointer;">${label}${sortKey===key ? (sortDir===1?' ▲':' ▼') : ''}</th>`;
   let html = `<table><thead><tr>
-    ${th('title','Auction')}${th('auctioneer','Auctioneer')}${th('end_date','Date')}${th('state','State')}${th('lot_count','Lots')}${th('distance_miles','Distance')}${th('multi_day','Multi-day')}${th('kw_sum','Keyword Count')}<th>Send to Gemini</th>
+    ${th('title','Auction')}${th('end_date','Date')}${th('state','State')}${th('distance_miles','Distance')}${th('lot_count','Lots')}${th('kw_sum','Keyword Count')}${th('multi_day','Multi-day')}<th>Send to Gemini</th>
   </tr></thead><tbody>`;
 
   for (const c of filtered) {
@@ -185,13 +185,12 @@ function renderTable() {
       : `<button class="btn" style="font-size:11px;padding:4px 10px;" onclick="sendToGemini('${c.catalog_url}', this)">📤 Send</button>`;
     html += `<tr data-catalog-url="${c.catalog_url}">
       <td><a href="${href}" target="_blank">${displayTitle(c).replace(/</g,'&lt;')}</a></td>
-      <td class="muted">${(c.auctioneer || '—').replace(/</g,'&lt;')}</td>
       <td class="muted">${c.end_date || '—'}</td>
       <td class="muted">${c.state || '—'}</td>
-      <td>${c.lot_count}</td>
       <td>${dist}</td>
-      <td>${dayBadge}</td>
+      <td>${c.lot_count}</td>
       <td>${kwCell}</td>
+      <td>${dayBadge}</td>
       <td>${sendCell}</td>
     </tr>`;
   }
