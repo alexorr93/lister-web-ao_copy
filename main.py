@@ -8146,12 +8146,31 @@ def push_listing_to_shopify(listing: dict, image_urls_override: list = None) -> 
         }
     }
     headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
-    r = _req.post(f"{api_base}/products.json", headers=headers, json=body, timeout=20)
-    if r.status_code == 401:
-        # cached token was invalidated (e.g. app was uninstalled/reinstalled) — force a fresh one and retry once
-        token = get_shopify_access_token(biz_id, force_refresh=True)
-        headers["X-Shopify-Access-Token"] = token
-        r = _req.post(f"{api_base}/products.json", headers=headers, json=body, timeout=20)
+    # Shopify has to fetch every image URL itself before it can respond to this
+    # call (images are sent as external src URLs here, not embedded data) --
+    # for a multi-photo listing that can legitimately take well past 20s, which
+    # is exactly what was timing out real, otherwise-fine publishes. Not adding
+    # a retry-on-timeout here on purpose: this is a non-idempotent create, and
+    # blindly re-POSTing after a timeout risks creating a duplicate product if
+    # Shopify actually finished server-side and the response just came back
+    # slow -- a longer timeout is the safe fix, a retry here is not.
+    try:
+        r = _req.post(f"{api_base}/products.json", headers=headers, json=body, timeout=75)
+        if r.status_code == 401:
+            # cached token was invalidated (e.g. app was uninstalled/reinstalled) — force a fresh one and retry once
+            token = get_shopify_access_token(biz_id, force_refresh=True)
+            headers["X-Shopify-Access-Token"] = token
+            r = _req.post(f"{api_base}/products.json", headers=headers, json=body, timeout=75)
+    except _req.exceptions.Timeout:
+        # Deliberately NOT retrying here -- see comment above. Surfacing a
+        # clear, actionable message instead of the raw connection-pool string
+        # that used to leak straight through to the user.
+        raise Exception(
+            "Shopify didn't respond within 75 seconds while creating this listing (it has to fetch "
+            f"{len(images)} photo(s) itself before it can respond). Check Shopify directly before "
+            "retrying -- if the product actually went through and this just timed out waiting on the "
+            "response, retrying now would create a duplicate."
+        )
     if r.status_code not in (200, 201):
         raise Exception(f"Shopify product create failed ({r.status_code}): {r.text[:400]}")
 
