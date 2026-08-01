@@ -90,6 +90,13 @@ td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: 
   </div>
   <div class="section-status" id="ebayonly-status">Loading...</div>
   <div id="ebayonly-table-area"><div class="empty">Loading...</div></div>
+
+  <div class="section-header">
+    <div class="section-title">🔒 Locked Manual Overrides</div>
+    <a class="section-link" href="/acquisitions">Open in Lots →</a>
+  </div>
+  <div class="section-status" id="overrides-status">Loading...</div>
+  <div id="overrides-table-area"><div class="empty">Loading...</div></div>
 </div>
 
 <script>
@@ -372,9 +379,48 @@ async function hideEbayOnlyRow(btn, rowId, title) {
   }
 }
 
+// ── Locked Manual Overrides (from Lots) ─────────────────────────
+let overrideItems = [];
+async function loadOverrides() {
+  document.getElementById('overrides-status').textContent = 'Loading...';
+  try {
+    const r = await fetch('/api/acquisitions/sku-overrides');
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed to load');
+    overrideItems = data.overrides || [];
+    document.getElementById('overrides-status').textContent =
+      overrideItems.length ? `${overrideItems.length} manual override(s) on file` : 'No manual overrides set.';
+    renderOverridesTable();
+  } catch(e) {
+    document.getElementById('overrides-status').textContent = '';
+    document.getElementById('overrides-table-area').innerHTML = `<div class="empty">Failed to load: ${escapeHtml(e.message)}</div>`;
+  }
+}
+function renderOverridesTable() {
+  const area = document.getElementById('overrides-table-area');
+  if (!overrideItems.length) { area.innerHTML = '<div class="empty">No manual overrides set.</div>'; return; }
+  let html = `<table><thead><tr>
+    <th>eBay's SKU (locked, unchanged)</th><th>Your Corrected SKU</th><th>Title</th><th>Lot</th>
+  </tr></thead><tbody>`;
+  for (const o of overrideItems) {
+    const lotCell = o.lot_matched
+      ? `<span style="color:var(--green);font-weight:600;">${escapeHtml(o.lot_name || o.lot_sku || '')}</span>`
+      : `<span style="color:var(--amber);" title="This override's prefix doesn't match a real lot yet">${escapeHtml(o.lot_sku || '—')} (no lot match)</span>`;
+    html += `<tr>
+      <td class="sku muted">${escapeHtml(o.original_ebay_sku || '(blank)')}</td>
+      <td class="sku" style="color:var(--green);font-weight:700;">${escapeHtml(o.your_corrected_sku || '')}</td>
+      <td class="muted">${escapeHtml(o.title || '')}</td>
+      <td>${lotCell}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  area.innerHTML = html;
+}
+
 loadUncatOrders();
 loadUncatListings();
 loadEbayOnly();
+loadOverrides();
 </script>
 </body>
 </html>
