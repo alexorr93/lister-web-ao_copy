@@ -172,6 +172,7 @@ async def start_background_jobs():
     asyncio.create_task(analytics_cache_refresh_worker())
     asyncio.create_task(auction_archive_worker())
     asyncio.create_task(active_listings_sync_worker())
+    asyncio.create_task(inventory_value_sync_worker())
 
 async def auction_archive_worker():
     """Runs once a day (00:20 UTC) and archives any capture session whose lots'
@@ -9565,10 +9566,85 @@ def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> di
         .eq("business_id", business_id).eq("listing_status", "Active")\
         .lt("updated_at", run_started_at).execute()
 
+    # ebay_listing_status only ever holds CURRENT state (upserted + stale rows
+    # deleted above) -- it can't answer "what was active on some past date."
+    # This appends today's state into a separate append-only history table so
+    # inventory value can be reconstructed for any date going forward.
+    _snapshot_active_listings(business_id)
+
     save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_CHECKPOINT_PAGE", "")
     save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_RUN_STARTED_AT", "")
 
     return {"checked": total_rows, "synced_at": _dt.datetime.utcnow().isoformat()}
+
+def _snapshot_active_listings(business_id: str):
+    """Appends today's active-listings state into active_listings_daily_snapshot
+    (append-only, one row per item per calendar day), so inventory value can be
+    reconstructed for any past date -- something ebay_listing_status alone can't
+    do, since it only ever holds current state. Called once per successful sync
+    (both the daily automatic worker and the manual button), tagged with today's
+    date; upserts on (business_id, item_id, snapshot_date) so re-running the sync
+    twice in one day never creates duplicate rows for that day."""
+    rows = _fetch_all_for_business(business_id, "ebay_listing_status",
+                                    "item_id,sku,title,quantity,quantity_available,price,listing_status")
+    active_rows = [r for r in rows if r.get("listing_status") == "Active"]
+    if not active_rows:
+        return
+    import datetime as _dt2
+    snapshot_date = _dt2.date.today().isoformat()
+    snapshot_rows = [{
+        "business_id": business_id, "item_id": r["item_id"], "sku": r.get("sku"),
+        "title": r.get("title"), "quantity": r.get("quantity"),
+        "quantity_available": r.get("quantity_available"), "price": r.get("price"),
+        "snapshot_date": snapshot_date,
+    } for r in active_rows]
+    # Chunked -- a single request with thousands of rows risks hitting a payload
+    # size limit; this table can hold years of daily history at full item detail.
+    for i in range(0, len(snapshot_rows), 500):
+        chunk = snapshot_rows[i:i + 500]
+        supabase.table("active_listings_daily_snapshot").upsert(
+            chunk, on_conflict="business_id,item_id,snapshot_date").execute()
+
+async def inventory_value_sync_worker():
+    """Keeps ebay_inventory/shopify_inventory fresh -- these are what
+    _compute_inventory_snapshot_value actually reads from, which is what
+    analytics_snapshot_worker's daily Inventory Snapshot Value history is built
+    on. Found via direct DB check: both tables were stale for days (ebay_inventory
+    last synced 7/25, shopify_inventory 7/27) because sync_inventory() had only
+    ever been called from the manual '/api/inventory/sync-now' button -- the same
+    bug shape as Active Listings before active_listings_sync_worker, just in a
+    different pair of tables. This is the actual reason the daily inventory-value
+    history had gone flat for 5 straight days despite the snapshot worker itself
+    running correctly every day.
+    Uses its own app_settings timestamp key (INVENTORY_VALUE_SYNC_LAST_RUN_AT)
+    rather than the existing _sync_status dict -- that dict is already shared
+    (ambiguously) between this feature's manual button and the unrelated
+    order-resync endpoint, and didn't want to add a third consumer on top of
+    that pre-existing collision."""
+    import asyncio, datetime as _dt
+    while True:
+        try:
+            res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
+            business_ids = list(set(r["business_id"] for r in (res.data or [])))
+            for biz_id in business_ids:
+                try:
+                    settings = get_ebay_settings(biz_id)
+                    last_run = settings.get("INVENTORY_VALUE_SYNC_LAST_RUN_AT")
+                    needs_sync = True
+                    if last_run:
+                        age = _dt.datetime.utcnow() - _dt.datetime.fromisoformat(
+                            last_run.replace("Z", "+00:00")).replace(tzinfo=None)
+                        needs_sync = age >= _dt.timedelta(days=1)
+                    if not needs_sync:
+                        continue
+                    result = await asyncio.to_thread(sync_inventory, biz_id)
+                    save_ebay_setting(biz_id, "INVENTORY_VALUE_SYNC_LAST_RUN_AT", _dt.datetime.utcnow().isoformat())
+                    print(f"inventory_value_sync_worker: business {biz_id} synced -> {result}")
+                except Exception as e:
+                    print(f"inventory_value_sync_worker: business {biz_id} failed: {e}")
+        except Exception as e:
+            print(f"inventory_value_sync_worker error: {e}")
+        await asyncio.sleep(3600)  # check hourly; actual sync per business is gated to ~once/day above
 
 async def active_listings_sync_worker():
     """Keeps the Lots page's Active Listings column fresh automatically. Previously
