@@ -1141,6 +1141,16 @@ async def update_ebay_v2_sku(item_id: str, body: UpdateSkuV2, request: Request):
             raise HTTPException(400, "This item hasn't been published to eBay yet")
         _ebay_revise_sku_only(business_id, ebay_item_id, new_sku)
         supabase.table("listings").update({"ebay_sku": new_sku}).eq("id", item_id).execute()
+        # Also update ebay_listing_status.sku -- that's the table every
+        # "uncategorized listings" view (Lots, the Uncat tab) actually reads
+        # from, not listings.ebay_sku. Without this, a successful, verified-
+        # on-eBay SKU push would still show up as uncategorized in Lister's
+        # own views until the next active-listings sync (up to a day away),
+        # even though eBay itself was already correct.
+        try:
+            supabase.table("ebay_listing_status").update({"sku": new_sku}).eq("business_id", business_id).eq("item_id", ebay_item_id).execute()
+        except Exception as e:
+            print(f"update_ebay_v2_sku: local ebay_listing_status update failed (eBay itself succeeded): {e}")
         return {"ok": True, "ebay_sku": new_sku}
     except HTTPException:
         raise

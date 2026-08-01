@@ -231,7 +231,13 @@ async function saveUncatSku(btn, listingId, itemId) {
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed to update SKU');
-    await loadUncatListings();
+    // Remove just this row in place, not a full reload -- a full reload here
+    // would replace the ENTIRE table's DOM (including any other row someone
+    // is mid-edit or mid-save on right now), breaking concurrent saves.
+    listingItems = listingItems.filter(x => x.item_id !== itemId);
+    document.getElementById('listings-status').textContent =
+      listingItems.length ? `${listingItems.length} active listing(s) need attention` : 'Nothing uncategorized — every active listing matches a lot and has a real SKU.';
+    renderListingsTable();
   } catch(e) {
     alert(`Failed to update SKU: ${e.message}`);
     btn.disabled = false; btn.textContent = 'Save';
@@ -249,7 +255,10 @@ async function saveUncatSkuOverride(btn, itemId) {
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed to update SKU');
-    await loadUncatListings();
+    listingItems = listingItems.filter(x => x.item_id !== itemId);
+    document.getElementById('listings-status').textContent =
+      listingItems.length ? `${listingItems.length} active listing(s) need attention` : 'Nothing uncategorized — every active listing matches a lot and has a real SKU.';
+    renderListingsTable();
   } catch(e) {
     alert(`Failed to update SKU: ${e.message}`);
     btn.disabled = false; btn.textContent = 'Save';

@@ -272,8 +272,11 @@ async function saveUncatSku(btn, listingId, itemId) {
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed to update SKU');
-    await loadAcquisitions();
-    setView('uncategorized');
+    // Remove just this row in place, not a full page reload -- a full reload
+    // here replaces the ENTIRE uncategorized table's DOM, which would break
+    // any OTHER row someone is mid-edit or mid-save on at the same time.
+    uncategorized.items = (uncategorized.items || []).filter(x => x.item_id !== itemId);
+    renderUncategorizedTable();
   } catch(e) {
     alert(`Failed to update SKU: ${e.message}`);
     btn.disabled = false;
@@ -294,8 +297,8 @@ async function saveUncatSkuOverride(btn, itemId) {
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed to update SKU');
-    await loadAcquisitions();
-    setView('uncategorized');
+    uncategorized.items = (uncategorized.items || []).filter(x => x.item_id !== itemId);
+    renderUncategorizedTable();
   } catch(e) {
     alert(`Failed to update SKU: ${e.message}`);
     btn.disabled = false;
