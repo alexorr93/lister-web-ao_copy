@@ -789,6 +789,10 @@ function toggleTodayFilter() {
   todayOnly = !todayOnly;
   document.getElementById('today-filter-btn').classList.toggle('active', todayOnly);
   renderTiles();
+  // Persisted server-side (not localStorage) so this follows the account,
+  // not the browser -- stays on/off across devices and sessions until
+  // explicitly changed again.
+  api('POST', '/api/settings', {key: 'INTAKE_TODAY_ONLY_FILTER', value: todayOnly ? 'true' : 'false'}).catch(() => {});
 }
 let selected      = new Set();
 let quantities    = {};
@@ -3335,7 +3339,16 @@ async function applyBulkShipping() {
 }
 
 // ── INIT ───────────────────────────────────────────────────────
-loadListings();
+async function initTodayFilterFromSettings() {
+  try {
+    const s = await api('GET', '/api/settings');
+    if (s && s.INTAKE_TODAY_ONLY_FILTER === 'true') {
+      todayOnly = true;
+      document.getElementById('today-filter-btn').classList.add('active');
+    }
+  } catch(e) { /* non-critical -- just defaults to off */ }
+}
+initTodayFilterFromSettings().then(() => loadListings());
 initTileListeners();
 loadShippingPolicyOptions();
 loadLotSkus();
