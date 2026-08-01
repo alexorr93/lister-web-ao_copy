@@ -808,8 +808,26 @@ let knownLotSkus  = new Set(); // real Lot SKUs from the Lots page — publishin
 let lotSkusByRecency = []; // same SKUs, most-recently-created lot first — feeds the Fast Scan / Batch Upload lot picker
 // Unified color-state system for ALL editable fields (title/price/brand/category):
 // no color = untouched, PINK = clicked into it (reviewed/confirmed as-is), YELLOW = actually changed. Keys are "id_field".
-let reviewedFields = new Set();
-let changedFields   = new Set();
+// Persisted in localStorage (same pattern/reasoning as isResearched below --
+// a personal "have I touched this" marker, not core listing data, so it
+// doesn't need a database column, but it DOES need to survive a page
+// refresh, which a plain in-memory Set never would).
+function loadFieldSet(key) {
+  try { return new Set(JSON.parse(localStorage.getItem(key) || '[]')); }
+  catch(e) { return new Set(); }
+}
+let reviewedFields = loadFieldSet('lister_reviewed_fields');
+let changedFields  = loadFieldSet('lister_changed_fields');
+function markFieldReviewed(key) {
+  reviewedFields.add(key);
+  localStorage.setItem('lister_reviewed_fields', JSON.stringify([...reviewedFields]));
+}
+function markFieldChanged(key) {
+  changedFields.add(key);
+  reviewedFields.delete(key);
+  localStorage.setItem('lister_changed_fields', JSON.stringify([...changedFields]));
+  localStorage.setItem('lister_reviewed_fields', JSON.stringify([...reviewedFields]));
+}
 
 // A listing's ebay_sku is "{lotSku}-{listingId}" once a real lot has been picked
 // (see loadLotSkus/updateField('ebay_sku',...) below) — both push_listing_to_ebay and
@@ -1380,19 +1398,18 @@ function initTileListeners() {
     if (!field) return;
     var key = fieldKey(el.dataset.id, field);
     if (!changedFields.has(key)) {
-      reviewedFields.add(key);
+      markFieldReviewed(key);
       el.classList.add('field-reviewed');
     }
     if (field === 'lotsku') showLotSkuDropdown(el);
   });
 
-  // Actually typing a different value = YELLOW (changed), overrides pink, persists for the session
+  // Actually typing a different value = YELLOW (changed), overrides pink, persists forever (see markFieldChanged)
   document.getElementById('tile-grid').addEventListener('input', function(e) {
     var el = e.target, field = fieldNameFor(el);
     if (!field) return;
     var id = el.dataset.id, key = fieldKey(id, field);
-    changedFields.add(key);
-    reviewedFields.delete(key);
+    markFieldChanged(key);
     el.classList.remove('field-reviewed');
     el.classList.add('field-changed');
     if (field === 'title') {
@@ -2103,6 +2120,11 @@ async function saveModal() {
   const brand = document.getElementById('modal-brand-input').value.trim();
   const mpn   = document.getElementById('modal-mpn-input').value.trim();
   const l = listings.find(x => x.id === modalItemId);
+  // Captured BEFORE any overwrite below -- these are what "did this actually
+  // change" gets compared against, same rule the tile grid's own inputs use.
+  const origTitle = l ? l.title : undefined;
+  const origPrice = l ? l.price : undefined;
+  const origCond  = l ? l.condition : undefined;
   try {
     if (modalDirty) {
       await api('PATCH', `/api/listings/${modalItemId}`, {field:'title', value:title});
@@ -2111,16 +2133,27 @@ async function saveModal() {
       await api('PATCH', `/api/listings/${modalItemId}`, {field:'price', value:price});
       await api('PATCH', `/api/listings/${modalItemId}`, {field:'condition', value:cond});
       if (l) { l.title = title; l.price = price; l.condition = cond; }
+      // Edited through the modal should color the same as editing right on
+      // the tile -- yellow, persisted forever, not just for this session.
+      // modalDirty is one flag covering all four of these fields together
+      // (each just sets it true on input), so each is checked individually
+      // against its captured original rather than assumed changed.
+      if (title !== origTitle) markFieldChanged(modalItemId + '_title');
+      if (price !== origPrice) markFieldChanged(modalItemId + '_price');
+      if (cond  !== origCond)  markFieldChanged(modalItemId + '_condition');
+      markFieldChanged(modalItemId + '_description'); // no tile-level equivalent field yet, but kept consistent
       toast('Saved ✓');
     }
     if (brand && brand !== (l && l.brand)) {
       await api('PATCH', `/api/listings/${modalItemId}`, {field:'brand', value:brand});
       if (l) l.brand = brand;
+      markFieldChanged(modalItemId + '_brand');
     }
     if (mpn && mpn !== (l && l.ebay_mpn)) {
       await api('PATCH', `/api/listings/${modalItemId}`, {field:'ebay_mpn', value:mpn});
       await api('PATCH', `/api/listings/${modalItemId}`, {field:'ebay_mpn_is_fallback', value:false});
       if (l) { l.ebay_mpn = mpn; l.ebay_mpn_is_fallback = false; }
+      markFieldChanged(modalItemId + '_mpn');
     }
     renderTiles();
   } catch(e) { toast('Save failed', 'error'); }
@@ -2207,7 +2240,7 @@ async function autoCategoryModal() {
       l.ebay_category_path = r.path;
       l.ebay_category_is_default = false;
     }
-    changedFields.add(modalItemId + '_category');
+    markFieldChanged(modalItemId + '_category');
     delete dirtyCats[modalItemId];
     renderTiles(); // actually reflect the new match on the tile — this was missing before
     toast('Category matched ✓ (click again to see the next-best match)');
@@ -2229,7 +2262,7 @@ async function setModalCategoryManual() {
     statusEl.textContent = `✅ Category set manually to ID ${catId}`;
     const l = listings.find(x => x.id === modalItemId);
     if (l) { l.ebay_category_id = catId; l.ebay_category_is_default = false; }
-    changedFields.add(modalItemId + '_category');
+    markFieldChanged(modalItemId + '_category');
     delete dirtyCats[modalItemId];
     renderTiles();
     input.value = '';
