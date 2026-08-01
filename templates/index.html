@@ -914,6 +914,12 @@ function validateLotSkusForPublish(ids) {
 // the Dashboard's Lot SKU field already uses, so nothing downstream needed to change.
 let activeLotSku = localStorage.getItem('lister_active_lot_sku') || '';
 let activeLotSuffix = localStorage.getItem('lister_active_lot_suffix') || '';
+// null until the first successful loadListings() -- used to tell "an item that
+// was already sitting in the queue before this page opened" apart from "an
+// item that just showed up." Only the latter gets auto-assigned a lot SKU;
+// the first load just establishes the baseline so we never sweep-assign the
+// currently-selected lot onto old items that were deliberately left alone.
+let seenListingIds = null;
 
 // Category mode toggle: B&I / Auto Parts. Sticky like the active lot SKU — stays
 // wherever it's set until manually changed, shown on both Upload and Intake.
@@ -1138,13 +1144,52 @@ document.addEventListener('DOMContentLoaded', function() {
 
 async function loadListings() {
   try {
-    listings = await api('GET', '/api/listings');
+    const fresh = await api('GET', '/api/listings');
+    if (seenListingIds === null) {
+      // First load this session/page-open -- just establish the baseline.
+      // Nothing here gets auto-assigned; these items were already in the
+      // queue before we started watching, for whatever reason that is.
+      seenListingIds = new Set(fresh.map(l => String(l.id)));
+      listings = fresh;
+    } else {
+      const newOnes = fresh.filter(l => !seenListingIds.has(String(l.id)));
+      listings = fresh;
+      seenListingIds = new Set(fresh.map(l => String(l.id)));
+      if (newOnes.length && activeLotSku) {
+        await autoAssignLotToNewArrivals(newOnes);
+      }
+    }
     renderTiles();
     try {
       const stats = await api('GET', '/api/stats');
       updateProcBar(stats);
     } catch(e) {}
   } catch(e) { toast('Failed to load listings', 'error'); }
+}
+
+// Same underlying call as the manual Autofill Lot SKU button (POST
+// /api/listings/{id}/assign-lot with whatever's currently selected in the
+// lot dropdown) -- just triggered the moment a new item shows up in a
+// regular queue refresh, instead of requiring a manual click afterward.
+// This never talks to Gemini or waits on scan completion in any way: by the
+// time an item appears in GET /api/listings at all, its scan already
+// finished -- this only reacts to that, purely locally, on our own existing
+// 30-second poll (or any other refresh). That's the actual fix for what
+// broke the old scan-time version: nothing here is waiting ON the scan.
+async function autoAssignLotToNewArrivals(newItems) {
+  const todo = newItems.filter(l => !lotSkuFor(l));
+  if (!todo.length) return;
+  let ok = 0, failed = 0;
+  for (const l of todo) {
+    try {
+      const body = {lot_sku: activeLotSku};
+      if (activeLotSuffix) body.suffix = activeLotSuffix;
+      const r = await api('POST', `/api/listings/${l.id}/assign-lot`, body);
+      l.ebay_sku = r.ebay_sku;
+      ok++;
+    } catch(e) { failed++; }
+  }
+  if (ok) toast(`Lot SKU auto-filled on ${ok} new item(s)${failed ? ', ' + failed + ' failed' : ''} ✓`);
 }
 
 function updateStats() {
@@ -1620,10 +1665,13 @@ function toggleSelect(id) {
 function selectAll()   { visibleListings().forEach(l => selected.add(String(l.id))); renderTiles(); }
 function deselectAll() { selected.clear(); renderTiles(); }
 
-// Replaces the old scan-time auto-assign entirely (it polled for up to 2 minutes after
-// each scan and gave up if the scan took longer, which it now often does) — Lot SKU
-// assignment lives ONLY here now. Applies the currently-active lot to whichever selected
-// items (or all items, if nothing's selected) don't have one yet, whenever you click it.
+// Manual fallback/catch-up for autoAssignLotToNewArrivals above, which now
+// handles the common case automatically on every queue refresh. This button
+// covers what that can't: items that were already in the queue before this
+// page was opened (excluded from auto-assign on purpose -- see
+// seenListingIds), or a lot that was switched after an item arrived.
+// Applies the currently-active lot to whichever selected items (or all
+// items, if nothing's selected) don't have one yet, whenever you click it.
 async function autofillLotSku() {
   if (!activeLotSku) { toast('No active lot selected — pick one in Fast Scan/Upload first', 'error'); return; }
   const targets = selected.size ? listings.filter(l => selected.has(String(l.id))) : listings;
