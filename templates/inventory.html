@@ -302,6 +302,8 @@ function renderTable() {
       actionCell = `<button class="btn" style="font-size:11px;padding:4px 8px;" onclick="publishRowToShopify(this, '${r.listing_id}')">🛍️ Publish to Shopify</button>`;
     } else if (!r.shopify_product_id && !r.listing_id && r.ebay_item_id) {
       actionCell = `<span class="muted" title="Click 'Pull eBay-Only Photos' above first — this item has no photos in our own storage yet.">— (pull photos first)</span>`;
+    } else if (r.shopify_product_id && r.ebay_item_id) {
+      actionCell = `<button class="btn" style="font-size:11px;padding:4px 8px;color:#f59e0b;border-color:#f59e0b;" onclick="promptPushQuantity('${r.id}', '${r.ebay_item_id}', ${JSON.stringify(r.title || '')})" title="Sets a new available quantity on BOTH eBay and Shopify at once, live -- eBay must currently be Active.">📦 Update Qty</button>`;
     } else {
       actionCell = '<span class="muted">—</span>';
     }
@@ -524,6 +526,25 @@ async function confirmManualMatch(candidateRowId) {
     loadInventory();
   } catch(e) {
     alert(`Failed to match: ${e.message}`);
+  }
+}
+
+async function promptPushQuantity(rowId, ebayItemId, title) {
+  const input = prompt(`New AVAILABLE quantity for:\n${title}\n\nThis writes live to BOTH eBay (item ${ebayItemId}) and Shopify right now. eBay must currently be Active.`);
+  if (input === null) return;
+  const qty = parseInt(input, 10);
+  if (isNaN(qty) || qty < 0) { alert('Enter a whole number, 0 or greater.'); return; }
+  if (!confirm(`Confirm: set available quantity to ${qty} on BOTH eBay and Shopify now? This can't be undone with a button click — you'd need to push another update to change it back.`)) return;
+  try {
+    const r = await fetch(`/api/inventory/${rowId}/push-quantity`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({quantity: qty}),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    toast(`Quantity set to ${qty} on both platforms ✓`);
+    loadInventory();
+  } catch(e) {
+    alert(`Quantity push failed: ${e.message}`);
   }
 }
 

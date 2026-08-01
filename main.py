@@ -1072,8 +1072,50 @@ def _ebay_revise_sku_only(business_id: str, ebay_item_id: str, new_sku: str):
         raise Exception(f"ReviseItem (SKU only) failed (Ack={ack}): {resp.get('Errors')}")
     return resp
 
+def _ebay_revise_quantity_only(business_id: str, ebay_item_id: str, new_total_quantity: int):
+    """Trading API ReviseItem, sending ONLY ItemID + Quantity — deliberately nothing
+    else, same proven pattern as _ebay_revise_sku_only above. eBay's classic Revise
+    calls only change fields present in the request, so leaving out price/title/
+    ItemSpecifics/etc. here means they're left completely alone. Never expand this
+    call to include other fields for that same reason.
+
+    IMPORTANT: new_total_quantity must be the LIFETIME total (what ReviseItem
+    expects), not "how many available right now" -- eBay computes available as
+    Quantity - QuantitySold itself. The caller is responsible for adding the
+    live QuantitySold before calling this (see push_inventory_quantity below);
+    this function does no such adjustment itself and will send exactly the
+    number it's given."""
+    import requests as _req
+    import xml.etree.ElementTree as ET
+    from xml.sax.saxutils import escape as _xesc
+
+    token = get_ebay_access_token(business_id)
+    xml_body = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+        f'<RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>'
+        '<Item>'
+        f'<ItemID>{_xesc(ebay_item_id)}</ItemID>'
+        f'<Quantity>{int(new_total_quantity)}</Quantity>'
+        '</Item>'
+        '</ReviseItemRequest>'
+    )
+    headers = {
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "1193",
+        "X-EBAY-API-CALL-NAME": "ReviseItem",
+        "X-EBAY-API-SITEID": "0",
+        "Content-Type": "text/xml",
+    }
+    r = _req.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_body.encode("utf-8"), timeout=20)
+    resp = _ebay_xml_to_dict(ET.fromstring(r.content))
+    ack = resp.get("Ack")
+    if ack not in ("Success", "Warning"):
+        raise Exception(f"ReviseItem (Quantity only) failed (Ack={ack}): {resp.get('Errors')}")
+    return resp
+
 class UpdateSkuV2(BaseModel):
     new_sku: str
+
 
 @app.post("/api/listings/{item_id}/ebay-v2/sku")
 async def update_ebay_v2_sku(item_id: str, body: UpdateSkuV2, request: Request):
@@ -10487,6 +10529,154 @@ async def manual_match_inventory(body: ManualMatch, request: Request):
     supabase.table("inventory_match").delete().eq("id", body.ebay_row_id).execute()
     supabase.table("inventory_match").delete().eq("id", body.shopify_row_id).execute()
     return {"ok": True, "hd_id": new_hd_id}
+
+class InventoryQuantityPush(BaseModel):
+    quantity: int
+
+@app.post("/api/inventory/{row_id}/push-quantity")
+async def push_inventory_quantity(row_id: str, body: InventoryQuantityPush, request: Request):
+    """Pushes ONE quantity value to BOTH eBay and Shopify for a confirmed matched
+    pair, live, right now. This is a genuinely sensitive write path -- the only
+    place in this app that writes a value onto a live eBay listing outside of
+    initial publish -- so it's deliberately narrow by construction, not just by
+    convention:
+      - Requires a confirmed match on BOTH platforms (real ebay_id + shopify_id
+        via inventory_match). Refuses an eBay-only or Shopify-only row outright.
+      - Verifies the eBay listing is live-Active via a fresh GetItem call right
+        before writing -- not cached/stale data. Refuses if not Active.
+      - The eBay write itself (_ebay_revise_quantity_only) sends ONLY ItemID +
+        Quantity -- structurally incapable of touching price, title, category,
+        or anything else, the same proven pattern as the SKU-only revise above.
+      - eBay's Quantity is a LIFETIME total, not "available now" -- it computes
+        available as Quantity - QuantitySold itself. This reads the live
+        QuantitySold right before writing and adds it to the requested
+        available quantity, so the number that ends up showing as available
+        actually matches what was asked for.
+      - Fails closed: if the eBay write fails, Shopify is never touched at all.
+        If eBay succeeds but Shopify then fails, that's reported clearly as a
+        partial failure -- never silently swallowed.
+      - Every attempt (success, failure, or partial) gets its own row in
+        ebay_quantity_push_log, independent of the ordinary sync logs.
+    """
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    if body.quantity < 0:
+        raise HTTPException(400, "Quantity cannot be negative")
+
+    row_res = supabase.table("inventory_match").select("*").eq("id", row_id).eq("business_id", business_id).execute()
+    if not row_res.data:
+        raise HTTPException(404, "Row not found")
+    row = row_res.data[0]
+    ebay_item_id = row.get("ebay_id")
+    shopify_variant_id = row.get("shopify_id")
+    title = row.get("title") or ""
+    if not ebay_item_id or not shopify_variant_id:
+        raise HTTPException(400, "This row must be a confirmed match on both eBay and Shopify — "
+                                  "one-sided rows can't use this endpoint.")
+    if not str(ebay_item_id).isdigit():
+        # Guards against a known data anomaly found earlier this session: a
+        # duplicate inventory_match row where ebay_id was literally the
+        # string "lister-XXX" instead of a real eBay item ID.
+        raise HTTPException(400, f"ebay_id on this row ('{ebay_item_id}') doesn't look like a real "
+                                  f"eBay item ID — refusing to write to it.")
+
+    log_row = {
+        "business_id": business_id, "ebay_item_id": str(ebay_item_id), "shopify_variant_id": str(shopify_variant_id),
+        "title": title, "requested_available_qty": body.quantity,
+    }
+
+    # Fresh live check, not cached -- must be genuinely Active right now.
+    ebay_token = get_ebay_access_token(business_id)
+    try:
+        status_resp = _ebay_get_item_status(ebay_token, ebay_item_id)
+    except Exception as e:
+        log_row.update({"ebay_status": "error", "ebay_error": f"GetItem failed: {e}"})
+        supabase.table("ebay_quantity_push_log").insert(log_row).execute()
+        raise HTTPException(502, f"Could not check eBay's live listing status: {e}")
+    item = status_resp.get("Item") or {}
+    selling_status = item.get("SellingStatus") or {}
+    listing_status = selling_status.get("ListingStatus")
+    if status_resp.get("Ack") not in ("Success", "Warning") or listing_status != "Active":
+        log_row.update({"ebay_status": "refused", "ebay_error": f"Listing not Active (status={listing_status})"})
+        supabase.table("ebay_quantity_push_log").insert(log_row).execute()
+        raise HTTPException(409, f"eBay listing {ebay_item_id} is not currently Active "
+                                  f"(status: {listing_status or 'unknown'}) — refusing to push a quantity update.")
+
+    quantity_sold = _safe_int(selling_status.get("QuantitySold")) or 0
+    new_total_qty = body.quantity + quantity_sold
+    log_row["live_quantity_sold"] = quantity_sold
+    log_row["new_total_qty_sent"] = new_total_qty
+
+    # eBay first. If this fails, stop entirely -- Shopify is never touched.
+    try:
+        _ebay_revise_quantity_only(business_id, ebay_item_id, new_total_qty)
+        log_row["ebay_status"] = "success"
+    except Exception as e:
+        log_row.update({"ebay_status": "error", "ebay_error": str(e)})
+        supabase.table("ebay_quantity_push_log").insert(log_row).execute()
+        raise HTTPException(502, f"eBay quantity update failed — nothing was changed on Shopify either. Error: {e}")
+
+    # eBay succeeded — reflect it locally right away so the Inventory view
+    # doesn't show a stale number until the next scheduled sync.
+    try:
+        supabase.table("ebay_listing_status").update({
+            "quantity": new_total_qty, "quantity_available": body.quantity,
+        }).eq("business_id", business_id).eq("item_id", ebay_item_id).execute()
+    except Exception as e:
+        print(f"push_inventory_quantity: local ebay_listing_status update failed (eBay itself succeeded): {e}")
+
+    # Now Shopify — same proven absolute-set mutation shape already used by
+    # the automated sync (_push_shopify_qty_updates), not a relative delta.
+    shopify_error = None
+    try:
+        import requests as _req
+        settings = get_ebay_settings(business_id)
+        domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+        if not domain:
+            raise Exception("Shopify not connected")
+        shopify_token = get_shopify_access_token(business_id)
+        sp_headers = {"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"}
+        location_id = _get_shopify_primary_location_id(domain, sp_headers)
+        if not location_id:
+            raise Exception("Could not determine Shopify location")
+        variant_data = _fetch_shopify_variants_by_ids(domain, shopify_token, location_id, [str(shopify_variant_id)])
+        inv_item_id = (variant_data.get(str(shopify_variant_id)) or {}).get("inventory_item_id")
+        if not inv_item_id:
+            raise Exception(f"Could not resolve Shopify variant {shopify_variant_id} to a live inventory item")
+        mutation = {
+            "query": """mutation setQty($input: InventorySetQuantitiesInput!) {
+                inventorySetQuantities(input: $input) {
+                    inventoryAdjustmentGroup { changes { name delta quantityAfterChange } }
+                    userErrors { field message }
+                }
+            }""",
+            "variables": {"input": {
+                "reason": "correction", "name": "available", "ignoreCompareQuantity": True,
+                "quantities": [{"inventoryItemId": inv_item_id, "locationId": location_id, "quantity": body.quantity}],
+            }},
+        }
+        r = _req.post(f"https://{domain}/admin/api/2024-10/graphql.json", headers=sp_headers, json=mutation, timeout=20)
+        resp = r.json() if r.status_code == 200 else {}
+        gql_errors = resp.get("errors") or []
+        user_errors = (resp.get("data", {}) or {}).get("inventorySetQuantities", {}).get("userErrors", []) if not gql_errors else gql_errors
+        if r.status_code != 200 or gql_errors or user_errors:
+            raise Exception("; ".join(e.get("message", "") for e in user_errors) or f"HTTP {r.status_code}")
+        log_row["shopify_status"] = "success"
+        try:
+            supabase.table("shopify_inventory").update({"quantity": body.quantity}).eq("business_id", business_id).eq("id", str(shopify_variant_id)).execute()
+        except Exception as e:
+            print(f"push_inventory_quantity: local shopify_inventory update failed (Shopify itself succeeded): {e}")
+    except Exception as e:
+        shopify_error = str(e)
+        log_row.update({"shopify_status": "error", "shopify_error": shopify_error})
+
+    supabase.table("ebay_quantity_push_log").insert(log_row).execute()
+
+    if shopify_error:
+        raise HTTPException(207, f"eBay updated successfully to {body.quantity} available, but Shopify failed: "
+                                  f"{shopify_error} — you'll need to fix Shopify manually.")
+    return {"ok": True, "ebay_available_qty": body.quantity, "shopify_qty": body.quantity}
 
 @app.get("/api/inventory")
 async def list_inventory(request: Request):
