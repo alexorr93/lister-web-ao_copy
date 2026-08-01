@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Notes — Lister AI</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<style>
+:root {
+  --bg: #1a0611; --card: #1e2535; --border: #2d3348; --text: #f1f5f9; --muted: #64748b; --accent: #2563eb; --green: #4ade80;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.nav { background: var(--card); border-bottom: 1px solid var(--border); padding: 0 16px; display: flex; align-items: center; gap: 6px; overflow-x: auto; height: 52px; position: sticky; top: 0; z-index: 100; }
+.nav-btn { padding: 6px 14px; border-radius: 8px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; background: transparent; color: var(--muted); transition: all 0.15s; text-decoration: none; display: inline-block; font-family: inherit; }
+.nav-btn:hover { background: #1e2535; color: var(--text); }
+.nav-spacer { flex: 1; }
+.nav-download { padding: 6px 12px; background: #1e2535; border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; }
+.nav-account { font-size: 12px; color: var(--muted); margin-right: 4px; white-space: nowrap; }
+.nav-intake     { color: #3b82f6; }
+.nav-upload     { color: #22b8d8; }
+.nav-fastscan   { color: #22c55e; }
+.nav-archive    { color: #ef4444; }
+.nav-inventory  { color: #a78bfa; }
+.nav-financials { color: #eab308; }
+.nav-analytics  { color: #06b6d4; }
+.nav-lots       { color: #fb923c; }
+.nav-shopify    { color: #95bf47; }
+.nav-notes      { color: #f472b6; }
+.nav-browsesearch { color: #60a5fa; }
+.nav-auction    { color: #f59e0b; }
+.nav-settings   { color: #94a3b8; }
+.nav-intake.active     { background: #2563eb; color: #fff; }
+.nav-upload.active     { background: #0891b2; color: #fff; }
+.nav-fastscan.active   { background: #16a34a; color: #fff; }
+.nav-archive.active    { background: #dc2626; color: #fff; }
+.nav-inventory.active  { background: #7c3aed; color: #fff; }
+.nav-financials.active { background: #ca8a04; color: #fff; }
+.nav-analytics.active  { background: #0891b2; color: #fff; }
+.nav-lots.active       { background: #ea580c; color: #fff; }
+.nav-shopify.active    { background: #95bf47; color: #fff; }
+.nav-notes.active      { background: #db2777; color: #fff; }
+.nav-browsesearch.active { background: #3b82f6; color: #fff; }
+.nav-auction.active    { background: #f59e0b; color: #1a0611; }
+.nav-settings.active   { background: #475569; color: #fff; }
+.main { max-width: 800px; margin: 0 auto; padding: 20px 16px; }
+h1 { font-size: 20px; margin-bottom: 4px; }
+.sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+.sections { display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+.section-tab { padding: 10px 16px; background: none; border: none; color: var(--muted); font-size: 14px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; font-family: inherit; }
+.section-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.add-note-box { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 20px; }
+.add-note-box textarea { width: 100%; min-height: 70px; background: #fff; color: #0f172a; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 14px; font-family: inherit; resize: vertical; }
+.add-note-box .row { display: flex; justify-content: flex-end; margin-top: 10px; }
+.btn { padding: 8px 16px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.btn-primary { background: var(--accent); border-color: var(--accent); }
+.note-list { display: flex; flex-direction: column; gap: 10px; }
+.note-row { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.note-row .content { white-space: pre-wrap; font-size: 14px; line-height: 1.5; flex: 1; }
+.note-row .meta { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+.note-row .date { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.note-row .del-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13px; padding: 2px 6px; }
+.note-row .del-btn:hover { color: #ef4444; }
+.empty { color: var(--muted); font-size: 13px; padding: 24px 0; text-align: center; }
+</style>
+</head>
+<body>
+{% include "_nav.html" %}
+<div class="main">
+  <h1>📝 Notes</h1>
+  <p class="sub">Simple, permanent notes — nothing fancy. Click Add Note, type, done. Sorted newest first.</p>
+
+  <div class="sections" id="section-tabs"></div>
+
+  <div class="add-note-box">
+    <textarea id="new-note-input" placeholder="Write a note..." autocomplete="off"></textarea>
+    <div class="row">
+      <button class="btn btn-primary" onclick="addNote()">+ Add Note</button>
+    </div>
+  </div>
+
+  <div class="note-list" id="note-list"><div class="empty">Loading...</div></div>
+</div>
+
+<script>
+// Just add a new entry here (key + label) to get another section — no schema
+// or backend change needed, "section" is a plain text column.
+const SECTIONS = [
+  {key: 'audit', label: 'Audit Notes'},
+];
+let currentSection = SECTIONS[0].key;
+
+function renderSectionTabs() {
+  document.getElementById('section-tabs').innerHTML = SECTIONS.map(s => `
+    <button class="section-tab${s.key === currentSection ? ' active' : ''}" onclick="switchSection('${s.key}')">${s.label}</button>
+  `).join('');
+}
+
+function switchSection(key) {
+  currentSection = key;
+  renderSectionTabs();
+  loadNotes();
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function fmtDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleString('en-US', {month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit'});
+}
+
+async function loadNotes() {
+  const list = document.getElementById('note-list');
+  list.innerHTML = '<div class="empty">Loading...</div>';
+  try {
+    const r = await fetch('/api/notes?section=' + encodeURIComponent(currentSection));
+    const data = await r.json();
+    const notes = data.notes || [];
+    if (!notes.length) {
+      list.innerHTML = '<div class="empty">No notes yet — add the first one above.</div>';
+      return;
+    }
+    list.innerHTML = notes.map(n => `
+      <div class="note-row">
+        <div class="content">${escapeHtml(n.content)}</div>
+        <div class="meta">
+          <div class="date">${fmtDate(n.created_at)}</div>
+          <button class="del-btn" onclick="deleteNote(${n.id})" title="Delete this note">✕</button>
+        </div>
+      </div>
+    `).join('');
+  } catch(e) {
+    list.innerHTML = '<div class="empty">Failed to load notes.</div>';
+  }
+}
+
+async function addNote() {
+  const input = document.getElementById('new-note-input');
+  const content = input.value.trim();
+  if (!content) return;
+  try {
+    const r = await fetch('/api/notes', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({section: currentSection, content}),
+    });
+    if (!r.ok) throw new Error('Failed to save');
+    input.value = '';
+    loadNotes();
+  } catch(e) {
+    alert('Failed to save note: ' + e.message);
+  }
+}
+
+async function deleteNote(id) {
+  if (!confirm('Delete this note? This can\'t be undone.')) return;
+  try {
+    await fetch('/api/notes/' + id, {method: 'DELETE'});
+    loadNotes();
+  } catch(e) {
+    alert('Failed to delete note');
+  }
+}
+
+renderSectionTabs();
+loadNotes();
+</script>
+</body>
+</html>

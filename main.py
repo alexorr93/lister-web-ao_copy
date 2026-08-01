@@ -2192,6 +2192,56 @@ async def categories_page(request: Request):
         return RedirectResponse("/login", status_code=302)
     return templates.TemplateResponse("categories.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "categories"})
 
+@app.get("/notes", response_class=HTMLResponse)
+async def notes_page(request: Request):
+    nav = get_nav_context(request)
+    if nav is None:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("notes.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "notes"})
+
+class NoteCreate(BaseModel):
+    section: str
+    content: str
+
+@app.get("/api/notes")
+async def list_notes(request: Request, section: str):
+    """Notes are a plain, permanent log -- date + whatever was typed, nothing
+    fancier. Newest first, scoped to one section at a time (starting with
+    'audit' -- more sections can be added later just by using a new section
+    key, no schema change needed)."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    res = (supabase.table("notes").select("id,content,created_at")
+           .eq("business_id", business_id).eq("section", section)
+           .order("created_at", desc=True).execute())
+    return {"notes": res.data or []}
+
+@app.post("/api/notes")
+async def add_note(body: NoteCreate, request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    content = (body.content or "").strip()
+    if not content:
+        raise HTTPException(400, "content is required")
+    section = (body.section or "").strip()
+    if not section:
+        raise HTTPException(400, "section is required")
+    res = (supabase.table("notes")
+           .insert({"business_id": business_id, "section": section, "content": content})
+           .execute())
+    return {"ok": True, "note": (res.data or [{}])[0]}
+
+@app.delete("/api/notes/{note_id}")
+async def delete_note(note_id: int, request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    supabase.table("notes").delete().eq("id", note_id).eq("business_id", business_id).execute()
+    return {"ok": True}
+
 @app.get("/api/ebay/category-search")
 async def ebay_category_search(q: str, request: Request):
     """Look up valid LEAF category IDs by keyword, using the token already saved in Settings."""
