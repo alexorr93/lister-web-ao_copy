@@ -3258,6 +3258,73 @@ async def list_sku_overrides(request: Request):
     out.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
     return {"overrides": out}
 
+@app.get("/api/inventory/uncategorized-listings")
+async def api_uncategorized_listings_only(request: Request):
+    """Lean, standalone version of the 'uncategorized' section of /api/acquisitions --
+    same classification logic, but skips two things that section pays for on every
+    load that the Uncat tab never uses: acquisitions.select('*') (only the sku
+    column is actually needed here -- known_lot_skus), and a SECOND full paginated
+    fetch of the entire orders table (thousands of rows) that exists only to compute
+    a sales-total summary number this page doesn't display. The active_rows and
+    listings fetches are kept as-is -- those are the actual, unavoidable work
+    classification depends on."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+
+    known_lot_skus = {r["sku"] for r in
+                       supabase.table("acquisitions").select("sku").eq("business_id", business_id).execute().data or []
+                       if r.get("sku")}
+
+    active_rows = []
+    start = 0
+    while True:
+        page = supabase.table("ebay_listing_status").select("item_id,sku,sku_override,title,price,quantity_available,updated_at")\
+            .eq("business_id", business_id).eq("listing_status", "Active")\
+            .range(start, start + 999).execute().data or []
+        active_rows.extend(page)
+        if len(page) < 1000:
+            break
+        start += 1000
+
+    listing_by_item_id = {}
+    start = 0
+    while True:
+        page = supabase.table("listings").select("id,ebay_item_id,ebay_offer_id")\
+            .eq("business_id", business_id).not_.is_("ebay_item_id", "null")\
+            .range(start, start + 999).execute().data or []
+        for l in page:
+            listing_by_item_id[l["ebay_item_id"]] = l
+        if len(page) < 1000:
+            break
+        start += 1000
+
+    uncategorized_value, uncategorized_count, uncategorized_items = 0, 0, []
+    for row in active_rows:
+        raw_sku = row.get("sku") or ""
+        override_sku = row.get("sku_override") or ""
+        sku = override_sku or raw_sku
+        value = (row.get("price") or 0) * (row.get("quantity_available") or 0)
+        prefix = _lot_prefix(sku) if sku else None
+        needs_sku = _sku_needs_assignment(sku)
+        matched_listing = listing_by_item_id.get(row.get("item_id"))
+        sku_editable = bool(matched_listing) and not matched_listing.get("ebay_offer_id")
+        needs_review = needs_sku or (matched_listing is not None and not sku_editable and not override_sku)
+        if sku and not needs_review and prefix in known_lot_skus:
+            continue
+        uncategorized_value += value
+        uncategorized_count += 1
+        uncategorized_items.append({
+            "item_id": row.get("item_id"), "sku": sku, "raw_sku": raw_sku, "title": row.get("title"),
+            "price": row.get("price"), "quantity_available": row.get("quantity_available"),
+            "value": round(value, 2), "needs_sku": needs_sku,
+            "listing_id": matched_listing.get("id") if matched_listing else None,
+            "sku_editable": sku_editable, "has_override": bool(override_sku),
+            "has_matched_listing": matched_listing is not None,
+        })
+    uncategorized_items.sort(key=lambda r: r["value"], reverse=True)
+    return {"active_listings_value": round(uncategorized_value, 2), "active_listings_count": uncategorized_count, "items": uncategorized_items}
+
 @app.get("/api/acquisitions")
 async def list_acquisitions(request: Request):
     business_id = require_auth(request)
@@ -4613,6 +4680,37 @@ async def debug_sku_lookup(request: Request, order_id: str = None, title: str = 
     out["total_ebay_listing_status_rows"] = uncapped_res.count
     return out
 
+
+@app.get("/api/financials/uncategorized-orders")
+async def api_financials_uncategorized_orders(request: Request):
+    """Lean, standalone version of the 'uncategorized' section of /api/financials --
+    queries finance_uncategorized_order_skus directly (confirmed ~1.5s even across
+    full history, since the view does its own filtering/joining in Postgres) with
+    NO date range restriction, instead of going through the full endpoint above,
+    which fetches and processes the ENTIRE orders table for whatever date range is
+    given first (11,000+ rows for a multi-year range) just to throw almost all of
+    it away and extract this same small subset at the end. Built for the Uncat tab,
+    which only ever needed this piece and was paying for the other, much heavier
+    90% of that endpoint's work on every load for nothing."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    view_res = supabase.table("finance_uncategorized_order_skus").select("*").eq("business_id", business_id).execute()
+    items = []
+    net_total = 0
+    for r in (view_res.data or []):
+        net_total += r.get("net") or 0
+        items.append({
+            "id": r["id"], "sku": r.get("raw_sku") or "", "sku_override": r.get("sku_override"),
+            "matched_ebay_sku": r.get("matched_ebay_sku"),
+            "title": r.get("title"), "platform": r.get("platform"),
+            "order_id": r.get("order_id"), "order_date": r.get("order_date", ""),
+            "quantity": r.get("quantity"), "revenue": r.get("revenue"),
+            "net": r.get("net"), "buyer_shipping": r.get("buyer_shipping") or 0,
+            "shipping_cost": r.get("shipping_cost") or 0, "needs_sku": not (r.get("raw_sku") or ""),
+        })
+    items.sort(key=lambda r: r.get("order_date", ""), reverse=True)
+    return {"count": len(items), "net": round(net_total, 2), "items": items}
 
 @app.get("/api/financials")
 async def api_financials(request: Request, start: str = None, end: str = None, include_shopify: bool = True):

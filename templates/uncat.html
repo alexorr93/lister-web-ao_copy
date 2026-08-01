@@ -96,17 +96,13 @@ let orderItems = [];
 async function loadUncatOrders() {
   document.getElementById('orders-status').textContent = 'Loading...';
   try {
-    // Wide, fixed range on purpose -- this page is "show me everything
-    // outstanding", not a recent-activity view like Financials defaults to
-    // (which is last 30 days if no dates are given).
-    const params = new URLSearchParams({start: '2020-01-01', end: new Date().toISOString().slice(0, 10), include_shopify: 'true'});
-    const r = await fetch('/api/financials?' + params.toString());
+    const r = await fetch('/api/financials/uncategorized-orders');
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed to load');
-    orderItems = data.uncategorized?.items || [];
+    orderItems = data.items || [];
     document.getElementById('orders-status').textContent =
       orderItems.length
-        ? `${orderItems.length} order line(s), ${fmtMoney(data.uncategorized?.net || 0)} net`
+        ? `${orderItems.length} order line(s), ${fmtMoney(data.net || 0)} net`
         : 'Nothing uncategorized — every order matches a lot.';
     renderOrdersTable();
   } catch(e) {
@@ -168,10 +164,10 @@ let listingItems = [];
 async function loadUncatListings() {
   document.getElementById('listings-status').textContent = 'Loading...';
   try {
-    const r = await fetch('/api/acquisitions');
+    const r = await fetch('/api/inventory/uncategorized-listings');
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed to load');
-    listingItems = data.uncategorized?.items || [];
+    listingItems = data.items || [];
     document.getElementById('listings-status').textContent =
       listingItems.length
         ? `${listingItems.length} active listing(s) need attention`
