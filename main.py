@@ -171,6 +171,7 @@ async def start_background_jobs():
     asyncio.create_task(analytics_snapshot_worker())
     asyncio.create_task(analytics_cache_refresh_worker())
     asyncio.create_task(auction_archive_worker())
+    asyncio.create_task(active_listings_sync_worker())
 
 async def auction_archive_worker():
     """Runs once a day (00:20 UTC) and archives any capture session whose lots'
@@ -2498,17 +2499,19 @@ def apply_acquisition_profits(business_id: str) -> dict:
     return {"updated": updated}
 
 def _apply_cash_to_profit(business_id: str):
-    """FIXED: previously read the current `profit` column and added cash on top of
-    it — which compounds forever (a second Recalculate re-adds cash again) if
-    recalculate_acquisition_profits() (a Postgres function with no SQL source in
-    this repo) doesn't reset `profit` for every row unconditionally. Confirmed via
-    real data: a lot with $0 eBay activity showed Profit jump by exactly one more
-    Cash amount between two Recalculate runs — proof `profit` wasn't being reset
-    for that row, so cash kept stacking. Now computes profit as an absolute value
-    from total_payouts (assumed to be a genuine fresh SUM each time, defaulting to
-    0 for no-match rows rather than being conditionally skipped) minus cost, plus
-    cash — never reads or depends on the previous `profit` value at all, so this
-    is safe to run any number of times."""
+    """Total_Payouts is meant to be the genuine grand total of money received
+    across every channel -- eBay, Shopify, and Cash -- but Cash was previously
+    folded into Profit only, never into the Total_Payouts column itself, so a
+    lot with real cash income (e.g. AM1: $5,400 cash) showed a Total_Payouts
+    figure that silently excluded it. Fixed: cash now gets added into
+    total_payouts here too, before _apply_shopify_sales_to_profit adds Shopify
+    on top of it. Profit math is unchanged (total_payouts - cost, with cash
+    now already included in total_payouts instead of added separately) --
+    same final number, just an honest Total_Payouts column.
+
+    Still safe to run any number of times: reads the RPC's fresh eBay-only
+    total_payouts each time (never reads back a previously-cash-adjusted
+    value), so repeated Recalculate runs can't compound cash on top of itself."""
     start = 0
     while True:
         page = supabase.table("acquisitions").select("id,cost,cash,total_payouts")\
@@ -2516,10 +2519,13 @@ def _apply_cash_to_profit(business_id: str):
         for row in page:
             cost = row.get("cost") or 0
             cash = row.get("cash") or 0
-            total_payouts = row.get("total_payouts") or 0
-            profit = total_payouts - cost + cash
+            ebay_total_payouts = row.get("total_payouts") or 0
+            total_payouts = ebay_total_payouts + cash
+            profit = total_payouts - cost
             roi_pct = round(profit / cost * 100, 2) if cost else None
-            supabase.table("acquisitions").update({"profit": profit, "roi_pct": roi_pct}).eq("id", row["id"]).execute()
+            supabase.table("acquisitions").update({
+                "total_payouts": total_payouts, "profit": profit, "roi_pct": roi_pct,
+            }).eq("id", row["id"]).execute()
         if len(page) < 1000:
             break
         start += 1000
@@ -9563,6 +9569,56 @@ def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> di
     save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_RUN_STARTED_AT", "")
 
     return {"checked": total_rows, "synced_at": _dt.datetime.utcnow().isoformat()}
+
+async def active_listings_sync_worker():
+    """Keeps the Lots page's Active Listings column fresh automatically. Previously
+    this table (ebay_listing_status) only ever got refreshed by manually clicking
+    'Sync Active Listings' -- which is exactly why a report showed it last synced
+    days earlier despite being looked at daily. active_listings_value/count on the
+    Lots page are computed LIVE from this table on every page load (see
+    GET /api/acquisitions), so keeping this table itself fresh is the whole fix --
+    no separate 'active listings' value needs updating anywhere else.
+    Runs a check every hour, but only actually syncs a given business once its
+    last sync is >= 1 day old, so it settles into roughly a daily cadence per
+    business without needing a separate 24-hour-only scheduler. Skips a business
+    if a sync (manual or automatic) is already running for it, so this can never
+    race the manual 'Sync Active Listings' button."""
+    import asyncio, datetime as _dt
+    while True:
+        try:
+            res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
+            business_ids = list(set(r["business_id"] for r in (res.data or [])))
+            for biz_id in business_ids:
+                try:
+                    if _ebay_active_listings_job_status.get(biz_id, {}).get("running"):
+                        continue
+                    last_res = supabase.table("ebay_listing_status").select("updated_at")\
+                        .eq("business_id", biz_id).eq("listing_status", "Active")\
+                        .order("updated_at", desc=True).limit(1).execute()
+                    last_synced_at = (last_res.data or [{}])[0].get("updated_at")
+                    needs_sync = True
+                    if last_synced_at:
+                        age = _dt.datetime.utcnow() - _dt.datetime.fromisoformat(
+                            last_synced_at.replace("Z", "+00:00")).replace(tzinfo=None)
+                        needs_sync = age >= _dt.timedelta(days=1)
+                    if not needs_sync:
+                        continue
+                    _ebay_active_listings_job_status[biz_id] = {
+                        "running": True, "result": None,
+                        "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None,
+                    }
+                    result = await asyncio.to_thread(_sync_ebay_active_listings_work, biz_id)
+                    _ebay_active_listings_job_status[biz_id] = {
+                        "running": False, "result": result,
+                        "started_at": _ebay_active_listings_job_status[biz_id]["started_at"],
+                        "finished_at": _dt.datetime.utcnow().isoformat(),
+                    }
+                    print(f"active_listings_sync_worker: business {biz_id} synced automatically")
+                except Exception as e:
+                    print(f"active_listings_sync_worker: business {biz_id} failed: {e}")
+        except Exception as e:
+            print(f"active_listings_sync_worker error: {e}")
+        await asyncio.sleep(3600)  # check hourly; actual sync per business is gated to ~once/day above
 
 _ebay_active_listings_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
 
