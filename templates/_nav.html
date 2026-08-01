@@ -19,6 +19,7 @@
 {% set on_index = active_tab in ['intake', 'upload', 'fastscan', 'auction', 'settings'] %}
 <nav class="nav">
   <a class="nav-btn nav-flags{{ ' active' if active_tab == 'flags' else '' }}" href="/flags">🚩 Flags</a>
+  <a class="nav-btn nav-flags2{{ ' active' if active_tab == 'flags2' else '' }}" href="/flags2">🚩 Flags 2</a>
   {% if is_admin %}
     {% if on_index %}
     <button class="nav-btn nav-auction{{ ' active' if active_tab == 'auction' else '' }}" data-tab="auction">🔨 Auctions</button>

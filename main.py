@@ -1963,6 +1963,40 @@ async def flags_page(request: Request):
         return RedirectResponse("/login", status_code=302)
     return templates.TemplateResponse("flags.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "flags"})
 
+@app.get("/flags2", response_class=HTMLResponse)
+async def flags2_page(request: Request):
+    """Purely displays the automated Bright Data pull (bidspotter_auto_catalog_lots)
+    -- a separate, isolated view from the original Flags tab so the two data
+    sources (VA-driven auction_catalogs vs. fully automated Bright Data pull)
+    can be compared directly without ever mixing."""
+    nav = get_nav_context(request)
+    if nav is None:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("flags2.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "flags2"})
+
+@app.get("/api/flags2-data")
+async def flags2_data(request: Request):
+    """Backs the Flags 2 tab. Deliberately NOT filtered by this app's own
+    business_id -- the data was written by a separate app (auction-catalog-feed)
+    using its own business_id, which may not match this app's session value for
+    the same real user. Since this is a single-business system in practice,
+    returning everything in the table avoids a silent business_id mismatch
+    showing zero rows even when real data exists."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    rows = []
+    start = 0
+    while True:
+        page = supabase.table("bidspotter_auto_catalog_lots").select("*")\
+            .order("last_seen_at", desc=True).range(start, start + 999).execute().data or []
+        rows.extend(page)
+        if len(page) < 1000:
+            break
+        start += 1000
+    return {"lots": rows}
+
 @app.get("/shopify-sync", response_class=HTMLResponse)
 async def shopify_sync_page(request: Request):
     nav = get_nav_context(request)
