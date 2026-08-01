@@ -317,6 +317,18 @@ async def order_sync_worker():
                     days_back = 14 if backfilled else 720  # ~2 years — eBay's getOrders hard-caps creationdate at 2 years, stricter than Finance API's 5-year limit
                     result = await asyncio.to_thread(sync_orders_for_business, biz_id, days_back)
                     had_errors = bool(result.get("errors"))
+                    if result.get("upserted"):
+                        # New/updated order rows landed -- Total_Payouts/Profit/ROI on the
+                        # Lots page depend on this data but had no automatic trigger of
+                        # their own before this; every OTHER path that touches acquisitions
+                        # (edits, cash payments, CSV import) already auto-recalculates,
+                        # this was the one gap, which is exactly why the manual Recalculate
+                        # button was still load-bearing. Isolated in its own try/except so a
+                        # recalc failure can never mark the order sync itself as failed.
+                        try:
+                            apply_acquisition_profits(biz_id)
+                        except Exception as e:
+                            print(f"order_sync_worker: recalculate failed for business {biz_id} (order sync unaffected): {e}")
                     if not backfilled:
                         if had_errors and result["upserted"] == 0:
                             # Don't mark complete — the eBay pull itself failed, so we got

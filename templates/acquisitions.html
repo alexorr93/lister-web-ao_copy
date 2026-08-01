@@ -123,7 +123,7 @@ tr:last-child td { border-bottom: none; }
     </div>
     <div style="margin-top:10px;display:flex;gap:8px;align-items:center;">
       <button class="btn btn-primary" onclick="addAcquisition()">+ Add Row</button>
-      <button class="btn" onclick="recalculate()" title="Refreshes eBay/Total_Payouts/Profit for every row using the latest synced orders">🔄 Recalculate</button>
+      <button class="btn" onclick="syncAndRecalculate()" title="Both of these now also run automatically in the background (Recalculate after every order sync, Active Listings once daily) — this just forces them right now instead of waiting">🔄 Sync &amp; Recalculate</button>
       <button class="btn" onclick="backfillGreenTimestamps()" title="One-time fix: corrects became_green_at for lots that were already profitable before this feature existed, using their real order history instead of today's date">🕐 Fix Green Timestamps (one-time)</button>
       <button class="btn btn-primary" onclick="openAddCashPmtModal()">➕ Add Cash Pmt</button>
       <button class="btn" onclick="migrateCashToPayments()" title="One-time: moves every lot's existing cash value into the new dated ledger. 11R/R66/AM1 are dated this month; every other lot's cash is spread across its purchase date through today, since those values have no real date attached.">🕐 Migrate Cash to Ledger (one-time)</button>
@@ -155,7 +155,6 @@ tr:last-child td { border-bottom: none; }
         </div>
       </div>
     </div>
-      <button class="btn" onclick="syncActiveListings()" title="Pulls your real eBay ActiveList via the Trading API and recounts each lot's active listings">🔄 Sync Active Listings <span style="font-size:10px;opacity:.8;">(live API)</span></button>
       <span id="active-listings-synced" class="status-msg" style="margin:0;"></span>
     </div>
     <div style="margin-top:12px;display:flex;align-items:center;gap:10px;">
@@ -670,6 +669,16 @@ async function recalculate() {
   }
 }
 
+async function syncAndRecalculate() {
+  // Both halves already run automatically in the background (Recalculate after
+  // every order sync in order_sync_worker, Active Listings once daily in
+  // active_listings_sync_worker) -- this button is now just a manual "force it
+  // right now" override for both, combined into one click instead of two
+  // separate buttons for two things that used to require separate manual upkeep.
+  await recalculate();
+  await syncActiveListings();
+}
+
 async function loadAcquisitions() {
   const r = await fetch('/api/acquisitions');
   const data = await r.json();
@@ -678,7 +687,7 @@ async function loadAcquisitions() {
   const syncedAt = acquisitions.find(a => a.active_listings_synced_at)?.active_listings_synced_at;
   document.getElementById('active-listings-synced').textContent = syncedAt
     ? 'Active listings last synced: ' + new Date(syncedAt).toLocaleString()
-    : 'Active listings never synced — click Sync Active Listings';
+    : 'Active listings never synced — click Sync & Recalculate, or wait for tonight\'s automatic sync';
   renderTable();
 }
 
