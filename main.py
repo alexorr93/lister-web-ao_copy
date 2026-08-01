@@ -3233,7 +3233,7 @@ async def list_sku_overrides(request: Request):
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     rows = _fetch_all_for_business(business_id, "ebay_listing_status",
-                                    "item_id,title,sku,sku_override,price,quantity_available,updated_at")
+                                    "item_id,title,sku,sku_override,price,quantity_available,updated_at,start_time")
     overrides = [r for r in rows if r.get("sku_override")]
 
     lot_rows = _fetch_all_for_business(business_id, "acquisitions", "sku,name,cost,date")
@@ -3254,8 +3254,9 @@ async def list_sku_overrides(request: Request):
             "price": r.get("price"),
             "quantity_available": r.get("quantity_available"),
             "updated_at": r.get("updated_at"),
+            "created_at": r.get("start_time"),
         })
-    out.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
+    out.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     return {"overrides": out}
 
 @app.get("/api/inventory/uncategorized-listings")
@@ -3279,7 +3280,7 @@ async def api_uncategorized_listings_only(request: Request):
     active_rows = []
     start = 0
     while True:
-        page = supabase.table("ebay_listing_status").select("item_id,sku,sku_override,title,price,quantity_available,updated_at,gallery_url")\
+        page = supabase.table("ebay_listing_status").select("item_id,sku,sku_override,title,price,quantity_available,updated_at,gallery_url,start_time")\
             .eq("business_id", business_id).eq("listing_status", "Active")\
             .range(start, start + 999).execute().data or []
         active_rows.extend(page)
@@ -3321,9 +3322,9 @@ async def api_uncategorized_listings_only(request: Request):
             "listing_id": matched_listing.get("id") if matched_listing else None,
             "sku_editable": sku_editable, "has_override": bool(override_sku),
             "has_matched_listing": matched_listing is not None,
-            "gallery_url": row.get("gallery_url"),
+            "gallery_url": row.get("gallery_url"), "created_at": row.get("start_time"),
         })
-    uncategorized_items.sort(key=lambda r: r["value"], reverse=True)
+    uncategorized_items.sort(key=lambda r: r.get("created_at") or "", reverse=True)
     return {"active_listings_value": round(uncategorized_value, 2), "active_listings_count": uncategorized_count, "items": uncategorized_items}
 
 @app.get("/api/acquisitions")
