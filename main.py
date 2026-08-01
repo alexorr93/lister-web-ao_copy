@@ -9566,14 +9566,20 @@ def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> di
         .eq("business_id", business_id).eq("listing_status", "Active")\
         .lt("updated_at", run_started_at).execute()
 
-    # ebay_listing_status only ever holds CURRENT state (upserted + stale rows
-    # deleted above) -- it can't answer "what was active on some past date."
-    # This appends today's state into a separate append-only history table so
-    # inventory value can be reconstructed for any date going forward.
-    _snapshot_active_listings(business_id)
-
     save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_CHECKPOINT_PAGE", "")
     save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_RUN_STARTED_AT", "")
+
+    # Snapshotting runs AFTER the live sync is fully committed and checkpoints
+    # are cleared, and is wrapped so it can never affect this function's
+    # result or leave the checkpoint in a bad state. The live listings data
+    # (what drives Shopify matching) has zero tolerance for this step's
+    # failure; the history table has real tolerance for it -- if a snapshot
+    # write fails, today's history point is simply missing, logged, and
+    # nothing else about the sync is affected.
+    try:
+        _snapshot_active_listings(business_id)
+    except Exception as e:
+        print(f"_snapshot_active_listings failed for business {business_id} (live sync unaffected): {e}")
 
     return {"checked": total_rows, "synced_at": _dt.datetime.utcnow().isoformat()}
 
