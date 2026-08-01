@@ -2615,72 +2615,6 @@ def _apply_shopify_sales_to_profit(business_id: str):
             "became_green_at": became_green_at,
         }).eq("id", a["id"]).execute()
 
-def _backfill_became_green_at_from_history(business_id: str) -> dict:
-    """One-time fix for a real flaw in the stamping logic above: the FIRST time it
-    ran, every lot that was ALREADY profitable before this feature existed had no
-    prior became_green_at to preserve, so it got stamped 'now' -- meaning every
-    pre-existing green lot looked like it turned green today, and Green Revenue
-    (which only counts sales from that timestamp onward) collapsed to almost
-    nothing. Confirmed by the user: $314.16 for a period that should have been
-    much higher, right after their first Recalculate.
-
-    This reconstructs the REAL historical crossing date using each lot's own
-    order history (which is already fully dated) instead of accepting 'today':
-    walks that lot's orders oldest-to-newest, starting from a baseline of
-    (cash - cost), summing each order's final_net (same net figure Financials/
-    the Shopify-profit code already use) until the running total first exceeds
-    1 -- that order's date is the real became_green_at. No new snapshot table
-    needed; every order was already dated when it happened."""
-    import datetime as _dt2
-    lots = _fetch_all_for_business(business_id, "acquisitions", "id,sku,cost,cash,profit")
-    lot_by_sku = {l["sku"]: l for l in lots if l.get("sku")}
-
-    orders = _fetch_all_for_business(business_id, "orders", "sku,final_net,order_date")
-    orders_by_prefix = {}
-    for o in orders:
-        sku = o.get("sku") or ""
-        if not sku:
-            continue
-        prefix = _lot_prefix(sku)
-        if prefix in lot_by_sku:
-            orders_by_prefix.setdefault(prefix, []).append(o)
-
-    fixed, unchanged, no_crossing_found = 0, 0, 0
-    for sku, lot in lot_by_sku.items():
-        if (lot.get("profit") or 0) <= 1:
-            continue  # not green -- became_green_at should already be null from the logic above
-        cost = lot.get("cost") or 0
-        cash = lot.get("cash") or 0
-        running = cash - cost
-        lot_orders = sorted(orders_by_prefix.get(sku, []), key=lambda o: o.get("order_date") or "")
-        crossing_date = None
-        for o in lot_orders:
-            running += (o.get("final_net") or 0)
-            if running > 1:
-                crossing_date = o.get("order_date")
-                break
-        if crossing_date:
-            supabase.table("acquisitions").update({"became_green_at": crossing_date + "T00:00:00"}).eq("id", lot["id"]).execute()
-            fixed += 1
-        else:
-            # Profit > 1 but order history never actually crosses it (e.g. cash
-            # alone exceeds cost) -- leave whatever timestamp Recalculate already
-            # set rather than guess further.
-            no_crossing_found += 1
-    return {"fixed": fixed, "no_crossing_found": no_crossing_found, "total_green_lots": fixed + no_crossing_found}
-
-@app.post("/api/acquisitions/backfill-green-timestamps")
-async def backfill_green_timestamps(request: Request):
-    """One-time endpoint to run _backfill_became_green_at_from_history. Not meant
-    to be a recurring button -- run it once after the became_green_at column was
-    first added, to correct the 'stamped as today' flaw for lots that were
-    already green beforehand."""
-    business_id = require_auth(request)
-    if not business_id:
-        raise HTTPException(401, "Unauthorized")
-    result = _backfill_became_green_at_from_history(business_id)
-    return result
-
 @app.post("/api/analytics/refresh-snapshot-now")
 async def refresh_snapshot_now(request: Request):
     """Manually runs today's analytics_snapshot computation immediately, instead
@@ -2874,45 +2808,6 @@ async def add_cash_payment(body: AddCashPayment, request: Request):
 
     apply_acquisition_profits(business_id)
     return {"ok": True, "sku": body.sku, "new_total_cash": new_total_cash}
-
-@app.post("/api/acquisitions/migrate-cash-to-payments")
-async def migrate_cash_to_payments(request: Request):
-    """One-time migration: moves every lot's existing acquisitions.cash value
-    into the new ledger. The three lots the user explicitly named as entered
-    THIS MONTH (11R, R66, AM1) get a precise payment dated today -- everything
-    else gets a spread entry across [acquisitions.date, today], since those
-    values have no real date attached and were entered at various unknown
-    points in the past. Skips any sku that already has cash_payments rows, so
-    this is safe to run only once (or again harmlessly after that)."""
-    business_id = require_auth(request)
-    if not business_id:
-        raise HTTPException(401, "Unauthorized")
-    import datetime as _dt3
-    today_str = _dt3.datetime.utcnow().strftime("%Y-%m-%d")
-    THIS_MONTH_SKUS = {"11R", "RB66", "AM1"}
-
-    lots = _fetch_all_for_business(business_id, "acquisitions", "sku,cash,date")
-    existing_payment_skus = {r["sku"] for r in _fetch_all_for_business(business_id, "cash_payments", "sku")}
-
-    precise_migrated, spread_migrated, skipped = 0, 0, 0
-    for lot in lots:
-        sku = lot.get("sku")
-        cash = lot.get("cash") or 0
-        if not sku or not cash or sku in existing_payment_skus:
-            skipped += 1
-            continue
-        if sku in THIS_MONTH_SKUS:
-            supabase.table("cash_payments").insert({
-                "business_id": business_id, "sku": sku, "amount": cash, "payment_date": today_str,
-            }).execute()
-            precise_migrated += 1
-        else:
-            acq_date = lot.get("date") or today_str
-            supabase.table("cash_payments").insert({
-                "business_id": business_id, "sku": sku, "amount": cash, "spread_start_date": acq_date,
-            }).execute()
-            spread_migrated += 1
-    return {"precise_migrated": precise_migrated, "spread_migrated": spread_migrated, "skipped_already_migrated_or_no_cash": skipped}
 
 @app.get("/api/acquisitions/debug-sku/{sku}")
 async def debug_acquisition_sku(sku: str, request: Request):
