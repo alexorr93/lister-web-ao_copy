@@ -303,7 +303,7 @@ function renderTable() {
     } else if (!r.shopify_product_id && !r.listing_id && r.ebay_item_id) {
       actionCell = `<span class="muted" title="Click 'Pull eBay-Only Photos' above first — this item has no photos in our own storage yet.">— (pull photos first)</span>`;
     } else if (r.shopify_product_id && r.ebay_item_id) {
-      actionCell = `<button class="btn" style="font-size:11px;padding:4px 8px;color:#f59e0b;border-color:#f59e0b;" onclick="promptPushQuantity('${r.id}', '${r.ebay_item_id}', ${JSON.stringify(r.title || '')})" title="Sets a new available quantity on BOTH eBay and Shopify at once, live -- eBay must currently be Active.">📦 Update Qty</button>`;
+      actionCell = `<button class="btn" style="font-size:11px;padding:4px 8px;color:#f59e0b;border-color:#f59e0b;" data-row-id="${r.id}" data-ebay-id="${escapeHtml(r.ebay_item_id)}" data-title="${escapeHtml(r.title || '')}" onclick="promptPushQuantity(this.dataset.rowId, this.dataset.ebayId, this.dataset.title)" title="Sets a new available quantity on BOTH eBay and Shopify at once, live -- eBay must currently be Active.">📦 Update Qty</button>`;
     } else {
       actionCell = '<span class="muted">—</span>';
     }
