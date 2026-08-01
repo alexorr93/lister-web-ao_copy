@@ -10893,6 +10893,55 @@ async def list_inventory(request: Request):
         })
     return {"inventory": results}
 
+@app.get("/api/inventory/ebay-only")
+async def api_inventory_ebay_only(request: Request):
+    """Lean, standalone version of the 'eBay Only' subset of /api/inventory --
+    filters at the query level (ebay_id set, shopify_id null) instead of fetching
+    every inventory_match/ebay_inventory/shopify_inventory row (the full endpoint's
+    approach) just to filter down to this smaller slice client-side. Same
+    fields/actions as the Inventory tab shows for these rows."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+
+    rows = []
+    start = 0
+    while True:
+        page = (supabase.table("inventory_match").select("id,title,ebay_id")
+                .eq("business_id", business_id).eq("hidden", False)
+                .not_.is_("ebay_id", "null").is_("shopify_id", "null")
+                .range(start, start + 999).execute().data or [])
+        rows.extend(page)
+        if len(page) < 1000:
+            break
+        start += 1000
+
+    ebay_ids = [r["ebay_id"] for r in rows if r.get("ebay_id")]
+    ebay_by_id, listing_by_ebay_id = {}, {}
+    for i in range(0, len(ebay_ids), 200):
+        chunk = ebay_ids[i:i + 200]
+        for e in (supabase.table("ebay_inventory").select("id,sku,quantity,condition,price,gallery_url,local_photo_ids,start_time")
+                  .in_("id", chunk).execute().data or []):
+            ebay_by_id[e["id"]] = e
+        for l in (supabase.table("listings").select("id,ebay_item_id,shopify_product_id")
+                  .in_("ebay_item_id", chunk).execute().data or []):
+            listing_by_ebay_id[l["ebay_item_id"]] = l
+
+    results = []
+    for row in rows:
+        e = ebay_by_id.get(row.get("ebay_id")) or {}
+        matching_listing = listing_by_ebay_id.get(row.get("ebay_id"))
+        results.append({
+            "id": row["id"], "title": row["title"],
+            "ebay_item_id": e.get("id") or row.get("ebay_id"),
+            "ebay_sku": e.get("sku"), "ebay_qty": e.get("quantity"), "ebay_price": e.get("price"),
+            "ebay_gallery_url": e.get("gallery_url"), "ebay_local_photo_ids": e.get("local_photo_ids"),
+            "ebay_created_at": e.get("start_time"),
+            "listing_id": (matching_listing.get("id") if matching_listing and not matching_listing.get("shopify_product_id") else None),
+        })
+    results.sort(key=lambda r: r.get("ebay_created_at") or "", reverse=True)
+    return {"items": results}
+
 @app.post("/api/inventory/{row_id}/hide")
 async def hide_inventory_row(row_id: str, request: Request):
     """Permanently removes a row from the main Inventory list, without deleting

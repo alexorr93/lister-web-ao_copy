@@ -71,6 +71,13 @@ td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: 
   <p class="sub">Quick access to everything needing categorization — both views also live in their normal spots (Financials, Lots) and stay there; this is just a shortcut to the action items.</p>
 
   <div class="section-header">
+    <div class="section-title">📦 Uncategorized Listings</div>
+    <a class="section-link" href="/acquisitions">Open in Lots →</a>
+  </div>
+  <div class="section-status" id="listings-status">Loading...</div>
+  <div id="listings-table-area"><div class="empty">Loading...</div></div>
+
+  <div class="section-header">
     <div class="section-title">🛒 Uncategorized Orders</div>
     <a class="section-link" href="/financials">Open in Financials →</a>
   </div>
@@ -78,11 +85,11 @@ td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: 
   <div id="orders-table-area"><div class="empty">Loading...</div></div>
 
   <div class="section-header">
-    <div class="section-title">📦 Uncategorized Listings</div>
-    <a class="section-link" href="/acquisitions">Open in Lots →</a>
+    <div class="section-title">📤 eBay Only</div>
+    <a class="section-link" href="/inventory">Open in Inventory →</a>
   </div>
-  <div class="section-status" id="listings-status">Loading...</div>
-  <div id="listings-table-area"><div class="empty">Loading...</div></div>
+  <div class="section-status" id="ebayonly-status">Loading...</div>
+  <div id="ebayonly-table-area"><div class="empty">Loading...</div></div>
 </div>
 
 <script>
@@ -261,8 +268,106 @@ async function saveUncatSkuOverride(btn, itemId) {
   }
 }
 
+// ── eBay Only (from Inventory) ──────────────────────────────────
+let ebayOnlyItems = [];
+async function loadEbayOnly() {
+  document.getElementById('ebayonly-status').textContent = 'Loading...';
+  try {
+    const r = await fetch('/api/inventory/ebay-only');
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed to load');
+    ebayOnlyItems = data.items || [];
+    document.getElementById('ebayonly-status').textContent =
+      ebayOnlyItems.length ? `${ebayOnlyItems.length} eBay-only item(s)` : 'Nothing eBay-only — everything active has a Shopify match.';
+    renderEbayOnlyTable();
+  } catch(e) {
+    document.getElementById('ebayonly-status').textContent = '';
+    document.getElementById('ebayonly-table-area').innerHTML = `<div class="empty">Failed to load: ${escapeHtml(e.message)}</div>`;
+  }
+}
+function renderEbayOnlyTable() {
+  const area = document.getElementById('ebayonly-table-area');
+  if (!ebayOnlyItems.length) { area.innerHTML = '<div class="empty">Nothing eBay-only — everything active has a Shopify match.</div>'; return; }
+  let html = `<table><thead><tr>
+    <th>Title</th><th>eBay Item ID</th><th>SKU</th><th>Qty</th><th>Created</th><th>Action</th><th></th>
+  </tr></thead><tbody>`;
+  for (const r of ebayOnlyItems) {
+    let actionCell;
+    if (r.ebay_local_photo_ids) {
+      actionCell = `<button class="btn btn-primary" data-row-id="${r.id}" onclick="publishEbayOnlyToShopify(this, this.dataset.rowId)">🛍️ Publish to Shopify (eBay-only)</button>`;
+    } else if (r.listing_id) {
+      actionCell = `<button class="btn btn-primary" data-listing-id="${r.listing_id}" onclick="publishRowToShopify(this, this.dataset.listingId)">🛍️ Publish to Shopify</button>`;
+    } else {
+      actionCell = `<span class="muted" title="Pull eBay-Only Photos from the Inventory tab first.">— (pull photos first)</span>`;
+    }
+    html += `<tr id="ebayonly-row-${r.id}">
+      <td>${escapeHtml(r.title)}</td>
+      <td class="muted">${escapeHtml(r.ebay_item_id || '—')}</td>
+      <td class="sku muted">${escapeHtml(r.ebay_sku || '—')}</td>
+      <td class="muted">${r.ebay_qty ?? '—'}</td>
+      <td class="muted">${r.ebay_created_at ? escapeHtml(String(r.ebay_created_at).slice(0,10)) : '—'}</td>
+      <td>${actionCell}</td>
+      <td><button class="btn" data-row-id="${r.id}" data-title="${escapeHtml(r.title)}" onclick="hideEbayOnlyRow(this, this.dataset.rowId, this.dataset.title)">🙈 Hide</button></td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  area.innerHTML = html;
+}
+function removeEbayOnlyRow(rowId) {
+  ebayOnlyItems = ebayOnlyItems.filter(x => String(x.id) !== String(rowId));
+  document.getElementById('ebayonly-status').textContent =
+    ebayOnlyItems.length ? `${ebayOnlyItems.length} eBay-only item(s)` : 'Nothing eBay-only — everything active has a Shopify match.';
+  const tr = document.getElementById('ebayonly-row-' + rowId);
+  if (tr) tr.remove();
+  if (!ebayOnlyItems.length) renderEbayOnlyTable();
+}
+async function publishRowToShopify(btn, listingId) {
+  if (!confirm('Publish this item to Shopify now, using its saved title/price/photos from Lister?')) return;
+  const rowId = btn.closest('tr').id.replace('ebayonly-row-', '');
+  btn.disabled = true; btn.textContent = 'Publishing...';
+  try {
+    const r = await fetch(`/api/listings/${listingId}/shopify-publish`, {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    toast('Published to Shopify ✓');
+    removeEbayOnlyRow(rowId);
+  } catch(e) {
+    alert(`Failed to publish: ${e.message}`);
+    btn.disabled = false; btn.textContent = '🛍️ Publish to Shopify';
+  }
+}
+async function publishEbayOnlyToShopify(btn, rowId) {
+  if (!confirm("Publish this eBay-only item to Shopify now, using eBay's own title/price/SKU and the photos already downloaded into our own storage?")) return;
+  btn.disabled = true; btn.textContent = 'Publishing...';
+  try {
+    const r = await fetch(`/api/inventory/${rowId}/publish-ebay-only-to-shopify`, {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    toast('Published to Shopify ✓');
+    removeEbayOnlyRow(rowId);
+  } catch(e) {
+    alert(`Failed to publish: ${e.message}`);
+    btn.disabled = false; btn.textContent = '🛍️ Publish to Shopify (eBay-only)';
+  }
+}
+async function hideEbayOnlyRow(btn, rowId, title) {
+  if (!confirm(`Hide "${title}" from this list? It won't show up here again unless you unhide it from the Inventory tab's Hidden Items panel.`)) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/api/inventory/${rowId}/hide`, {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    toast('Hidden ✓');
+    removeEbayOnlyRow(rowId);
+  } catch(e) {
+    alert(`Failed to hide: ${e.message}`);
+    btn.disabled = false;
+  }
+}
+
 loadUncatOrders();
 loadUncatListings();
+loadEbayOnly();
 </script>
 </body>
 </html>
