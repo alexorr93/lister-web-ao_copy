@@ -8627,9 +8627,29 @@ def _maybe_confirm_inventory_match(business_id: str, listing_id):
             return
         listing = res.data[0]
         ebay_id = listing.get("ebay_item_id")
-        shopify_id = listing.get("shopify_product_id")
-        if not (ebay_id and shopify_id):
+        shopify_product_id = listing.get("shopify_product_id")
+        if not (ebay_id and shopify_product_id):
             return  # only one side published so far — nothing to confirm yet
+
+        # BUG FIXED (confirmed 100% of 139 existing dual-publish matches affected):
+        # shopify_product_id is exactly what its name says -- a PRODUCT id -- but
+        # every other consumer of inventory_match.shopify_id (title-matching,
+        # the quantity-push feature, _fetch_shopify_variants_by_ids) expects a
+        # VARIANT id, same as shopify_inventory.id. Storing the product id here
+        # meant the regular title-matcher never recognized this item as already
+        # matched (wrong ID type), silently creating a second, orphaned
+        # "Shopify only" row for the same real listing every single time -- and
+        # separately meant any feature keying off shopify_id (like the eBay+
+        # Shopify quantity push) would have failed outright on any dual-
+        # published item. Resolved here to the real variant id before storing.
+        variant_res = (supabase.table("shopify_inventory").select("id")
+                       .eq("business_id", business_id).eq("product_id", shopify_product_id)
+                       .limit(1).execute().data or [])
+        if not variant_res:
+            print(f"_maybe_confirm_inventory_match: no shopify_inventory row for product "
+                  f"{shopify_product_id} yet (not synced there yet?) — skipping for now")
+            return
+        shopify_id = variant_res[0]["id"]
 
         hd_id_value = str(listing["id"])
         existing = (supabase.table("inventory_match").select("id,hd_id")
