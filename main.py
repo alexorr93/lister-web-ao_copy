@@ -1975,22 +1975,95 @@ async def flags2_page(request: Request):
         return RedirectResponse("/login", status_code=302)
     return templates.TemplateResponse("flags2.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "flags2"})
 
-@app.get("/api/flags2-data")
-async def flags2_data(request: Request):
-    """Backs the Flags 2 tab. Deliberately NOT filtered by this app's own
-    business_id -- the data was written by a separate app (auction-catalog-feed)
-    using its own business_id, which may not match this app's session value for
-    the same real user. Since this is a single-business system in practice,
-    returning everything in the table avoids a silent business_id mismatch
-    showing zero rows even when real data exists."""
+@app.get("/api/flags2/data")
+async def flags2_data(request: Request, keywords: str = ""):
+    """Backs the Flags 2 tab -- the SAME catalog-level aggregation logic as
+    the original /api/flags/data (distance, multi-day, layer 1/2 keyword
+    counts), but sourced from bidspotter_auto_catalog_lots (the fully
+    automated Bright Data pull) instead of auction_catalogs. Deliberately
+    NOT filtered by business_id on the data source itself -- see /flags2
+    route docstring. Interactive workflow fields (favorite, viewed,
+    not_interested, capture_session_id) don't apply to this data source and
+    are omitted rather than faked."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
+
+    kw_rows_db = supabase.table("flag_keywords").select("keyword,layer").eq("business_id", business_id).execute().data or []
+    layer1_keywords = [r["keyword"] for r in kw_rows_db if r["layer"] == 1]
+    layer2_keywords = [r["keyword"] for r in kw_rows_db if r["layer"] == 2]
+    default_keywords = layer1_keywords + layer2_keywords
+    kw_list = [k.strip() for k in keywords.split(",") if k.strip()] or default_keywords
+
+    lot_rows = []
+    start = 0
+    while True:
+        page = supabase.table("bidspotter_auto_catalog_lots").select("catalog_url,catalog_title,description,state,zip_code,date")\
+            .range(start, start + 999).execute().data or []
+        lot_rows.extend(page)
+        if len(page) < 1000:
+            break
+        start += 1000
+
+    from collections import defaultdict
+    by_catalog = defaultdict(list)
+    for r in lot_rows:
+        by_catalog[r["catalog_url"]].append(r)
+
+    centroids = _load_zip_centroids()
+    origin_lat, origin_lng = _FLAG_ORIGIN_LATLNG
+
+    out = []
+    for catalog_url, lots in by_catalog.items():
+        first = lots[0]
+        title = first.get("catalog_title") or catalog_url
+        state = next((l["state"] for l in lots if l.get("state")), None)
+        zip_code = next((l["zip_code"] for l in lots if l.get("zip_code")), None)
+        end_date = next((l["date"] for l in lots if l.get("date")), None)
+        distance = None
+        distance_is_estimate = True
+        if zip_code and zip_code in centroids:
+            lat, lng = centroids[zip_code]
+            distance = round(_haversine_miles(origin_lat, origin_lng, lat, lng), 1)
+            distance_is_estimate = False
+        elif state in _STATE_CENTROID_FALLBACK:
+            lat, lng = _STATE_CENTROID_FALLBACK[state]
+            distance = round(_haversine_miles(origin_lat, origin_lng, lat, lng), 1)
+        keyword_counts = {}
+        for kw in kw_list:
+            kw_lower = kw.lower()
+            keyword_counts[kw] = sum(1 for l in lots if kw_lower in (l.get("description") or "").lower())
+        out.append({
+            "catalog_url": catalog_url,
+            "title": title,
+            "auctioneer": None,  # not reliably captured by the automated pull yet
+            "state": state or "",
+            "lot_count": len(lots),
+            "end_date": end_date,
+            "zip": zip_code,
+            "distance_miles": distance,
+            "distance_is_estimate": distance_is_estimate,
+            "within_radius": (distance is not None and distance <= _FLAG_RADIUS_MILES),
+            "multi_day": "day" in title.lower(),
+            "keyword_counts": keyword_counts,
+        })
+    return {"origin_zip": _FLAG_ORIGIN_ZIP, "radius_miles": _FLAG_RADIUS_MILES, "keywords": kw_list,
+            "layer1_keywords": layer1_keywords, "layer2_keywords": layer2_keywords, "catalogs": out}
+
+@app.get("/api/bright-lots")
+async def api_bright_lots(catalog_url: str = None):
+    """Purely the automated Bright Data pull's own data -- a separate view
+    so it can be compared directly against the VA's manually-uploaded
+    bidspotter_catalog_lots data above, without the two ever mixing."""
+    def build_query():
+        q = supabase.table("bidspotter_auto_catalog_lots").select("*")
+        if catalog_url:
+            q = q.eq("catalog_url", catalog_url)
+        return q.order("last_seen_at", desc=True)
     rows = []
     start = 0
     while True:
-        page = supabase.table("bidspotter_auto_catalog_lots").select("*")\
-            .order("last_seen_at", desc=True).range(start, start + 999).execute().data or []
+        page = build_query().range(start, start + 999).execute().data or []
         rows.extend(page)
         if len(page) < 1000:
             break

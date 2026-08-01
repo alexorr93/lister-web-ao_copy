@@ -33,94 +33,301 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 h1 { font-size: 22px; margin-bottom: 4px; }
 .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; max-width: 900px; }
 .filter-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.btn { padding: 9px 16px; border-radius: 8px; border: 1px solid var(--border); background: #1e2535; color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; }
+.btn-primary { background: var(--accent); border-color: var(--accent); }
 .field-input { background: #fff; color: #111; border: none; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th { text-align: left; padding: 8px 10px; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--border); position: sticky; top: 52px; background: var(--bg); }
-td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
-tr:hover td { background: rgba(255,255,255,.02); }
+label.check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.kw-chip { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; user-select: none; transition: all .15s; }
+.kw-dropdown { position: absolute; top: 100%; left: 0; margin-top: 6px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; min-width: 260px; max-height: 320px; overflow-y: auto; z-index: 50; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+.kw-dropdown label { display: flex; align-items: center; gap: 8px; padding: 5px 4px; font-size: 13px; cursor: pointer; border-radius: 6px; }
+.kw-dropdown label:hover { background: #1e2535; }
+.kw-tag { display: inline-block; padding: 5px 12px; border-radius: 999px; background: #2d3348; color: var(--text); font-size: 12px; font-weight: 600; margin-right: 6px; margin-bottom: 6px; }
+.kw-mini-tag { display: inline-block; padding: 2px 6px; border-radius: 999px; background: #2d3348; color: var(--muted); font-size: 10px; font-weight: 600; margin-right: 3px; white-space: nowrap; }
+table { width: max-content; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; white-space: nowrap; }
+td.kw-count-cell { white-space: normal; max-width: 130px; }
+th { background: #161b29; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+tr:last-child td { border-bottom: none; }
 .muted { color: var(--muted); }
-.empty { color: var(--muted); padding: 40px 0; text-align: center; }
+.status-msg { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+.empty { padding: 40px; text-align: center; color: var(--muted); }
 a { color: #60a5fa; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+.badge-radius { background: rgba(22,163,74,.15); color: var(--green); border: 1px solid rgba(22,163,74,.4); }
+.badge-day { background: rgba(245,158,11,.15); color: var(--amber); border: 1px solid rgba(245,158,11,.4); }
+.badge-kw { background: rgba(37,99,235,.15); color: #60a5fa; border: 1px solid rgba(37,99,235,.4); }
 </style>
 </head>
 <body>
 {% include "_nav.html" %}
-<div class="main">
-  <h1>🚩 Flags 2</h1>
-  <div class="sub">Purely the automated Bright Data pull — real catalog and lot data pulled directly from BidSpotter with no manual VA involvement. Separate from the original Flags tab above; use this one to compare against it.</div>
 
-  <div class="filter-bar">
-    <input type="text" class="field-input" id="search-input" placeholder="Search title/lot/description..." oninput="render()" style="width:320px;" autocomplete="off"/>
-    <span class="muted" id="summary-text"></span>
+<div class="main">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;">
+    <h1>🚩 Flags 2</h1>
+    <span class="sub" style="margin:0;">Purely the automated Bright Data pull — same aggregation as the original Flags tab, sourced from a fully separate table so it can be compared directly.</span>
   </div>
 
-  <div id="table-area"><div class="empty">Loading...</div></div>
+  <div class="filter-bar" style="position:relative;">
+    <label class="check"><input type="checkbox" id="filter-today" onchange="renderTable()"/> Today</label>
+    <select class="field-input" id="filter-state" style="min-width:100px;" onchange="renderTable()">
+      <option value="">All states</option>
+    </select>
+    <input type="text" class="field-input" id="search-input" placeholder="Search title/state..." style="min-width:220px;" oninput="renderTable()"/>
+    <input type="number" class="field-input" id="filter-max-distance" placeholder="Max distance (mi)" style="width:150px;" oninput="renderTable()"/>
+    <input type="number" class="field-input" id="filter-min-lots" placeholder="Min lots" style="width:100px;" oninput="renderTable()"/>
+    <input type="number" class="field-input" id="filter-min-layer1" placeholder="Min Layer 1" style="width:100px;" oninput="renderTable()"/>
+    <input type="number" class="field-input" id="filter-min-layer2" placeholder="Min Layer 2" style="width:100px;" oninput="renderTable()"/>
+    <select class="field-input" id="filter-multiday" style="min-width:130px;" onchange="renderTable()">
+      <option value="">Multi-day: any</option>
+      <option value="yes">Multi-day: yes</option>
+      <option value="no">Multi-day: no</option>
+    </select>
+    <label class="check"><input type="checkbox" id="flagged-only" onchange="renderTable()"/> Flagged only</label>
+    <div style="position:relative;">
+      <button class="btn" onclick="toggleLayerDropdown(1, event)">Layer 1 keywords &#9662;</button>
+      <div id="layer1-dropdown" class="kw-dropdown" style="display:none;"></div>
+    </div>
+    <div style="position:relative;">
+      <button class="btn" onclick="toggleLayerDropdown(2, event)">Layer 2 keywords &#9662;</button>
+      <div id="layer2-dropdown" class="kw-dropdown" style="display:none;"></div>
+    </div>
+    <label class="check"><input type="checkbox" id="filter-past" checked onchange="renderTable()"/> Filter past</label>
+  </div>
+
+  <div id="status" class="status-msg">Loading...</div>
+  <div id="table-area"></div>
 </div>
 
 <script>
-let allLots = [];
+let rows = [];
+let keywords = [];
+let sortKey = 'distance_miles';
+let sortDir = 1;
 
-function escapeHtml(s) {
-  return (s || '').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function setSort(key) {
+  if (sortKey === key) { sortDir *= -1; } else { sortKey = key; sortDir = 1; }
+  renderTable();
 }
 
-function catalogLink(catalogUrl, title) {
-  const shown = title || catalogUrl || '';
-  const withoutExt = (catalogUrl || '').replace(/\.pdf$/i, '');
-  const m = withoutExt.match(/^https(www\.bidspotter\.com)en-usauction-catalogues(.+?)(catalogue-id-.+)$/);
-  if (m) {
-    const url = `https://${m[1]}/en-us/auction-catalogues/${m[2]}/${m[3]}`;
-    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${escapeHtml(shown)}</a>`;
-  }
-  return escapeHtml(shown);
-}
+let keywordOn = {};
+let layer1List = [];
+let layer2List = [];
 
-async function loadAll() {
+async function loadFlags() {
+  const statusEl = document.getElementById('status');
+  statusEl.textContent = 'Loading...';
   try {
-    const r = await fetch('/api/flags2-data');
-    const data = await r.json();
-    allLots = data.lots || [];
-  } catch(e) { console.error(e); }
-  render();
+    const r = await api('GET', '/api/flags2/data');
+    rows = r.catalogs || [];
+    keywords = r.keywords || [];
+    layer1List = r.layer1_keywords || [];
+    layer2List = r.layer2_keywords || [];
+    keywords.forEach(k => { if (!(k in keywordOn)) keywordOn[k] = true; });
+    populateFilterDropdowns();
+    const flaggedCount = rows.filter(isFlagged).length;
+    statusEl.textContent = `${rows.length} catalogs -- ${flaggedCount} flagged (within ${r.radius_miles}mi of ${r.origin_zip}, multi-day, or keyword match)`;
+    renderTable();
+  } catch (e) {
+    statusEl.textContent = `Error: ${e.message}`;
+  }
 }
 
-function render() {
-  const el = document.getElementById('table-area');
-  const search = document.getElementById('search-input').value.toLowerCase();
-  let rows = allLots;
-  if (search) rows = rows.filter(l =>
-    (l.description || '').toLowerCase().includes(search) ||
-    (l.lot_number || '').toLowerCase().includes(search) ||
-    (l.catalog_title || '').toLowerCase().includes(search));
+function populateFilterDropdowns() {
+  const states = [...new Set(rows.map(c => c.state).filter(Boolean))].sort();
+  const sSel = document.getElementById('filter-state');
+  const keepS = sSel.value;
+  sSel.innerHTML = '<option value="">All states</option>' + states.map(s => `<option value="${s}">${s}</option>`).join('');
+  sSel.value = keepS;
+}
 
-  const distinctCatalogs = new Set(allLots.map(l => l.catalog_url)).size;
-  document.getElementById('summary-text').textContent =
-    `${allLots.length} total lot(s) across ${distinctCatalogs} catalog(s)` + (search ? ` — ${rows.length} matching` : '');
+function layer1Keywords() { return layer1List; }
+function layer2Keywords() { return layer2List; }
 
-  if (!rows.length) { el.innerHTML = '<div class="empty">No Bright Data lots pulled yet — this fills in automatically as the automated pull runs.</div>'; return; }
+function toggleLayerDropdown(layer, event) {
+  event.stopPropagation();
+  const id = `layer${layer}-dropdown`;
+  const el = document.getElementById(id);
+  const isOpen = el.style.display !== 'none';
+  document.querySelectorAll('.kw-dropdown').forEach(d => d.style.display = 'none');
+  if (!isOpen) {
+    renderLayerDropdown(layer);
+    el.style.display = 'block';
+  }
+}
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.kw-dropdown') && !e.target.closest('.filter-bar button')) {
+    document.querySelectorAll('.kw-dropdown').forEach(d => d.style.display = 'none');
+  }
+});
 
-  let html = `<table><thead><tr><th>Catalog</th><th>Lot #</th><th>Description</th><th>State</th><th>ZIP</th><th>Date</th><th>Pulled At</th></tr></thead><tbody>`;
-  for (const l of rows.slice(0, 1000)) {
-    const pulledCell = l.last_seen_at
-      ? new Date(l.last_seen_at).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-      : '—';
-    html += `<tr>
-      <td>${catalogLink(l.catalog_url, l.catalog_title)}</td>
-      <td>${escapeHtml(l.lot_number)}</td>
-      <td>${escapeHtml(l.description)}</td>
-      <td>${escapeHtml(l.state)}</td>
-      <td class="muted">${escapeHtml(l.zip_code)}</td>
-      <td class="muted">${escapeHtml(l.date)}</td>
-      <td class="muted" style="white-space:nowrap;">${pulledCell}</td>
+function renderLayerDropdown(layer) {
+  const list = layer === 1 ? layer1List : layer2List;
+  const chip = k => `
+    <label onclick="event.stopPropagation();">
+      <input type="checkbox" ${keywordOn[k] ? 'checked' : ''} onchange="toggleKeyword('${k.replace(/'/g,"\\'")}')"/> ${k}
+    </label>`;
+  document.getElementById(`layer${layer}-dropdown`).innerHTML = list.map(chip).join('') || '<div class="muted" style="font-size:12px;padding:6px 4px;">No keywords configured yet -- add some on the original Flags tab.</div>';
+}
+
+function toggleKeyword(k) {
+  keywordOn[k] = !keywordOn[k];
+  renderTable();
+}
+
+const KW_DISPLAY_LABEL = { 'allen bradley': 'AB' };
+
+function kwBreakdownCell(total, keywordList, c) {
+  if (total === 0) return '<span class="muted">0</span>';
+  const parts = keywordList
+    .map(k => ({ k, n: (c.keyword_counts || {})[k] || 0 }))
+    .filter(x => x.n > 0)
+    .sort((a, b) => b.n - a.n);
+  const pills = parts.map(x =>
+    `<span class="kw-mini-tag">${KW_DISPLAY_LABEL[x.k.toLowerCase()] || x.k} ${x.n}</span>`
+  ).join('');
+  return `<span class="badge badge-kw" style="margin-right:4px;">${total}</span>${pills}`;
+}
+
+function keywordSumLayer1(c) {
+  return layer1Keywords().reduce((sum, k) => sum + (keywordOn[k] ? ((c.keyword_counts || {})[k] || 0) : 0), 0);
+}
+function keywordSumLayer2(c) {
+  return keywordSumLayer1(c) + layer2Keywords().reduce((sum, k) => sum + (keywordOn[k] ? ((c.keyword_counts || {})[k] || 0) : 0), 0);
+}
+
+function parseDateForSort(raw) {
+  if (!raw) return null;
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(raw).trim());
+  const d = isoMatch
+    ? new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]))
+    : new Date(raw);
+  return isNaN(d.getTime()) ? null : d.getTime();
+}
+
+function formatDate(raw) {
+  if (!raw) return '--';
+  let d;
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(raw).trim());
+  if (isoMatch) {
+    d = new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
+  } else {
+    d = new Date(raw);
+  }
+  if (isNaN(d.getTime())) return raw;
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function realUrlFromCatalogUrl(catalogUrl) {
+  const prefix = 'httpswww.bidspotter.comen-usauction-catalogues';
+  if (!catalogUrl.startsWith(prefix)) return null;
+  const rest = catalogUrl.slice(prefix.length);
+  const idx = rest.indexOf('catalogue-id-');
+  if (idx === -1) return null;
+  const slug = rest.slice(0, idx);
+  const id = rest.slice(idx + 'catalogue-id-'.length);
+  return `https://www.bidspotter.com/en-us/auction-catalogues/${slug}/catalogue-id-${id}`;
+}
+
+function isFlagged(c) {
+  if (c.within_radius || c.multi_day) return true;
+  return keywordSumLayer1(c) > 0 || keywordSumLayer2(c) > 0;
+}
+
+function renderTable() {
+  if (!rows.length) {
+    document.getElementById('table-area').innerHTML = '<div class="empty">No Bright Data catalogs yet -- this fills in automatically as the automated pull runs.</div>';
+    return;
+  }
+  const search = document.getElementById('search-input').value.trim().toLowerCase();
+  const flaggedOnly = document.getElementById('flagged-only').checked;
+  const fToday = document.getElementById('filter-today').checked;
+  const fState = document.getElementById('filter-state').value;
+  const fMaxDistance = parseFloat(document.getElementById('filter-max-distance').value);
+  const fMinLots = parseFloat(document.getElementById('filter-min-lots').value);
+  const fMinLayer1 = parseFloat(document.getElementById('filter-min-layer1').value);
+  const fMinLayer2 = parseFloat(document.getElementById('filter-min-layer2').value);
+  const fMultiday = document.getElementById('filter-multiday').value;
+  const fFilterPast = document.getElementById('filter-past').checked;
+  let filtered = rows;
+  if (search) {
+    filtered = filtered.filter(c =>
+      (c.title || '').toLowerCase().includes(search) ||
+      (c.state || '').toLowerCase().includes(search));
+  }
+  if (fToday) {
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    filtered = filtered.filter(c => c.end_date === todayStr);
+  }
+  if (fState) filtered = filtered.filter(c => c.state === fState);
+  if (!isNaN(fMaxDistance)) filtered = filtered.filter(c => c.distance_miles != null && c.distance_miles <= fMaxDistance);
+  if (!isNaN(fMinLots)) filtered = filtered.filter(c => c.lot_count >= fMinLots);
+  if (!isNaN(fMinLayer1)) filtered = filtered.filter(c => keywordSumLayer1(c) >= fMinLayer1);
+  if (!isNaN(fMinLayer2)) filtered = filtered.filter(c => keywordSumLayer2(c) >= fMinLayer2);
+  if (fMultiday === 'yes') filtered = filtered.filter(c => c.multi_day);
+  if (fMultiday === 'no') filtered = filtered.filter(c => !c.multi_day);
+  if (fFilterPast) {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    filtered = filtered.filter(c => {
+      const t = parseDateForSort(c.end_date);
+      return t === null || t >= startOfToday;
+    });
+  }
+  if (flaggedOnly) filtered = filtered.filter(isFlagged);
+
+  filtered = [...filtered].sort((a, b) => {
+    let av = sortKey === 'kw_sum1' ? keywordSumLayer1(a) : sortKey === 'kw_sum2' ? keywordSumLayer2(a) : sortKey === 'end_date' ? parseDateForSort(a.end_date) : a[sortKey];
+    let bv = sortKey === 'kw_sum1' ? keywordSumLayer1(b) : sortKey === 'kw_sum2' ? keywordSumLayer2(b) : sortKey === 'end_date' ? parseDateForSort(b.end_date) : b[sortKey];
+    const aNull = (av === null || av === undefined);
+    const bNull = (bv === null || bv === undefined);
+    if (aNull && bNull) return 0;
+    if (aNull) return 1;
+    if (bNull) return -1;
+    const cmp = av > bv ? 1 : (av < bv ? -1 : 0);
+    return cmp * sortDir;
+  });
+
+  const th = (key, label) => `<th onclick="setSort('${key}')" style="cursor:pointer;">${label}${sortKey===key ? (sortDir===1?' UP':' DOWN') : ''}</th>`;
+  let html = `<table><thead><tr>
+    <th onclick="setSort('title')" style="cursor:pointer;">Auction${sortKey==='title' ? (sortDir===1?' UP':' DOWN') : ''}</th><th onclick="setSort('end_date')" style="cursor:pointer;max-width:90px;">Date${sortKey==='end_date' ? (sortDir===1?' UP':' DOWN') : ''}</th>${th('state','State')}${th('distance_miles','Distance')}${th('lot_count','Lots')}${th('kw_sum1','Layer 1 Count')}${th('kw_sum2','Layer 2 Count')}<th onclick="setSort('multi_day')" style="cursor:pointer;max-width:70px;">Multi-day${sortKey==='multi_day' ? (sortDir===1?' UP':' DOWN') : ''}</th>
+  </tr></thead><tbody>`;
+
+  for (const c of filtered) {
+    const dist = c.distance_miles != null
+      ? `${c.within_radius ? '<span class="badge badge-radius">' : ''}${c.distance_miles} mi${c.distance_is_estimate ? ' (est.)' : ''}${c.within_radius ? '</span>' : ''}`
+      : '<span class="muted">--</span>';
+    const dayBadge = c.multi_day ? '<span class="badge badge-day">multi-day</span>' : '<span class="muted">--</span>';
+    const kwSum1 = keywordSumLayer1(c);
+    const kwSum2 = keywordSumLayer2(c);
+    const kwCell1 = kwBreakdownCell(kwSum1, layer1Keywords(), c);
+    const kwCell2 = kwBreakdownCell(kwSum2, [...layer1Keywords(), ...layer2Keywords()], c);
+    const href = realUrlFromCatalogUrl(c.catalog_url) || c.catalog_url;
+    html += `<tr data-catalog-url="${c.catalog_url}">
+      <td><a href="${href}" target="_blank">${(c.title || '').replace(/</g,'&lt;')}</a></td>
+      <td class="muted" style="max-width:90px;">${formatDate(c.end_date)}</td>
+      <td class="muted">${c.state || '--'}</td>
+      <td>${dist}</td>
+      <td>${c.lot_count}</td>
+      <td class="kw-count-cell">${kwCell1}</td>
+      <td class="kw-count-cell">${kwCell2}</td>
+      <td style="max-width:70px;">${dayBadge}</td>
     </tr>`;
   }
   html += '</tbody></table>';
-  if (rows.length > 1000) html += `<div class="sub" style="margin-top:8px;">Showing first 1000 of ${rows.length} — narrow with search to see more.</div>`;
-  el.innerHTML = html;
+  document.getElementById('table-area').innerHTML = html;
 }
 
-loadAll();
-setInterval(loadAll, 30000); // auto-refresh every 30s so this stays live while the pull keeps running
+async function api(method, url, body) {
+  const opts = { method, headers: {} };
+  if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+  const r = await fetch(url, opts);
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.detail || 'Request failed');
+  return data;
+}
+
+loadFlags();
+setInterval(loadFlags, 30000);
 </script>
 </body>
 </html>
