@@ -189,9 +189,9 @@ function renderListingsTable() {
   const area = document.getElementById('listings-table-area');
   if (!listingItems.length) { area.innerHTML = '<div class="empty">Nothing uncategorized — every active listing matches a lot and has a real SKU.</div>'; return; }
   let html = `<table><thead><tr>
-    <th>SKU</th><th>Reason</th><th>eBay Item</th><th>Price</th><th>Qty Available</th><th>Value</th><th>Edit SKU</th>
+    <th></th><th>SKU</th><th>Reason</th><th>eBay Item</th><th>Price</th><th>Qty Available</th><th>Value</th><th>Edit SKU</th>
   </tr></thead><tbody>`;
-  for (const it of listingItems) {
+  listingItems.forEach((it, idx) => {
     const reason = it.needs_sku
       ? '<span style="color:var(--amber);font-weight:600;">Needs SKU</span>'
       : (it.has_matched_listing && !it.sku_editable && !it.has_override
@@ -209,7 +209,14 @@ function renderListingsTable() {
         <button class="btn" onclick="saveUncatSkuOverride(this, '${it.item_id}')">Save</button>
         ${overrideNote}`;
     }
+    // Only the first 50 get a thumbnail <img> tag at all -- not just visually
+    // capped, genuinely not requested/rendered past that, so this can never
+    // slow the page down regardless of how many rows are uncategorized.
+    const thumbCell = (idx < 50 && it.gallery_url)
+      ? `<img src="${escapeHtml(it.gallery_url)}" loading="lazy" style="width:36px;height:36px;object-fit:cover;border-radius:4px;" onerror="this.style.display='none'"/>`
+      : '';
     html += `<tr>
+      <td>${thumbCell}</td>
       <td class="sku muted">${escapeHtml(it.sku || '(blank)')}</td>
       <td>${reason}</td>
       <td class="muted">${escapeHtml(it.title || '')}</td>
@@ -218,7 +225,7 @@ function renderListingsTable() {
       <td>${fmtMoney(it.value)}</td>
       <td>${editCell}</td>
     </tr>`;
-  }
+  });
   html += '</tbody></table>';
   area.innerHTML = html;
 }

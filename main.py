@@ -3279,7 +3279,7 @@ async def api_uncategorized_listings_only(request: Request):
     active_rows = []
     start = 0
     while True:
-        page = supabase.table("ebay_listing_status").select("item_id,sku,sku_override,title,price,quantity_available,updated_at")\
+        page = supabase.table("ebay_listing_status").select("item_id,sku,sku_override,title,price,quantity_available,updated_at,gallery_url")\
             .eq("business_id", business_id).eq("listing_status", "Active")\
             .range(start, start + 999).execute().data or []
         active_rows.extend(page)
@@ -3321,6 +3321,7 @@ async def api_uncategorized_listings_only(request: Request):
             "listing_id": matched_listing.get("id") if matched_listing else None,
             "sku_editable": sku_editable, "has_override": bool(override_sku),
             "has_matched_listing": matched_listing is not None,
+            "gallery_url": row.get("gallery_url"),
         })
     uncategorized_items.sort(key=lambda r: r["value"], reverse=True)
     return {"active_listings_value": round(uncategorized_value, 2), "active_listings_count": uncategorized_count, "items": uncategorized_items}
