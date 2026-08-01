@@ -2242,6 +2242,20 @@ async def notes_page(request: Request):
         return RedirectResponse("/login", status_code=302)
     return templates.TemplateResponse("notes.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "notes"})
 
+@app.get("/uncat", response_class=HTMLResponse)
+async def uncat_page(request: Request):
+    """Quick-access dashboard combining two views that already exist elsewhere
+    (Financials' Uncategorized Orders, Lots' Uncategorized Listings) -- both
+    stay fully intact in their original homes; this just pulls the same two
+    existing endpoints (/api/financials, /api/acquisitions) so both action-item
+    lists are reachable from one tab instead of navigating to two different
+    pages."""
+    nav = get_nav_context(request)
+    if nav is None:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("uncat.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "uncat"})
+
 class NoteCreate(BaseModel):
     section: str
     content: str
