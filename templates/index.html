@@ -218,6 +218,7 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tile-cond-btn { font-size:10px; padding:4px 8px; background:transparent; border:none; color:var(--muted); cursor:pointer; font-family:inherit; font-weight:600; }
 .tile-cond-btn.active { background:var(--accent); color:#fff; }
 .catmode-btn.active { background:#2563eb; border-color:#2563eb; color:#fff; font-weight:600; }
+.today-filter-btn.active { background:#0d9488; border-color:#0d9488; color:#fff; font-weight:600; }
 .pricemode-btn.active { background:#16a34a; border-color:#16a34a; color:#fff; font-weight:600; }
 .proc-bar-wrap { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px 14px; margin-bottom:14px; }
 .proc-bar-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:7px; font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:0.06em; }
@@ -334,6 +335,7 @@ select.field-input { background: #fff; color: #0f172a; }
     <div class="action-bar">
       <button class="btn" onclick="selectAll()">☑ Select All</button>
       <button class="btn" onclick="deselectAll()">☐ Deselect</button>
+      <button class="btn today-filter-btn" id="today-filter-btn" onclick="toggleTodayFilter()" title="Show only items scanned today — hides everything older so you can focus on new stuff without the rest of the queue in the way">📅 Today Only</button>
       <button class="btn" style="color:#f59e0b;border-color:#b45309;" onclick="rematchCategory()" title="Re-runs eBay category matching on selected items (or everything stuck on the generic 'Other Business & Industrial' fallback) — needed because already-scanned items never get re-checked automatically once they're inside the allowed category root, even if the matching logic gets fixed later">📂 Re-match Category</button>
       <div class="tile-cond-toggle" style="margin-left:0;" title="Which category tree matching stays inside. Stays where you set it until you change it.">
         <button class="tile-cond-btn catmode-btn" data-catmode="industrial" onclick="setCategoryMode('industrial')">B&amp;I</button>
@@ -767,6 +769,27 @@ select.field-input { background: #fff; color: #0f172a; }
 <script>
 // ── STATE ──────────────────────────────────────────────────────
 let listings      = [];
+let todayOnly     = false;
+
+// Compares against the browser's own local date/day boundary -- this is a
+// personal "what's new since I last checked" filter, not a financial
+// calculation, so matching whatever the person's own clock says "today" is
+// is the right behavior here (unlike Financials/Analytics, which compute
+// "today" server-side in Mountain time for date-range accuracy).
+function isToday(dateStr) {
+  if (!dateStr) return false;
+  const d = new Date(dateStr);
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+}
+function visibleListings() {
+  return todayOnly ? listings.filter(l => isToday(l.created_at)) : listings;
+}
+function toggleTodayFilter() {
+  todayOnly = !todayOnly;
+  document.getElementById('today-filter-btn').classList.toggle('active', todayOnly);
+  renderTiles();
+}
 let selected      = new Set();
 let quantities    = {};
 let dirtyTitles   = {}; // id -> unsaved title text, so background refreshes don't clobber in-progress edits
@@ -1127,7 +1150,7 @@ async function loadListings() {
 function updateStats() {
   let totalVal = 0, totalUnits = 0, itemCount = 0;
   const inSelectMode = selected.size > 0;
-  listings.forEach(l => {
+  visibleListings().forEach(l => {
     if (inSelectMode && !selected.has(String(l.id))) return;
     const qty = quantities[l.id] ?? l.quantity ?? 1;
     totalVal += l.price * qty;
@@ -1169,9 +1192,19 @@ function renderTiles() {
     };
   }
 
-  if (!listings.length) {
+  const visible = visibleListings();
+  if (!visible.length) {
     grid.innerHTML = '';
     empty.style.display = 'block';
+    const title = empty.querySelector('.empty-title');
+    const sub = empty.querySelector('.empty-sub');
+    if (todayOnly) {
+      if (title) title.textContent = 'No items scanned today yet';
+      if (sub) sub.textContent = 'Turn off "Today Only" to see the rest of the queue';
+    } else {
+      if (title) title.textContent = 'No items in batch';
+      if (sub) sub.textContent = 'Use Scan or Upload to add items';
+    }
     document.getElementById('stat-items').textContent = '0';
     document.getElementById('stat-value').textContent = '$0';
     document.getElementById('stat-units').textContent = '0';
@@ -1181,7 +1214,7 @@ function renderTiles() {
 
   updateStats();
 
-  grid.innerHTML = listings.map(l => {
+  grid.innerHTML = visible.map(l => {
     const qty = quantities[l.id] ?? l.quantity;
     const isSel = selected.has(String(l.id));
     const cond = (l.condition || 'used').toString().toLowerCase().trim();
@@ -1584,7 +1617,7 @@ function toggleSelect(id) {
   updateSubmitBtn();
   updateStats();
 }
-function selectAll()   { listings.forEach(l => selected.add(String(l.id))); renderTiles(); }
+function selectAll()   { visibleListings().forEach(l => selected.add(String(l.id))); renderTiles(); }
 function deselectAll() { selected.clear(); renderTiles(); }
 
 // Replaces the old scan-time auto-assign entirely (it polled for up to 2 minutes after
