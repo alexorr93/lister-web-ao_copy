@@ -9564,10 +9564,18 @@ def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> di
         page += 1
 
     # Every page landed — drop any Active row this run never touched (sold, ended,
-    # or relisted under a different item_id since the run started).
+    # or relisted under a different item_id since the run started). EXCEPT rows
+    # carrying a manual sku_override: that correction has no other home anywhere
+    # in the system (see set_sku_override), so deleting the row here would
+    # silently and permanently destroy it the moment a listing ends -- with zero
+    # audit trail, unrecoverable. Confirmed this actually happened to a real
+    # item. A listing that's no longer active still gets marked as such
+    # everywhere else (it just won't show as "Active" in listing_status), but
+    # the override itself is preserved for good.
     supabase.table("ebay_listing_status").delete()\
         .eq("business_id", business_id).eq("listing_status", "Active")\
-        .lt("updated_at", run_started_at).execute()
+        .lt("updated_at", run_started_at)\
+        .is_("sku_override", "null").execute()
 
     save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_CHECKPOINT_PAGE", "")
     save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_RUN_STARTED_AT", "")
