@@ -355,8 +355,7 @@ select.field-input { background: #fff; color: #0f172a; }
         <input type="text" class="field-input" id="actionbar-suffix-input" placeholder="optional" oninput="setActiveLotSuffix(this.value)" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="actionbar-suffix-nofill" disabled style="font-size:12px;padding:5px 8px;width:70px;"/>
         <button class="btn" style="font-size:11px;padding:5px 6px;" onclick="unlockSuffixInput(this)" title="Click to type a custom 2nd half">✏️</button>
       </div>
-      <button class="btn btn-primary" id="schedule-v2-btn" style="display:none" onclick="submitSelectedScheduleV2()">⏰ Schedule to eBay</button>
-      <button class="btn btn-primary" id="publish-now-v2-btn" style="display:none;background:#ea580c;border-color:#ea580c;" onclick="submitSelectedNowV2()" title="SKU stays editable after publishing">⚡ Publish Immediately</button>
+      <button class="btn btn-primary" id="publish-now-v2-btn" style="display:none;background:#ea580c;border-color:#ea580c;" onclick="submitSelectedNowV2()" title="SKU stays editable after publishing">📤 Publish to eBay</button>
       <button class="btn btn-primary" id="submit-shopify-btn" style="display:none;background:#95bf47;border-color:#95bf47;" onclick="submitSelectedToShopify()">🛍️ Publish to Shopify</button>
       <button class="btn" id="archive-selected-btn" style="display:none;color:var(--red);border-color:#991b1b;" onclick="archiveSelected()">🗄️ Archive Selected</button>
       <div style="display:none;align-items:center;gap:4px;" id="bulk-shipping-wrap" title="Applies a shipping policy to every currently selected item">
@@ -1761,12 +1760,9 @@ async function rematchCategory() {
   toast(`${matched} matched, ${fellBack} fell back to the catch-all${failed ? ', ' + failed + ' failed' : ''}`);
 }
 function updateSubmitBtn() {
-  const btn = document.getElementById('schedule-v2-btn');
-  btn.style.display = selected.size > 0 ? 'inline-block' : 'none';
-  btn.textContent = `⏰ Schedule ${selected.size} to eBay`;
   const nowBtnV2 = document.getElementById('publish-now-v2-btn');
   nowBtnV2.style.display = selected.size > 0 ? 'inline-block' : 'none';
-  nowBtnV2.textContent = `⚡ Publish ${selected.size} Immediately`;
+  nowBtnV2.textContent = `📤 Publish ${selected.size} to eBay`;
   const shopBtn = document.getElementById('submit-shopify-btn');
   shopBtn.style.display = selected.size > 0 ? 'inline-block' : 'none';
   shopBtn.textContent = `🛍️ Publish ${selected.size} to Shopify`;
@@ -1846,30 +1842,6 @@ function showBatchProgress(current, total, label) {
 }
 function hideBatchProgress() {
   document.getElementById('batch-submit-progress').style.display = 'none';
-}
-
-async function submitSelectedScheduleV2() {
-  if (!selected.size) return;
-  const ids = Array.from(selected);
-  if (!validateLotSkusForPublish(ids)) return;
-  const hours = 2; // fixed default now that the editable hours box was removed from the page
-  const ok = confirm(`Schedule ${ids.length} item(s) to go live on eBay in ${hours} hour(s)?\n\nSchedule is the only bulk action here — nothing publishes immediately. You can still adjust or cancel any item individually before it goes live.`);
-  if (!ok) return;
-  let success = 0, failed = 0;
-  for (let i = 0; i < ids.length; i++) {
-    const id = ids[i];
-    showBatchProgress(i + 1, ids.length, 'Scheduling to eBay');
-    try {
-      const r = await api('POST', `/api/listings/${id}/ebay-v2`, {mode: 'schedule', hours_from_now: hours});
-      const l = listings.find(x => String(x.id) === id);
-      if (l) { l.ebay_status = r.status; l.ebay_item_id = r.item_id; l.ebay_scheduled_at = r.scheduled_at; l.ebay_sku = r.sku; }
-      success++;
-    } catch(e) { failed++; }
-    renderTiles();
-  }
-  hideBatchProgress();
-  toast(`Scheduled ${success} item(s)${failed ? ', ' + failed + ' failed' : ''} ✓`);
-  renderTiles();
 }
 
 async function submitSelectedNowV2() {
