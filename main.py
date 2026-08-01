@@ -9405,10 +9405,14 @@ def _ebay_get_unsold_listings_page(token: str, page_number: int, entries_per_pag
     return _ebay_xml_to_dict(root)
 
 def _sync_ebay_unsold_listings_work(business_id: str) -> dict:
-    """Pulls every page of eBay's real UnsoldList and wholesale-replaces
-    ebay_listing_status for this business — a listing that's since been relisted or
-    sold should disappear from 'inactive', not linger from a stale row, so this is a
-    full delete+replace rather than an incremental upsert."""
+    """Pulls every page of eBay's real UnsoldList and upserts it into
+    ebay_listing_status. Never deletes -- a listing eBay's UnsoldList doesn't
+    return this run (relisted, sold, or otherwise no longer unsold) just keeps
+    its last-known row rather than being wiped; any sku_override on it is
+    preserved regardless. (Previously did a full delete+replace scoped to
+    listing_status='Unsold' -- changed after a real, confirmed case of a manual
+    sku_override being permanently destroyed by an equivalent delete pattern on
+    the Active-listings side, with zero audit trail to even detect it happened.)"""
     import datetime as _dt
 
     token = get_ebay_access_token(business_id)
@@ -9450,10 +9454,11 @@ def _sync_ebay_unsold_listings_work(business_id: str) -> dict:
             "updated_at": now_iso,
         })
 
-    # Scoped to listing_status="Unsold" specifically — this table also holds "Active"
-    # rows synced independently by the Lots page (see _sync_ebay_active_listings_work
-    # below); an unscoped delete here would wipe those out on every Inactive-tab sync.
-    supabase.table("ebay_listing_status").delete().eq("business_id", business_id).eq("listing_status", "Unsold").execute()
+    # Upsert only -- never delete. A row this fetch doesn't include anymore (sold,
+    # relisted, or just paginated differently this run) simply keeps whatever it
+    # last had rather than being wiped; any sku_override on it survives
+    # regardless. If it later shows up as Active, the Active-listings sync
+    # updates its listing_status itself the next time that runs.
     if rows:
         supabase.table("ebay_listing_status").upsert(rows, on_conflict="business_id,item_id").execute()
 
@@ -9572,10 +9577,19 @@ def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> di
     # item. A listing that's no longer active still gets marked as such
     # everywhere else (it just won't show as "Active" in listing_status), but
     # the override itself is preserved for good.
-    supabase.table("ebay_listing_status").delete()\
+    # Every page landed. A listing this run never touched again (sold, ended, or
+    # relisted under a different item_id since the run started) is marked Ended
+    # here -- NEVER deleted. This table is the only place sku_override lives, has
+    # no audit trail, and the person building on top of this correctly pointed
+    # out there's no such thing as "delete" in a real database when the data is
+    # still meaningfully useful later (a since-ended listing's row is exactly
+    # what a past order needs to resolve its SKU against). The active-listings
+    # count elsewhere already filters on listing_status="Active" specifically,
+    # so marking Ended (instead of leaving stale "Active") keeps that count
+    # correct without erasing anything.
+    supabase.table("ebay_listing_status").update({"listing_status": "Ended"})\
         .eq("business_id", business_id).eq("listing_status", "Active")\
-        .lt("updated_at", run_started_at)\
-        .is_("sku_override", "null").execute()
+        .lt("updated_at", run_started_at).execute()
 
     save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_CHECKPOINT_PAGE", "")
     save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_RUN_STARTED_AT", "")
@@ -9844,7 +9858,8 @@ async def shopify_sync_inactive_items(request: Request, response: Response, limi
     response.headers["Cache-Control"] = "no-store"
     limit = max(1, min(limit, 500))
 
-    res = supabase.table("ebay_listing_status").select("*").eq("business_id", business_id).execute()
+    res = supabase.table("ebay_listing_status").select("*")\
+        .eq("business_id", business_id).eq("listing_status", "Unsold").execute()
     rows = res.data or []
     total = len(rows)
     rows.sort(key=lambda r: r.get("end_time") or "", reverse=True)
@@ -10430,8 +10445,8 @@ async def list_inventory(request: Request):
     # current source for "is this eBay item still active", used here to tell a
     # genuinely-unmatched Shopify item apart from one whose eBay side ended (the
     # end-and-relist scenario) for the Manual Match candidate list below.
-    active_ebay_ids = {r["item_id"] for r in _fetch_all("ebay_listing_status", "item_id")
-                        if r.get("item_id")}
+    active_ebay_ids = {r["item_id"] for r in _fetch_all("ebay_listing_status", "item_id,listing_status")
+                        if r.get("item_id") and r.get("listing_status") == "Active"}
     # shopify_inventory.id is a VARIANT id (that's what fetch_shopify_inventory_items
     # keys it by), but inventory_match.shopify_id can hold either that same variant
     # id (rows from ordinary title-matching) OR a plain PRODUCT id (rows from the
