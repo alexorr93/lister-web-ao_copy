@@ -8961,6 +8961,62 @@ def _fetch_all_shopify_products(domain: str, shopify_token: str, location_id: st
         cursor = page_info.get("endCursor")
     return catalog, True, pages
 
+def _fetch_shopify_variants_by_ids(domain: str, shopify_token: str, location_id: str, variant_ids: list) -> dict:
+    """Direct Shopify GraphQL lookup for a known, exact list of variant IDs (from
+    inventory_match.shopify_id, locked via hd_id) -- returns {variant_id: {title,
+    qty, inventory_item_id}}. This is what makes hd_id-matched items skip the
+    expensive full-catalog title scan entirely: instead of paginating every
+    product and fuzzy-matching by normalized title, this asks Shopify for
+    exactly the variants already known to be the right ones. Same request
+    shape/auth/retry/throttle-pacing as _fetch_all_shopify_products above, just
+    querying nodes(ids: ...) instead of products(first: ...) -- kept consistent
+    on purpose. A batch that fails after retries is simply left out of the
+    result; the caller falls back to the title-matched catalog scan for
+    anything missing here, so a failure here can never break a sync, only
+    make it fall back to the slower path for that batch."""
+    import requests as _req, time
+    result = {}
+    headers = {"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"}
+    for i in range(0, len(variant_ids), 100):
+        batch = variant_ids[i:i + 100]
+        gids = ", ".join(f'"gid://shopify/ProductVariant/{vid}"' for vid in batch)
+        query = ('{ nodes(ids: [' + gids + ']) { ... on ProductVariant { id product { title } '
+                 'inventoryItem { id inventoryLevel(locationId: "' + location_id + '") '
+                 '{ quantities(names: ["available"]) { quantity } } } } } }')
+        body = None
+        for attempt in range(8):
+            r = _req.post(f"https://{domain}/admin/api/2024-10/graphql.json", headers=headers,
+                           json={"query": query}, timeout=30)
+            if r.status_code == 200:
+                body = r.json()
+                break
+            if r.status_code == 429:
+                wait = float(r.headers.get("Retry-After", 2 ** attempt))
+                time.sleep(min(wait, 60))
+                continue
+            break
+        if body is None:
+            continue  # this batch failed after retries -- caller's catalog-scan fallback covers it
+        for node in ((body.get("data") or {}).get("nodes") or []):
+            if not node:
+                continue
+            variant_gid = node.get("id", "")
+            variant_id = variant_gid.rsplit("/", 1)[-1] if variant_gid else None
+            if not variant_id:
+                continue
+            inv_item = node.get("inventoryItem") or {}
+            quantities = (inv_item.get("inventoryLevel") or {}).get("quantities") or []
+            qty = quantities[0]["quantity"] if quantities else None
+            product = node.get("product") or {}
+            result[variant_id] = {"title": product.get("title"), "qty": qty, "inventory_item_id": inv_item.get("id")}
+        throttle = ((body.get("extensions", {}) or {}).get("cost", {}) or {}).get("throttleStatus", {})
+        available = throttle.get("currentlyAvailable")
+        cost = (body.get("extensions", {}) or {}).get("cost", {}).get("requestedQueryCost")
+        restore_rate = throttle.get("restoreRate")
+        if available is not None and cost and restore_rate and available < cost:
+            time.sleep(min((cost - available) / restore_rate, 10))
+    return result
+
 def _safe_int(v):
     try:
         return int(v)
@@ -9161,10 +9217,13 @@ def _ebay_get_item_status(token: str, item_id: str) -> dict:
     root = ET.fromstring(r.content)
     return _ebay_xml_to_dict(root)
 
-def _shopify_sync_check_one(norm_title: str, entry: dict, ebay_token: str, shopify_catalog: dict) -> dict:
-    """The eBay side of the lookup for one sold title (Shopify's side is now a plain
-    dict lookup against the pre-fetched catalog — see _fetch_all_shopify_products).
-    Runs off the request thread (see refresh endpoint) since it's pure blocking I/O —
+def _shopify_sync_check_one(norm_title: str, entry: dict, ebay_token: str, shopify_catalog: dict,
+                             direct_variant_matches: dict = None) -> dict:
+    """The eBay side of the lookup for one sold title (Shopify's side prefers a
+    direct hd_id-based variant match when one exists -- see
+    _fetch_shopify_variants_by_ids -- and only falls back to the pre-fetched
+    title-matched catalog for items with no locked pairing). Runs off the
+    request thread (see refresh endpoint) since it's pure blocking I/O —
     parallelizing this is what keeps a multi-day resync from taking forever."""
     import requests as _req
 
@@ -9209,7 +9268,10 @@ def _shopify_sync_check_one(norm_title: str, entry: dict, ebay_token: str, shopi
         except Exception:
             pass
 
-    match = shopify_catalog.get(norm_title)
+    shopify_id = entry.get("shopify_id")
+    match = (direct_variant_matches or {}).get(shopify_id) if shopify_id else None
+    if match is None:
+        match = shopify_catalog.get(norm_title)
     return {
         "norm_title": norm_title, "sku": sku, "legacy_item_id": legacy_item_id,
         "ebay_live_qty": ebay_live_qty, "ebay_ended": ebay_ended, "shopify_found": match is not None,
@@ -9247,6 +9309,23 @@ def _shopify_sync_refresh_work(business_id: str, items: list) -> dict:
     if not sold_by_title:
         return {"checked": 0}
 
+    # Resolve each sold item's locked Shopify variant (via hd_id/inventory_match,
+    # matched on legacy_item_id -- the real eBay item ID) BEFORE deciding whether
+    # a full catalog scan is even needed. As of this being written, coverage is
+    # 4568/4569 active listings, so on a typical day every sold item already has
+    # a locked pairing and the expensive full-catalog scan below can be skipped
+    # entirely -- it only runs as a fallback for genuinely unmatched items.
+    legacy_ids = [v["legacy_item_id"] for v in sold_by_title.values() if v.get("legacy_item_id")]
+    if legacy_ids:
+        match_res = supabase.table("inventory_match").select("ebay_id,shopify_id")\
+            .eq("business_id", business_id).in_("ebay_id", legacy_ids).execute()
+        match_by_ebay_id = {r["ebay_id"]: r["shopify_id"] for r in (match_res.data or []) if r.get("shopify_id")}
+        for v in sold_by_title.values():
+            v["shopify_id"] = match_by_ebay_id.get(v.get("legacy_item_id"))
+    else:
+        for v in sold_by_title.values():
+            v["shopify_id"] = None
+
     # Only ever call eBay's API for a title we've never successfully gotten a live
     # quantity for — re-checking every item in the window on every single run is
     # what exhausted eBay's daily Browse API rate limit (confirmed: hundreds of
@@ -9281,20 +9360,34 @@ def _shopify_sync_refresh_work(business_id: str, items: list) -> dict:
     shopify_token = get_shopify_access_token(business_id) if domain else None
 
     shopify_catalog = {}
+    direct_variant_matches = {}
     if domain and shopify_token:
         loc_headers = {"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"}
         location_id = _get_shopify_primary_location_id(domain, loc_headers)
         if location_id:
-            shopify_catalog, catalog_complete, catalog_pages = _fetch_all_shopify_products(domain, shopify_token, location_id)
-            if not catalog_complete:
-                # Don't write ANYTHING — an incomplete catalog would mark real,
-                # existing products "not found" just because their page never got
-                # fetched, silently overwriting correct data from a prior run.
-                # Leaving the snapshot untouched and reporting the failure is safer
-                # than a run that "succeeds" while quietly making things wrong.
-                return {"error": f"Shopify catalog scan was rate-limited and only got through "
-                                  f"{catalog_pages} page(s) ({len(shopify_catalog)} products) before giving up. "
-                                  f"Nothing was changed — try Sync Now again in a minute."}
+            resolved_ids = list({v["shopify_id"] for v in sold_by_title.values() if v.get("shopify_id")})
+            if resolved_ids:
+                direct_variant_matches = _fetch_shopify_variants_by_ids(domain, shopify_token, location_id, resolved_ids)
+
+            # Only pay for the expensive full-catalog title scan when something
+            # is left unresolved after the direct hd_id-based lookup above --
+            # either it never had a locked pairing, or the direct fetch didn't
+            # return a result for it (e.g. a stale/deleted variant ID).
+            still_unresolved = any(
+                not v.get("shopify_id") or v["shopify_id"] not in direct_variant_matches
+                for v in sold_by_title.values()
+            )
+            if still_unresolved:
+                shopify_catalog, catalog_complete, catalog_pages = _fetch_all_shopify_products(domain, shopify_token, location_id)
+                if not catalog_complete:
+                    # Don't write ANYTHING — an incomplete catalog would mark real,
+                    # existing products "not found" just because their page never got
+                    # fetched, silently overwriting correct data from a prior run.
+                    # Leaving the snapshot untouched and reporting the failure is safer
+                    # than a run that "succeeds" while quietly making things wrong.
+                    return {"error": f"Shopify catalog scan was rate-limited and only got through "
+                                      f"{catalog_pages} page(s) ({len(shopify_catalog)} products) before giving up. "
+                                      f"Nothing was changed — try Sync Now again in a minute."}
 
     need_ebay_check = {k: v for k, v in sold_by_title.items() if k not in known_ebay and k not in recent_failures}
     already_known = {k: v for k, v in sold_by_title.items() if k in known_ebay}
@@ -9302,17 +9395,20 @@ def _shopify_sync_refresh_work(business_id: str, items: list) -> dict:
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         checked_results = list(pool.map(
-            lambda kv: _shopify_sync_check_one(kv[0], kv[1], ebay_token, shopify_catalog),
+            lambda kv: _shopify_sync_check_one(kv[0], kv[1], ebay_token, shopify_catalog, direct_variant_matches),
             need_ebay_check.items(),
         ))
 
     # Shopify data is always refreshed (cheap — it's just a dict lookup against the
-    # catalog we already fetched above), but the eBay side is reused as-is rather
-    # than re-hitting an API we've already gotten a real answer from.
+    # direct matches / catalog we already fetched above), but the eBay side is
+    # reused as-is rather than re-hitting an API we've already gotten a real
+    # answer from.
     reused_results = []
     for norm_title, entry in already_known.items():
         known = known_ebay[norm_title]
-        match = shopify_catalog.get(norm_title)
+        match = direct_variant_matches.get(entry.get("shopify_id")) if entry.get("shopify_id") else None
+        if match is None:
+            match = shopify_catalog.get(norm_title)
         reused_results.append({
             "norm_title": norm_title, "sku": entry["sku"], "legacy_item_id": entry.get("legacy_item_id"),
             "ebay_live_qty": known["ebay_live_qty"], "ebay_ended": known["ebay_ended"],
@@ -10377,6 +10473,23 @@ async def manual_match_inventory(body: ManualMatch, request: Request):
     if not ebay_row.get("ebay_id") or not shopify_row.get("shopify_id"):
         raise HTTPException(400, "First row must be eBay-only, second must be Shopify-only")
 
+    # shopify_row is allowed to already carry an old ebay_id -- that's the whole
+    # point of the end-and-relist scenario this also serves (the Shopify side's
+    # real pairing lives on an eBay listing that's since ended, and the new
+    # relisted item needs to inherit it). What's NOT allowed is stealing a
+    # pairing whose eBay side is still genuinely active -- that would silently
+    # orphan a live listing. Checked against ebay_listing_status directly
+    # (the real current-state source), not assumed from the row's own data.
+    old_ebay_id = shopify_row.get("ebay_id")
+    if old_ebay_id and old_ebay_id != ebay_row["ebay_id"]:
+        still_active = (supabase.table("ebay_listing_status").select("item_id")
+                         .eq("business_id", business_id).eq("item_id", old_ebay_id)
+                         .eq("listing_status", "Active").limit(1).execute().data)
+        if still_active:
+            raise HTTPException(409, f"This Shopify item is still actively matched to eBay listing "
+                                      f"{old_ebay_id}, which is currently Active -- can't reassign it "
+                                      f"without un-matching that listing first.")
+
     new_hd_id = str(_uuid.uuid4())
     supabase.table("inventory_match").insert({
         "business_id": business_id, "title": ebay_row.get("title") or shopify_row.get("title"),
@@ -10409,6 +10522,13 @@ async def list_inventory(request: Request):
     inv_rows = _fetch_all("inventory_match", "*")
     ebay_by_id = {r["id"]: r for r in _fetch_all("ebay_inventory", "*")}
     shopify_records_all = _fetch_all("shopify_inventory", "*")
+    # ebay_inventory.listing_status is never actually populated (sync_inventory
+    # hardcodes it to None) -- ebay_listing_status is the real, reliably-kept-
+    # current source for "is this eBay item still active", used here to tell a
+    # genuinely-unmatched Shopify item apart from one whose eBay side ended (the
+    # end-and-relist scenario) for the Manual Match candidate list below.
+    active_ebay_ids = {r["item_id"] for r in _fetch_all("ebay_listing_status", "item_id")
+                        if r.get("item_id")}
     # shopify_inventory.id is a VARIANT id (that's what fetch_shopify_inventory_items
     # keys it by), but inventory_match.shopify_id can hold either that same variant
     # id (rows from ordinary title-matching) OR a plain PRODUCT id (rows from the
@@ -10448,6 +10568,7 @@ async def list_inventory(request: Request):
             "ebay_local_photo_ids": e.get("local_photo_ids"), "ebay_created_at": e.get("start_time"),
             "shopify_sku": s.get("sku"), "shopify_qty": s.get("quantity"), "shopify_price": s.get("price"), "shopify_status": s.get("status"),
             "shopify_product_id": s.get("product_id") or (row.get("shopify_id") if row.get("shopify_id") else None),
+            "ebay_still_active": (row.get("ebay_id") in active_ebay_ids) if row.get("ebay_id") else None,
             "listing_id": (matching_listing.get("id") if matching_listing and not matching_listing.get("shopify_product_id") else None),
             "qty_variance": (e.get("quantity") is not None and s.get("quantity") is not None and e.get("quantity") != s.get("quantity")),
         })

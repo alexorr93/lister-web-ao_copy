@@ -473,10 +473,21 @@ function closeManualMatch(e) {
 
 function renderMmCandidates() {
   const q = document.getElementById('mm-search-input').value.trim().toLowerCase();
-  // Candidates are rows on the OPPOSITE side that are still unmatched (one-sided).
+  // Candidates are rows on the OPPOSITE side that are either genuinely
+  // unmatched, OR (when searching from an eBay-only row) matched to an eBay
+  // listing that's since ended -- the end-and-relist scenario, where the
+  // Shopify side's real pairing needs to move to the new listing instead.
+  // A Shopify item still matched to a genuinely ACTIVE eBay listing is never
+  // shown here -- reassigning that would silently orphan a live listing.
   const candidates = inventory.filter(r => {
-    const isOneSided = mmSourceIsEbay ? (r.shopify_product_id && !r.ebay_item_id) : (r.ebay_item_id && !r.shopify_product_id);
-    if (!isOneSided) return false;
+    if (mmSourceIsEbay) {
+      if (!r.shopify_product_id) return false;
+      const isUnmatched = !r.ebay_item_id;
+      const isReassignable = r.ebay_item_id && r.ebay_still_active === false;
+      if (!isUnmatched && !isReassignable) return false;
+    } else {
+      if (!(r.ebay_item_id && !r.shopify_product_id)) return false;
+    }
     if (q && !(r.title || '').toLowerCase().includes(q)) return false;
     return true;
   }).slice(0, 50);
@@ -485,12 +496,16 @@ function renderMmCandidates() {
     area.innerHTML = '<div class="empty">No matching candidates found — try a different search term.</div>';
     return;
   }
-  area.innerHTML = candidates.map(c => `
+  area.innerHTML = candidates.map(c => {
+    const isReassign = mmSourceIsEbay && c.ebay_item_id && c.ebay_still_active === false;
+    return `
     <div class="mm-candidate" onclick="confirmManualMatch('${c.id}')">
       <div style="font-weight:600;">${escapeHtml(c.title || '')}</div>
       <div class="muted" style="font-size:11px;">${mmSourceIsEbay ? 'Shopify Product ID' : 'eBay Item ID'}: ${escapeHtml(mmSourceIsEbay ? (c.shopify_product_id || '') : (c.ebay_item_id || ''))}</div>
+      ${isReassign ? `<div style="font-size:11px;color:#f0ad4e;margin-top:2px;">⚠️ Currently linked to ended eBay listing ${escapeHtml(c.ebay_item_id)} — that link will be removed and replaced with this one</div>` : ''}
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 async function confirmManualMatch(candidateRowId) {
