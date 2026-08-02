@@ -433,10 +433,11 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
       <input type="file" id="upload-file-input" accept="image/*,image/heic" multiple style="display:none;" onchange="handleUploadFiles(this)"/>
       <div id="upload-thumbs" class="photo-thumbs"></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;"><button class="btn" style="font-size:14px;padding:12px;" onclick="document.getElementById('upload-camera-input').click()">📷 Take Photo</button><button class="btn" style="font-size:14px;padding:12px;" onclick="document.getElementById('upload-file-input').click()">🖼️ Gallery</button></div><input type="file" id="upload-camera-input" accept="image/*" capture="environment" multiple style="display:none;" onchange="handleUploadFiles(this, true)"/>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;"><button class="btn" style="font-size:14px;padding:12px;" onclick="openCameraMode()">📷 Take Photo</button><button class="btn" style="font-size:14px;padding:12px;" onclick="document.getElementById('upload-file-input').click()">🖼️ Gallery</button></div><input type="file" id="upload-camera-input" accept="image/*" capture="environment" multiple style="display:none;" onchange="handleUploadFiles(this, true)"/>
 <div id="camera-mode-overlay" style="display:none;position:fixed;inset:0;background:#000;z-index:500;flex-direction:column;">
   <div style="position:relative;flex:1;overflow:hidden;">
-    <video id="camera-mode-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;background:#000;transform-origin:center center;"></video>
+    <video id="camera-mode-video" autoplay playsinline muted onclick="onCameraVideoTap(event)" style="width:100%;height:100%;object-fit:cover;background:#000;transform-origin:center center;"></video>
+    <div id="camera-focus-ring" style="display:none;position:absolute;width:70px;height:70px;border:2px solid #fbbf24;border-radius:8px;pointer-events:none;transform:translate(-50%,-50%);"></div>
     <div style="position:absolute;bottom:14px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:10px;background:rgba(0,0,0,0.55);border-radius:20px;padding:6px 10px;">
       <button onclick="adjustCameraZoom(-0.5)" style="width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,0.15);border:none;color:#fff;font-size:18px;line-height:1;">−</button>
       <span id="camera-zoom-label" style="color:#fff;font-size:12px;font-weight:600;min-width:32px;text-align:center;">1.0x</span>
@@ -2406,6 +2407,54 @@ let cameraModeStartIdx = 0;  // upPhotos.length when this session opened, so Can
 let cameraZoomLevel = 1;
 let cameraPinchStartDist = null;
 let cameraPinchStartZoom = 1;
+
+// Real tap-to-focus where the browser actually exposes it (Chrome on
+// Android does; iOS Safari and desktop browsers don't -- confirmed, not a
+// gap in this code, Apple doesn't expose camera focus control to any
+// website at all). Feature-detected so it's a silent no-op rather than an
+// error anywhere it's unsupported -- the visual focus ring still shows
+// either way for consistent feedback, it just won't have moved the actual
+// hardware focus point on unsupported devices (which fall back to whatever
+// continuous autofocus the camera is already doing by default).
+function onCameraVideoTap(e) {
+  const video = document.getElementById('camera-mode-video');
+  const rect = video.getBoundingClientRect();
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  if (e.touches && e.touches.length > 1) return;  // don't fire on pinch
+
+  const ring = document.getElementById('camera-focus-ring');
+  ring.style.left = (clientX - rect.left) + 'px';
+  ring.style.top = (clientY - rect.top) + 'px';
+  ring.style.display = 'block';
+  setTimeout(() => { ring.style.display = 'none'; }, 900);
+
+  if (!cameraModeStream) return;
+  const track = cameraModeStream.getVideoTracks()[0];
+  if (!track) return;
+  const supported = navigator.mediaDevices.getSupportedConstraints();
+  if (!supported.pointsOfInterest) return;  // e.g. iOS Safari -- nothing more to do
+
+  // Map the tap position on the displayed (object-fit:cover-cropped)
+  // element back to normalized 0-1 coordinates in the RAW camera frame.
+  const tapXInEl = (clientX - rect.left) / rect.width;
+  const tapYInEl = (clientY - rect.top) / rect.height;
+  const videoAspect = video.videoWidth / video.videoHeight;
+  const elAspect = rect.width / rect.height;
+  let normX, normY;
+  if (videoAspect > elAspect) {
+    const visibleFraction = elAspect / videoAspect;
+    normX = 0.5 - visibleFraction / 2 + tapXInEl * visibleFraction;
+    normY = tapYInEl;
+  } else {
+    const visibleFraction = videoAspect / elAspect;
+    normX = tapXInEl;
+    normY = 0.5 - visibleFraction / 2 + tapYInEl * visibleFraction;
+  }
+  const advanced = [{pointsOfInterest: [{x: normX, y: normY}]}];
+  if (supported.focusMode) advanced[0].focusMode = 'single-shot';
+  track.applyConstraints({advanced}).catch(() => {});
+}
 
 function adjustCameraZoom(delta) {
   cameraZoomLevel = Math.max(1, Math.min(4, cameraZoomLevel + delta));
