@@ -1737,8 +1737,13 @@ function deselectAll() { selected.clear(); renderTiles(); }
 // items, if nothing's selected) don't have one yet, whenever you click it.
 async function autofillLotSku() {
   if (!activeLotSku) { toast('No active lot selected — pick one in Fast Scan/Upload first', 'error'); return; }
+  // Explicit selection = deliberate "put this lot's SKU on exactly these
+  // items" action -- applies to all of them, overwriting whatever SKU (if
+  // any) they already had. No selection = broad safety-net sweep over the
+  // whole queue, where it's still correct to only touch items missing a SKU
+  // rather than risk overwriting a bunch of unrelated, already-correct lots.
   const targets = selected.size ? listings.filter(l => selected.has(String(l.id))) : listings;
-  const todo = targets.filter(l => !lotSkuFor(l));
+  const todo = selected.size ? targets : targets.filter(l => !lotSkuFor(l));
   if (!todo.length) { toast('Nothing needs a Lot SKU ✓'); return; }
   let ok = 0, failed = 0;
   for (const l of todo) {
