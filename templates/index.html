@@ -329,6 +329,7 @@ select.field-input { background: #fff; color: #0f172a; }
         <button onclick="showStuckItems()" style="margin-left:8px;font-size:10px;padding:3px 8px;background:#1e2535;border:1px solid #2d3348;border-radius:6px;color:#64748b;cursor:pointer;" title="See what's stuck">↺ Reset</button>
       </div>
     </div>
+    <div id="intake-sticky-bar" style="position:sticky;top:52px;z-index:90;background:var(--bg);padding-top:4px;margin:0 -16px;padding-left:16px;padding-right:16px;">
     <div class="stats">
       <div class="stat" style="--c:#2563eb"><div class="stat-num" id="stat-items">—</div><div class="stat-lbl">Items</div></div>
       <div class="stat" style="--c:#16a34a"><div class="stat-num" id="stat-value">—</div><div class="stat-lbl">Batch Value</div></div>
@@ -366,6 +367,7 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
       <div class="spacer"></div>
       <button class="btn" style="color:#dc2626;border-color:#dc2626;" onclick="archiveBothPublished()">🗄️ Archive Published</button>
+    </div>
     </div>
     <div id="batch-submit-progress" style="display:none;margin-bottom:10px;">
       <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;"><div id="batch-submit-bar" style="height:100%;background:var(--accent);width:0%;transition:width 0.2s;"></div></div>

@@ -4,7 +4,7 @@
      JS tab-switch buttons on index.html itself, and as real links (`/?tab=...`) from
      every other page. -->
 {% set on_index = active_tab in ['intake', 'upload', 'fastscan', 'auction', 'settings'] %}
-<style>.nav-browsesearch{color:#60a5fa;}.nav-browsesearch.active{background:#3b82f6;color:#fff;}.nav-uncat{color:#f87171;}.nav-uncat.active{background:#dc2626;color:#fff;}.nav-notes{color:#f472b6;}.nav-notes.active{background:#db2777;color:#fff;}</style>
+<style>.nav-browsesearch{color:#60a5fa;}.nav-browsesearch.active{background:#3b82f6;color:#fff;}.nav-uncat{color:#f87171;}.nav-uncat.active{background:#dc2626;color:#fff;}.nav-notes{color:#f472b6;}.nav-notes.active{background:#db2777;color:#fff;}.nav .nav-account{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle;}</style>
 <nav class="nav">
   {% if on_index %}
   <button class="nav-btn nav-intake{{ ' active' if active_tab == 'intake' else '' }}" data-tab="intake">📥 Intake</button>
@@ -45,6 +45,6 @@
   {% if on_index %}
   <a class="nav-download" href="#" onclick="window.location.href='/api/export/ebay-csv';return false;">⬇️ eBay CSV</a>
   {% endif %}
-  {% if account_label %}<span class="nav-account">👤 {{ account_label }}</span>{% endif %}
+  {% if account_label %}<span class="nav-account" title="{{ account_label }}">👤 {{ account_label }}</span>{% endif %}
   <a class="nav-download" href="/logout" style="color:#ef4444;border-color:#7f1d1d;">⏻ Logout</a>
 </nav>
