@@ -433,7 +433,7 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
       <input type="file" id="upload-file-input" accept="image/*,image/heic" multiple style="display:none;" onchange="handleUploadFiles(this)"/>
       <div id="upload-thumbs" class="photo-thumbs"></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;"><button class="btn" style="font-size:14px;padding:12px;" onclick="document.getElementById('upload-camera-input').click()">📷 Take Photo</button><button class="btn" style="font-size:14px;padding:12px;" onclick="document.getElementById('upload-file-input').click()">🖼️ Gallery</button></div><input type="file" id="upload-camera-input" accept="image/*" capture="environment" multiple style="display:none;" onchange="handleUploadFiles(this)"/>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;"><button class="btn" style="font-size:14px;padding:12px;" onclick="document.getElementById('upload-camera-input').click()">📷 Take Photo</button><button class="btn" style="font-size:14px;padding:12px;" onclick="document.getElementById('upload-file-input').click()">🖼️ Gallery</button></div><input type="file" id="upload-camera-input" accept="image/*" capture="environment" multiple style="display:none;" onchange="handleUploadFiles(this, true)"/>
       <div style="margin-bottom:12px;">
         <div class="field-label">Quantity</div>
         <div style="display:flex;align-items:center;gap:12px;margin-top:6px;">
@@ -2376,9 +2376,29 @@ async function createUpGroup() {
   document.getElementById('up-qty-display').textContent = upQtyVal = 1;
 }
 
-async function handleUploadFiles(input) {
+// Explicit, reliable save-to-device -- doesn't depend on whatever the phone's
+// own camera app happens to do after handing a photo back to the browser,
+// which is genuinely inconsistent across iOS/Android versions and not
+// something this app can detect or rely on. Works the same way regardless:
+// creates a real download, so the browser/OS's own save-to-Photos/Downloads
+// flow kicks in exactly like any other file download would.
+function saveFileToDevice(file) {
+  try {
+    const url = URL.createObjectURL(file);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name || `lister-photo-${Date.now()}.jpg`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch(e) { /* non-critical -- never block the actual upload over this */ }
+}
+
+async function handleUploadFiles(input, isCameraCapture) {
   const files = Array.from(input.files).slice(0, 10 - upPhotos.length);
   for (const f of files) {
+    if (isCameraCapture) saveFileToDevice(f);
     const url = URL.createObjectURL(f);
     const idx = upPhotos.length;
     upPhotos.push({file: f, url});
