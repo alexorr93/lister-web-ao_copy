@@ -435,7 +435,14 @@ select.field-input { background: #fff; color: #0f172a; }
       <div id="upload-thumbs" class="photo-thumbs"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;"><button class="btn" style="font-size:14px;padding:12px;" onclick="openCameraMode()">📷 Take Photo</button><button class="btn" style="font-size:14px;padding:12px;" onclick="document.getElementById('upload-file-input').click()">🖼️ Gallery</button></div><input type="file" id="upload-camera-input" accept="image/*" capture="environment" multiple style="display:none;" onchange="handleUploadFiles(this, true)"/>
 <div id="camera-mode-overlay" style="display:none;position:fixed;inset:0;background:#000;z-index:500;flex-direction:column;">
-  <video id="camera-mode-video" autoplay playsinline muted style="flex:1;width:100%;object-fit:cover;background:#000;"></video>
+  <div style="position:relative;flex:1;overflow:hidden;">
+    <video id="camera-mode-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;background:#000;transform-origin:center center;"></video>
+    <div style="position:absolute;bottom:14px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:10px;background:rgba(0,0,0,0.55);border-radius:20px;padding:6px 10px;">
+      <button onclick="adjustCameraZoom(-0.5)" style="width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,0.15);border:none;color:#fff;font-size:18px;line-height:1;">−</button>
+      <span id="camera-zoom-label" style="color:#fff;font-size:12px;font-weight:600;min-width:32px;text-align:center;">1.0x</span>
+      <button onclick="adjustCameraZoom(0.5)" style="width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,0.15);border:none;color:#fff;font-size:18px;line-height:1;">+</button>
+    </div>
+  </div>
   <canvas id="camera-mode-canvas" style="display:none;"></canvas>
   <div style="background:rgba(0,0,0,0.85);padding:10px 12px;">
     <div id="camera-mode-thumbs" style="display:flex;gap:6px;overflow-x:auto;margin-bottom:10px;min-height:44px;"></div>
@@ -2396,6 +2403,40 @@ async function createUpGroup() {
 // capture), so nothing ever leaves this screen until you're actually done.
 let cameraModeStream = null;
 let cameraModeStartIdx = 0;  // upPhotos.length when this session opened, so Cancel can undo just this session's shots
+let cameraZoomLevel = 1;
+let cameraPinchStartDist = null;
+let cameraPinchStartZoom = 1;
+
+function adjustCameraZoom(delta) {
+  cameraZoomLevel = Math.max(1, Math.min(4, cameraZoomLevel + delta));
+  document.getElementById('camera-mode-video').style.transform = `scale(${cameraZoomLevel})`;
+  document.getElementById('camera-zoom-label').textContent = cameraZoomLevel.toFixed(1) + 'x';
+}
+
+function _pinchDist(touches) {
+  const dx = touches[0].clientX - touches[1].clientX;
+  const dy = touches[0].clientY - touches[1].clientY;
+  return Math.hypot(dx, dy);
+}
+
+function _onCameraTouchStart(e) {
+  if (e.touches.length === 2) {
+    cameraPinchStartDist = _pinchDist(e.touches);
+    cameraPinchStartZoom = cameraZoomLevel;
+  }
+}
+function _onCameraTouchMove(e) {
+  if (e.touches.length === 2 && cameraPinchStartDist) {
+    e.preventDefault();
+    const ratio = _pinchDist(e.touches) / cameraPinchStartDist;
+    cameraZoomLevel = Math.max(1, Math.min(4, cameraPinchStartZoom * ratio));
+    document.getElementById('camera-mode-video').style.transform = `scale(${cameraZoomLevel})`;
+    document.getElementById('camera-zoom-label').textContent = cameraZoomLevel.toFixed(1) + 'x';
+  }
+}
+function _onCameraTouchEnd(e) {
+  if (e.touches.length < 2) cameraPinchStartDist = null;
+}
 
 async function openCameraMode() {
   if (!requireActiveLotSku()) return;
@@ -2412,17 +2453,31 @@ async function openCameraMode() {
   }
   document.getElementById('camera-mode-video').srcObject = cameraModeStream;
   cameraModeStartIdx = upPhotos.length;
+  cameraZoomLevel = 1;
+  document.getElementById('camera-mode-video').style.transform = 'scale(1)';
+  document.getElementById('camera-zoom-label').textContent = '1.0x';
   document.getElementById('camera-mode-thumbs').innerHTML = '';
   document.getElementById('camera-mode-done-btn').textContent = 'Done (0)';
   document.getElementById('camera-mode-overlay').style.display = 'flex';
+  const vid = document.getElementById('camera-mode-video');
+  vid.ontouchstart = _onCameraTouchStart;
+  vid.ontouchmove = _onCameraTouchMove;
+  vid.ontouchend = _onCameraTouchEnd;
 }
 
 function captureShot() {
   const video = document.getElementById('camera-mode-video');
   const canvas = document.getElementById('camera-mode-canvas');
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  canvas.getContext('2d').drawImage(video, 0, 0);
+  // Crop to match what's actually shown on screen (the CSS-scaled preview) --
+  // otherwise the saved photo would be the full, unzoomed frame regardless
+  // of how far zoomed in the person was looking when they hit the shutter.
+  const cropW = video.videoWidth / cameraZoomLevel;
+  const cropH = video.videoHeight / cameraZoomLevel;
+  const cropX = (video.videoWidth - cropW) / 2;
+  const cropY = (video.videoHeight - cropH) / 2;
+  canvas.width = cropW;
+  canvas.height = cropH;
+  canvas.getContext('2d').drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
   canvas.toBlob((blob) => {
     if (!blob) return;
     const file = new File([blob], `lister-photo-${Date.now()}.jpg`, {type: 'image/jpeg'});
