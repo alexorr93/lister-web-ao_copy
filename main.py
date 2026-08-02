@@ -1641,7 +1641,13 @@ async def get_stats(request: Request):
         items = res.data or []
         total = len(items)
         value = sum(float(i.get("price") or 0) for i in items)
-        pending = supabase.table("listing_groups").select("id").eq("business_id", business_id).in_("status", ["pending", "processing", "error"]).execute()
+        # "error" means the scan failed or was deliberately abandoned -- it's
+        # done trying, not still working. Counting it as "processing" here
+        # made the progress bar show a wildly inflated, permanently-stuck
+        # number any time a batch of groups got marked error (confirmed: 132
+        # old abandoned groups showed up as "141 scanning" alongside the 9
+        # that were genuinely active).
+        pending = supabase.table("listing_groups").select("id").eq("business_id", business_id).in_("status", ["pending", "processing"]).execute()
         processing = len(pending.data or [])
         return {"total": total, "processing": processing, "value": round(value, 2)}
     except Exception as e:
