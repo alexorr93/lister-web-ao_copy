@@ -433,7 +433,19 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
       <input type="file" id="upload-file-input" accept="image/*,image/heic" multiple style="display:none;" onchange="handleUploadFiles(this)"/>
       <div id="upload-thumbs" class="photo-thumbs"></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;"><button class="btn" style="font-size:14px;padding:12px;" onclick="document.getElementById('upload-camera-input').click()">📷 Take Photo</button><button class="btn" style="font-size:14px;padding:12px;" onclick="document.getElementById('upload-file-input').click()">🖼️ Gallery</button></div><input type="file" id="upload-camera-input" accept="image/*" capture="environment" multiple style="display:none;" onchange="handleUploadFiles(this, true)"/>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;"><button class="btn" style="font-size:14px;padding:12px;" onclick="openCameraMode()">📷 Take Photo</button><button class="btn" style="font-size:14px;padding:12px;" onclick="document.getElementById('upload-file-input').click()">🖼️ Gallery</button></div><input type="file" id="upload-camera-input" accept="image/*" capture="environment" multiple style="display:none;" onchange="handleUploadFiles(this, true)"/>
+<div id="camera-mode-overlay" style="display:none;position:fixed;inset:0;background:#000;z-index:500;flex-direction:column;">
+  <video id="camera-mode-video" autoplay playsinline muted style="flex:1;width:100%;object-fit:cover;background:#000;"></video>
+  <canvas id="camera-mode-canvas" style="display:none;"></canvas>
+  <div style="background:rgba(0,0,0,0.85);padding:10px 12px;">
+    <div id="camera-mode-thumbs" style="display:flex;gap:6px;overflow-x:auto;margin-bottom:10px;min-height:44px;"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+      <button onclick="closeCameraMode(false)" style="background:none;border:none;color:#94a3b8;font-size:14px;font-weight:600;padding:10px;">Cancel</button>
+      <button onclick="captureShot()" style="width:66px;height:66px;border-radius:50%;background:#fff;border:4px solid #64748b;flex-shrink:0;" title="Take photo"></button>
+      <button onclick="closeCameraMode(true)" id="camera-mode-done-btn" style="background:#0891b2;border:none;color:#fff;font-size:14px;font-weight:700;padding:10px 16px;border-radius:8px;">Done (0)</button>
+    </div>
+  </div>
+</div>
       <div style="margin-bottom:12px;">
         <div class="field-label">Quantity</div>
         <div style="display:flex;align-items:center;gap:12px;margin-top:6px;">
@@ -2362,6 +2374,7 @@ async function startUploadBatch() {
   if (!requireActiveLotSku()) return;
   upBatchId = crypto.randomUUID();
   upItems = []; upPhotos = []; upQtyVal = 1;
+  document.getElementById('upload-thumbs').innerHTML = '';
   document.getElementById('upload-start').style.display = 'none';
   document.getElementById('upload-active').style.display = 'block';
   await createUpGroup();
@@ -2370,10 +2383,81 @@ async function startUploadBatch() {
 async function createUpGroup() {
   const r = await api('POST', '/api/groups', {session_id: upBatchId, condition: upCondition, category_mode: categoryMode, pricing_mode: pricingMode});
   upGroupId = r.id;
-  upPhotos = [];
-  document.getElementById('upload-thumbs').innerHTML = '';
   document.getElementById('up-item-label').textContent = `Item ${upItems.length + 1}`;
   document.getElementById('up-qty-display').textContent = upQtyVal = 1;
+}
+
+// ── CONTINUOUS CAMERA MODE ──────────────────────────────────────
+// eBay-style: tap once, stay in the camera, take as many shots as you want,
+// hit Done once. The plain HTML file-input camera trigger fundamentally
+// can't do this -- on most mobile browsers it returns to the page after
+// every single photo even with `multiple` set, requiring a re-tap each
+// time. This builds a real in-page camera instead (getUserMedia + canvas
+// capture), so nothing ever leaves this screen until you're actually done.
+let cameraModeStream = null;
+let cameraModeStartIdx = 0;  // upPhotos.length when this session opened, so Cancel can undo just this session's shots
+
+async function openCameraMode() {
+  if (!requireActiveLotSku()) return;
+  try {
+    cameraModeStream = await navigator.mediaDevices.getUserMedia({
+      video: {facingMode: {ideal: 'environment'}}, audio: false,
+    });
+  } catch(e) {
+    // Camera access denied/unavailable (or just not supported, e.g. desktop
+    // testing) -- fall back to the plain file-input camera trigger rather
+    // than leaving the button dead.
+    document.getElementById('upload-camera-input').click();
+    return;
+  }
+  document.getElementById('camera-mode-video').srcObject = cameraModeStream;
+  cameraModeStartIdx = upPhotos.length;
+  document.getElementById('camera-mode-thumbs').innerHTML = '';
+  document.getElementById('camera-mode-done-btn').textContent = 'Done (0)';
+  document.getElementById('camera-mode-overlay').style.display = 'flex';
+}
+
+function captureShot() {
+  const video = document.getElementById('camera-mode-video');
+  const canvas = document.getElementById('camera-mode-canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  canvas.toBlob((blob) => {
+    if (!blob) return;
+    const file = new File([blob], `lister-photo-${Date.now()}.jpg`, {type: 'image/jpeg'});
+    saveFileToDevice(file);  // same reliable save-to-device as the plain camera button
+    const url = URL.createObjectURL(file);
+    upPhotos.push({file, url});
+    const stripCount = upPhotos.length - cameraModeStartIdx;
+    document.getElementById('camera-mode-thumbs').insertAdjacentHTML('beforeend',
+      `<img src="${url}" style="width:44px;height:44px;object-fit:cover;border-radius:6px;flex-shrink:0;"/>`);
+    document.getElementById('camera-mode-done-btn').textContent = `Done (${stripCount})`;
+  }, 'image/jpeg', 0.9);
+}
+
+function closeCameraMode(keepShots) {
+  if (cameraModeStream) {
+    cameraModeStream.getTracks().forEach(t => t.stop());
+    cameraModeStream = null;
+  }
+  document.getElementById('camera-mode-overlay').style.display = 'none';
+  if (!keepShots) {
+    // Cancel -- undo only what was captured THIS session, leave anything
+    // already in upPhotos (from a prior camera-mode session or gallery
+    // picks) untouched.
+    const removed = upPhotos.splice(cameraModeStartIdx);
+    removed.forEach(p => URL.revokeObjectURL(p.url));
+    return;
+  }
+  // Sync the main upload screen's thumbnail strip with what was just captured.
+  for (let i = cameraModeStartIdx; i < upPhotos.length; i++) {
+    const div = document.createElement('div');
+    div.className = 'photo-thumb';
+    div.id = `up-thumb-${i}`;
+    div.innerHTML = `<img src="${upPhotos[i].url}"/><button class="photo-thumb-del" onclick="removeUpPhoto(${i})">×</button>`;
+    document.getElementById('upload-thumbs').appendChild(div);
+  }
 }
 
 // Explicit, reliable save-to-device -- doesn't depend on whatever the phone's
@@ -2422,30 +2506,68 @@ function upQty(d) {
   document.getElementById('up-qty-display').textContent = upQtyVal;
 }
 
-async function submitUploadItem() {
+let upBackgroundJobs = 0;  // count of item uploads still running in the background
+
+function _updateUpBackgroundIndicator() {
+  const el = document.getElementById('up-progress-text');
+  const prog = document.getElementById('up-progress');
+  if (upBackgroundJobs > 0) {
+    prog.style.display = 'block';
+    document.getElementById('up-progress-bar').style.width = '100%';
+    el.textContent = `Uploading ${upBackgroundJobs} item(s) in the background — keep scanning, this won't block you`;
+  } else {
+    prog.style.display = 'none';
+  }
+}
+
+// This is the actual click handler -- it does NOT wait on any network call.
+// It captures this item's photos/settings, immediately clears the screen and
+// creates the next group so you can start taking the next item's photos
+// right away, and kicks the real upload+submit off as a detached background
+// task. Previously this awaited a sequential (not even concurrent) loop of
+// photo uploads before you could do anything else -- 4 photos took visibly
+// longer than 1 and fully blocked moving on to the next scan the whole time.
+function submitUploadItem() {
   if (!upPhotos.length) { toast('Select photos first', 'error'); return; }
   if (!requireActiveLotSku()) return;
-  const lotForThis = activeLotSku;
+  const photosForThis = upPhotos;
   const groupForThis = upGroupId;
-  const prog = document.getElementById('up-progress');
-  const bar  = document.getElementById('up-progress-bar');
-  const txt  = document.getElementById('up-progress-text');
-  prog.style.display = 'block';
-  for (let i = 0; i < upPhotos.length; i++) {
-    bar.style.width = `${((i+1)/upPhotos.length*100)}%`;
-    txt.textContent = `Uploading ${i+1}/${upPhotos.length}...`;
-    const fd = new FormData();
-    fd.append('file', upPhotos[i].file);
-    fd.append('group_id', upGroupId);
-    fd.append('index', i);
-    await fetch('/api/photos/upload', {method:'POST', body:fd});
-  }
-  await api('POST', '/api/groups/submit', {group_id:upGroupId, condition:upCondition, quantity:upQtyVal});
-  upItems.push({count: upPhotos.length, qty: upQtyVal});
-  prog.style.display = 'none';
-  toast(`✅ Item ${upItems.length} sent to scanner`);
+  const conditionForThis = upCondition;
+  const qtyForThis = upQtyVal;
+  const itemNumber = upItems.length + 1;
+
+  // Reset immediately -- don't wait on anything below this line.
+  upPhotos = [];
+  document.getElementById('upload-thumbs').innerHTML = '';
+  upItems.push({count: photosForThis.length, qty: qtyForThis});
   renderUpItems();
-  await createUpGroup();
+  createUpGroup();
+
+  upBackgroundJobs++;
+  _updateUpBackgroundIndicator();
+  _uploadAndSubmitItemBackground(photosForThis, groupForThis, conditionForThis, qtyForThis, itemNumber)
+    .finally(() => { upBackgroundJobs--; _updateUpBackgroundIndicator(); });
+}
+
+async function _uploadAndSubmitItemBackground(photos, groupId, condition, qty, itemNumber) {
+  try {
+    // Concurrent, not sequential -- this is the actual fix for the hang.
+    // group_id/submit below still correctly wait for every one of these to
+    // land before finalizing the group, so the scanner can never pick it up
+    // with photos still missing -- only the PERSON isn't blocked anymore,
+    // the correctness ordering is unchanged.
+    await Promise.all(photos.map((p, i) => {
+      const fd = new FormData();
+      fd.append('file', p.file);
+      fd.append('group_id', groupId);
+      fd.append('index', i);
+      return fetch('/api/photos/upload', {method:'POST', body:fd});
+    }));
+    await api('POST', '/api/groups/submit', {group_id: groupId, condition, quantity: qty});
+    toast(`✅ Item ${itemNumber} sent to scanner`);
+  } catch(e) {
+    toast(`❌ Item ${itemNumber} failed to upload: ${e.message}`, 'error');
+  }
 }
 
 function renderUpItems() {
