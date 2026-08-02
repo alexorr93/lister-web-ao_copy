@@ -1615,8 +1615,15 @@ async def get_stuck_groups(request: Request):
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     try:
+        # Same fix as /api/stats above: "error" means the scan failed or was
+        # deliberately abandoned -- it's done trying, not still stuck/scanning.
+        # This is a SEPARATE endpoint from /api/stats (powers the detail list
+        # you get from clicking into the scanning count, not the summary
+        # number itself), so it had the exact same bug independently and
+        # needed its own fix -- confirmed: the summary correctly showed 8,
+        # but this list still showed 100+ of the same abandoned groups.
         groups = supabase.table("listing_groups").select("id,status,created_at")\
-            .eq("business_id", business_id).in_("status", ["pending", "processing", "error"]).execute()
+            .eq("business_id", business_id).in_("status", ["pending", "processing"]).execute()
         out = []
         for g in (groups.data or []):
             gp = supabase.table("group_photos").select("photo_id").eq("group_id", g["id"]).limit(1).execute()
