@@ -2611,6 +2611,8 @@ function upQty(d) {
 }
 
 let upBackgroundJobs = 0;  // count of item uploads still running in the background
+let upBackgroundQueue = [];  // ordered queue -- items process strictly in submission order
+let upQueueRunning = false;
 
 function _updateUpBackgroundIndicator() {
   const el = document.getElementById('up-progress-text');
@@ -2627,10 +2629,10 @@ function _updateUpBackgroundIndicator() {
 // This is the actual click handler -- it does NOT wait on any network call.
 // It captures this item's photos/settings, immediately clears the screen and
 // creates the next group so you can start taking the next item's photos
-// right away, and kicks the real upload+submit off as a detached background
-// task. Previously this awaited a sequential (not even concurrent) loop of
-// photo uploads before you could do anything else -- 4 photos took visibly
-// longer than 1 and fully blocked moving on to the next scan the whole time.
+// right away, and queues the real upload+submit as a background job.
+// Previously this awaited a sequential (not even concurrent) loop of photo
+// uploads before you could do anything else -- 4 photos took visibly longer
+// than 1 and fully blocked moving on to the next scan the whole time.
 function submitUploadItem() {
   if (!upPhotos.length) { toast('Select photos first', 'error'); return; }
   if (!requireActiveLotSku()) return;
@@ -2647,19 +2649,36 @@ function submitUploadItem() {
   renderUpItems();
   createUpGroup();
 
+  upBackgroundQueue.push({photos: photosForThis, groupId: groupForThis, condition: conditionForThis, qty: qtyForThis, itemNumber});
   upBackgroundJobs++;
   _updateUpBackgroundIndicator();
-  _uploadAndSubmitItemBackground(photosForThis, groupForThis, conditionForThis, qtyForThis, itemNumber)
-    .finally(() => { upBackgroundJobs--; _updateUpBackgroundIndicator(); });
+  _runUploadQueue();
+}
+
+// Drains the queue one item at a time, strictly in the order items were
+// submitted -- photos WITHIN one item still upload concurrently (that part
+// of the speed fix is unaffected), but different ITEMS no longer run at the
+// same time and race each other for which finishes (and therefore appears
+// in the queue) first. _runUploadQueue is safe to call any number of times;
+// upQueueRunning ensures only one drain loop is ever active.
+async function _runUploadQueue() {
+  if (upQueueRunning) return;
+  upQueueRunning = true;
+  while (upBackgroundQueue.length) {
+    const job = upBackgroundQueue.shift();
+    await _uploadAndSubmitItemBackground(job.photos, job.groupId, job.condition, job.qty, job.itemNumber);
+    upBackgroundJobs--;
+    _updateUpBackgroundIndicator();
+  }
+  upQueueRunning = false;
 }
 
 async function _uploadAndSubmitItemBackground(photos, groupId, condition, qty, itemNumber) {
   try {
-    // Concurrent, not sequential -- this is the actual fix for the hang.
-    // group_id/submit below still correctly wait for every one of these to
-    // land before finalizing the group, so the scanner can never pick it up
-    // with photos still missing -- only the PERSON isn't blocked anymore,
-    // the correctness ordering is unchanged.
+    // Concurrent, not sequential, within THIS item's own photos -- group_id/
+    // submit still correctly wait for every one of these to land before
+    // finalizing the group, so the scanner can never pick it up with photos
+    // still missing.
     await Promise.all(photos.map((p, i) => {
       const fd = new FormData();
       fd.append('file', p.file);
