@@ -433,7 +433,7 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
       <input type="file" id="upload-file-input" accept="image/*,image/heic" multiple style="display:none;" onchange="handleUploadFiles(this)"/>
       <div id="upload-thumbs" class="photo-thumbs"></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;"><button class="btn" style="font-size:14px;padding:12px;" onclick="openCameraMode()">📷 Take Photo</button><button class="btn" style="font-size:14px;padding:12px;" onclick="document.getElementById('upload-file-input').click()">🖼️ Gallery</button></div><input type="file" id="upload-camera-input" accept="image/*" capture="environment" multiple style="display:none;" onchange="handleUploadFiles(this, true)"/>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;"><button class="btn" style="font-size:14px;padding:12px;" onclick="document.getElementById('upload-camera-input').click()">📷 Take Photo</button><button class="btn" style="font-size:14px;padding:12px;" onclick="document.getElementById('upload-file-input').click()">🖼️ Gallery</button></div><input type="file" id="upload-camera-input" accept="image/*" capture="environment" multiple style="display:none;" onchange="handleUploadFiles(this, true)"/>
 <div id="camera-mode-overlay" style="display:none;position:fixed;inset:0;background:#000;z-index:500;flex-direction:column;">
   <div style="position:relative;flex:1;overflow:hidden;">
     <video id="camera-mode-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;background:#000;transform-origin:center center;"></video>
