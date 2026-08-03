@@ -1458,7 +1458,7 @@ function initTileListeners() {
     }
   });
 
-  document.getElementById('tile-grid').addEventListener('blur', function(e) {
+  document.getElementById('tile-grid').addEventListener('focusout', function(e) {
     var el = e.target;
     if (el.classList.contains('tile-title-input')) {
       updateField(el.dataset.id, 'title', el.value).then(function(ok) {
