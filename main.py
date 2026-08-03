@@ -24,6 +24,19 @@ print(f"Connecting to Supabase: {SUPABASE_URL}")
 supabase     = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = FastAPI(title="Lister AI")
+
+@app.middleware("http")
+async def _no_stale_html(request, call_next):
+    # Every page (text/html) is served no-store so a deploy is ALWAYS picked up
+    # on the next normal refresh — no more hard-refresh/stale-JS confusion where
+    # a fix is live on the server but the browser keeps rendering old JS.
+    # API/JSON responses are untouched.
+    response = await call_next(request)
+    if response.headers.get("content-type", "").startswith("text/html"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
 import os as _os
 if _os.path.isdir("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
