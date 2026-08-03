@@ -5,6 +5,7 @@ Replaces Streamlit for real-time performance.
 import os
 import csv
 import io
+import re
 from datetime import datetime
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException, UploadFile, File, Body, Response, BackgroundTasks
@@ -510,6 +511,17 @@ def photo_url(photo_id: str, thumb: bool = False) -> str:
         return f"{SUPABASE_URL}/storage/v1/render/image/public/part-photos/{photo_id}?width=500&height=500&resize=cover&quality=80"
     return f"{SUPABASE_URL}/storage/v1/object/public/part-photos/{photo_id}"
 
+def _photo_seq(photo_id: str):
+    """Photos written by /api/photos/upload carry their original capture/
+    selection order as a trailing _<idx> before the extension (e.g.
+    030826_143022_3.jpg — see the batch_ts fix in that endpoint, and the
+    matching helper in mantle-scanner's scanner_service.py which renames
+    scanned photos while preserving this same suffix). Returns None for
+    anything that doesn't match (legacy single-photo scans, _extra add-on
+    photos), which callers should sort to the end rather than error on."""
+    m = re.search(r'_(\d+)\.[^.]+$', str(photo_id or ""))
+    return int(m.group(1)) if m else None
+
 def get_all_photo_ids(primary_photo_id: str) -> list:
     """A listing only stores its primary photo_id, but scans capture multiple photos
     per group (group_photos table). Marketplace listings should use ALL of them,
@@ -519,7 +531,12 @@ def get_all_photo_ids(primary_photo_id: str) -> list:
     without this, "Make Main Photo" (which only ever updates the listing's
     photo_id) had no actual effect on eBay/Shopify submissions — the photo array
     sent to both marketplaces came back in whatever order Supabase happened to
-    return group_photos, ignoring which one was chosen as primary."""
+    return group_photos, ignoring which one was chosen as primary.
+
+    The remaining (non-primary) photos are further sorted by _photo_seq so they
+    match original capture order too, instead of Supabase's arbitrary row order
+    — real bug this fixes: that arbitrary order was a second, separate source of
+    out-of-order images beyond which photo became primary."""
     pid = str(primary_photo_id or "")
     if not pid:
         return []
@@ -532,7 +549,9 @@ def get_all_photo_ids(primary_photo_id: str) -> list:
         all_pids = [r["photo_id"] for r in (gp.data or []) if r.get("photo_id")]
         if not all_pids:
             return [pid]
-        return [pid] + [p for p in all_pids if p != pid]
+        rest = [p for p in all_pids if p != pid]
+        rest.sort(key=lambda p: (0, _photo_seq(p)) if _photo_seq(p) is not None else (1, 0))
+        return [pid] + rest
     except Exception:
         return [pid]
 
