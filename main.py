@@ -7671,7 +7671,7 @@ Return ONLY a raw JSON object, no markdown, no backticks:
 {spec['schema']}"""
 
     resp = _requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}",
+        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={gemini_key}",
         json={
             "contents": [{"parts": [{"text": prompt}]}],
             "tools": [{"google_search": {}}],
@@ -7765,6 +7765,7 @@ async def compute_metric_for_session(session_id: str, body: ComputeMetricRequest
                     job["ok"] += 1
                     job["last"] = {"lot_id": lot["id"], "lot_number": lot.get("lot_number"), "title": lot.get("title"), "status": "ok", **patch}
                 except Exception as e:
+                    print(f"compute-metric error metric={body.metric} lot={lot.get('lot_number')}: {e}", flush=True)
                     job["errors"] += 1
                     job["last"] = {"lot_id": lot["id"], "lot_number": lot.get("lot_number"), "title": lot.get("title"), "status": "error", "error": str(e)}
                 job["processed"] += 1
