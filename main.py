@@ -6461,9 +6461,10 @@ async def flags_data(request: Request, keywords: str = ""):
                 "layer1_keywords": layer1_keywords, "layer2_keywords": layer2_keywords, "catalogs": out}
     except Exception as e:
         tb = traceback.format_exc()
-        print(f"/api/flags/data FAILED at step '{step}': {type(e).__name__}: {e}\n{tb}")
+        print(f"/api/flags/data FAILED at step '{step}': {type(e).__name__}: {e}\n{tb}", flush=True)
         return JSONResponse(status_code=500, content={
             "error": True, "failed_step": step, "exception_type": type(e).__name__, "message": str(e),
+            "detail": f"Failed at '{step}': {type(e).__name__}: {e}",
         })
 
 @app.post("/api/flags/keywords")
