@@ -345,7 +345,6 @@ select.field-input { background: #fff; color: #0f172a; }
         <button class="tile-cond-btn catmode-btn" data-catmode="motors" onclick="setCategoryMode('motors')">Auto Parts</button>
       </div>
       <button class="btn" style="color:#a78bfa;border-color:#7c3aed;" onclick="autofillLotSku()" title="Fills in the Lot SKU for selected items using the lot that was active when each was scanned — no waiting on scan completion">🏷️ Autofill Lot SKU</button>
-      <button class="btn" style="color:#38bdf8;border-color:#0369a1;" onclick="confirmGuessedMpns()" title="The MPN box on each tile shows a guess pulled from the title text (why it can still look red even with a value visible in the box) — this saves that guess as the real MPN for selected items, same as clicking into the box and out again, just for many at once. Skips anything with no usable guess or already confirmed; use 🔍 Find MPN in the item modal for those (reads the part number off the actual photo instead of guessing from the title)">✅ Confirm Guessed MPNs</button>
       <div style="display:flex;align-items:center;gap:4px;" title="Sets the active lot — same as the dropdown on the Fast Scan/Upload tabs.">
         <span style="font-size:11px;color:var(--muted);white-space:nowrap;">SKU:</span>
         <select class="field-input" id="actionbar-lot-select" onchange="setActiveLotSku(this.value)" style="font-size:12px;padding:5px 8px;width:100px;">
@@ -1762,36 +1761,6 @@ async function autofillLotSku() {
   toast(`Lot SKU filled on ${ok} item(s)${failed ? ', ' + failed + ' failed' : ''} ✓`);
 }
 
-async function confirmGuessedMpns() {
-  // Real source of the "why is this red if the MPN is right there" confusion:
-  // the tile's MPN box shows guessMpn()'s title-text guess as a convenience
-  // starting point, but that guess is only ever SAVED (clearing the red
-  // missing/flag state) when the box itself gets a focus+blur -- typing in
-  // it, or clicking in and back out. Just being visible in the box was never
-  // enough on its own, on purpose (a title-scraped guess isn't trustworthy
-  // enough to auto-confirm silently -- see guessMpn's own history as the old
-  // crude fallback Find MPN's photo-reading was built to replace). This
-  // button does the same focus+blur save, just for every targeted item in
-  // one click instead of clicking into each box individually.
-  const targets = (selected.size ? listings.filter(l => selected.has(String(l.id))) : listings)
-    .filter(l => l.category_mode === 'motors' && needsMpnAttention(l));
-  if (!targets.length) { toast('Nothing needs MPN confirmation ✓'); return; }
-  let confirmed = 0, skipped = 0, failed = 0;
-  for (const l of targets) {
-    const guess = guessMpn(l.title || '', l.brand || guessBrand(l.title || ''));
-    if (!guess) { skipped++; continue; }
-    try {
-      const ok = await updateField(l.id, 'ebay_mpn', guess);
-      if (!ok) { failed++; continue; }
-      await updateField(l.id, 'ebay_mpn_is_fallback', false);
-      l.ebay_mpn = guess;
-      l.ebay_mpn_is_fallback = false;
-      confirmed++;
-    } catch(e) { failed++; }
-  }
-  renderTiles();
-  toast(`${confirmed} MPN(s) confirmed${skipped ? ', ' + skipped + ' had no guess to confirm — use 🔍 Find MPN' : ''}${failed ? ', ' + failed + ' failed' : ''}`);
-}
 
 async function rematchCategory() {
   // If nothing is explicitly selected, default to everything sitting on the
