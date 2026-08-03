@@ -5514,6 +5514,8 @@ class CreateGroup(BaseModel):
     condition:     str
     category_mode: str = "industrial"
     pricing_mode:  str = "always_search"
+    lot_sku:       str = ""
+    lot_suffix:    str = ""
 
 @app.post("/api/groups")
 async def create_group(body: CreateGroup, request: Request):
@@ -5537,6 +5539,8 @@ async def create_group(body: CreateGroup, request: Request):
             "condition":  body.condition,
             "category_mode": category_mode,
             "pricing_mode": pricing_mode,
+            "lot_sku":    (body.lot_sku or "").strip(),
+            "lot_suffix": (body.lot_suffix or "").strip(),
             "business_id": business_id,
             "created_at": datetime.utcnow().isoformat(),
         }).execute()
@@ -5555,6 +5559,39 @@ class SubmitGroup(BaseModel):
     group_id:  str
     condition: str
     quantity:  int
+
+@app.post("/api/listings/{item_id}/assign-lot-from-group")
+async def assign_lot_from_group(item_id: str, request: Request):
+    """Root-cause fix for lot SKUs coming in under the WRONG lot: the old
+    auto-assign used whatever lot was active in whichever open browser tab
+    happened to poll first — a stale tab from an earlier session could stamp
+    its old lot onto brand-new items. This endpoint instead reads the lot that
+    was stored ON THE GROUP at upload time (listing → photo → group), so the
+    result is the same no matter which tab (or how many tabs) trigger it.
+    Returns lot_sku="" if the group predates lot capture — caller may fall
+    back to its own active lot in that case."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    res = supabase.table("listings").select("photo_id,ebay_sku").eq("id", item_id).limit(1).execute()
+    if not res.data:
+        raise HTTPException(404, "Listing not found")
+    photo_id = res.data[0].get("photo_id")
+    lot, suffix = "", ""
+    if photo_id:
+        gp = supabase.table("group_photos").select("group_id").eq("photo_id", photo_id).limit(1).execute()
+        if gp.data:
+            grp = (supabase.table("listing_groups").select("lot_sku,lot_suffix")
+                   .eq("id", gp.data[0]["group_id"]).limit(1).execute())
+            if grp.data:
+                lot = (grp.data[0].get("lot_sku") or "").strip()
+                suffix = (grp.data[0].get("lot_suffix") or "").strip()
+    if not lot:
+        return {"ok": True, "ebay_sku": None, "lot_sku": ""}
+    new_sku = f"{lot}-{suffix}" if suffix else f"{lot}-"
+    supabase.table("listings").update({"ebay_sku": new_sku}).eq("id", item_id).execute()
+    return {"ok": True, "ebay_sku": new_sku, "lot_sku": lot}
+
 
 @app.post("/api/groups/{group_id}/rescan")
 async def rescan_group(group_id: str, request: Request):
