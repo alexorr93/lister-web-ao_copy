@@ -6383,6 +6383,7 @@ async def flags_data(request: Request, keywords: str = ""):
         raise HTTPException(401, "Unauthorized")
 
     import re
+    import time
 
     # DIAGNOSTIC WRAP: this endpoint was returning a bare 500 with no visible
     # cause -- every step now runs inside its own try/except so the actual
@@ -6416,11 +6417,31 @@ async def flags_data(request: Request, keywords: str = ""):
             start += 1000
 
         step = "get_catalog_zips RPC"
-        zip_rows = supabase.rpc("get_catalog_zips", {"p_business_id": business_id}).execute().data or []
+        # Retries a few times with backoff -- this table is shared with a
+        # separate app that runs periodic heavy background writes against
+        # it, so a transient read timeout here is expected contention, not
+        # a real failure. A few seconds' wait is normal; genuinely down is not.
+        zip_rows = None
+        for attempt in range(3):
+            try:
+                zip_rows = supabase.rpc("get_catalog_zips", {"p_business_id": business_id}).execute().data or []
+                break
+            except Exception:
+                if attempt == 2:
+                    raise
+                time.sleep(2 * (attempt + 1))
         zip_by_catalog = {r["catalog_url"]: r["zip_code"] for r in zip_rows if r.get("zip_code")}
 
         step = "get_catalog_keyword_counts RPC"
-        kw_rows = supabase.rpc("get_catalog_keyword_counts", {"p_business_id": business_id, "p_keywords": kw_list}).execute().data or []
+        kw_rows = None
+        for attempt in range(3):
+            try:
+                kw_rows = supabase.rpc("get_catalog_keyword_counts", {"p_business_id": business_id, "p_keywords": kw_list}).execute().data or []
+                break
+            except Exception:
+                if attempt == 2:
+                    raise
+                time.sleep(2 * (attempt + 1))
         kw_by_catalog = {r["catalog_url"]: (r.get("keyword_counts") or {}) for r in kw_rows}
 
         step = "centroid loading"
