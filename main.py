@@ -5652,7 +5652,18 @@ async def upload_photo(request: Request):
         gid      = str(form["group_id"])
         idx      = int(form.get("index", 0))
         contents = await file.read()
-        dt  = datetime.now()
+        # batch_ts (sent once per Done-click, shared by every photo in that
+        # batch) replaces calling datetime.now() independently per request.
+        # Real bug this fixes: concurrent uploads (since the earlier speed
+        # fix) can be PROCESSED by the server in a different order than they
+        # were sent -- each independent datetime.now() call would then embed
+        # a different second into the filename, so sorting by filename (which
+        # is how photo order/primary gets determined downstream) no longer
+        # matched selection order. A shared timestamp makes idx the only
+        # thing that differs between photos in one batch, so sort order is
+        # exactly selection order regardless of network/arrival timing.
+        batch_ts = form.get("batch_ts")
+        dt = datetime.strptime(batch_ts, "%Y%m%d%H%M%S") if batch_ts else datetime.now()
         fn  = f"{dt.strftime('%d%m%y')}_{dt.strftime('%H%M%S')}_{idx}.jpg"
         print(f"Uploading photo: {fn}, size={len(contents)}, group={gid}")
         supabase.storage.from_("part-photos").upload(
