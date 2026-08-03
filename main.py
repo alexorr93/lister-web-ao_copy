@@ -6384,67 +6384,87 @@ async def flags_data(request: Request, keywords: str = ""):
 
     import re
 
-    kw_rows_db = supabase.table("flag_keywords").select("keyword,layer").eq("business_id", business_id).execute().data or []
-    layer1_keywords = [r["keyword"] for r in kw_rows_db if r["layer"] == 1]
-    layer2_keywords = [r["keyword"] for r in kw_rows_db if r["layer"] == 2]
-    default_keywords = layer1_keywords + layer2_keywords
-    kw_list = [k.strip() for k in keywords.split(",") if k.strip()] or default_keywords
+    # DIAGNOSTIC WRAP: this endpoint was returning a bare 500 with no visible
+    # cause -- every step now runs inside its own try/except so the actual
+    # failure point and real exception message come back in the response
+    # itself (readable in the browser/network tab immediately) and in the
+    # logs, instead of guessing further from an opaque blank 500.
+    import traceback
+    step = "unknown"
+    try:
+        step = "flag_keywords query"
+        kw_rows_db = supabase.table("flag_keywords").select("keyword,layer").eq("business_id", business_id).execute().data or []
+        layer1_keywords = [r["keyword"] for r in kw_rows_db if r["layer"] == 1]
+        layer2_keywords = [r["keyword"] for r in kw_rows_db if r["layer"] == 2]
+        default_keywords = layer1_keywords + layer2_keywords
+        kw_list = [k.strip() for k in keywords.split(",") if k.strip()] or default_keywords
 
-    from datetime import timedelta
-    stale_cutoff = (datetime.now().date() - timedelta(days=5)).isoformat()
+        from datetime import timedelta
+        stale_cutoff = (datetime.now().date() - timedelta(days=5)).isoformat()
 
-    catalogs = []
-    start = 0
-    while True:
-        page = supabase.table("auction_catalogs").select("catalog_url,title,display_title,auctioneer,state,lot_count,end_date,capture_session_id,flags_viewed_at,flags_not_interested,flags_favorite")\
-            .eq("business_id", business_id).gt("lot_count", 0)\
-            .or_(f"end_date.gte.{stale_cutoff},end_date.is.null")\
-            .range(start, start + 999).execute().data or []
-        catalogs.extend(page)
-        if len(page) < 1000:
-            break
-        start += 1000
+        step = "auction_catalogs query"
+        catalogs = []
+        start = 0
+        while True:
+            page = supabase.table("auction_catalogs").select("catalog_url,title,display_title,auctioneer,state,lot_count,end_date,capture_session_id,flags_viewed_at,flags_not_interested,flags_favorite")\
+                .eq("business_id", business_id).gt("lot_count", 0)\
+                .or_(f"end_date.gte.{stale_cutoff},end_date.is.null")\
+                .range(start, start + 999).execute().data or []
+            catalogs.extend(page)
+            if len(page) < 1000:
+                break
+            start += 1000
 
-    zip_rows = supabase.rpc("get_catalog_zips", {"p_business_id": business_id}).execute().data or []
-    zip_by_catalog = {r["catalog_url"]: r["zip_code"] for r in zip_rows if r.get("zip_code")}
+        step = "get_catalog_zips RPC"
+        zip_rows = supabase.rpc("get_catalog_zips", {"p_business_id": business_id}).execute().data or []
+        zip_by_catalog = {r["catalog_url"]: r["zip_code"] for r in zip_rows if r.get("zip_code")}
 
-    kw_rows = supabase.rpc("get_catalog_keyword_counts", {"p_business_id": business_id, "p_keywords": kw_list}).execute().data or []
-    kw_by_catalog = {r["catalog_url"]: (r.get("keyword_counts") or {}) for r in kw_rows}
+        step = "get_catalog_keyword_counts RPC"
+        kw_rows = supabase.rpc("get_catalog_keyword_counts", {"p_business_id": business_id, "p_keywords": kw_list}).execute().data or []
+        kw_by_catalog = {r["catalog_url"]: (r.get("keyword_counts") or {}) for r in kw_rows}
 
-    centroids = _load_zip_centroids()
-    origin_lat, origin_lng = _FLAG_ORIGIN_LATLNG
+        step = "centroid loading"
+        centroids = _load_zip_centroids()
+        origin_lat, origin_lng = _FLAG_ORIGIN_LATLNG
 
-    out = []
-    for c in catalogs:
-        z = zip_by_catalog.get(c["catalog_url"])
-        distance = None
-        if z and z in centroids:
-            lat, lng = centroids[z]
-            distance = round(_haversine_miles(origin_lat, origin_lng, lat, lng), 1)
-        elif c.get("state") in _STATE_CENTROID_FALLBACK:
-            lat, lng = _STATE_CENTROID_FALLBACK[c["state"]]
-            distance = round(_haversine_miles(origin_lat, origin_lng, lat, lng), 1)
-        title = c.get("display_title") or c.get("title") or ""
-        out.append({
-            "catalog_url": c["catalog_url"],
-            "title": title,
-            "auctioneer": c.get("auctioneer") or "",
-            "state": c.get("state") or "",
-            "lot_count": c.get("lot_count") or 0,
-            "end_date": c.get("end_date"),
-            "capture_session_id": c.get("capture_session_id"),
-            "viewed": bool(c.get("flags_viewed_at")),
-            "not_interested": bool(c.get("flags_not_interested")),
-            "favorite": bool(c.get("flags_favorite")),
-            "zip": z,
-            "distance_miles": distance,
-            "distance_is_estimate": z is None or z not in centroids,
-            "within_radius": (distance is not None and distance <= _FLAG_RADIUS_MILES),
-            "multi_day": "day" in title.lower(),
-            "keyword_counts": kw_by_catalog.get(c["catalog_url"], {}),
+        step = "assembling response"
+        out = []
+        for c in catalogs:
+            z = zip_by_catalog.get(c["catalog_url"])
+            distance = None
+            if z and z in centroids:
+                lat, lng = centroids[z]
+                distance = round(_haversine_miles(origin_lat, origin_lng, lat, lng), 1)
+            elif c.get("state") in _STATE_CENTROID_FALLBACK:
+                lat, lng = _STATE_CENTROID_FALLBACK[c["state"]]
+                distance = round(_haversine_miles(origin_lat, origin_lng, lat, lng), 1)
+            title = c.get("display_title") or c.get("title") or ""
+            out.append({
+                "catalog_url": c["catalog_url"],
+                "title": title,
+                "auctioneer": c.get("auctioneer") or "",
+                "state": c.get("state") or "",
+                "lot_count": c.get("lot_count") or 0,
+                "end_date": c.get("end_date"),
+                "capture_session_id": c.get("capture_session_id"),
+                "viewed": bool(c.get("flags_viewed_at")),
+                "not_interested": bool(c.get("flags_not_interested")),
+                "favorite": bool(c.get("flags_favorite")),
+                "zip": z,
+                "distance_miles": distance,
+                "distance_is_estimate": z is None or z not in centroids,
+                "within_radius": (distance is not None and distance <= _FLAG_RADIUS_MILES),
+                "multi_day": "day" in title.lower(),
+                "keyword_counts": kw_by_catalog.get(c["catalog_url"], {}),
+            })
+        return {"origin_zip": _FLAG_ORIGIN_ZIP, "radius_miles": _FLAG_RADIUS_MILES, "keywords": kw_list,
+                "layer1_keywords": layer1_keywords, "layer2_keywords": layer2_keywords, "catalogs": out}
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f"/api/flags/data FAILED at step '{step}': {type(e).__name__}: {e}\n{tb}")
+        return JSONResponse(status_code=500, content={
+            "error": True, "failed_step": step, "exception_type": type(e).__name__, "message": str(e),
         })
-    return {"origin_zip": _FLAG_ORIGIN_ZIP, "radius_miles": _FLAG_RADIUS_MILES, "keywords": kw_list,
-            "layer1_keywords": layer1_keywords, "layer2_keywords": layer2_keywords, "catalogs": out}
 
 @app.post("/api/flags/keywords")
 async def flags_add_keyword(request: Request, body: dict):
