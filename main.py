@@ -1425,6 +1425,7 @@ async def get_listings(request: Request, archived: bool = False):
                 print(f"category path lookup failed: {e}")
 
         default_cat_id = str(get_ebay_settings(business_id).get("EBAY_DEFAULT_CATEGORY_ID", "") or "")
+        default_motors_cat_id = str(get_ebay_settings(business_id).get("EBAY_DEFAULT_MOTORS_CATEGORY_ID", "") or "") or "26261"
 
         for l in listings:
             pid = str(l.get("photo_id") or "")
@@ -1438,7 +1439,10 @@ async def get_listings(request: Request, archived: bool = False):
             l["full_url"]   = photo_url(pid)
             l["all_photos"] = [{"id": p, "thumb": photo_url(p, thumb=True), "full": photo_url(p)} for p in all_photos if p]
             l["ebay_category_path"] = cat_path_map.get(str(l.get("ebay_category_id") or ""), "")
-            l["ebay_category_is_default"] = bool(default_cat_id) and str(l.get("ebay_category_id") or "") == default_cat_id
+            l["ebay_category_is_default"] = (
+                (l.get("category_mode") == "motors" and str(l.get("ebay_category_id") or "") == default_motors_cat_id)
+                or (l.get("category_mode") != "motors" and bool(default_cat_id) and str(l.get("ebay_category_id") or "") == default_cat_id)
+            )
             # Coerce types
             l["price"]      = float(l.get("price") or 0)
             l["price_used"] = float(l.get("price_used") or 0)
