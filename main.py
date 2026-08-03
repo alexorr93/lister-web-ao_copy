@@ -7679,7 +7679,18 @@ Return ONLY a raw JSON object, no markdown, no backticks:
         },
         timeout=30,
     )
-    resp.raise_for_status()
+    if not resp.ok:
+        # Surface Gemini's own error body (e.g. "API key not valid") -- the
+        # generic HTTPError from raise_for_status() just says "400 Client
+        # Error" with no indication of WHY, which is why every failed lot
+        # only ever showed a bare "failed" with no way to tell an invalid
+        # key apart from a rate limit apart from anything else.
+        try:
+            err_body = resp.json()
+            err_msg = err_body.get("error", {}).get("message") or resp.text[:300]
+        except Exception:
+            err_msg = resp.text[:300]
+        raise RuntimeError(f"Gemini {resp.status_code}: {err_msg}")
     resp_data = resp.json()
     raw = (resp_data["candidates"][0]["content"]["parts"][0].get("text") or "").strip()
     raw = re.sub(r"^```[a-z]*\n?", "", raw, flags=re.IGNORECASE)

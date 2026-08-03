@@ -2672,7 +2672,7 @@ async function pollMetricJob(jobId, metric) {
     bar.style.width = p + '%';
     pct.textContent = p + '%';
     if (job.last) {
-      label.textContent = `Lot ${job.last.lot_number || '?'} (${job.processed}/${job.total}): ${(job.last.title||'').slice(0,40)} — ${job.last.status === 'ok' ? 'done' : 'failed'}`;
+      label.textContent = `Lot ${job.last.lot_number || '?'} (${job.processed}/${job.total}): ${(job.last.title||'').slice(0,40)} — ${job.last.status === 'ok' ? 'done' : ('FAILED: ' + (job.last.error || 'unknown error'))}`;
       const lotIdx = auctionLotsCache.findIndex(l => l.id === job.last.lot_id);
       if (lotIdx >= 0 && job.last.status === 'ok') {
         if (metric === 'resale_value') Object.assign(auctionLotsCache[lotIdx], {resale_value_low: job.last.resale_value_low, resale_value_high: job.last.resale_value_high, resale_value_notes: job.last.resale_value_notes});
