@@ -2192,12 +2192,14 @@ async function saveModal() {
 }
 
 function needsMpnAttention(l) {
-  // Pre-publish check, not just post-publish: an item in Motors mode with no
-  // real saved MPN would send "Does Not Apply" to eBay if published right
-  // now, whether or not it's ever actually been published before. Also still
-  // flags anything that WAS already published with the fallback, so a past
-  // mistake stays visible until it's actually fixed.
-  return (l.category_mode === 'motors' && !l.ebay_mpn) || !!l.ebay_mpn_is_fallback;
+  // Matches what publish actually sends: an unconfirmed item still goes out with
+  // a title-guessed MPN as long as one exists — that's the same guess shown in
+  // the box. Only flag the two cases where it truly WILL be literal "Does Not
+  // Apply": no usable guess exists at all, or it already published that way.
+  if (l.category_mode !== 'motors') return false;
+  if (l.ebay_mpn_is_fallback) return true;
+  if (l.ebay_mpn) return false;
+  return !guessMpn(l.title || '', l.brand || guessBrand(l.title || ''));
 }
 
 function guessBrand(title) {
