@@ -54,6 +54,7 @@ h1 { font-size: 20px; margin-bottom: 4px; }
 table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 th { text-align: left; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
 td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid var(--border); }
+.sku-col { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 tr:last-child td { border-bottom: none; }
 .muted { color: var(--muted); }
 .warn { color: #fbbf24; font-weight: 700; }
@@ -282,7 +283,7 @@ function renderTable() {
 
   const th = (key, label) => `<th onclick="setInvSort('${key}')" style="cursor:pointer;">${label}${invSortKey===key ? (invSortDir===1?' ▲':' ▼') : ''}</th>`;
   let html = `<table><thead><tr>
-    <th></th>${th('title','Title')}${th('ebay_item_id','eBay Item ID')}${th('ebay_sku','eBay SKU')}${th('ebay_qty','eBay Qty')}${th('ebay_shipping_cost','Ship $')}${th('ebay_created_at','Created')}${th('shopify_product_id','Shopify Product ID')}${th('shopify_sku','Shopify SKU')}${th('shopify_qty','Shopify Qty')}${th('shopify_price','Shopify Price')}<th>Status</th><th>Matched By</th><th>HD_ID</th><th>Action</th><th>Match</th><th>Hide</th>
+    <th></th>${th('title','Title')}${th('ebay_item_id','eBay Item ID')}<th onclick="setInvSort('ebay_sku')" style="cursor:pointer;width:90px;">eBay SKU${invSortKey==='ebay_sku' ? (invSortDir===1?' ▲':' ▼') : ''}</th>${th('ebay_qty','eBay Qty')}${th('ebay_shipping_cost','Ship $')}${th('ebay_created_at','Created')}${th('shopify_product_id','Shopify Product ID')}<th onclick="setInvSort('shopify_sku')" style="cursor:pointer;width:90px;">Shopify SKU${invSortKey==='shopify_sku' ? (invSortDir===1?' ▲':' ▼') : ''}</th>${th('shopify_qty','Shopify Qty')}${th('shopify_price','Shopify Price')}<th>Status</th><th>Matched By</th><th>HD_ID</th><th>Action</th><th>Match</th><th>Hide</th>
   </tr></thead><tbody>`;
   for (const r of filtered) {
     const status = !r.ebay_item_id ? '<span class="missing">Shopify only</span>'
@@ -329,12 +330,12 @@ function renderTable() {
       <td>${photoCell}</td>
       <td>${escapeHtml(r.title)}</td>
       <td class="muted">${escapeHtml(r.ebay_item_id || '—')}</td>
-      <td class="muted">${escapeHtml(r.ebay_sku || '—')}</td>
+      <td class="muted sku-col" title="${escapeHtml(r.ebay_sku || '')}">${escapeHtml(r.ebay_sku || '—')}</td>
       <td class="muted">${r.ebay_qty ?? '—'}</td>
       <td class="muted">${r.ebay_shipping_cost != null ? (Number(r.ebay_shipping_cost) === 0 ? 'Free' : '$' + Number(r.ebay_shipping_cost).toFixed(0)) : '—'}</td>
       <td class="muted">${createdCell}</td>
       <td class="muted">${escapeHtml(r.shopify_product_id || '—')}</td>
-      <td class="muted">${escapeHtml(r.shopify_sku || '—')}</td>
+      <td class="muted sku-col" title="${escapeHtml(r.shopify_sku || '')}">${escapeHtml(r.shopify_sku || '—')}</td>
       <td class="muted">${r.shopify_qty ?? '—'}</td>
       <td class="muted">${r.shopify_price != null ? '$' + Number(r.shopify_price).toFixed(2) : '—'}</td>
       <td>${status}</td>
