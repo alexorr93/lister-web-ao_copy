@@ -345,6 +345,7 @@ select.field-input { background: #fff; color: #0f172a; }
         <button class="tile-cond-btn catmode-btn" data-catmode="motors" onclick="setCategoryMode('motors')">Auto Parts</button>
       </div>
       <button class="btn" style="color:#a78bfa;border-color:#7c3aed;" onclick="autofillLotSku()" title="Fills in the Lot SKU for selected items using the lot that was active when each was scanned — no waiting on scan completion">🏷️ Autofill Lot SKU</button>
+      <button class="btn" id="find-mpns-btn" style="color:#38bdf8;border-color:#0369a1;" onclick="findMpnsForSelected()" title="For SELECTED items: reads the real part number off each item's photos (same as the modal's 🔍 Find MPN, done in one pass) and saves it into the MPN box where you can see and correct it before publishing. Never runs on its own — only when you press this. Skips items that already have a saved MPN.">🔍 Find MPNs (selected)</button>
       <div style="display:flex;align-items:center;gap:4px;" title="Sets the active lot — same as the dropdown on the Fast Scan/Upload tabs.">
         <span style="font-size:11px;color:var(--muted);white-space:nowrap;">SKU:</span>
         <select class="field-input" id="actionbar-lot-select" onchange="setActiveLotSku(this.value)" style="font-size:12px;padding:5px 8px;width:100px;">
@@ -2191,6 +2192,38 @@ function guessMpn(title, brand) {
     .filter(w => w.toLowerCase() !== brandLower && /[0-9]/.test(w) && /[a-zA-Z]/.test(w));
   if (!candidates.length) return '';
   return candidates.reduce((a, b) => b.length > a.length ? b : a, '');
+}
+
+async function findMpnsForSelected() {
+  // On-demand, fully visible batch MPN assignment: runs ONLY when pressed,
+  // never during intake/scan (keeps the scan fast and Gemini focused), and
+  // writes results straight into each tile's MPN box so everything is
+  // checkable before publish. Photo-read first (real stamped/labeled part
+  // numbers); items already holding a saved MPN are left alone.
+  const ids = [...selected];
+  if (!ids.length) { alert('Select items first.'); return; }
+  const btn = document.getElementById('find-mpns-btn');
+  const orig = btn.textContent;
+  btn.disabled = true;
+  let done = 0, found = 0, failed = 0;
+  for (const id of ids) {
+    const l = listings.find(x => x.id === id);
+    done++;
+    btn.textContent = `🔍 ${done}/${ids.length}...`;
+    if (!l || l.ebay_mpn) continue;  // already has a saved MPN — don't touch
+    try {
+      const r = await api('POST', `/api/listings/${id}/find-mpn`, {});
+      if (r.mpn) {
+        await api('PATCH', `/api/listings/${id}`, {field: 'ebay_mpn', value: r.mpn});
+        l.ebay_mpn = r.mpn;
+        found++;
+      }
+    } catch(e) { failed++; }
+  }
+  btn.disabled = false;
+  btn.textContent = orig;
+  renderListings();
+  alert(`MPN assignment done: ${found} found from photos` + (failed ? `, ${failed} failed` : '') + `. Values are in each item's MPN box — check/correct before publishing.`);
 }
 
 async function findMpn() {
