@@ -340,6 +340,14 @@ async def order_sync_worker():
                         # button was still load-bearing. Isolated in its own try/except so a
                         # recalc failure can never mark the order sync itself as failed.
                         try:
+                            # Attribute orphaned multi-box labels + refresh shipping costs
+                            # BEFORE recalculating lot profits, so profits always reflect
+                            # full shipping. No button pressing required — this is the
+                            # same automatic 20-minute cycle as the order sync itself.
+                            apply_shipping_matches(biz_id)
+                        except Exception as e:
+                            print(f"order_sync_worker: shipping match failed for business {biz_id} (order sync unaffected): {e}")
+                        try:
                             apply_acquisition_profits(biz_id)
                         except Exception as e:
                             print(f"order_sync_worker: recalculate failed for business {biz_id} (order sync unaffected): {e}")
@@ -3972,18 +3980,84 @@ def apply_shipping_matches(business_id: str) -> dict:
         return all_rows
 
     orders = _fetch_all("orders", "*", lambda q: q.not_.is_("tracking_number", "null"))
-    labels = _fetch_all("shipping_labels", "tracking_number,cost")
+    labels = _fetch_all("shipping_labels", "tracking_number,cost,recipient,created_date")
     if not orders:
         return {"updated": 0, "debug_orders_fetched": 0, "debug_labels_fetched": len(labels)}
 
     cost_by_tracking = {row["tracking_number"]: (row.get("cost") or 0) for row in labels}
 
+    # ── Multi-box label attribution ─────────────────────────────────────────
+    # A multi-box shipment produces N Pirate Ship labels but eBay only ever
+    # knows the ONE tracking number that was uploaded to it, so the other N-1
+    # labels sat orphaned in shipping_labels and their cost was never counted
+    # against any order. Attribution rule: an orphan label (attached to no
+    # order at all) is attributed to an order when that order already has a
+    # matched label with the SAME recipient bought within ±36h of the orphan.
+    # Each orphan attaches to at most one order (closest label time wins), so
+    # cost can never be double-counted. The attachment is persisted onto
+    # orders.tracking_number, and sync merges rather than overwrites tracking
+    # numbers, so the attribution is durable across every future sync cycle.
+    from datetime import datetime as _dt
+    def _parse_label_dt(txt):
+        txt = (txt or "").replace(" MDT", "").replace(" MST", "").replace(" MT", "").strip()
+        for fmt in ("%m/%d/%y %I:%M %p", "%m/%d/%Y %I:%M %p"):
+            try:
+                return _dt.strptime(txt, fmt)
+            except ValueError:
+                continue
+        return None
+
+    label_info = {row["tracking_number"]: row for row in labels}
+    assigned = set()
+    for order in orders:
+        for tn in (order.get("tracking_number") or "").split(","):
+            tn = tn.strip()
+            if tn:
+                assigned.add(tn)
+
+    orphans_by_recipient = {}
+    for row in labels:
+        tn = row["tracking_number"]
+        if tn in assigned or not (row.get("cost") or 0):
+            continue
+        rcpt = (row.get("recipient") or "").strip().lower()
+        ts = _parse_label_dt(row.get("created_date"))
+        if rcpt and ts:
+            orphans_by_recipient.setdefault(rcpt, []).append((tn, ts))
+
+    attached_orphans = 0
+    if orphans_by_recipient:
+        for order in orders:
+            own = [tn.strip() for tn in (order.get("tracking_number") or "").split(",") if tn.strip()]
+            anchor_times = []
+            for tn in own:
+                li = label_info.get(tn)
+                if li:
+                    ts = _parse_label_dt(li.get("created_date"))
+                    rcpt = (li.get("recipient") or "").strip().lower()
+                    if ts and rcpt:
+                        anchor_times.append((rcpt, ts))
+            if not anchor_times:
+                continue
+            added = []
+            for rcpt, ts in anchor_times:
+                for tn, ots in list(orphans_by_recipient.get(rcpt, [])):
+                    if abs((ots - ts).total_seconds()) <= 36 * 3600 and tn not in assigned:
+                        added.append(tn)
+                        assigned.add(tn)
+                        orphans_by_recipient[rcpt].remove((tn, ots))
+            if added:
+                order["tracking_number"] = ",".join(own + added)
+                attached_orphans += len(added)
+
     updates = []
     for order in orders:
         trackings = (order.get("tracking_number") or "").split(",")
-        shipping_cost = round(sum(cost_by_tracking.get(tn, 0) or 0 for tn in trackings if tn), 2)
+        shipping_cost = round(sum(cost_by_tracking.get(tn.strip(), 0) or 0 for tn in trackings if tn.strip()), 2)
         if shipping_cost <= 0:
             continue  # nothing to update — leave existing stored values alone
+        if shipping_cost == round(float(order.get("shipping_cost") or 0), 2) and order.get("final_net") is not None:
+            continue  # already correct — skip the write
         base_net = order.get("net") or 0
         # Copy the FULL existing row and just overwrite the two fields that changed —
         # a partial payload fails Postgres's NOT NULL check on the insert-half of the
@@ -4002,7 +4076,7 @@ def apply_shipping_matches(business_id: str) -> dict:
         except Exception as e:
             print(f"apply_shipping_matches: batch {i}-{i+len(chunk)} failed: {e}")
 
-    return {"updated": updated, "orders_with_tracking": len(orders), "debug_labels_fetched": len(labels), "debug_matches_found": len(updates)}
+    return {"updated": updated, "orders_with_tracking": len(orders), "debug_labels_fetched": len(labels), "debug_matches_found": len(updates), "orphan_labels_attached": attached_orphans}
 
 @app.post("/api/financials/apply-shipping-matches")
 async def apply_shipping_matches_now(request: Request):
