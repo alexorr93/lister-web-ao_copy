@@ -4129,6 +4129,14 @@ async def upload_shipping_labels(request: Request, file: UploadFile = File(...))
             cost = float(cost) if cost not in (None, "") else None
         except (ValueError, TypeError):
             cost = None
+        # Refunded labels (misprints that were voided in Pirate Ship) are not real
+        # spend -- their money came back. Importing them at face value inflated
+        # shipping cost whenever they matched or got attributed to an order
+        # (seen live: 3 refunded reprints added $112.41 to one order). Store them
+        # at cost 0 so they can never count, while keeping the row so a re-upload
+        # of an older export can't resurrect the original cost either.
+        if str(row.get("Status") or "").strip().lower() == "refunded":
+            cost = 0
         records.append({
             "tracking_number": tracking,
             "business_id": business_id,
