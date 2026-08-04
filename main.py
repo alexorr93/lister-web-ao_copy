@@ -514,6 +514,15 @@ def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
         "ytd_net_cash_yield": ytd_net_cash_yield,
         "ytd_inventory_appreciation": ytd_inventory_appreciation,
         "ytd_net_business_appreciation": ytd_net_business_appreciation,
+        # Count of active eBay listings per flat-shipping tier as of today —
+        # requested so shipping composition is tracked historically, not just
+        # queryable "now". Keys are dollar amounts as strings + 'unknown' for
+        # listings eBay returns no flat cost for (calculated/freight).
+        "active_shipping_breakdown": (lambda rows_: (lambda d: d)(
+            __import__('collections').Counter(
+                ("unknown" if r.get("shipping_cost") is None else str(int(r["shipping_cost"]) if float(r["shipping_cost"]).is_integer() else r["shipping_cost"]))
+                for r in rows_ if r.get("listing_status") == "Active"
+            )))(_fetch_all_for_business(business_id, "ebay_listing_status", "listing_status,shipping_cost")),
     }
     existing = supabase.table("analytics_snapshots").select("id").eq("business_id", business_id)\
         .eq("snapshot_date", mt_today).limit(1).execute()
@@ -10081,6 +10090,15 @@ def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> di
             selling_status = it.get("SellingStatus") or {}
             picture_details = it.get("PictureDetails") or {}
             gallery_url = picture_details.get("GalleryURL")
+            # Flat buyer-facing shipping cost off the listing itself (the $0/$18/
+            # $69/$195 policy tiers). First ShippingServiceOptions entry = the
+            # primary domestic service. None when eBay doesn't return it
+            # (calculated-shipping or freight listings).
+            ship_details = it.get("ShippingDetails") or {}
+            sso = ship_details.get("ShippingServiceOptions")
+            if isinstance(sso, list):
+                sso = sso[0] if sso else {}
+            shipping_cost = _safe_float((sso or {}).get("ShippingServiceCost"))
             rows.append({
                 "business_id": business_id, "item_id": it.get("ItemID"),
                 "sku": it.get("SKU"), "title": title, "norm_title": _shopify_sync_norm(title),
@@ -10089,6 +10107,7 @@ def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> di
                 "start_time": listing_details.get("StartTime"),
                 "listing_status": "Active", "end_time": listing_details.get("EndTime"),
                 "gallery_url": gallery_url,
+                "shipping_cost": shipping_cost,
                 "updated_at": now_iso,
             })
         if rows:
@@ -11125,8 +11144,10 @@ async def list_inventory(request: Request):
     # current source for "is this eBay item still active", used here to tell a
     # genuinely-unmatched Shopify item apart from one whose eBay side ended (the
     # end-and-relist scenario) for the Manual Match candidate list below.
-    active_ebay_ids = {r["item_id"] for r in _fetch_all("ebay_listing_status", "item_id,listing_status")
+    _els_rows = _fetch_all("ebay_listing_status", "item_id,listing_status,shipping_cost")
+    active_ebay_ids = {r["item_id"] for r in _els_rows
                         if r.get("item_id") and r.get("listing_status") == "Active"}
+    shipping_by_item_id = {r["item_id"]: r.get("shipping_cost") for r in _els_rows if r.get("item_id")}
     # shopify_inventory.id is a VARIANT id (that's what fetch_shopify_inventory_items
     # keys it by), but inventory_match.shopify_id can hold either that same variant
     # id (rows from ordinary title-matching) OR a plain PRODUCT id (rows from the
@@ -11167,6 +11188,7 @@ async def list_inventory(request: Request):
             "shopify_sku": s.get("sku"), "shopify_qty": s.get("quantity"), "shopify_price": s.get("price"), "shopify_status": s.get("status"),
             "shopify_product_id": s.get("product_id") or (row.get("shopify_id") if row.get("shopify_id") else None),
             "ebay_still_active": (row.get("ebay_id") in active_ebay_ids) if row.get("ebay_id") else None,
+            "ebay_shipping_cost": shipping_by_item_id.get(row.get("ebay_id")),
             "listing_id": (matching_listing.get("id") if matching_listing and not matching_listing.get("shopify_product_id") else None),
             "qty_variance": (e.get("quantity") is not None and s.get("quantity") is not None and e.get("quantity") != s.get("quantity")),
         })

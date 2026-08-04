@@ -87,6 +87,11 @@ tr:last-child td { border-bottom: none; }
       <option value="ebay_only">eBay Only</option>
       <option value="shopify_only">Shopify Only</option>
       <option value="qty_variance">Quantity Mismatch</option>
+      <option value="ship_free">Free Shipping</option>
+      <option value="ship_18">$18 Shipping</option>
+      <option value="ship_69">$69 Shipping</option>
+      <option value="ship_195">$195 Shipping</option>
+      <option value="ship_other">Other/Unknown Shipping</option>
     </select>
   </div>
   <div id="sync-status" class="status-msg"></div>
@@ -248,6 +253,12 @@ function renderTable() {
   if (filter === 'ebay_only') filtered = filtered.filter(r => r.ebay_item_id && !r.shopify_product_id);
   if (filter === 'shopify_only') filtered = filtered.filter(r => r.shopify_product_id && !r.ebay_item_id);
   if (filter === 'qty_variance') filtered = filtered.filter(r => r.qty_variance);
+  const shipVal = r => r.ebay_shipping_cost == null ? null : Number(r.ebay_shipping_cost);
+  if (filter === 'ship_free') filtered = filtered.filter(r => shipVal(r) === 0);
+  if (filter === 'ship_18') filtered = filtered.filter(r => shipVal(r) === 18);
+  if (filter === 'ship_69') filtered = filtered.filter(r => shipVal(r) === 69);
+  if (filter === 'ship_195') filtered = filtered.filter(r => shipVal(r) === 195);
+  if (filter === 'ship_other') filtered = filtered.filter(r => r.ebay_item_id && (shipVal(r) === null || ![0,18,69,195].includes(shipVal(r))));
 
   document.getElementById('summary-row').style.display = 'grid';
   document.getElementById('stat-total').textContent = activeInventory.length;
@@ -271,7 +282,7 @@ function renderTable() {
 
   const th = (key, label) => `<th onclick="setInvSort('${key}')" style="cursor:pointer;">${label}${invSortKey===key ? (invSortDir===1?' ▲':' ▼') : ''}</th>`;
   let html = `<table><thead><tr>
-    <th></th>${th('title','Title')}${th('ebay_item_id','eBay Item ID')}${th('ebay_sku','eBay SKU')}${th('ebay_qty','eBay Qty')}${th('ebay_created_at','Created')}${th('shopify_product_id','Shopify Product ID')}${th('shopify_sku','Shopify SKU')}${th('shopify_qty','Shopify Qty')}${th('shopify_price','Shopify Price')}<th>Status</th><th>Matched By</th><th>HD_ID</th><th>Action</th><th>Match</th><th>Hide</th>
+    <th></th>${th('title','Title')}${th('ebay_item_id','eBay Item ID')}${th('ebay_sku','eBay SKU')}${th('ebay_qty','eBay Qty')}${th('ebay_shipping_cost','Ship $')}${th('ebay_created_at','Created')}${th('shopify_product_id','Shopify Product ID')}${th('shopify_sku','Shopify SKU')}${th('shopify_qty','Shopify Qty')}${th('shopify_price','Shopify Price')}<th>Status</th><th>Matched By</th><th>HD_ID</th><th>Action</th><th>Match</th><th>Hide</th>
   </tr></thead><tbody>`;
   for (const r of filtered) {
     const status = !r.ebay_item_id ? '<span class="missing">Shopify only</span>'
@@ -320,6 +331,7 @@ function renderTable() {
       <td class="muted">${escapeHtml(r.ebay_item_id || '—')}</td>
       <td class="muted">${escapeHtml(r.ebay_sku || '—')}</td>
       <td class="muted">${r.ebay_qty ?? '—'}</td>
+      <td class="muted">${r.ebay_shipping_cost != null ? (Number(r.ebay_shipping_cost) === 0 ? 'Free' : '$' + Number(r.ebay_shipping_cost).toFixed(0)) : '—'}</td>
       <td class="muted">${createdCell}</td>
       <td class="muted">${escapeHtml(r.shopify_product_id || '—')}</td>
       <td class="muted">${escapeHtml(r.shopify_sku || '—')}</td>
