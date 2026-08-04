@@ -77,7 +77,7 @@ tr:last-child td { border-bottom: none; }
   <div class="sub">eBay + Shopify inventory, matched by title. Non-matches show up as one-sided rows for manual review.</div>
 
   <div class="filter-bar">
-    <button class="btn btn-primary" onclick="syncInventory()" title="Shopify: live API call, pulls fresh right now. eBay: reads from the local cache filled by the button next to this one.">🔄 Sync Inventory <span style="font-size:10px;opacity:.8;">(Shopify: live · eBay: cached)</span></button>
+    <button class="btn btn-primary" onclick="syncInventory()" title="Shopify: live API call, pulls fresh right now. eBay: reads from the local cache filled by the button next to this one.">🔄 Sync Inventory</button>
     <button class="btn" id="sync-ebay-live-btn" onclick="syncEbayActiveListingsFromInventory()" title="The actual live eBay pull — fills eBay Qty, Ship $, and everything else on this page's eBay side. Was previously only on the Lots page; added here too so you never have to hunt for it.">🛰️ Sync eBay Live (Ship $ etc.)</button>
     <span id="ebay-live-sync-status" class="status-msg"></span>
     <button class="btn" onclick="pullEbayPhotos()" title="Downloads up to 2 real photos per eBay-ONLY item (skips anything already matched to a Shopify product) into Lister's own storage — a one-time step needed before these items can be published to Shopify.">📥 Pull eBay-Only Photos (into our storage)</button>
