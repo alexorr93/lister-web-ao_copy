@@ -10157,7 +10157,123 @@ def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> di
     except Exception as e:
         print(f"_snapshot_active_listings failed for business {business_id} (live sync unaffected): {e}")
 
+    # Standing rule (explicit request): any eBay listing on the $69 or $195
+    # flat-shipping tier pushes that same shipping cost to its matched Shopify
+    # product, automatically, every sync. Wrapped like the snapshot -- the rule
+    # failing can never affect the sync itself.
+    try:
+        apply_shopify_shipping_rule(business_id)
+    except Exception as e:
+        print(f"apply_shopify_shipping_rule failed for business {business_id} (live sync unaffected): {e}")
+
     return {"checked": total_rows, "synced_at": _dt.datetime.utcnow().isoformat()}
+
+def _shopify_gql(business_id: str, query: str, variables: dict = None):
+    import requests as _req
+    token = get_shopify_access_token(business_id)
+    settings = get_ebay_settings(business_id)
+    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").replace("https://", "").replace("http://", "").strip("/")
+    r = _req.post(f"https://{domain}/admin/api/2024-10/graphql.json",
+                  headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+                  json={"query": query, "variables": variables or {}}, timeout=30)
+    out = r.json()
+    if out.get("errors"):
+        raise Exception(f"Shopify GraphQL error: {str(out['errors'])[:300]}")
+    return out.get("data") or {}
+
+def _ensure_shipping_profile(business_id: str, cost: int) -> str:
+    """Returns the Shopify delivery-profile GID for the given flat cost,
+    creating 'eBay $<cost> Shipping' (US flat rate, all locations) if it
+    doesn't exist yet. Profiles are looked up by that exact name."""
+    name = f"eBay ${cost} Shipping"
+    data = _shopify_gql(business_id, """
+      query { deliveryProfiles(first: 25) { edges { node { id name } } } }""")
+    for edge in (data.get("deliveryProfiles") or {}).get("edges", []):
+        if edge["node"]["name"] == name:
+            return edge["node"]["id"]
+    locs = _shopify_gql(business_id, """
+      query { locations(first: 10, includeLegacy: true) { edges { node { id } } } }""")
+    loc_ids = [e["node"]["id"] for e in (locs.get("locations") or {}).get("edges", [])]
+    if not loc_ids:
+        raise Exception("No Shopify locations found — cannot create shipping profile")
+    created = _shopify_gql(business_id, """
+      mutation createProfile($profile: DeliveryProfileInput!) {
+        deliveryProfileCreate(profile: $profile) {
+          profile { id }
+          userErrors { field message }
+        }
+      }""", {"profile": {
+        "name": name,
+        "locationGroupsToCreate": [{
+            "locations": loc_ids,
+            "zonesToCreate": [{
+                "name": "United States",
+                "countries": [{"code": "US", "includeAllProvinces": True}],
+                "methodDefinitionsToCreate": [{
+                    "name": f"Flat Rate (${cost})", "active": True,
+                    "rateDefinition": {"price": {"amount": float(cost), "currencyCode": "USD"}},
+                }],
+            }],
+        }],
+      }})
+    res = (created.get("deliveryProfileCreate") or {})
+    if res.get("userErrors"):
+        raise Exception(f"deliveryProfileCreate: {res['userErrors']}")
+    return res["profile"]["id"]
+
+def apply_shopify_shipping_rule(business_id: str) -> dict:
+    """Standing rule: eBay listing on the $69/$195 flat-shipping tier =>
+    its matched Shopify product's variant goes into the matching
+    'eBay $69/$195 Shipping' delivery profile so Shopify charges the same
+    shipping. Runs automatically after every active-listings sync; idempotent
+    via ebay_listing_status.shopify_ship_rule_applied (skips items already
+    pushed at the same cost)."""
+    els = _fetch_all_for_business(business_id, "ebay_listing_status",
+                                  "item_id,listing_status,shipping_cost,shopify_ship_rule_applied")
+    targets = {r["item_id"]: int(float(r["shipping_cost"]))
+               for r in els
+               if r.get("item_id") and r.get("listing_status") == "Active"
+               and r.get("shipping_cost") is not None and float(r["shipping_cost"]) in (69.0, 195.0)
+               and (r.get("shopify_ship_rule_applied") is None
+                    or float(r["shopify_ship_rule_applied"]) != float(r["shipping_cost"]))}
+    if not targets:
+        return {"pushed": 0}
+    matches = _fetch_all_for_business(business_id, "inventory_match", "ebay_id,shopify_id")
+    shopify_inv = {r["id"]: r for r in _fetch_all_for_business(business_id, "shopify_inventory", "id,product_id")}
+    variants_by_cost = {69: [], 195: []}
+    items_by_cost = {69: [], 195: []}
+    for m in matches:
+        eid, sid = m.get("ebay_id"), m.get("shopify_id")
+        if not eid or not sid or eid not in targets:
+            continue
+        cost = targets[eid]
+        # shopify_id may be a variant id (title-match rows) or product id
+        # (dual-publish rows) — profile association needs variant GIDs.
+        if sid in shopify_inv:
+            variants_by_cost[cost].append(f"gid://shopify/ProductVariant/{sid}")
+            items_by_cost[cost].append(eid)
+    pushed = 0
+    for cost, variant_gids in variants_by_cost.items():
+        if not variant_gids:
+            continue
+        profile_id = _ensure_shipping_profile(business_id, cost)
+        for i in range(0, len(variant_gids), 100):
+            chunk = variant_gids[i:i+100]
+            chunk_items = items_by_cost[cost][i:i+100]
+            data = _shopify_gql(business_id, """
+              mutation assign($id: ID!, $profile: DeliveryProfileInput!) {
+                deliveryProfileUpdate(id: $id, profile: $profile) {
+                  userErrors { field message }
+                }
+              }""", {"id": profile_id, "profile": {"variantsToAssociate": chunk}})
+            errs = ((data.get("deliveryProfileUpdate") or {}).get("userErrors")) or []
+            if errs:
+                print(f"apply_shopify_shipping_rule: userErrors on ${cost} chunk: {errs}")
+                continue
+            supabase.table("ebay_listing_status").update({"shopify_ship_rule_applied": cost})\
+                .eq("business_id", business_id).in_("item_id", chunk_items).execute()
+            pushed += len(chunk)
+    return {"pushed": pushed}
 
 def _snapshot_active_listings(business_id: str):
     """Appends today's active-listings state into active_listings_daily_snapshot
@@ -10168,7 +10284,7 @@ def _snapshot_active_listings(business_id: str):
     date; upserts on (business_id, item_id, snapshot_date) so re-running the sync
     twice in one day never creates duplicate rows for that day."""
     rows = _fetch_all_for_business(business_id, "ebay_listing_status",
-                                    "item_id,sku,title,quantity,quantity_available,price,listing_status")
+                                    "item_id,sku,title,quantity,quantity_available,price,listing_status,shipping_cost")
     active_rows = [r for r in rows if r.get("listing_status") == "Active"]
     if not active_rows:
         return
@@ -10178,6 +10294,7 @@ def _snapshot_active_listings(business_id: str):
         "business_id": business_id, "item_id": r["item_id"], "sku": r.get("sku"),
         "title": r.get("title"), "quantity": r.get("quantity"),
         "quantity_available": r.get("quantity_available"), "price": r.get("price"),
+        "shipping_cost": r.get("shipping_cost"),
         "snapshot_date": snapshot_date,
     } for r in active_rows]
     # Chunked -- a single request with thousands of rows risks hitting a payload
