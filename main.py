@@ -2365,6 +2365,73 @@ async def delete_note(note_id: int, request: Request):
     supabase.table("notes").delete().eq("id", note_id).eq("business_id", business_id).execute()
     return {"ok": True}
 
+@app.post("/api/notes/files")
+async def upload_audit_file(request: Request, file: UploadFile = File(...), section: str = "audit"):
+    """PDF attachments for the Notes page (Audit Notes etc.) — stored in the
+    private 'audit-docs' Supabase bucket, indexed in audit_files, downloadable
+    any time later. Same storage pattern as part-photos/auction-pdfs."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    fname = (file.filename or "document.pdf").strip()
+    if not fname.lower().endswith(".pdf"):
+        raise HTTPException(400, "Only PDF files are accepted here")
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "File is empty")
+    import uuid as _uuid
+    file_id = str(_uuid.uuid4())
+    storage_path = f"{business_id}/{file_id}.pdf"
+    supabase.storage.from_("audit-docs").upload(
+        storage_path, content, {"content-type": "application/pdf"}
+    )
+    res = supabase.table("audit_files").insert({
+        "id": file_id, "business_id": business_id, "section": section,
+        "filename": fname, "storage_path": storage_path, "size_bytes": len(content),
+    }).execute()
+    return {"ok": True, "file": (res.data or [{}])[0]}
+
+@app.get("/api/notes/files")
+async def list_audit_files(request: Request, section: str = "audit"):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    res = (supabase.table("audit_files").select("id,filename,size_bytes,uploaded_at")
+           .eq("business_id", business_id).eq("section", section)
+           .order("uploaded_at", desc=True).execute())
+    return {"files": res.data or []}
+
+@app.get("/api/notes/files/{file_id}/download")
+async def download_audit_file(file_id: str, request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    res = (supabase.table("audit_files").select("filename,storage_path")
+           .eq("id", file_id).eq("business_id", business_id).limit(1).execute())
+    if not res.data:
+        raise HTTPException(404, "File not found")
+    row = res.data[0]
+    data = supabase.storage.from_("audit-docs").download(row["storage_path"])
+    from fastapi.responses import Response as _Resp
+    safe_name = row["filename"].replace('"', "")
+    return _Resp(content=data, media_type="application/pdf",
+                 headers={"Content-Disposition": f'inline; filename="{safe_name}"'})
+
+@app.delete("/api/notes/files/{file_id}")
+async def delete_audit_file(file_id: str, request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    res = (supabase.table("audit_files").select("storage_path")
+           .eq("id", file_id).eq("business_id", business_id).limit(1).execute())
+    if res.data:
+        try:
+            supabase.storage.from_("audit-docs").remove([res.data[0]["storage_path"]])
+        except Exception:
+            pass
+        supabase.table("audit_files").delete().eq("id", file_id).eq("business_id", business_id).execute()
+    return {"ok": True}
+
 @app.get("/api/ebay/category-search")
 async def ebay_category_search(q: str, request: Request):
     """Look up valid LEAF category IDs by keyword, using the token already saved in Settings."""

@@ -80,6 +80,18 @@ h1 { font-size: 20px; margin-bottom: 4px; }
   </div>
 
   <div class="note-list" id="note-list"><div class="empty">Loading...</div></div>
+
+  <div style="margin-top:24px;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+      <h3 style="margin:0;font-size:14px;">📎 Documents</h3>
+      <label class="btn" style="cursor:pointer;font-size:12px;">
+        Upload PDF
+        <input type="file" accept="application/pdf" style="display:none;" onchange="uploadAuditPdf(this)">
+      </label>
+      <span id="pdf-upload-status" style="font-size:12px;color:var(--muted);"></span>
+    </div>
+    <div class="note-list" id="file-list"><div class="empty">Loading...</div></div>
+  </div>
 </div>
 
 <script>
@@ -100,6 +112,61 @@ function switchSection(key) {
   currentSection = key;
   renderSectionTabs();
   loadNotes();
+  loadFiles();
+}
+
+function fmtSize(b) {
+  if (!b) return '';
+  return b > 1048576 ? (b/1048576).toFixed(1) + ' MB' : Math.round(b/1024) + ' KB';
+}
+
+async function loadFiles() {
+  const list = document.getElementById('file-list');
+  list.innerHTML = '<div class="empty">Loading...</div>';
+  try {
+    const r = await fetch('/api/notes/files?section=' + encodeURIComponent(currentSection));
+    const data = await r.json();
+    const files = data.files || [];
+    if (!files.length) {
+      list.innerHTML = '<div class="empty">No documents yet — upload a PDF above.</div>';
+      return;
+    }
+    list.innerHTML = files.map(f => `
+      <div class="note-row">
+        <div class="content"><a href="/api/notes/files/${f.id}/download" target="_blank" style="color:var(--accent);text-decoration:none;">📄 ${escapeHtml(f.filename)}</a> <span style="color:var(--muted);font-size:11px;">${fmtSize(f.size_bytes)}</span></div>
+        <div class="meta">
+          <div class="date">${fmtDate(f.uploaded_at)}</div>
+          <button class="del-btn" onclick="deleteFile('${f.id}')" title="Delete this document">✕</button>
+        </div>
+      </div>
+    `).join('');
+  } catch(e) {
+    list.innerHTML = '<div class="empty">Failed to load documents.</div>';
+  }
+}
+
+async function uploadAuditPdf(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const status = document.getElementById('pdf-upload-status');
+  status.textContent = 'Uploading ' + file.name + '...';
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const r = await fetch('/api/notes/files?section=' + encodeURIComponent(currentSection), {method: 'POST', body: fd});
+    if (!r.ok) throw new Error((await r.json()).detail || 'upload failed');
+    status.textContent = '';
+    loadFiles();
+  } catch(e) {
+    status.textContent = 'Upload failed: ' + e.message;
+  }
+  input.value = '';
+}
+
+async function deleteFile(id) {
+  if (!confirm('Delete this document permanently?')) return;
+  await fetch('/api/notes/files/' + id, {method: 'DELETE'});
+  loadFiles();
 }
 
 function escapeHtml(s) {
@@ -165,6 +232,7 @@ async function deleteNote(id) {
 
 renderSectionTabs();
 loadNotes();
+loadFiles();
 </script>
 </body>
 </html>
