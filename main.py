@@ -595,6 +595,16 @@ EBAY_SHIPPING_POLICY_OPTIONS = [
     {"id": "251094371020", "label": "$69 Shipping"},
     {"id": "251094542020", "label": "$195 Shipping"},
 ]
+def _parse_ship_label_cost(label: str):
+    label = (label or "").strip()
+    if label.lower().startswith("free"):
+        return 0
+    import re as _re
+    m = _re.search(r'\$(\d+(?:\.\d+)?)', label)
+    return float(m.group(1)) if m else None
+_EBAY_SHIP_POLICY_COST_BY_ID = {
+    opt["id"]: _parse_ship_label_cost(opt["label"]) for opt in EBAY_SHIPPING_POLICY_OPTIONS
+}
 
 EBAY_ENV_KEYS = [
     "EBAY_USER_TOKEN", "EBAY_APP_ID", "EBAY_DEV_ID", "EBAY_CERT_ID", "EBAY_RUNAME",
@@ -10133,15 +10143,27 @@ def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> di
             selling_status = it.get("SellingStatus") or {}
             picture_details = it.get("PictureDetails") or {}
             gallery_url = picture_details.get("GalleryURL")
-            # Flat buyer-facing shipping cost off the listing itself (the $0/$18/
-            # $69/$195 policy tiers). First ShippingServiceOptions entry = the
-            # primary domestic service. None when eBay doesn't return it
-            # (calculated-shipping or freight listings).
-            ship_details = it.get("ShippingDetails") or {}
-            sso = ship_details.get("ShippingServiceOptions")
-            if isinstance(sso, list):
-                sso = sso[0] if sso else {}
-            shipping_cost = _safe_float((sso or {}).get("ShippingServiceCost"))
+            # BUG FIXED (confirmed 0/4605 populated on first real sync): this
+            # account publishes shipping via a Business Policy (SellerShippingProfile
+            # / ShippingProfileID -- see push_listing_to_ebay_v2), NOT a manual
+            # ShippingServiceOptions block. GetMyeBaySelling's ActiveList items
+            # reflect that same policy-based structure back, so ShippingDetails.
+            # ShippingServiceOptions.ShippingServiceCost is never populated for
+            # business-policy listings -- it's the legacy manual-shipping-only
+            # field. Real source: SellerProfiles.SellerShippingProfile.ShippingProfileID,
+            # mapped to a dollar figure via the same EBAY_SHIPPING_POLICY_OPTIONS
+            # list used when publishing. Kept the old field as a fallback in case
+            # any older listing still carries manual (non-policy) shipping.
+            seller_profiles = it.get("SellerProfiles") or {}
+            ship_profile = seller_profiles.get("SellerShippingProfile") or {}
+            profile_id = str(ship_profile.get("ShippingProfileID") or "").strip()
+            shipping_cost = _EBAY_SHIP_POLICY_COST_BY_ID.get(profile_id)
+            if shipping_cost is None:
+                ship_details = it.get("ShippingDetails") or {}
+                sso = ship_details.get("ShippingServiceOptions")
+                if isinstance(sso, list):
+                    sso = sso[0] if sso else {}
+                shipping_cost = _safe_float((sso or {}).get("ShippingServiceCost"))
             rows.append({
                 "business_id": business_id, "item_id": it.get("ItemID"),
                 "sku": it.get("SKU"), "title": title, "norm_title": _shopify_sync_norm(title),
