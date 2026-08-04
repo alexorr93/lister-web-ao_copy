@@ -9103,6 +9103,49 @@ def _rematch_inventory_from_cache(business_id: str) -> dict:
 def _rematch_inventory_from_cache_inner(business_id: str) -> dict:
     errors = {}
 
+    # SELF-HEALING dual-publish confirms — root cause of confirmed-real bug
+    # ("published to both platforms but shows eBay-only, no HD_ID"): right
+    # after a dual publish, _maybe_confirm_inventory_match needs the brand-new
+    # Shopify product to already be in the shopify_inventory cache to resolve
+    # its variant id — but a just-created product isn't there until the next
+    # inventory sync, so the confirm hit "skipping for now" and NOTHING ever
+    # retried. "For now" was forever. This backfill re-runs the confirm for
+    # every dual-published listing that still lacks a confirmed match, every
+    # time a rematch runs — by which point the variant is in the cache, so the
+    # confirm that raced the sync at publish time simply completes on the next
+    # cycle instead of stranding the item permanently.
+    try:
+        dual, start_dp = [], 0
+        while True:
+            page = (supabase.table("listings").select("id,ebay_item_id")
+                    .eq("business_id", business_id)
+                    .not_.is_("ebay_item_id", "null").not_.is_("shopify_product_id", "null")
+                    .range(start_dp, start_dp + 999).execute().data or [])
+            dual.extend(page)
+            if len(page) < 1000:
+                break
+            start_dp += 1000
+        if dual:
+            confirmed_ebay_ids = set()
+            start_c = 0
+            while True:
+                page = (supabase.table("inventory_match").select("ebay_id")
+                        .eq("business_id", business_id).not_.is_("hd_id", "null")
+                        .range(start_c, start_c + 999).execute().data or [])
+                confirmed_ebay_ids.update(str(r.get("ebay_id")) for r in page if r.get("ebay_id"))
+                if len(page) < 1000:
+                    break
+                start_c += 1000
+            healed = 0
+            for l in dual:
+                if str(l.get("ebay_item_id")) not in confirmed_ebay_ids:
+                    _maybe_confirm_inventory_match(business_id, l["id"])
+                    healed += 1
+            if healed:
+                print(f"_rematch: retried dual-publish confirm for {healed} previously-stranded listing(s)")
+    except Exception as e:
+        errors["dual_publish_backfill"] = str(e)
+
     def _fetch_paginated(table):
         # Same 1000-row Supabase cap hit repeatedly today elsewhere — a plain
         # .execute() here was silently truncating both tables to 1000 rows each,
