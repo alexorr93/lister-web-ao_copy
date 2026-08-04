@@ -147,6 +147,11 @@ function render() {
         <div class="title">${(l.title||'Untitled').slice(0,80)}</div>
         <div class="price">$${(l.price||0).toFixed(2)}</div>
         <div class="date">Archived — originally added ${formatDate(l.created_at)}</div>
+        ${l.ebay_item_id ? `
+        <div style="display:flex;gap:6px;margin-top:8px;">
+          <input type="text" class="sku-edit-input" data-item-id="${l.id}" value="${(l.ebay_sku||'').replace(/"/g,'&quot;')}" placeholder="SKU" style="flex:1;min-width:0;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:#161925;color:var(--text);font-size:12px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="archive-sku-${l.id}"/>
+          <button class="btn" style="font-size:11px;padding:6px 10px;" onclick="saveArchivedSku('${l.id}')">Save</button>
+        </div>` : ''}
       </div>
       <div class="controls">
         <div class="check${isSel?' checked':''}" onclick="toggleSelect('${l.id}')"></div>
@@ -197,6 +202,24 @@ async function restoreAll() {
     render();
     toast('All items restored ✓');
   } catch(e) { toast('Restore failed: ' + e.message); }
+}
+
+async function saveArchivedSku(id) {
+  // Published items get archived (normal cleanup) and previously had NO way to
+  // fix their SKU afterward short of Restore -> edit in Intake -> re-archive.
+  // Same endpoint the Intake modal and Lots page already use for this.
+  const input = document.querySelector(`.sku-edit-input[data-item-id="${id}"]`);
+  const newSku = input.value.trim();
+  if (!newSku) { toast('SKU cannot be blank'); return; }
+  try {
+    const r = await fetch(`/api/listings/${id}/ebay-v2/sku`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({new_sku: newSku}),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    toast('SKU updated ✓');
+  } catch(e) { toast('SKU update failed: ' + e.message); }
 }
 
 loadArchive();
