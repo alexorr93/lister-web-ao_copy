@@ -186,6 +186,7 @@ async def start_background_jobs():
     asyncio.create_task(analytics_cache_refresh_worker())
     asyncio.create_task(auction_archive_worker())
     asyncio.create_task(active_listings_sync_worker())
+    asyncio.create_task(post_publish_sync_worker())
     asyncio.create_task(inventory_value_sync_worker())
 
 async def auction_archive_worker():
@@ -1908,6 +1909,8 @@ async def submit_to_ebay(item_id: str, body: EbaySubmit, request: Request):
             _maybe_confirm_inventory_match(business_id, item_id)
         except Exception:
             pass
+        if result.get("item_id"):
+            _mark_needs_post_publish_sync(business_id)
         return {"ok": True, **result}
     except HTTPException:
         raise
@@ -1961,6 +1964,8 @@ async def submit_to_ebay_v2(item_id: str, body: EbaySubmit, request: Request):
             _maybe_confirm_inventory_match(business_id, item_id)
         except Exception:
             pass
+        if result.get("item_id"):
+            _mark_needs_post_publish_sync(business_id)
         return {"ok": True, **result}
     except HTTPException:
         raise
@@ -10409,6 +10414,68 @@ async def inventory_value_sync_worker():
         except Exception as e:
             print(f"inventory_value_sync_worker error: {e}")
         await asyncio.sleep(3600)  # check hourly; actual sync per business is gated to ~once/day above
+
+_post_publish_sync_pending = {}  # business_id -> {"first": iso, "last": iso}
+
+def _mark_needs_post_publish_sync(business_id: str):
+    """Called right after a successful eBay publish. Doesn't sync anything itself —
+    just timestamps that this business has fresh listings waiting, for
+    post_publish_sync_worker to pick up once publishing activity settles."""
+    import datetime as _dt
+    now_iso = _dt.datetime.utcnow().isoformat()
+    entry = _post_publish_sync_pending.get(business_id)
+    if entry:
+        entry["last"] = now_iso
+    else:
+        _post_publish_sync_pending[business_id] = {"first": now_iso, "last": now_iso}
+
+async def post_publish_sync_worker():
+    """Fires an active-listings sync shortly after a publish, instead of making
+    new items wait for the once-daily cycle to pick up their shipping cost /
+    inventory match. Debounced rather than immediate: a real Lister session
+    publishes many items over a stretch of time, so firing once per publish
+    would be wasteful and would just repeatedly interrupt itself. Fires once
+    publishing goes quiet for QUIET_MINUTES, with a MAX_WAIT_MINUTES ceiling so
+    a long continuous session still gets a sync at least that often instead of
+    the timer resetting forever."""
+    import asyncio, datetime as _dt
+    QUIET_MINUTES = 20
+    MAX_WAIT_MINUTES = 60
+    while True:
+        try:
+            now = _dt.datetime.utcnow()
+            for biz_id, entry in list(_post_publish_sync_pending.items()):
+                if _ebay_active_listings_job_status.get(biz_id, {}).get("running"):
+                    continue
+                last = _dt.datetime.fromisoformat(entry["last"])
+                first = _dt.datetime.fromisoformat(entry["first"])
+                quiet_long_enough = (now - last) >= _dt.timedelta(minutes=QUIET_MINUTES)
+                been_waiting_too_long = (now - first) >= _dt.timedelta(minutes=MAX_WAIT_MINUTES)
+                if not (quiet_long_enough or been_waiting_too_long):
+                    continue
+                del _post_publish_sync_pending[biz_id]
+                _ebay_active_listings_job_status[biz_id] = {
+                    "running": True, "result": None,
+                    "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None,
+                }
+                try:
+                    result = await asyncio.to_thread(_sync_ebay_active_listings_work, biz_id)
+                    _ebay_active_listings_job_status[biz_id] = {
+                        "running": False, "result": result,
+                        "started_at": _ebay_active_listings_job_status[biz_id]["started_at"],
+                        "finished_at": _dt.datetime.utcnow().isoformat(),
+                    }
+                    print(f"post_publish_sync_worker: business {biz_id} synced after publish activity")
+                except Exception as e:
+                    _ebay_active_listings_job_status[biz_id] = {
+                        "running": False, "result": {"error": str(e)},
+                        "started_at": _ebay_active_listings_job_status[biz_id]["started_at"],
+                        "finished_at": _dt.datetime.utcnow().isoformat(),
+                    }
+                    print(f"post_publish_sync_worker: business {biz_id} failed: {e}")
+        except Exception as e:
+            print(f"post_publish_sync_worker error: {e}")
+        await asyncio.sleep(120)  # check every 2 min -- cheap, and keeps the 20-min debounce reasonably tight
 
 async def active_listings_sync_worker():
     """Keeps the Lots page's Active Listings column fresh automatically. Previously
