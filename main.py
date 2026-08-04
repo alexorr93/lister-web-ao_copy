@@ -4194,14 +4194,40 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
         # to be final, one-and-done, not silently re-derived on every future sync.
         candidate_ids = [f"ebay:{row['order_id']}:{row['line_item_id']}" for row in ebay_rows]
         existing_sku_by_id = {}
+        existing_tracking_by_id = {}
         for i in range(0, len(candidate_ids), 200):
             chunk = candidate_ids[i:i+200]
             try:
-                res = supabase.table("orders").select("id,sku").in_("id", chunk).execute()
+                res = supabase.table("orders").select("id,sku,tracking_number").in_("id", chunk).execute()
                 for r in (res.data or []):
                     existing_sku_by_id[r["id"]] = r.get("sku")
+                    existing_tracking_by_id[r["id"]] = r.get("tracking_number") or ""
             except Exception:
                 pass
+
+        # Multi-box orders: eBay only knows the ONE tracking number uploaded to it,
+        # but a 6-box shipment has 6 Pirate Ship labels — the other 5 live only in
+        # shipping_labels (source blank) and previously could never attach to the
+        # order, undercounting shipping cost (seen live: qty-6 order, $235 of labels,
+        # $39.19 counted). Fix: MERGE stored trackings with eBay's instead of
+        # overwriting, so extra trackings attached to the order (manually or by any
+        # future tooling) survive every 20-minute sync. Their label costs are looked
+        # up right here so shipping_cost reflects the full merged set.
+        extra_trackings = []
+        for rid in candidate_ids:
+            for tn in (existing_tracking_by_id.get(rid) or "").split(","):
+                tn = tn.strip()
+                if tn and tn not in cost_by_tracking:
+                    extra_trackings.append(tn)
+        for i in range(0, len(extra_trackings), 200):
+            chunk = extra_trackings[i:i+200]
+            try:
+                res = supabase.table("shipping_labels").select("tracking_number,cost")\
+                    .eq("business_id", business_id).in_("tracking_number", chunk).execute()
+                for row in (res.data or []):
+                    cost_by_tracking[row["tracking_number"]] = row.get("cost") or 0
+            except Exception as e:
+                errors["shipping_match_extras"] = str(e)
 
         skipped_rows = 0
         for row in ebay_rows:
@@ -4214,7 +4240,12 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
             # revenue-refund-fee reconstruction can drift from. Fall back to reconstruction
             # only if that field is missing for some reason.
             net = _safe(row["net_from_ebay"]) if "net_from_ebay" in row else _safe(revenue - refund_amt - fee)
-            trackings = tracking_by_order.get(row["order_id"], [])
+            trackings = list(tracking_by_order.get(row["order_id"], []))
+            _rid = f"ebay:{row['order_id']}:{row['line_item_id']}"
+            for tn in (existing_tracking_by_id.get(_rid) or "").split(","):
+                tn = tn.strip()
+                if tn and tn not in trackings:
+                    trackings.append(tn)
             pirate_ship_cost = sum(cost_by_tracking.get(tn, 0) or 0 for tn in trackings)
             # Pirate Ship match takes priority (it's the common case); eBay-purchased
             # label cost fills in only when there's no Pirate Ship match for this order.
