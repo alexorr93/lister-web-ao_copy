@@ -691,6 +691,7 @@ select.field-input { background: #fff; color: #0f172a; }
 
 <!-- PHOTO MODAL -->
 <div class="modal-overlay" id="modal" onclick="closeModal(event)">
+  <button onclick="closeModal()" title="Close" style="position:absolute;top:14px;right:14px;width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,0.7);border:none;color:#fff;font-size:20px;line-height:1;cursor:pointer;z-index:50;display:flex;align-items:center;justify-content:center;">✕</button>
   <div class="modal" onclick="event.stopPropagation()">
     <div style="position:relative;z-index:5;">
       <img class="modal-img" id="modal-img" src="" alt="" style="pointer-events:none;"/>
