@@ -187,6 +187,7 @@ async def start_background_jobs():
     asyncio.create_task(auction_archive_worker())
     asyncio.create_task(active_listings_sync_worker())
     asyncio.create_task(post_publish_sync_worker())
+    asyncio.create_task(shopify_shipping_rule_worker())
     asyncio.create_task(inventory_value_sync_worker())
 
 async def auction_archive_worker():
@@ -313,6 +314,30 @@ async def shopify_sync_run_now(request: Request):
     import asyncio
     result = await asyncio.to_thread(run_hourly_shopify_sync_for_business, business_id)
     return result
+
+async def shopify_shipping_rule_worker():
+    """Fully independent, fully automatic -- no button, and by DESIGN never
+    calls eBay at all (explicit instruction: this must never be bundled with
+    or trigger anything that touches eBay). Reads whatever shipping_cost is
+    ALREADY sitting in ebay_listing_status (kept fresh by the separate eBay
+    sync workers) and pushes any $69/$195 item to its matched Shopify product.
+    Runs on its own clock every 15 minutes -- catches new matches, price-tier
+    changes, etc. without waiting on or depending on an eBay sync ever running."""
+    import asyncio
+    while True:
+        try:
+            res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
+            business_ids = list(set(r["business_id"] for r in (res.data or [])))
+            for biz_id in business_ids:
+                try:
+                    result = await asyncio.to_thread(apply_shopify_shipping_rule, biz_id)
+                    if result.get("pushed"):
+                        print(f"shopify_shipping_rule_worker: pushed {result['pushed']} item(s) for business {biz_id}")
+                except Exception as e:
+                    print(f"shopify_shipping_rule_worker: business {biz_id} failed: {e}")
+        except Exception as e:
+            print(f"shopify_shipping_rule_worker error: {e}")
+        await asyncio.sleep(900)  # 15 min
 
 async def order_sync_worker():
     """Keeps the local `orders` table fresh automatically, so Financials never has to
@@ -10226,15 +10251,6 @@ def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> di
         _snapshot_active_listings(business_id)
     except Exception as e:
         print(f"_snapshot_active_listings failed for business {business_id} (live sync unaffected): {e}")
-
-    # Standing rule (explicit request): any eBay listing on the $69 or $195
-    # flat-shipping tier pushes that same shipping cost to its matched Shopify
-    # product, automatically, every sync. Wrapped like the snapshot -- the rule
-    # failing can never affect the sync itself.
-    try:
-        apply_shopify_shipping_rule(business_id)
-    except Exception as e:
-        print(f"apply_shopify_shipping_rule failed for business {business_id} (live sync unaffected): {e}")
 
     return {"checked": total_rows, "synced_at": _dt.datetime.utcnow().isoformat()}
 
