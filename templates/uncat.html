@@ -62,6 +62,9 @@ td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: 
 .platform-tag.shopify { background: #95bf47; color: #fff; }
 .empty { color: var(--muted); font-size: 13px; padding: 24px 0; text-align: center; }
 .lock-note { font-size: 10px; color: var(--muted); margin-top: 2px; }
+.bulk-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.row-check { width: 15px; height: 15px; cursor: pointer; }
+.bulk-sku-input { background: #fff; color: #0f172a; border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-family: monospace; font-weight: 700; width: 120px; }
 </style>
 </head>
 <body>
@@ -75,6 +78,14 @@ td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: 
     <a class="section-link" href="/acquisitions">Open in Lots →</a>
   </div>
   <div class="section-status" id="listings-status">Loading...</div>
+  <div class="bulk-bar">
+    <button class="btn" onclick="selectAllUncat()">☑ Select All</button>
+    <button class="btn" onclick="deselectAllUncat()">☐ Deselect All</button>
+    <span class="muted" id="uncat-selected-count" style="font-size:12px;"></span>
+    <span style="flex:1;"></span>
+    <input type="text" class="bulk-sku-input" id="bulk-sku-input" placeholder="SKU e.g. 14R-102" autocomplete="off" spellcheck="false"/>
+    <button class="btn btn-primary" onclick="assignSkuToSelected()">Assign to Selected</button>
+  </div>
   <div id="listings-table-area"><div class="empty">Loading...</div></div>
 
   <div class="section-header">
@@ -175,6 +186,23 @@ async function saveOrderSku(btn, rowId) {
 
 // ── Uncategorized Listings (from Lots) ─────────────────────────
 let listingItems = [];
+let uncatSelected = new Set();
+function updateUncatSelectedCount() {
+  const el = document.getElementById('uncat-selected-count');
+  if (el) el.textContent = uncatSelected.size ? `${uncatSelected.size} selected` : '';
+}
+function selectAllUncat() {
+  listingItems.forEach(it => uncatSelected.add(it.item_id));
+  renderListingsTable();
+}
+function deselectAllUncat() {
+  uncatSelected.clear();
+  renderListingsTable();
+}
+function toggleUncatSelect(itemId) {
+  if (uncatSelected.has(itemId)) uncatSelected.delete(itemId); else uncatSelected.add(itemId);
+  updateUncatSelectedCount();
+}
 async function loadUncatListings() {
   document.getElementById('listings-status').textContent = 'Loading...';
   try {
@@ -196,7 +224,7 @@ function renderListingsTable() {
   const area = document.getElementById('listings-table-area');
   if (!listingItems.length) { area.innerHTML = '<div class="empty">Nothing uncategorized — every active listing matches a lot and has a real SKU.</div>'; return; }
   let html = `<table><thead><tr>
-    <th></th><th>SKU</th><th>Reason</th><th>eBay Item</th><th>Price</th><th>Qty Available</th><th>Value</th><th>Edit SKU</th>
+    <th></th><th></th><th>SKU</th><th>Reason</th><th>eBay Item</th><th>Price</th><th>Qty Available</th><th>Value</th><th>Edit SKU</th>
   </tr></thead><tbody>`;
   listingItems.forEach((it, idx) => {
     const reason = it.needs_sku
@@ -222,7 +250,9 @@ function renderListingsTable() {
     const thumbCell = (idx < 50 && it.gallery_url)
       ? `<img src="${escapeHtml(it.gallery_url)}" loading="lazy" style="width:36px;height:36px;object-fit:cover;border-radius:4px;" onerror="this.style.display='none'"/>`
       : '';
+    const checked = uncatSelected.has(it.item_id) ? ' checked' : '';
     html += `<tr>
+      <td><input type="checkbox" class="row-check" data-item-id="${it.item_id}"${checked} onchange="toggleUncatSelect('${it.item_id}')"/></td>
       <td>${thumbCell}</td>
       <td class="sku muted">${escapeHtml(it.sku || '(blank)')}</td>
       <td>${reason}</td>
@@ -235,6 +265,7 @@ function renderListingsTable() {
   });
   html += '</tbody></table>';
   area.innerHTML = html;
+  updateUncatSelectedCount();
 }
 async function saveUncatSku(btn, listingId, itemId) {
   const input = document.querySelector(`.uncat-sku-input[data-item-id="${itemId}"]`);
@@ -279,6 +310,52 @@ async function saveUncatSkuOverride(btn, itemId) {
   } catch(e) {
     alert(`Failed to update SKU: ${e.message}`);
     btn.disabled = false; btn.textContent = 'Save';
+  }
+}
+
+async function assignSkuToSelected() {
+  const input = document.getElementById('bulk-sku-input');
+  const newSku = input.value.trim();
+  if (!uncatSelected.size) { alert('Select at least one item first.'); return; }
+  if (!newSku) { alert('Enter a SKU first.'); return; }
+  // Fast client-side check for the "still uncat" rule (blank / bare 'PREFIX-')
+  // — the real, authoritative check (including "must match a real lot") is
+  // server-side in _validate_sku_for_assignment, enforced per item below, so
+  // this is just to fail obviously-wrong input instantly without a round trip.
+  if (newSku.endsWith('-')) {
+    alert(`'${newSku}' isn't a complete SKU — it still needs the part after the dash.`);
+    return;
+  }
+  if (!confirm(`Assign SKU "${newSku}" to ${uncatSelected.size} selected item(s)?`)) return;
+
+  const ids = [...uncatSelected];
+  let ok = 0, failed = [];
+  for (const itemId of ids) {
+    const it = listingItems.find(x => x.item_id === itemId);
+    if (!it) continue;
+    try {
+      const url = it.sku_editable
+        ? `/api/listings/${it.listing_id}/ebay-v2/sku`
+        : `/api/acquisitions/sku-override`;
+      const body = it.sku_editable ? {new_sku: newSku} : {item_id: itemId, new_sku: newSku};
+      const r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || 'Failed');
+      ok++;
+      uncatSelected.delete(itemId);
+    } catch(e) {
+      failed.push(`${it.title || itemId}: ${e.message}`);
+    }
+  }
+  // Remove rows that were targeted AND succeeded (anything still left in
+  // uncatSelected among `ids` failed and correctly stays visible in the table).
+  listingItems = listingItems.filter(x => !(ids.includes(x.item_id) && !uncatSelected.has(x.item_id)));
+  document.getElementById('listings-status').textContent =
+    listingItems.length ? `${listingItems.length} active listing(s) need attention` : 'Nothing uncategorized — every active listing matches a lot and has a real SKU.';
+  renderListingsTable();
+  input.value = '';
+  if (failed.length) {
+    alert(`Assigned to ${ok} item(s). ${failed.length} failed:\n\n` + failed.join('\n'));
   }
 }
 

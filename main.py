@@ -693,6 +693,25 @@ def _sku_needs_assignment(sku: str) -> bool:
     even though their prefix matches a real lot."""
     return (not sku) or sku.endswith("-")
 
+def _validate_sku_for_assignment(business_id: str, sku: str):
+    """Per direct instruction for the Uncat page's SKU tools (single-row Save AND
+    the bulk multi-select assign): a SKU being SAVED here must be a real, complete
+    assignment, not just a step toward one. Two rules, both hard failures:
+      1. Can't be blank or a bare 'PREFIX-' with nothing after the dash -- that's
+         still effectively uncategorized, just wearing a SKU-shaped string.
+      2. The prefix must match an actual row on the Lots page -- same rule
+         _require_valid_lot_sku_for_publish already enforces at publish time,
+         applied here too so a bad SKU can't even get saved in the first place,
+         not just get caught later when publishing."""
+    sku = (sku or "").strip()
+    if _sku_needs_assignment(sku):
+        raise HTTPException(400, f"'{sku or '(blank)'}' isn't a complete SKU — it still needs the part after the dash.")
+    prefix = _lot_prefix(sku)
+    known_lot_skus = {a["sku"] for a in (supabase.table("acquisitions").select("sku")
+                       .eq("business_id", business_id).execute().data or []) if a.get("sku")}
+    if prefix not in known_lot_skus:
+        raise HTTPException(400, f"'{prefix}' doesn't match any real lot on the Lots page.")
+
 def _is_blank_sku(s):
     """True for blank, '(no SKU)', or the 'lister-{id}' fallback — the set of values
     that count as 'not a real SKU yet' for order-sync SKU-preservation purposes.
@@ -1214,6 +1233,7 @@ async def update_ebay_v2_sku(item_id: str, body: UpdateSkuV2, request: Request):
     new_sku = (body.new_sku or "").strip()
     if not new_sku:
         raise HTTPException(400, "new_sku is required")
+    _validate_sku_for_assignment(business_id, new_sku)
     try:
         res = supabase.table("listings").select("id,ebay_item_id,ebay_offer_id,business_id").eq("id", item_id).limit(1).execute()
         if not res.data:
@@ -3387,6 +3407,7 @@ async def set_sku_override(body: SkuOverrideUpdate, request: Request):
     new_sku = (body.new_sku or "").strip()
     if not new_sku:
         raise HTTPException(400, "new_sku is required")
+    _validate_sku_for_assignment(business_id, new_sku)
     res = (supabase.table("ebay_listing_status")
            .update({"sku_override": new_sku})
            .eq("business_id", business_id).eq("item_id", body.item_id).execute())
