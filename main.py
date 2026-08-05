@@ -6715,7 +6715,13 @@ def _extract_meta_from_stored_pdf(catalog_url: str) -> Optional[dict]:
         return None
     try:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        text = "".join(p.get_text() for p in doc[:2])
+        # Confirmed real gap: a catalog whose address/state info sits past the
+        # first 2 pages (e.g. behind a cover page or TOC) silently never got a
+        # state, forever -- every recast pass re-read the same 2 pages and kept
+        # finding nothing. Widened to the first 6 pages (still cheap -- this is
+        # local text extraction, not another Gemini call).
+        page_count = min(len(doc), 6)
+        text = "".join(p.get_text() for p in doc[:page_count])
     except Exception:
         return None
 
@@ -6731,6 +6737,18 @@ def _extract_meta_from_stored_pdf(catalog_url: str) -> Optional[dict]:
         for state_name, abbr in _US_STATE_NAMES.items():
             if _re3.search(r'\b' + _re3.escape(state_name) + r'\b', text, _re3.I):
                 state_found = abbr
+                break
+    if not state_found:
+        # Fallback: catalogs that print an address as "City, ST 12345" instead
+        # of spelling the state out in full -- confirmed real case (a stored
+        # PDF with zero full state-name hits anywhere in its first 6 pages,
+        # but a normal "CT 06810"-shaped ZIP line). Only accepts a REAL state
+        # abbreviation immediately before a 5-digit ZIP, so it can't false-
+        # -positive on unrelated two-letter tokens.
+        _valid_abbrs = set(_US_STATE_NAMES.values())
+        for m in _re3.finditer(r'\b([A-Z]{2})\s+\d{5}(?:-\d{4})?\b', text):
+            if m.group(1) in _valid_abbrs:
+                state_found = m.group(1)
                 break
 
     title_meta = _extract_title_via_gemini(text) or {}
@@ -6800,49 +6818,55 @@ async def flags_recast_metadata(request: Request, body: dict):
 
 
 async def _auto_recast_bad_titles():
-    """Runs ~15s after startup: finds every catalog whose title is still
-    URL/filename-shaped (see _looks_like_bad_title) and recasts it
-    automatically -- per direct instruction, this needs to be automated,
-    not a button someone has to remember to click for each row. Also
-    closes a real gap in the manual Recast button itself: it only ever
-    appeared for rows missing an end_date, so a catalog that already had
-    a date (like Danbury) but a broken title had NO way to trigger a fix,
-    manual or automatic, until now."""
+    """Runs ~15s after startup, then every ~30 minutes -- finds every catalog
+    with a bad/missing title OR missing state/auctioneer/end_date and recasts
+    it automatically. Per direct instruction, this needs to be automated, not
+    a button someone has to remember to click per row.
+
+    Real gap closed here: this used to ONLY sweep bad titles and only ran
+    once at boot, so a catalog with a perfectly fine title but a blank state
+    (confirmed live -- Brass Monkey/Danbury: fine title, auctioneer, date,
+    but state stuck null forever) had NO automatic path to ever get fixed,
+    only the manual per-row Recast button. Now matches the manual button's
+    actual scope (title OR state OR auctioneer OR end_date, whichever's
+    missing) and keeps re-checking instead of running exactly once."""
     import asyncio
-    await asyncio.sleep(15)
-    try:
-        rows = supabase.table("auction_catalogs").select(
-            "id,business_id,catalog_url,title,end_date,state,auctioneer").execute().data or []
-        bad = [r for r in rows if _looks_like_bad_title(r.get("title"))]
-        if not bad:
-            return
-        print(f"[auto-recast] {len(bad)} catalog(s) with a URL-shaped title -- recasting automatically")
-        for row in bad:
-            meta = _extract_meta_from_stored_pdf(row["catalog_url"])
-            if not meta:
-                real_url = _reconstruct_bidspotter_url(row["catalog_url"])
-                if real_url:
-                    meta = _fetch_bidspotter_catalog_meta(real_url, row.get("title") or "")
-            if not meta:
-                continue
-            patch = {}
-            if meta.get("title") and _looks_like_bad_title(row.get("title")):
-                patch["title"] = meta["title"]
-                patch["display_title"] = meta["title"]
-            if meta.get("end_date") and not row.get("end_date"):
-                patch["end_date"] = meta["end_date"]
-            if meta.get("state") and not row.get("state"):
-                patch["state"] = meta["state"]
-            if meta.get("auctioneer") and not row.get("auctioneer"):
-                patch["auctioneer"] = meta["auctioneer"]
-            if patch:
-                try:
-                    supabase.table("auction_catalogs").update(patch).eq("id", row["id"]).execute()
-                    print(f"[auto-recast] fixed {row['catalog_url']}: {list(patch.keys())}")
-                except Exception as e:
-                    print(f"[auto-recast] failed to update {row['catalog_url']}: {e}")
-    except Exception as e:
-        print(f"[auto-recast] pass failed: {type(e).__name__}: {e}")
+    while True:
+        await asyncio.sleep(15)
+        try:
+            rows = supabase.table("auction_catalogs").select(
+                "id,business_id,catalog_url,title,end_date,state,auctioneer").execute().data or []
+            bad = [r for r in rows if _looks_like_bad_title(r.get("title"))
+                   or not r.get("state") or not r.get("auctioneer") or not r.get("end_date")]
+            if bad:
+                print(f"[auto-recast] {len(bad)} catalog(s) need a title/state/auctioneer/date fix -- recasting automatically")
+                for row in bad:
+                    meta = _extract_meta_from_stored_pdf(row["catalog_url"])
+                    if not meta:
+                        real_url = _reconstruct_bidspotter_url(row["catalog_url"])
+                        if real_url:
+                            meta = _fetch_bidspotter_catalog_meta(real_url, row.get("title") or "")
+                    if not meta:
+                        continue
+                    patch = {}
+                    if meta.get("title") and _looks_like_bad_title(row.get("title")):
+                        patch["title"] = meta["title"]
+                        patch["display_title"] = meta["title"]
+                    if meta.get("end_date") and not row.get("end_date"):
+                        patch["end_date"] = meta["end_date"]
+                    if meta.get("state") and not row.get("state"):
+                        patch["state"] = meta["state"]
+                    if meta.get("auctioneer") and not row.get("auctioneer"):
+                        patch["auctioneer"] = meta["auctioneer"]
+                    if patch:
+                        try:
+                            supabase.table("auction_catalogs").update(patch).eq("id", row["id"]).execute()
+                            print(f"[auto-recast] fixed {row['catalog_url']}: {list(patch.keys())}")
+                        except Exception as e:
+                            print(f"[auto-recast] failed to update {row['catalog_url']}: {e}")
+        except Exception as e:
+            print(f"[auto-recast] pass failed: {type(e).__name__}: {e}")
+        await asyncio.sleep(1800 - 15)  # ~30 min between passes after the first
 
 def _send_catalog_lots_to_capture(session_id: str, business_id: str, catalog_url: str):
     """Runs in the background -- bulk-inserts every already-parsed BidSpotter lot
