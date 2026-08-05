@@ -313,6 +313,14 @@ function displayTitle(c) {
   return c.title || (c.auctioneer ? c.auctioneer + ' — ' : '') + 'View catalog';
 }
 
+function looksLikeBadTitle(title) {
+  // Matches the server's _looks_like_bad_title exactly -- a title that's
+  // really just the raw catalog URL/filename, not a real auction name.
+  if (!title) return true;
+  const t = title.toLowerCase();
+  return t.startsWith('http') || t.includes('catalogue-id-') || t.endsWith('.pdf');
+}
+
 function isFlagged(c) {
   if (c.within_radius || c.multi_day) return true;
   return keywordSumLayer1(c) > 0 || keywordSumLayer2(c) > 0;
@@ -403,7 +411,9 @@ function renderTable() {
     const rowStyle = c.viewed ? ' style="background:rgba(22,163,74,.15);"' : '';
     html += `<tr data-catalog-url="${c.catalog_url}"${rowStyle}>
       <td style="text-align:center;padding:10px 2px;max-width:24px;"><span style="cursor:pointer;font-size:13px;color:${c.favorite ? '#f59e0b' : 'var(--border)'};" onclick="toggleFavorite('${c.catalog_url}', ${!c.favorite})">★</span></td>
-      <td><a href="${href}" target="_blank" onclick="markViewed('${c.catalog_url}')">${displayTitle(c).replace(/</g,'&lt;')}</a></td>
+      <td>${looksLikeBadTitle(c.title)
+        ? `<span class="muted" style="font-size:12px;">Untitled catalog</span> <button class="btn" style="font-size:11px;padding:3px 8px;" onclick="recastMetadata('${c.catalog_url}', this)">🔁 Recast title</button>`
+        : `<a href="${href}" target="_blank" onclick="markViewed('${c.catalog_url}')">${displayTitle(c).replace(/</g,'&lt;')}</a>`}</td>
       <td class="muted" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(c.auctioneer || '').replace(/"/g,'&quot;')}">${c.auctioneer || '—'}</td>
       <td class="muted" style="max-width:90px;">${c.end_date ? renderDateCell(c.end_date) : `<button class="btn" style="font-size:11px;padding:3px 8px;" onclick="recastMetadata('${c.catalog_url}', this)">🔁 Recast</button>`}</td>
       <td class="muted">${c.state || '—'}</td>
@@ -462,6 +472,7 @@ async function recastMetadata(catalogUrl, btn) {
     if (row) {
       if (r.end_date) row.end_date = r.end_date;
       if (r.state) row.state = r.state;
+      if (r.title) row.title = r.title;
     }
     renderTable();
   } catch (e) {

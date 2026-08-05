@@ -168,6 +168,7 @@ async def start_background_jobs():
     asyncio.create_task(auto_fill_worker())
     asyncio.create_task(order_sync_worker())
     asyncio.create_task(shopify_sync_worker())
+    asyncio.create_task(_auto_recast_bad_titles())
 
 async def shopify_sync_worker():
     """Runs the eBay-live-qty -> Shopify-qty sync automatically once per hour, at
@@ -6656,14 +6657,53 @@ async def flags_not_interested(request: Request, body: dict):
         raise HTTPException(404, "Catalog not found")
     return {"ok": True, "not_interested": not_interested}
 
+def _looks_like_bad_title(title: str) -> bool:
+    """A title that's really just the raw catalog URL/filename, not a real
+    auction name -- the exact symptom this whole fix addresses."""
+    if not title:
+        return True
+    t = title.lower()
+    return t.startswith("http") or "catalogue-id-" in t or t.endswith(".pdf")
+
+
+def _extract_title_via_gemini(text: str) -> Optional[dict]:
+    """Same gap, same fix as auction-catalog-feed tonight, just a second
+    independent copy of it in this app: nothing here ever asked for the
+    auction's own title, only state/end_date. Short, cheap, first-page-only
+    Gemini call -- title/auctioneer are usually right on the cover page."""
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    if not gemini_key:
+        return None
+    try:
+        import google.generativeai as genai
+        import json as _json
+        genai.configure(api_key=gemini_key)
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        prompt = f"""This is text from an auction catalog PDF's cover page. Find the auction's
+own title/headline (the name of THIS SPECIFIC SALE, e.g. "2-Day Machine Shop Liquidation" --
+NOT the auctioneer company running it) and the auctioneer/company name.
+Return ONLY a JSON object, no other text: {{"title": "..." or null, "auctioneer": "..." or null}}
+
+Text:
+{text[:6000]}"""
+        resp = model.generate_content(prompt)
+        raw = (resp.text or "").strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        return _json.loads(raw)
+    except Exception:
+        return None
+
+
 def _extract_meta_from_stored_pdf(catalog_url: str) -> Optional[dict]:
     """The real, durable path for Recast: reads the actual PDF this catalog
     was uploaded from (saved to the shared 'auction-pdfs' Supabase Storage
-    bucket by auction-catalog-feed at upload time) and extracts state/end_date
-    directly from its own text -- no dependency on BidSpotter's live site
-    still listing the auction, matching titles correctly, or anything else
-    fragile. Only catalogs uploaded before the storage bucket existed (a real
-    bug, fixed) will have nothing here; everything uploaded since should.
+    bucket by auction-catalog-feed at upload time) and extracts
+    title/auctioneer/state/end_date directly from its own text -- no
+    dependency on BidSpotter's live site still listing the auction,
+    matching titles correctly, or anything else fragile. Only catalogs
+    uploaded before the storage bucket existed (a real bug, fixed) will
+    have nothing here; everything uploaded since should.
     Returns None (not an error) if no stored PDF is found, so the caller can
     fall back to the live-fetch path for those older catalogs."""
     import fitz, re as _re3
@@ -6693,8 +6733,12 @@ def _extract_meta_from_stored_pdf(catalog_url: str) -> Optional[dict]:
                 state_found = abbr
                 break
 
-    if end_date_iso or state_found:
-        return {"end_date": end_date_iso, "state": state_found}
+    title_meta = _extract_title_via_gemini(text) or {}
+
+    result = {"end_date": end_date_iso, "state": state_found,
+              "title": title_meta.get("title"), "auctioneer": title_meta.get("auctioneer")}
+    if any(result.values()):
+        return result
     return None
 
 _MONTHS_ABBR = {"Jan":"01","Feb":"02","Mar":"03","Apr":"04","May":"05","Jun":"06",
@@ -6736,11 +6780,69 @@ async def flags_recast_metadata(request: Request, body: dict):
         patch["end_date"] = meta["end_date"]
     if meta.get("state") and not catalog.get("state"):
         patch["state"] = meta["state"]
+    # REAL GAP FIXED HERE: this only ever recast state/end_date -- title was
+    # never part of it at all, even in the durable stored-PDF path that
+    # already had the real text sitting right there. Same class of bug as
+    # tonight's other fix, a second independent copy of it in this app.
+    # Only overwrites a title that's missing or clearly URL/filename-shaped
+    # (see _looks_like_bad_title) -- never touches a real typed or
+    # previously-extracted title.
+    if meta.get("title") and _looks_like_bad_title(catalog.get("title")):
+        patch["title"] = meta["title"]
+        patch["display_title"] = meta["title"]
+    if meta.get("auctioneer") and not catalog.get("auctioneer"):
+        patch["auctioneer"] = meta["auctioneer"]
     if not patch:
-        raise HTTPException(422, "Found the catalog but no new state/date to fill in")
+        raise HTTPException(422, "Found the catalog but nothing new to fill in")
 
     supabase.table("auction_catalogs").update(patch).eq("id", catalog["id"]).execute()
     return {"ok": True, **patch}
+
+
+async def _auto_recast_bad_titles():
+    """Runs ~15s after startup: finds every catalog whose title is still
+    URL/filename-shaped (see _looks_like_bad_title) and recasts it
+    automatically -- per direct instruction, this needs to be automated,
+    not a button someone has to remember to click for each row. Also
+    closes a real gap in the manual Recast button itself: it only ever
+    appeared for rows missing an end_date, so a catalog that already had
+    a date (like Danbury) but a broken title had NO way to trigger a fix,
+    manual or automatic, until now."""
+    import asyncio
+    await asyncio.sleep(15)
+    try:
+        rows = supabase.table("auction_catalogs").select(
+            "id,business_id,catalog_url,title,end_date,state,auctioneer").execute().data or []
+        bad = [r for r in rows if _looks_like_bad_title(r.get("title"))]
+        if not bad:
+            return
+        print(f"[auto-recast] {len(bad)} catalog(s) with a URL-shaped title -- recasting automatically")
+        for row in bad:
+            meta = _extract_meta_from_stored_pdf(row["catalog_url"])
+            if not meta:
+                real_url = _reconstruct_bidspotter_url(row["catalog_url"])
+                if real_url:
+                    meta = _fetch_bidspotter_catalog_meta(real_url, row.get("title") or "")
+            if not meta:
+                continue
+            patch = {}
+            if meta.get("title") and _looks_like_bad_title(row.get("title")):
+                patch["title"] = meta["title"]
+                patch["display_title"] = meta["title"]
+            if meta.get("end_date") and not row.get("end_date"):
+                patch["end_date"] = meta["end_date"]
+            if meta.get("state") and not row.get("state"):
+                patch["state"] = meta["state"]
+            if meta.get("auctioneer") and not row.get("auctioneer"):
+                patch["auctioneer"] = meta["auctioneer"]
+            if patch:
+                try:
+                    supabase.table("auction_catalogs").update(patch).eq("id", row["id"]).execute()
+                    print(f"[auto-recast] fixed {row['catalog_url']}: {list(patch.keys())}")
+                except Exception as e:
+                    print(f"[auto-recast] failed to update {row['catalog_url']}: {e}")
+    except Exception as e:
+        print(f"[auto-recast] pass failed: {type(e).__name__}: {e}")
 
 def _send_catalog_lots_to_capture(session_id: str, business_id: str, catalog_url: str):
     """Runs in the background -- bulk-inserts every already-parsed BidSpotter lot
