@@ -1375,7 +1375,11 @@ function renderTiles() {
         </div>
         <textarea class="tile-cat-input${fieldClassFor(l.id,'category')}${l.ebay_category_is_default ? ' default-warn' : ''}" rows="2" data-id="${l.id}" data-catid="${l.ebay_category_id||''}" placeholder="eBay category" autocomplete="off" spellcheck="false" title="Click to edit — type a phrase to re-match, or a number to set the ID directly. Double-click to open full editor." ondblclick="openModal('${l.id}')">${(dirtyCats[l.id] ?? (l.ebay_category_path||'No category yet')).replace(/</g,'&lt;')}</textarea>
         ${l.ebay_category_is_default ? '<div class="tile-cat-warn-label">⚠️ Generic fallback — needs a real match</div>' : ''}
-        <input class="tile-brand-input${fieldClassFor(l.id,'brand')}" type="text" value="${(dirtyBrands[l.id] ?? (l.brand || guessBrand(l.title||''))).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Brand" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="brand-${l.id}">
+        <div style="display:flex;gap:4px;align-items:center;">
+          <input class="tile-brand-input${fieldClassFor(l.id,'brand')}" type="text" value="${(dirtyBrands[l.id] ?? (l.brand || guessBrand(l.title||''))).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Brand" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="brand-${l.id}" style="flex:1;">
+          <button class="btn" style="padding:4px 7px;font-size:11px;color:#f59e0b;border-color:#b45309;flex-shrink:0;" title="Recalculate this item's category as Business & Industrial" onclick="event.stopPropagation();recalcTileCategory('${l.id}','industrial',this)">BI</button>
+          <button class="btn" style="padding:4px 7px;font-size:11px;color:#f59e0b;border-color:#b45309;flex-shrink:0;" title="Recalculate this item's category as Auto Parts (eBay Motors)" onclick="event.stopPropagation();recalcTileCategory('${l.id}','motors',this)">AP</button>
+        </div>
       </div>
       <div class="tile-controls">
         <div class="tile-check${isSel?' checked':''}" onclick="event.stopPropagation();toggleSelect('${l.id}')"></div>
@@ -1769,6 +1773,33 @@ async function autofillLotSku() {
   toast(`Lot SKU filled on ${ok} item(s)${failed ? ', ' + failed + ' failed' : ''} ✓`);
 }
 
+
+async function recalcTileCategory(id, mode, btn) {
+  // Same endpoint/logic as the bulk "Re-match Category" button, but for one
+  // tile at a time with an EXPLICITLY forced mode -- doesn't touch or depend
+  // on the sticky B&I/Auto Parts toggle at all, so pressing this can never
+  // silently change based on whatever the toggle happens to be set to.
+  const l = listings.find(x => String(x.id) === String(id));
+  if (!l) return;
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    const r = await api('POST', `/api/listings/${id}/rematch-category?mode=${mode}`, {});
+    if (r.category_id) {
+      l.ebay_category_id = r.category_id;
+      l.category_mode = mode;
+      l.ebay_category_is_default = !!r.is_fallback;
+      if (r.name) l.ebay_category_path = r.name;  // best available immediately; full breadcrumb refreshes on next load
+      toast(r.is_fallback ? `Fell back to the generic catch-all (${mode === 'motors' ? 'Auto Parts' : 'B&I'})` : `Category updated ✓`);
+    } else {
+      toast(`No ${mode === 'motors' ? 'Auto Parts' : 'B&I'} match found`, 'error');
+    }
+  } catch(e) {
+    toast(`Recalc failed: ${e.message}`, 'error');
+  }
+  btn.disabled = false; btn.textContent = orig;
+  renderTiles();
+}
 
 async function rematchCategory() {
   // If nothing is explicitly selected, default to everything sitting on the
