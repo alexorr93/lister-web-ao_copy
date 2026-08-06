@@ -1789,7 +1789,8 @@ async function recalcTileCategory(id, mode, btn) {
       l.ebay_category_id = r.category_id;
       l.category_mode = mode;
       l.ebay_category_is_default = !!r.is_fallback;
-      if (r.name) l.ebay_category_path = r.name;  // best available immediately; full breadcrumb refreshes on next load
+      if (r.category_path) l.ebay_category_path = r.category_path;
+      else if (r.name) l.ebay_category_path = r.name;  // fallback only if the path lookup itself came up empty
       toast(r.is_fallback ? `Fell back to the generic catch-all (${mode === 'motors' ? 'Auto Parts' : 'B&I'})` : `Category updated ✓`);
     } else {
       toast(`No ${mode === 'motors' ? 'Auto Parts' : 'B&I'} match found`, 'error');
@@ -1817,6 +1818,8 @@ async function rematchCategory() {
       const r = await api('POST', `/api/listings/${l.id}/rematch-category?mode=${categoryMode}`, {});
       if (r.category_id) {
         l.ebay_category_id = r.category_id;
+        l.ebay_category_path = r.category_path || r.name || l.ebay_category_path;
+        l.ebay_category_is_default = !!r.is_fallback;
         r.is_fallback ? fellBack++ : matched++;
       } else {
         failed++;

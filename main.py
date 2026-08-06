@@ -1912,7 +1912,22 @@ async def rematch_category(item_id: str, request: Request, mode: str = "industri
             "ebay_category_id": suggestion["category_id"],
             "category_mode": mode,
         }).eq("id", item_id).execute()
+        # Real full breadcrumb, same source every normal listing's displayed
+        # category comes from (ebay_categories.path) -- NOT just the bare leaf
+        # name. Root cause of a real bug: this endpoint never returned this,
+        # so both the bulk "Re-match Category" button and any per-tile recalc
+        # button could only ever show a stale or incomplete path afterward,
+        # unlike a normally-matched item.
+        category_path = None
+        try:
+            path_res = (supabase.table("ebay_categories").select("path")
+                        .eq("category_id", str(suggestion["category_id"])).limit(1).execute())
+            if path_res.data:
+                category_path = path_res.data[0].get("path")
+        except Exception as e:
+            print(f"rematch_category: path lookup failed: {e}")
         return {"ok": True, "category_id": suggestion["category_id"], "name": suggestion.get("name"),
+                "category_path": category_path,
                 "tree_id": suggestion.get("tree_id"), "is_fallback": suggestion.get("is_fallback", False)}
     else:
         return {"ok": True, "category_id": None, "name": None, "note": "still no B&I/Motors match"}
