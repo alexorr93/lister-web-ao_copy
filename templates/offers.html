@@ -240,7 +240,10 @@ async function pollFullScan() {
       const s = await r.json();
       if (s.total) {
         btn.textContent = `Scanning... ${s.checked}/${s.total}`;
-        progressLabel.textContent = `Scan in progress: ${s.checked} of ${s.total} listings checked, ${s.found} active offer(s) found so far.`;
+        let msg = `Scan in progress: ${s.checked} of ${s.total} listings checked, ${s.found} active offer(s) found so far.`;
+        if (s.errors) msg += ` (${s.errors} failed to check — not counted as "no offer".)`;
+        if (s.rate_limited) msg = `⚠️ eBay's call limit was hit — stopped early. Only ${s.checked} of ${s.total} listings were actually verified; the rest are unknown, NOT confirmed offer-free.`;
+        progressLabel.textContent = msg;
       }
       await loadBestOffers();
       if (s.running) {
@@ -249,7 +252,11 @@ async function pollFullScan() {
         btn.disabled = false;
         btn.textContent = '🔍 Full scan (check every listing directly)';
         if (s.total) {
-          progressLabel.textContent = `Scan complete: checked ${s.checked} listings, found ${s.found} active offer(s).`;
+          if (s.rate_limited) {
+            progressLabel.textContent = `⚠️ Stopped early — eBay's call limit was hit. Only ${s.checked} of ${s.total} listings were actually verified. Try again later once the limit resets.`;
+          } else {
+            progressLabel.textContent = `Scan complete: checked ${s.checked} listings${s.errors ? ` (${s.errors} failed)` : ''}, found ${s.found} active offer(s).`;
+          }
         }
       }
     } catch (e) {

@@ -191,7 +191,6 @@ async def start_background_jobs():
     asyncio.create_task(inventory_value_sync_worker())
     asyncio.create_task(ebay_best_offers_sync_worker())
     asyncio.create_task(ebay_notification_subscribe_worker())
-    asyncio.create_task(_debug_check_specific_items_once())
 
 async def auction_archive_worker():
     """Runs once a day (00:20 UTC) and archives any capture session whose lots'
@@ -10190,6 +10189,17 @@ def _ebay_get_active_listings_page(token: str, page_number: int, entries_per_pag
     root = ET.fromstring(r.content)
     return _ebay_xml_to_dict(root)
 
+class EbayCallLimitError(Exception):
+    """eBay error 518 -- this specific Trading API call name has hit its usage
+    limit (per-app, resets on eBay's own schedule). Distinct from other
+    failures so callers can stop burning further calls immediately instead of
+    retrying into a dead quota, and so a rate-limit is never silently
+    indistinguishable from a confirmed 'no offer' result."""
+    def __init__(self, item_id, errors):
+        self.item_id = item_id
+        self.errors = errors
+        super().__init__(f"eBay call limit reached (item {item_id}): {errors}")
+
 def _ebay_get_best_offers_for_item(token: str, item_id: str) -> dict:
     """GetBestOffers for a single ItemID -- this is the documented, individually
     tested mode (eBay's own Sandbox validation steps call this out explicitly
@@ -10219,16 +10229,21 @@ def _ebay_get_best_offers_for_item(token: str, item_id: str) -> dict:
     return _ebay_xml_to_dict(root)
 
 def _sync_one_item_best_offers(business_id: str, token: str, item_id: str) -> list:
-    """Shared by the notification handler (instant, single item) and the
-    10-min poll worker (safety net, loops this per flagged item). Returns the
-    list of currently-Active best-offer-ids found for this item after upsert."""
+    """Shared by the notification handler, the 10-min poll worker (safety
+    net), and the full-scan. Returns the list of currently-Active best-offer-
+    ids found for this item after upsert. IMPORTANT: raises on a failed Ack
+    instead of silently returning [] -- a rate-limit or auth failure must
+    never look identical to a confirmed no-offer-here result to any caller
+    (real bug found 8/7: the full-scan's 0-found result was untrustworthy
+    because API failures were being counted the same as true negatives)."""
     import datetime as _dt
 
     resp = _ebay_get_best_offers_for_item(token, item_id)
     ack = resp.get("Ack")
     if ack not in ("Success", "Warning"):
-        print(f"_sync_one_item_best_offers: item {item_id} Ack={ack}: {resp.get('Errors')}")
-        return []
+        errors = resp.get("Errors") or {}
+        error_code = (errors.get("ErrorCode") if isinstance(errors, dict) else None)
+        raise EbayCallLimitError(item_id, errors) if error_code == "518" else Exception(f"item {item_id} Ack={ack}: {errors}")
     best_offer_array = resp.get("BestOfferArray") or {}
     offers = best_offer_array.get("BestOffer") or []
     if isinstance(offers, dict):
@@ -10395,39 +10410,6 @@ async def ebay_notification_subscribe_worker():
             print(f"ebay_notification_subscribe_worker error: {e}")
         await asyncio.sleep(30 * (attempt + 1))
 
-async def _debug_check_specific_items_once():
-    """ONE-TIME diagnostic, runs automatically at boot (no HTTP call, no click
-    from anyone needed) -- checks two specific item IDs directly against
-    eBay's real GetBestOffers response and writes the raw, unparsed result
-    into debug_log so it can be read straight from Supabase. Throwaway, safe
-    to delete once the specific report it's investigating is resolved."""
-    import asyncio
-    debug_item_ids = ["405914680038", "405779475361"]
-    try:
-        res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
-        business_ids = list(set(r["business_id"] for r in (res.data or [])))
-        for biz_id in business_ids:
-            try:
-                token = await asyncio.to_thread(get_ebay_access_token, biz_id)
-            except Exception as e:
-                supabase.table("debug_log").insert({
-                    "business_id": biz_id, "key": "mac_tools_offer_check",
-                    "payload": {"error": f"token fetch failed: {e}"},
-                }).execute()
-                continue
-            for item_id in debug_item_ids:
-                try:
-                    raw = await asyncio.to_thread(_ebay_get_best_offers_for_item, token, item_id)
-                except Exception as e:
-                    raw = {"error": str(e)}
-                supabase.table("debug_log").insert({
-                    "business_id": biz_id, "key": f"mac_tools_offer_check:{item_id}",
-                    "payload": raw,
-                }).execute()
-        print("_debug_check_specific_items_once: done, results in debug_log")
-    except Exception as e:
-        print(f"_debug_check_specific_items_once error: {e}")
-
 def _sync_ebay_best_offers_work(business_id: str) -> dict:
     """Poll-based SAFETY NET, not the primary path -- BestOfferPlaced push
     notifications (/api/ebay/notifications) handle the instant case. Still
@@ -10451,6 +10433,9 @@ def _sync_ebay_best_offers_work(business_id: str) -> dict:
             found = _sync_one_item_best_offers(business_id, token, c["item_id"])
             checked += 1
             total_found += len(found)
+        except EbayCallLimitError:
+            print(f"_sync_ebay_best_offers_work: eBay call limit hit at item {c['item_id']} -- stopping this run early")
+            break
         except Exception as e:
             print(f"_sync_ebay_best_offers_work: item {c['item_id']} failed: {e}")
 
@@ -10550,17 +10535,25 @@ async def _run_best_offers_full_scan(business_id: str):
 
     status = _best_offers_full_scan_status[business_id]
     status["total"] = len(item_ids)
+    status["errors"] = 0
+    status["rate_limited"] = False
 
     sem = asyncio.Semaphore(15)
 
     async def _check_one(item_id):
         async with sem:
+            if status["rate_limited"]:
+                return  # quota already confirmed dead this run -- don't waste more calls
             try:
                 found = await asyncio.to_thread(_sync_one_item_best_offers, business_id, token, item_id)
                 status["checked"] += 1
                 status["found"] += len(found)
+            except EbayCallLimitError as e:
+                status["errors"] += 1
+                status["rate_limited"] = True
+                print(f"_run_best_offers_full_scan: eBay call limit hit at item {item_id} -- stopping scan early, remaining items untested")
             except Exception as e:
-                status["checked"] += 1
+                status["errors"] += 1
                 print(f"_run_best_offers_full_scan: item {item_id} failed: {e}")
 
     await asyncio.gather(*[_check_one(i) for i in item_ids])
@@ -10583,7 +10576,7 @@ async def best_offers_full_scan(request: Request):
     if _best_offers_full_scan_status.get(business_id, {}).get("running"):
         return {"started": False, "already_running": True}
     _best_offers_full_scan_status[business_id] = {
-        "running": True, "checked": 0, "total": 0, "found": 0,
+        "running": True, "checked": 0, "total": 0, "found": 0, "errors": 0, "rate_limited": False,
         "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None,
     }
     asyncio.create_task(_run_best_offers_full_scan(business_id))
