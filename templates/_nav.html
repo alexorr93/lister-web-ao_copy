@@ -4,7 +4,7 @@
      JS tab-switch buttons on index.html itself, and as real links (`/?tab=...`) from
      every other page. -->
 {% set on_index = active_tab in ['intake', 'upload', 'fastscan', 'auction', 'settings'] %}
-<style>.nav-browsesearch{color:#60a5fa;}.nav-browsesearch.active{background:#3b82f6;color:#fff;}.nav-uncat{color:#f87171;}.nav-uncat.active{background:#dc2626;color:#fff;}.nav-notes{color:#f472b6;}.nav-notes.active{background:#db2777;color:#fff;}.nav .nav-account{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle;}</style>
+<style>.nav-browsesearch{color:#60a5fa;}.nav-browsesearch.active{background:#3b82f6;color:#fff;}.nav-uncat{color:#f87171;}.nav-uncat.active{background:#dc2626;color:#fff;}.nav-notes{color:#f472b6;}.nav-notes.active{background:#db2777;color:#fff;}.nav-offers{color:#facc15;}.nav-offers.active{background:#ca8a04;color:#fff;}.nav .nav-account{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle;}</style>
 <nav class="nav">
   {% if on_index %}
   <button class="nav-btn nav-intake{{ ' active' if active_tab == 'intake' else '' }}" data-tab="intake">📥 Intake</button>
@@ -27,7 +27,8 @@
      the line below to bring it back any time. #}
   {#- <a class="nav-btn nav-categories{{ ' active' if active_tab == 'categories' else '' }}" href="/categories">📂 Categories</a> -#}
   <a class="nav-btn nav-notes{{ ' active' if active_tab == 'notes' else '' }}" href="/notes">📝 Notes</a>
-  <a class="nav-btn nav-browsesearch{{ ' active' if active_tab == 'browse_search' else '' }}" href="/browse-search">🔎 Browse Search</a>
+  <a class="nav-btn nav-browsesearch{{ ' active' if active_tab == 'browse_search' else '' }}" href="/browse-search">🔎 Browse</a>
+  <a class="nav-btn nav-offers{{ ' active' if active_tab == 'offers' else '' }}" href="/offers">🏷️ Offers</a>
   {% if is_admin %}
     {% if on_index %}
     <button class="nav-btn nav-auction{{ ' active' if active_tab == 'auction' else '' }}" data-tab="auction">🔨 Auctions</button>

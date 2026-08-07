@@ -2385,6 +2385,23 @@ async def categories_page(request: Request):
         return RedirectResponse("/login", status_code=302)
     return templates.TemplateResponse("categories.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "categories"})
 
+@app.get("/offers", response_class=HTMLResponse)
+async def offers_page(request: Request):
+    """Watcher/view leaderboard for active listings -- the foundation for the
+    incoming-Best-Offer decision hub described in watcher_view pricing notes
+    (hold firm on offers when watch_count is elevated/rising, respond fast
+    when flat). NOTE: this page surfaces watch_count/view_count only -- there
+    is no eBay integration yet that pulls actual incoming Best Offer amounts
+    (that's a separate build, likely the Negotiation API or GetBestOffers-
+    equivalent). watch_count/view_count only start populating after
+    IncludeWatchCount was added to the active-listings sync (8/7) -- existing
+    rows show null until the next full sync cycle touches them."""
+    nav = get_nav_context(request)
+    if nav is None:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("offers.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "offers"})
+
 @app.get("/notes", response_class=HTMLResponse)
 async def notes_page(request: Request):
     nav = get_nav_context(request)
@@ -2406,6 +2423,24 @@ async def uncat_page(request: Request):
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/login", status_code=302)
     return templates.TemplateResponse("uncat.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "uncat"})
+
+@app.get("/api/offers")
+async def list_offers(request: Request):
+    """Backs the Offers page: every Active listing (all of them are Best-Offer-
+    enabled -- see push_listing_to_ebay_v2) with its watch_count/view_count,
+    sorted watch_count desc (nulls last) so the highest-interest items surface
+    first. Purely a watcher/view leaderboard for now -- no actual incoming
+    Best Offer amounts are pulled from eBay yet, that's a separate build."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    rows = _fetch_all_for_business(business_id, "ebay_listing_status",
+        "item_id,sku,title,price,watch_count,view_count,gallery_url,listing_status,updated_at")
+    active = [r for r in rows if r.get("listing_status") == "Active"]
+    active.sort(key=lambda r: (r.get("watch_count") is None, -(r.get("watch_count") or 0),
+                                r.get("view_count") is None, -(r.get("view_count") or 0)))
+    populated = sum(1 for r in active if r.get("watch_count") is not None or r.get("view_count") is not None)
+    return {"offers": active, "total_active": len(active), "populated": populated}
 
 class NoteCreate(BaseModel):
     section: str
@@ -10138,6 +10173,7 @@ def _ebay_get_active_listings_page(token: str, page_number: int, entries_per_pag
         '<ActiveList><Include>true</Include>'
         f'<Pagination><EntriesPerPage>{entries_per_page}</EntriesPerPage><PageNumber>{page_number}</PageNumber></Pagination>'
         '</ActiveList>'
+        '<IncludeWatchCount>true</IncludeWatchCount>'
         '<DetailLevel>ReturnAll</DetailLevel>'
         '</GetMyeBaySellingRequest>'
     )
@@ -10239,6 +10275,13 @@ def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> di
                 "listing_status": "Active", "end_time": listing_details.get("EndTime"),
                 "gallery_url": gallery_url,
                 "shipping_cost": shipping_cost,
+                # WatchCount needs IncludeWatchCount=true on the request (added above) and
+                # is only returned by eBay at all once it's >0 -- so a missing/null value
+                # here means "0 or not yet known", not necessarily zero. HitCount (page
+                # views) needs no special request flag, just DetailLevel=ReturnAll (already
+                # set) and a hit-counter style that isn't HiddenStyle-for-non-seller.
+                "watch_count": _safe_int(it.get("WatchCount")),
+                "view_count": _safe_int(it.get("HitCount")),
                 "updated_at": now_iso,
             })
         if rows:

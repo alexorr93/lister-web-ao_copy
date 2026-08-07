@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Offers — Lister AI</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<style>
+:root {
+  --bg: #1a0611; --card: #1e2535; --border: #2d3348; --text: #f1f5f9; --muted: #64748b; --accent: #2563eb; --green: #4ade80;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.nav { background: var(--card); border-bottom: 1px solid var(--border); padding: 0 16px; display: flex; align-items: center; gap: 6px; overflow-x: auto; height: 52px; position: sticky; top: 0; z-index: 100; }
+.nav-btn { padding: 6px 14px; border-radius: 8px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; background: transparent; color: var(--muted); transition: all 0.15s; text-decoration: none; display: inline-block; font-family: inherit; }
+.nav-btn:hover { background: #1e2535; color: var(--text); }
+.nav-spacer { flex: 1; }
+.nav-download { padding: 6px 12px; background: #1e2535; border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; }
+.nav-account { font-size: 12px; color: var(--muted); margin-right: 4px; white-space: nowrap; }
+.nav-settings   { color: #94a3b8; }
+.nav-settings.active   { background: #475569; color: #fff; }
+.main { max-width: 1100px; margin: 0 auto; padding: 20px 16px; }
+h1 { font-size: 20px; margin-bottom: 4px; }
+.sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+.banner { background: var(--card); border: 1px solid var(--border); border-left: 3px solid #eab308; border-radius: 8px; padding: 12px 14px; font-size: 13px; color: var(--text); margin-bottom: 18px; line-height: 1.5; }
+.banner b { color: #eab308; }
+.sort-row { display: flex; gap: 8px; margin-bottom: 12px; }
+.sort-btn { padding: 6px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.sort-btn.active { color: var(--text); border-color: var(--accent); background: #1e2535; }
+table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--border); }
+td { padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
+tr:last-child td { border-bottom: none; }
+.thumb { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; background: #0f172a; }
+.title-cell { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.count-pill { display: inline-block; min-width: 20px; text-align: center; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.count-pill.watch { background: rgba(250,204,21,.15); color: #facc15; }
+.count-pill.view { background: rgba(96,165,250,.15); color: #60a5fa; }
+.count-dash { color: var(--muted); }
+.empty { color: var(--muted); font-size: 13px; padding: 24px 0; text-align: center; }
+a.item-link { color: var(--text); text-decoration: none; }
+a.item-link:hover { color: var(--accent); }
+</style>
+</head>
+<body>
+{% include "_nav.html" %}
+<div class="main">
+  <h1>🏷️ Offers</h1>
+  <p class="sub">Active listings ranked by watcher and view activity — the signal for deciding whether to hold firm or move fast on an incoming Best Offer.</p>
+
+  <div class="banner" id="status-banner">Loading...</div>
+
+  <div class="sort-row">
+    <button class="sort-btn active" data-sort="watch" onclick="setSort('watch')">Sort by Watchers</button>
+    <button class="sort-btn" data-sort="view" onclick="setSort('view')">Sort by Views</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th></th>
+        <th>Title</th>
+        <th>SKU</th>
+        <th class="num">Price</th>
+        <th class="num">👀 Watchers</th>
+        <th class="num">📈 Views</th>
+      </tr>
+    </thead>
+    <tbody id="offers-body">
+      <tr><td colspan="6" class="empty">Loading...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+let allOffers = [];
+let currentSort = 'watch';
+
+function setSort(key) {
+  currentSort = key;
+  document.querySelectorAll('.sort-btn').forEach(b => b.classList.toggle('active', b.dataset.sort === key));
+  render();
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function pill(n, cls) {
+  if (n === null || n === undefined) return '<span class="count-dash">—</span>';
+  return `<span class="count-pill ${cls}">${n}</span>`;
+}
+
+function render() {
+  const body = document.getElementById('offers-body');
+  if (!allOffers.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty">No active listings found.</td></tr>';
+    return;
+  }
+  const sorted = [...allOffers].sort((a, b) => {
+    const av = currentSort === 'watch' ? a.watch_count : a.view_count;
+    const bv = currentSort === 'watch' ? b.watch_count : b.view_count;
+    if (av === null && bv === null) return 0;
+    if (av === null) return 1;
+    if (bv === null) return -1;
+    return bv - av;
+  });
+  body.innerHTML = sorted.map(o => `
+    <tr>
+      <td>${o.gallery_url ? `<img class="thumb" src="${o.gallery_url}" loading="lazy">` : ''}</td>
+      <td class="title-cell"><a class="item-link" href="https://www.ebay.com/itm/${o.item_id}" target="_blank">${escapeHtml(o.title || o.item_id)}</a></td>
+      <td>${escapeHtml(o.sku || '')}</td>
+      <td class="num">${o.price != null ? '$' + Number(o.price).toFixed(2) : '—'}</td>
+      <td class="num">${pill(o.watch_count, 'watch')}</td>
+      <td class="num">${pill(o.view_count, 'view')}</td>
+    </tr>
+  `).join('');
+}
+
+async function load() {
+  const banner = document.getElementById('status-banner');
+  try {
+    const r = await fetch('/api/offers');
+    const data = await r.json();
+    allOffers = data.offers || [];
+    const total = data.total_active || 0;
+    const populated = data.populated || 0;
+    if (populated === 0) {
+      banner.innerHTML = `<b>Watcher/view data not populated yet.</b> The sync worker was just wired up to pull watch and view counts — it fills in on the next full active-listings sync cycle. ${total} active listings loaded below, watchers/views will show as they land.`;
+    } else if (populated < total) {
+      banner.innerHTML = `<b>${populated} of ${total}</b> active listings have watcher/view data so far — the rest fill in as the sync continues.`;
+    } else {
+      banner.innerHTML = `Watcher/view data current as of the last sync. This shows relative interest only — it does not yet pull actual incoming Best Offer amounts from eBay.`;
+    }
+    render();
+  } catch (e) {
+    banner.innerHTML = 'Failed to load offers data.';
+    document.getElementById('offers-body').innerHTML = '<tr><td colspan="6" class="empty">Failed to load.</td></tr>';
+  }
+}
+
+load();
+</script>
+</body>
+</html>
