@@ -10562,6 +10562,20 @@ async def best_offers_full_scan_status(request: Request):
         raise HTTPException(401, "Unauthorized")
     return _best_offers_full_scan_status.get(business_id, {"running": False, "checked": 0, "total": 0, "found": 0})
 
+@app.get("/api/best-offers/debug-item/{item_id}")
+async def best_offers_debug_item(item_id: str, request: Request):
+    """One-off diagnostic -- returns eBay's RAW GetBestOffers response for a
+    single item, unparsed/unfiltered, so a specific 'I have an offer and it's
+    not showing' report can be checked against ground truth directly instead
+    of trusting our own parsing logic."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio
+    token = await asyncio.to_thread(get_ebay_access_token, business_id)
+    raw = await asyncio.to_thread(_ebay_get_best_offers_for_item, token, item_id)
+    return raw
+
 def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> dict:
     """Pulls eBay's real ActiveList one page at a time, upserting each page
     immediately and checkpointing progress in app_settings (via
