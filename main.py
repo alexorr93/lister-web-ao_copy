@@ -8209,25 +8209,45 @@ def _scrape_all_lot_photos(listing_url: str, lot_title: Optional[str] = None) ->
         print(f"lot photo re-scrape failed for {listing_url}: {e}")
     return urls[:10]
 
-@app.post("/api/auction/capture/lots/{lot_id}/itemize")
-async def itemize_capture_lot(lot_id: str):
+def _itemize_capture_lot_sync(lot_id: str) -> dict:
     lot_res = supabase.table("auction_lots").select("*").eq("id", lot_id).single().execute()
     if not lot_res.data:
-        raise HTTPException(404, "Lot not found")
+        raise Exception("404: Lot not found")
     inserted = _itemize_lot_deep(lot_res.data)
     return {"lot_id": lot_id, "items": inserted}
 
-@app.post("/api/auction/capture/lots/{lot_id}/flag-as-lot")
-async def flag_capture_lot_as_bulk(lot_id: str):
-    """Self-serve 'this is actually a mixed lot' action: re-scrapes the listing page
-    for all photos, re-hosts them, then runs the deep per-photo itemization."""
+@app.post("/api/auction/capture/lots/{lot_id}/itemize")
+async def itemize_capture_lot(lot_id: str):
+    """Same blocking-Gemini-call issue as flag-as-lot — offloaded to a thread so
+    it doesn't freeze the server for everyone else while it runs."""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    try:
+        return await loop.run_in_executor(None, _itemize_capture_lot_sync, lot_id)
+    except Exception as e:
+        msg = str(e)
+        if msg.startswith("404:"):
+            raise HTTPException(404, msg[4:].strip())
+        raise HTTPException(500, msg)
+
+def _flag_lot_as_bulk_sync(lot_id: str) -> dict:
+    """Blocking body of flag-as-lot: a page scrape (network I/O), several photo
+    downloads, and a synchronous Gemini call. Pulled out into a plain function so
+    the route can run it in a thread pool instead of on the asyncio event loop —
+    previously this ran directly inside `async def`, which on this single-worker
+    Uvicorn process meant one person's Flag-as-LOT click (10-60s of blocking I/O)
+    froze every other request on the server: other browsers' page loads, the
+    best-offers polling, and every other lot's Flag-as-LOT button, all queued
+    behind it. Raises plain Exception on failure; the route translates that back
+    into an HTTPException since HTTPException raised off the event loop thread
+    doesn't get FastAPI's normal handling."""
     lot_res = supabase.table("auction_lots").select("*").eq("id", lot_id).single().execute()
     if not lot_res.data:
-        raise HTTPException(404, "Lot not found")
+        raise Exception("404: Lot not found")
     lot = lot_res.data
 
     if not lot.get("listing_url"):
-        raise HTTPException(400, "Lot has no listing_url to re-scrape photos from")
+        raise Exception("400: Lot has no listing_url to re-scrape photos from")
 
     existing_urls = lot.get("photo_urls") or []
     found_urls = _scrape_all_lot_photos(lot["listing_url"], lot.get("title"))
@@ -8262,8 +8282,25 @@ async def flag_capture_lot_as_bulk(lot_id: str):
     lot["is_bulk_lot"] = True
     return lot
 
-@app.post("/api/auction/capture/sessions/{session_id}/itemize-all")
-async def itemize_all_capture_lots(session_id: str):
+@app.post("/api/auction/capture/lots/{lot_id}/flag-as-lot")
+async def flag_capture_lot_as_bulk(lot_id: str):
+    """Self-serve 'this is actually a mixed lot' action: re-scrapes the listing page
+    for all photos, re-hosts them, then runs the deep per-photo itemization. Runs
+    off-thread (see _flag_lot_as_bulk_sync) so it doesn't block the whole server
+    while it works."""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    try:
+        return await loop.run_in_executor(None, _flag_lot_as_bulk_sync, lot_id)
+    except Exception as e:
+        msg = str(e)
+        if msg.startswith("404:"):
+            raise HTTPException(404, msg[4:].strip())
+        if msg.startswith("400:"):
+            raise HTTPException(400, msg[4:].strip())
+        raise HTTPException(500, msg)
+
+def _itemize_all_capture_lots_sync(session_id: str) -> dict:
     lots_res = (supabase.table("auction_lots")
                 .select("*")
                 .eq("session_id", session_id)
@@ -8277,6 +8314,15 @@ async def itemize_all_capture_lots(session_id: str):
         except Exception as e:
             results.append({"lot_id": lot["id"], "lot_number": lot.get("lot_number"), "status": "error", "error": str(e)})
     return {"session_id": session_id, "results": results}
+
+@app.post("/api/auction/capture/sessions/{session_id}/itemize-all")
+async def itemize_all_capture_lots(session_id: str):
+    """Same blocking-Gemini-call issue as flag-as-lot, times however many lots are
+    unitemized in the session — offloaded to a thread so it doesn't freeze the
+    server for everyone else while it churns through the whole session."""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _itemize_all_capture_lots_sync, session_id)
 
 # ── API: AUCTION LOT PRICING METRICS (independent, per-column, opt-in) ── #
 
