@@ -10427,34 +10427,44 @@ def _ebay_set_notification_preferences(business_id: str, token: str, application
     return _ebay_xml_to_dict(root)
 
 async def ebay_notification_subscribe_worker():
-    """Runs once at startup (not a repeating clock -- the subscription doesn't
-    expire or need refreshing) so BestOfferPlaced push is always live with
-    zero manual setup. Retries with backoff on failure (e.g. eBay token not
-    ready yet at cold boot) instead of giving up silently."""
+    """Keeps retrying for the life of the process (not just at startup) so
+    BestOffer push self-heals with zero manual action. REAL BUG FIXED 8/7:
+    this used to give up permanently after 5 backoff attempts (~7.5 min) --
+    fine for a cold-boot-token-not-ready hiccup, but fatal if eBay's Trading
+    API is returning 518 (call usage limit) at boot, since that quota can
+    stay dead for hours. A permanent give-up meant the subscription would
+    never be (re)established once the quota reset unless someone manually
+    redeployed. Now: fast backoff for the first few tries (cold-boot case),
+    then settles into a steady 30-min retry forever until it succeeds once
+    per business -- cheap (one call per business per 30 min) and safe to
+    keep calling (idempotent, see _ebay_set_notification_preferences)."""
     import asyncio
     app_url = "https://lister-web-aocopy-production-halfdome.up.railway.app/api/ebay/notifications"
-    for attempt in range(5):
+    subscribed = set()
+    attempt = 0
+    while True:
+        attempt += 1
         try:
             res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
             business_ids = list(set(r["business_id"] for r in (res.data or [])))
-            all_ok = True
             for biz_id in business_ids:
+                if biz_id in subscribed:
+                    continue
                 try:
                     token = await asyncio.to_thread(get_ebay_access_token, biz_id)
                     result = await asyncio.to_thread(_ebay_set_notification_preferences, biz_id, token, app_url)
                     if result.get("Ack") in ("Success", "Warning"):
                         print(f"ebay_notification_subscribe_worker: subscribed business {biz_id} to BestOffer")
+                        subscribed.add(biz_id)
                     else:
-                        all_ok = False
-                        print(f"ebay_notification_subscribe_worker: business {biz_id} failed: {result.get('Errors')}")
+                        print(f"ebay_notification_subscribe_worker: business {biz_id} failed (attempt {attempt}): {result.get('Errors')}")
                 except Exception as e:
-                    all_ok = False
-                    print(f"ebay_notification_subscribe_worker: business {biz_id} error: {e}")
-            if all_ok:
-                return
+                    print(f"ebay_notification_subscribe_worker: business {biz_id} error (attempt {attempt}): {e}")
+            if business_ids and all(b in subscribed for b in business_ids):
+                return  # every known business subscribed -- nothing left to retry
         except Exception as e:
-            print(f"ebay_notification_subscribe_worker error: {e}")
-        await asyncio.sleep(30 * (attempt + 1))
+            print(f"ebay_notification_subscribe_worker error (attempt {attempt}): {e}")
+        await asyncio.sleep(min(30 * attempt, 1800))  # fast backoff early, capped at 30 min steady-state
 
 def _sync_ebay_best_offers_work(business_id: str) -> dict:
     """Poll-based SAFETY NET, not the primary path -- BestOfferPlaced push
