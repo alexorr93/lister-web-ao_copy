@@ -10496,9 +10496,23 @@ async def _run_best_offers_full_scan(business_id: str):
     import asyncio
 
     token = get_ebay_access_token(business_id)
-    items = (supabase.table("ebay_listing_status").select("item_id")
-             .eq("business_id", business_id).eq("listing_status", "Active").execute()).data or []
-    item_ids = [r["item_id"] for r in items if r.get("item_id")]
+    # BUG FIXED: was a single unpaginated .execute(), which Supabase silently
+    # caps at 1000 rows -- this codebase already has a documented fix for
+    # exactly this (Supabase caps queries around 1000 rows, paginate
+    # everything) and this call didn't use it, so the scan was silently only
+    # ever checking the first 1000 of ~4,700 active listings and would report
+    # "0 found" even with a real offer sitting in the other ~3,700 untouched.
+    all_items = []
+    start_i, page_size = 0, 1000
+    while True:
+        page = (supabase.table("ebay_listing_status").select("item_id")
+                .eq("business_id", business_id).eq("listing_status", "Active")
+                .range(start_i, start_i + page_size - 1).execute()).data or []
+        all_items.extend(page)
+        if len(page) < page_size:
+            break
+        start_i += page_size
+    item_ids = [r["item_id"] for r in all_items if r.get("item_id")]
 
     status = _best_offers_full_scan_status[business_id]
     status["total"] = len(item_ids)
