@@ -10381,7 +10381,7 @@ async def ebay_notification_subscribe_worker():
                     token = await asyncio.to_thread(get_ebay_access_token, biz_id)
                     result = await asyncio.to_thread(_ebay_set_notification_preferences, biz_id, token, app_url)
                     if result.get("Ack") in ("Success", "Warning"):
-                        print(f"ebay_notification_subscribe_worker: subscribed business {biz_id} to BestOfferPlaced")
+                        print(f"ebay_notification_subscribe_worker: subscribed business {biz_id} to BestOffer")
                     else:
                         all_ok = False
                         print(f"ebay_notification_subscribe_worker: business {biz_id} failed: {result.get('Errors')}")
