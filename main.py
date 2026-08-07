@@ -10321,9 +10321,13 @@ async def ebay_platform_notification(request: Request):
     return Response(status_code=200)
 
 def _ebay_set_notification_preferences(token: str, application_url: str) -> dict:
-    """Subscribes this app to BestOfferPlaced push notifications, delivered to
-    application_url (/api/ebay/notifications). Idempotent -- safe to call every
-    startup, always just resets to this same preference set."""
+    """Subscribes this app to BestOfferPlaced/Declined/Countered push
+    notifications, delivered to application_url (/api/ebay/notifications).
+    All three route to the same handler, which just re-fetches that item's
+    current offers and reconciles -- so Declined/Countered clear a resolved
+    offer from the table instantly instead of waiting on the 10-min poller.
+    Idempotent -- safe to call every startup, always just resets to this same
+    preference set."""
     import requests as _req
     import xml.etree.ElementTree as ET
 
@@ -10338,6 +10342,8 @@ def _ebay_set_notification_preferences(token: str, application_url: str) -> dict
         '</ApplicationDeliveryPreferences>'
         '<UserDeliveryPreferenceArray>'
         '<NotificationEnable><EventType>BestOfferPlaced</EventType><EventEnable>Enable</EventEnable></NotificationEnable>'
+        '<NotificationEnable><EventType>BestOfferDeclined</EventType><EventEnable>Enable</EventEnable></NotificationEnable>'
+        '<NotificationEnable><EventType>BestOfferCountered</EventType><EventEnable>Enable</EventEnable></NotificationEnable>'
         '</UserDeliveryPreferenceArray>'
         '</SetNotificationPreferencesRequest>'
     )
