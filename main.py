@@ -190,6 +190,7 @@ async def start_background_jobs():
     asyncio.create_task(shopify_shipping_rule_worker())
     asyncio.create_task(inventory_value_sync_worker())
     asyncio.create_task(ebay_best_offers_sync_worker())
+    asyncio.create_task(ebay_notification_subscribe_worker())
 
 async def auction_archive_worker():
     """Runs once a day (00:20 UTC) and archives any capture session whose lots'
@@ -10216,17 +10217,176 @@ def _ebay_get_best_offers_for_item(token: str, item_id: str) -> dict:
     root = ET.fromstring(r.content)
     return _ebay_xml_to_dict(root)
 
+def _sync_one_item_best_offers(business_id: str, token: str, item_id: str) -> list:
+    """Shared by the notification handler (instant, single item) and the
+    10-min poll worker (safety net, loops this per flagged item). Returns the
+    list of currently-Active best-offer-ids found for this item after upsert."""
+    import datetime as _dt
+
+    resp = _ebay_get_best_offers_for_item(token, item_id)
+    ack = resp.get("Ack")
+    if ack not in ("Success", "Warning"):
+        print(f"_sync_one_item_best_offers: item {item_id} Ack={ack}: {resp.get('Errors')}")
+        return []
+    best_offer_array = resp.get("BestOfferArray") or {}
+    offers = best_offer_array.get("BestOffer") or []
+    if isinstance(offers, dict):
+        offers = [offers]
+    now_iso = _dt.datetime.utcnow().isoformat()
+    seen_ids = []
+    rows = []
+    for off in offers:
+        status = off.get("Status")
+        if status != "Active":
+            continue
+        best_offer_id = off.get("BestOfferID")
+        if not best_offer_id:
+            continue
+        buyer = (off.get("Buyer") or {}).get("UserID")
+        price_raw = off.get("Price")
+        price = (price_raw.get("value") if isinstance(price_raw, dict) else price_raw)
+        seen_ids.append(best_offer_id)
+        rows.append({
+            "business_id": business_id, "best_offer_id": best_offer_id,
+            "item_id": item_id, "buyer_user_id": buyer,
+            "offer_price": _safe_float(price),
+            "quantity": _safe_int(off.get("Quantity")),
+            "status": status, "expiration_time": off.get("ExpirationTime"),
+            "buyer_message": off.get("BuyerMessage"),
+            "updated_at": now_iso,
+        })
+    if rows:
+        supabase.table("ebay_best_offers").upsert(rows, on_conflict="business_id,best_offer_id").execute()
+    # Clear any previously-stored offer for THIS item that's no longer active
+    # (accepted/declined/expired/countered) -- scoped to item_id so a partial
+    # (single-item) sync never touches other items' offers.
+    existing = (supabase.table("ebay_best_offers").select("best_offer_id")
+                .eq("business_id", business_id).eq("item_id", item_id).execute()).data or []
+    stale = [r["best_offer_id"] for r in existing if r["best_offer_id"] not in seen_ids]
+    if stale:
+        supabase.table("ebay_best_offers").delete().eq("business_id", business_id).in_("best_offer_id", stale).execute()
+    return seen_ids
+
+def _find_item_ids_in_notification(obj, found=None) -> list:
+    """eBay Platform Notification payloads vary in exact shape by event type and
+    aren't worth hard-coding a schema for -- this just recursively hunts the
+    parsed XML for any ItemID value(s) present anywhere, which every Best-Offer
+    notification carries somewhere. The notification is only ever used as a
+    wake-up trigger; the authoritative offer data always comes from the
+    already-proven GetBestOffers(ItemID=X) call, never parsed out of the
+    notification body itself."""
+    if found is None:
+        found = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k == "ItemID" and isinstance(v, str):
+                found.append(v)
+            else:
+                _find_item_ids_in_notification(v, found)
+    elif isinstance(obj, list):
+        for v in obj:
+            _find_item_ids_in_notification(v, found)
+    return found
+
+@app.post("/api/ebay/notifications")
+async def ebay_platform_notification(request: Request):
+    """Receives eBay Platform Notifications (BestOfferPlaced) -- this is what
+    makes the Offers tab need zero manual refreshing: eBay pushes here the
+    instant an offer is placed, instead of Lister ever having to poll and hope
+    the timing lines up. No auth on this route (eBay is the caller, not a
+    logged-in user); always returns 200 quickly since eBay retries/flags the
+    URL unreliable on repeated non-200s. Business is resolved by trying the
+    item against every business with an eBay token connected (single-tenant
+    today, but written to not assume that)."""
+    import xml.etree.ElementTree as ET
+    try:
+        body = await request.body()
+        root = ET.fromstring(body)
+        parsed = _ebay_xml_to_dict(root)
+        item_ids = list(set(_find_item_ids_in_notification(parsed)))
+        if item_ids:
+            res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
+            business_ids = list(set(r["business_id"] for r in (res.data or [])))
+            for biz_id in business_ids:
+                token = get_ebay_access_token(biz_id)
+                for item_id in item_ids:
+                    try:
+                        found = _sync_one_item_best_offers(biz_id, token, item_id)
+                        if found:
+                            print(f"ebay_platform_notification: item {item_id} -> {len(found)} active offer(s) for business {biz_id}")
+                    except Exception as e:
+                        print(f"ebay_platform_notification: item {item_id} failed for business {biz_id}: {e}")
+    except Exception as e:
+        print(f"ebay_platform_notification: failed to process payload: {e}")
+    return Response(status_code=200)
+
+def _ebay_set_notification_preferences(token: str, application_url: str) -> dict:
+    """Subscribes this app to BestOfferPlaced push notifications, delivered to
+    application_url (/api/ebay/notifications). Idempotent -- safe to call every
+    startup, always just resets to this same preference set."""
+    import requests as _req
+    import xml.etree.ElementTree as ET
+
+    xml_body = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<SetNotificationPreferencesRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+        f'<RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>'
+        '<ApplicationDeliveryPreferences>'
+        '<ApplicationEnable>Enable</ApplicationEnable>'
+        f'<ApplicationURL>{application_url}</ApplicationURL>'
+        '<DeviceType>Platform</DeviceType>'
+        '</ApplicationDeliveryPreferences>'
+        '<UserDeliveryPreferenceArray>'
+        '<NotificationEnable><EventType>BestOfferPlaced</EventType><EventEnable>Enable</EventEnable></NotificationEnable>'
+        '</UserDeliveryPreferenceArray>'
+        '</SetNotificationPreferencesRequest>'
+    )
+    headers = {
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "1193",
+        "X-EBAY-API-CALL-NAME": "SetNotificationPreferences",
+        "X-EBAY-API-SITEID": "0",
+        "Content-Type": "text/xml",
+    }
+    r = _req.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_body.encode("utf-8"), timeout=30)
+    root = ET.fromstring(r.content)
+    return _ebay_xml_to_dict(root)
+
+async def ebay_notification_subscribe_worker():
+    """Runs once at startup (not a repeating clock -- the subscription doesn't
+    expire or need refreshing) so BestOfferPlaced push is always live with
+    zero manual setup. Retries with backoff on failure (e.g. eBay token not
+    ready yet at cold boot) instead of giving up silently."""
+    import asyncio
+    app_url = "https://lister-web-aocopy-production-halfdome.up.railway.app/api/ebay/notifications"
+    for attempt in range(5):
+        try:
+            res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
+            business_ids = list(set(r["business_id"] for r in (res.data or [])))
+            all_ok = True
+            for biz_id in business_ids:
+                try:
+                    token = await asyncio.to_thread(get_ebay_access_token, biz_id)
+                    result = await asyncio.to_thread(_ebay_set_notification_preferences, token, app_url)
+                    if result.get("Ack") in ("Success", "Warning"):
+                        print(f"ebay_notification_subscribe_worker: subscribed business {biz_id} to BestOfferPlaced")
+                    else:
+                        all_ok = False
+                        print(f"ebay_notification_subscribe_worker: business {biz_id} failed: {result.get('Errors')}")
+                except Exception as e:
+                    all_ok = False
+                    print(f"ebay_notification_subscribe_worker: business {biz_id} error: {e}")
+            if all_ok:
+                return
+        except Exception as e:
+            print(f"ebay_notification_subscribe_worker error: {e}")
+        await asyncio.sleep(30 * (attempt + 1))
+
 def _sync_ebay_best_offers_work(business_id: str) -> dict:
-    """Two-step, per-item approach -- NOT the account-wide no-ItemID GetBestOffers
-    call (that returned an empty ItemBestOffersArray on this account despite
-    Ack=Success and matching docs; see commit history). Step 1: read
-    best_offer_count off ebay_listing_status, which the active-listings sync
-    already populates for free via GetMyeBaySelling's BestOfferDetails.
-    Step 2: call GetBestOffers per-ItemID only for items with a count > 0 --
-    a handful of calls, not one per active listing. IMPORTANT: best_offer_count
-    is only as fresh as the last full active-listings sync -- if that hasn't
-    run recently, this will correctly find zero candidates even with real
-    offers sitting on eBay, until that sync runs."""
+    """Poll-based SAFETY NET, not the primary path -- BestOfferPlaced push
+    notifications (/api/ebay/notifications) handle the instant case. Still
+    runs its own 10-min clock to catch anything a missed push would leave
+    stale. Reads best_offer_count off ebay_listing_status (populated by the
+    active-listings sync) to decide which items are worth checking."""
     import datetime as _dt
 
     token = get_ebay_access_token(business_id)
@@ -10237,63 +10397,21 @@ def _sync_ebay_best_offers_work(business_id: str) -> dict:
                   .eq("business_id", business_id).eq("listing_status", "Active")
                   .gt("best_offer_count", 0).execute()).data or []
 
-    seen_ids = []
-    rows = []
     checked = 0
+    total_found = 0
     for c in candidates:
-        item_id = c["item_id"]
         try:
-            resp = _ebay_get_best_offers_for_item(token, item_id)
+            found = _sync_one_item_best_offers(business_id, token, c["item_id"])
+            checked += 1
+            total_found += len(found)
         except Exception as e:
-            print(f"_sync_ebay_best_offers_work: GetBestOffers failed for item {item_id}: {e}")
-            continue
-        checked += 1
-        ack = resp.get("Ack")
-        if ack not in ("Success", "Warning"):
-            print(f"_sync_ebay_best_offers_work: item {item_id} Ack={ack}: {resp.get('Errors')}")
-            continue
-        best_offer_array = resp.get("BestOfferArray") or {}
-        offers = best_offer_array.get("BestOffer") or []
-        if isinstance(offers, dict):
-            offers = [offers]
-        for off in offers:
-            status = off.get("Status")
-            if status != "Active":
-                continue
-            best_offer_id = off.get("BestOfferID")
-            if not best_offer_id:
-                continue
-            buyer = (off.get("Buyer") or {}).get("UserID")
-            price_raw = off.get("Price")
-            price = (price_raw.get("value") if isinstance(price_raw, dict) else price_raw)
-            seen_ids.append(best_offer_id)
-            rows.append({
-                "business_id": business_id, "best_offer_id": best_offer_id,
-                "item_id": item_id, "buyer_user_id": buyer,
-                "offer_price": _safe_float(price),
-                "quantity": _safe_int(off.get("Quantity")),
-                "status": status, "expiration_time": off.get("ExpirationTime"),
-                "buyer_message": off.get("BuyerMessage"),
-                "updated_at": now_iso,
-            })
+            print(f"_sync_ebay_best_offers_work: item {c['item_id']} failed: {e}")
 
-    if rows:
-        supabase.table("ebay_best_offers").upsert(rows, on_conflict="business_id,best_offer_id").execute()
-
-    existing = (supabase.table("ebay_best_offers").select("best_offer_id")
-                .eq("business_id", business_id).execute()).data or []
-    stale = [r["best_offer_id"] for r in existing if r["best_offer_id"] not in seen_ids]
-    if stale:
-        supabase.table("ebay_best_offers").delete().eq("business_id", business_id).in_("best_offer_id", stale).execute()
-
-    return {"candidates": len(candidates), "checked": checked, "active_offers": len(rows),
-            "cleared": len(stale), "synced_at": now_iso}
+    return {"candidates": len(candidates), "checked": checked, "active_offers": total_found, "synced_at": now_iso}
 
 async def ebay_best_offers_sync_worker():
-    """Independent worker, own 10-minute clock -- offers are time-sensitive
-    (buyers expect a response, and the whole point is deciding fast vs. holding
-    firm based on watcher activity) so this runs more often than the 15-min
-    Shopify shipping rule worker or the once-daily full active-listings sync."""
+    """Safety-net worker, own 10-minute clock -- see _sync_ebay_best_offers_work.
+    Primary path is push notifications; this just guards against a missed one."""
     import asyncio
     while True:
         try:
@@ -10341,8 +10459,9 @@ async def list_best_offers(request: Request):
 
 @app.post("/api/best-offers/sync-now")
 async def best_offers_sync_now(request: Request):
-    """Manual trigger for the same job the 10-min worker runs -- lets the page
-    (or the person) force a fresh pull without waiting for the clock."""
+    """Manual trigger for the same job the 10-min safety-net worker runs.
+    Not the primary mechanism anymore (push notifications are) but kept for
+    an immediate on-demand check."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
