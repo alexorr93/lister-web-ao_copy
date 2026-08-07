@@ -3043,6 +3043,8 @@ function renderAuctionTable() {
         ${searchBtns}
       </td>
       <td style="max-width:200px;font-size:11px;color:var(--text);">${itemsHtml}</td>
+      <td style="font-size:11px;max-width:220px;white-space:pre-wrap;">${lot.claude_itemization || ''}</td>
+      <td style="font-size:11px;max-width:200px;white-space:pre-wrap;">${lot.claude_resale_evaluation || ''}</td>
       <td style="font-size:11px;">${lot.resale_value_low != null ? `<b>${money(lot.resale_value_low)}–${money(lot.resale_value_high)}</b><div style="color:var(--muted);">${lot.resale_value_notes||''}</div>` : ''}</td>
       <td style="font-size:11px;">${lot.liquidity_rating ? `<b style="text-transform:uppercase;">${lot.liquidity_rating}</b><div style="color:var(--muted);">${lot.liquidity_notes||''}</div>` : ''}</td>
       <td style="font-size:11px;">${lot.weight_lbs != null ? `<b>${Number(lot.weight_lbs).toLocaleString()} lbs</b><div style="color:var(--muted);">${lot.weight_notes||''}</div>` : ''}</td>
@@ -3068,6 +3070,8 @@ function renderAuctionTable() {
           <th></th>
           <th style="cursor:pointer;user-select:none;" onclick="toggleLotSort()" title="Sort by lot number">Lot${lotSortArrow()}</th>
           <th>Itemization</th>
+          <th>Claude Itemization</th>
+          <th>Claude Resale Evaluation</th>
           <th>Resale Value ${metricRunBtn('resale_value')}</th>
           <th>Liquidity ${metricRunBtn('liquidity')}</th>
           <th>Weight ${metricRunBtn('weight')}</th>
