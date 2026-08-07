@@ -10320,16 +10320,22 @@ async def ebay_platform_notification(request: Request):
         print(f"ebay_platform_notification: failed to process payload: {e}")
     return Response(status_code=200)
 
-def _ebay_set_notification_preferences(token: str, application_url: str) -> dict:
-    """Subscribes this app to BestOfferPlaced/Declined/Countered push
-    notifications, delivered to application_url (/api/ebay/notifications).
-    All three route to the same handler, which just re-fetches that item's
-    current offers and reconciles -- so Declined/Countered clear a resolved
-    offer from the table instantly instead of waiting on the 10-min poller.
-    Idempotent -- safe to call every startup, always just resets to this same
-    preference set."""
+def _ebay_set_notification_preferences(business_id: str, token: str, application_url: str) -> dict:
+    """Subscribes this app to BestOffer push notifications, delivered to
+    application_url (/api/ebay/notifications). BestOffer is the SELLER-facing
+    'you received an offer' event -- BestOfferPlaced (tried first) is actually
+    the BUYER's own confirmation notification and would never fire for this
+    account. SetNotificationPreferences also requires the app's identity
+    headers (App/Dev/Cert ID), unlike the other Trading API calls this app
+    makes, which only need the user's auth token. Idempotent -- safe to call
+    every startup, always just resets to this same preference set."""
     import requests as _req
     import xml.etree.ElementTree as ET
+
+    settings = get_ebay_settings(business_id)
+    app_id = settings.get("EBAY_APP_ID", "")
+    dev_id = settings.get("EBAY_DEV_ID", "")
+    cert_id = settings.get("EBAY_CERT_ID", "")
 
     xml_body = (
         '<?xml version="1.0" encoding="utf-8"?>'
@@ -10341,9 +10347,7 @@ def _ebay_set_notification_preferences(token: str, application_url: str) -> dict
         '<DeviceType>Platform</DeviceType>'
         '</ApplicationDeliveryPreferences>'
         '<UserDeliveryPreferenceArray>'
-        '<NotificationEnable><EventType>BestOfferPlaced</EventType><EventEnable>Enable</EventEnable></NotificationEnable>'
-        '<NotificationEnable><EventType>BestOfferDeclined</EventType><EventEnable>Enable</EventEnable></NotificationEnable>'
-        '<NotificationEnable><EventType>BestOfferCountered</EventType><EventEnable>Enable</EventEnable></NotificationEnable>'
+        '<NotificationEnable><EventType>BestOffer</EventType><EventEnable>Enable</EventEnable></NotificationEnable>'
         '</UserDeliveryPreferenceArray>'
         '</SetNotificationPreferencesRequest>'
     )
@@ -10351,6 +10355,9 @@ def _ebay_set_notification_preferences(token: str, application_url: str) -> dict
         "X-EBAY-API-COMPATIBILITY-LEVEL": "1193",
         "X-EBAY-API-CALL-NAME": "SetNotificationPreferences",
         "X-EBAY-API-SITEID": "0",
+        "X-EBAY-API-APP-NAME": app_id,
+        "X-EBAY-API-DEV-NAME": dev_id,
+        "X-EBAY-API-CERT-NAME": cert_id,
         "Content-Type": "text/xml",
     }
     r = _req.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_body.encode("utf-8"), timeout=30)
@@ -10372,7 +10379,7 @@ async def ebay_notification_subscribe_worker():
             for biz_id in business_ids:
                 try:
                     token = await asyncio.to_thread(get_ebay_access_token, biz_id)
-                    result = await asyncio.to_thread(_ebay_set_notification_preferences, token, app_url)
+                    result = await asyncio.to_thread(_ebay_set_notification_preferences, biz_id, token, app_url)
                     if result.get("Ack") in ("Success", "Warning"):
                         print(f"ebay_notification_subscribe_worker: subscribed business {biz_id} to BestOfferPlaced")
                     else:
