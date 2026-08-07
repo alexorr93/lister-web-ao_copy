@@ -191,6 +191,7 @@ async def start_background_jobs():
     asyncio.create_task(inventory_value_sync_worker())
     asyncio.create_task(ebay_best_offers_sync_worker())
     asyncio.create_task(ebay_notification_subscribe_worker())
+    asyncio.create_task(_debug_check_specific_items_once())
 
 async def auction_archive_worker():
     """Runs once a day (00:20 UTC) and archives any capture session whose lots'
@@ -10393,6 +10394,39 @@ async def ebay_notification_subscribe_worker():
         except Exception as e:
             print(f"ebay_notification_subscribe_worker error: {e}")
         await asyncio.sleep(30 * (attempt + 1))
+
+async def _debug_check_specific_items_once():
+    """ONE-TIME diagnostic, runs automatically at boot (no HTTP call, no click
+    from anyone needed) -- checks two specific item IDs directly against
+    eBay's real GetBestOffers response and writes the raw, unparsed result
+    into debug_log so it can be read straight from Supabase. Throwaway, safe
+    to delete once the specific report it's investigating is resolved."""
+    import asyncio
+    debug_item_ids = ["405914680038", "405779475361"]
+    try:
+        res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
+        business_ids = list(set(r["business_id"] for r in (res.data or [])))
+        for biz_id in business_ids:
+            try:
+                token = await asyncio.to_thread(get_ebay_access_token, biz_id)
+            except Exception as e:
+                supabase.table("debug_log").insert({
+                    "business_id": biz_id, "key": "mac_tools_offer_check",
+                    "payload": {"error": f"token fetch failed: {e}"},
+                }).execute()
+                continue
+            for item_id in debug_item_ids:
+                try:
+                    raw = await asyncio.to_thread(_ebay_get_best_offers_for_item, token, item_id)
+                except Exception as e:
+                    raw = {"error": str(e)}
+                supabase.table("debug_log").insert({
+                    "business_id": biz_id, "key": f"mac_tools_offer_check:{item_id}",
+                    "payload": raw,
+                }).execute()
+        print("_debug_check_specific_items_once: done, results in debug_log")
+    except Exception as e:
+        print(f"_debug_check_specific_items_once error: {e}")
 
 def _sync_ebay_best_offers_work(business_id: str) -> dict:
     """Poll-based SAFETY NET, not the primary path -- BestOfferPlaced push
