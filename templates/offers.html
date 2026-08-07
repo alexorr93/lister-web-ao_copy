@@ -21,12 +21,18 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .nav-settings.active   { background: #475569; color: #fff; }
 .main { max-width: 1100px; margin: 0 auto; padding: 20px 16px; }
 h1 { font-size: 20px; margin-bottom: 4px; }
+h2 { font-size: 15px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
 .sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+.section { margin-bottom: 28px; }
+.section-sub { color: var(--muted); font-size: 12px; margin: -6px 0 12px; }
 .banner { background: var(--card); border: 1px solid var(--border); border-left: 3px solid #eab308; border-radius: 8px; padding: 12px 14px; font-size: 13px; color: var(--text); margin-bottom: 18px; line-height: 1.5; }
 .banner b { color: #eab308; }
-.sort-row { display: flex; gap: 8px; margin-bottom: 12px; }
+.sort-row { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
 .sort-btn { padding: 6px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
 .sort-btn.active { color: var(--text); border-color: var(--accent); background: #1e2535; }
+.refresh-btn { margin-left: auto; padding: 6px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.refresh-btn:hover { border-color: var(--accent); }
+.refresh-btn:disabled { opacity: .5; cursor: default; }
 table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--border); }
 td { padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
@@ -41,36 +47,71 @@ tr:last-child td { border-bottom: none; }
 .empty { color: var(--muted); font-size: 13px; padding: 24px 0; text-align: center; }
 a.item-link { color: var(--text); text-decoration: none; }
 a.item-link:hover { color: var(--accent); }
+.offer-price { font-weight: 700; color: var(--green); }
+.list-price { color: var(--muted); font-size: 11px; }
+.gap-pct { font-size: 11px; }
+.gap-pct.low { color: var(--green); }
+.gap-pct.mid { color: #facc15; }
+.gap-pct.high { color: #f87171; }
+.expires { font-size: 12px; color: var(--muted); }
+.buyer { font-size: 12px; }
 </style>
 </head>
 <body>
 {% include "_nav.html" %}
 <div class="main">
   <h1>🏷️ Offers</h1>
-  <p class="sub">Active listings ranked by watcher and view activity — the signal for deciding whether to hold firm or move fast on an incoming Best Offer.</p>
+  <p class="sub">Incoming Best Offers on top — the few things that actually need a decision. Watcher/view activity below as pricing context.</p>
 
-  <div class="banner" id="status-banner">Loading...</div>
-
-  <div class="sort-row">
-    <button class="sort-btn active" data-sort="watch" onclick="setSort('watch')">Sort by Watchers</button>
-    <button class="sort-btn" data-sort="view" onclick="setSort('view')">Sort by Views</button>
+  <div class="section">
+    <h2>💵 Active Best Offers</h2>
+    <div class="sort-row">
+      <span class="section-sub" id="offers-count-label" style="margin:0;">Loading...</span>
+      <button class="refresh-btn" id="offers-refresh-btn" onclick="refreshOffers()">↻ Sync now</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th></th>
+          <th>Item</th>
+          <th>Buyer</th>
+          <th class="num">Offer</th>
+          <th class="num">List price</th>
+          <th class="num">Gap</th>
+          <th>Expires</th>
+        </tr>
+      </thead>
+      <tbody id="best-offers-body">
+        <tr><td colspan="7" class="empty">Loading...</td></tr>
+      </tbody>
+    </table>
   </div>
 
-  <table>
-    <thead>
-      <tr>
-        <th></th>
-        <th>Title</th>
-        <th>SKU</th>
-        <th class="num">Price</th>
-        <th class="num">👀 Watchers</th>
-        <th class="num">📈 Views</th>
-      </tr>
-    </thead>
-    <tbody id="offers-body">
-      <tr><td colspan="6" class="empty">Loading...</td></tr>
-    </tbody>
-  </table>
+  <div class="section">
+    <h2>👀 Watcher / View Leaderboard</h2>
+    <div class="banner" id="status-banner">Loading...</div>
+
+    <div class="sort-row">
+      <button class="sort-btn active" data-sort="watch" onclick="setSort('watch')">Sort by Watchers</button>
+      <button class="sort-btn" data-sort="view" onclick="setSort('view')">Sort by Views</button>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th></th>
+          <th>Title</th>
+          <th>SKU</th>
+          <th class="num">Price</th>
+          <th class="num">👀 Watchers</th>
+          <th class="num">📈 Views</th>
+        </tr>
+      </thead>
+      <tbody id="offers-body">
+        <tr><td colspan="6" class="empty">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
 </div>
 
 <script>
@@ -90,6 +131,16 @@ function escapeHtml(s) {
 function pill(n, cls) {
   if (n === null || n === undefined) return '<span class="count-dash">—</span>';
   return `<span class="count-pill ${cls}">${n}</span>`;
+}
+
+function timeUntil(iso) {
+  if (!iso) return '—';
+  const ms = new Date(iso).getTime() - Date.now();
+  if (ms <= 0) return 'expired';
+  const hrs = Math.floor(ms / 3600000);
+  if (hrs < 1) return Math.round(ms / 60000) + 'm left';
+  if (hrs < 48) return hrs + 'h left';
+  return Math.round(hrs / 24) + 'd left';
 }
 
 function render() {
@@ -118,6 +169,58 @@ function render() {
   `).join('');
 }
 
+function renderBestOffers(offers) {
+  const body = document.getElementById('best-offers-body');
+  const label = document.getElementById('offers-count-label');
+  label.textContent = offers.length ? `${offers.length} active offer${offers.length === 1 ? '' : 's'}` : 'No active offers right now';
+  if (!offers.length) {
+    body.innerHTML = '<tr><td colspan="7" class="empty">No active Best Offers right now.</td></tr>';
+    return;
+  }
+  body.innerHTML = offers.map(o => {
+    let gapHtml = '—';
+    if (o.offer_price != null && o.listing_price) {
+      const pct = (1 - (o.offer_price / o.listing_price)) * 100;
+      const cls = pct <= 10 ? 'low' : pct <= 25 ? 'mid' : 'high';
+      gapHtml = `<span class="gap-pct ${cls}">-${pct.toFixed(0)}%</span>`;
+    }
+    return `
+    <tr>
+      <td>${o.gallery_url ? `<img class="thumb" src="${o.gallery_url}" loading="lazy">` : ''}</td>
+      <td class="title-cell"><a class="item-link" href="https://www.ebay.com/itm/${o.item_id}" target="_blank">${escapeHtml(o.title || o.item_id)}</a></td>
+      <td class="buyer">${escapeHtml(o.buyer_user_id || '—')}</td>
+      <td class="num offer-price">${o.offer_price != null ? '$' + Number(o.offer_price).toFixed(2) : '—'}</td>
+      <td class="num list-price">${o.listing_price != null ? '$' + Number(o.listing_price).toFixed(2) : '—'}</td>
+      <td class="num">${gapHtml}</td>
+      <td class="expires">${timeUntil(o.expiration_time)}</td>
+    </tr>
+  `;
+  }).join('');
+}
+
+async function loadBestOffers() {
+  try {
+    const r = await fetch('/api/best-offers');
+    const data = await r.json();
+    renderBestOffers(data.offers || []);
+  } catch (e) {
+    document.getElementById('best-offers-body').innerHTML = '<tr><td colspan="7" class="empty">Failed to load offers.</td></tr>';
+  }
+}
+
+async function refreshOffers() {
+  const btn = document.getElementById('offers-refresh-btn');
+  btn.disabled = true;
+  btn.textContent = 'Syncing...';
+  try {
+    await fetch('/api/best-offers/sync-now', { method: 'POST' });
+    await loadBestOffers();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '↻ Sync now';
+  }
+}
+
 async function load() {
   const banner = document.getElementById('status-banner');
   try {
@@ -127,11 +230,11 @@ async function load() {
     const total = data.total_active || 0;
     const populated = data.populated || 0;
     if (populated === 0) {
-      banner.innerHTML = `<b>Watcher/view data not populated yet.</b> The sync worker was just wired up to pull watch and view counts — it fills in on the next full active-listings sync cycle. ${total} active listings loaded below, watchers/views will show as they land.`;
+      banner.innerHTML = `<b>Watcher/view data not populated yet.</b> Fills in on the next active-listings sync cycle. ${total} active listings loaded below, watchers/views will show as they land.`;
     } else if (populated < total) {
       banner.innerHTML = `<b>${populated} of ${total}</b> active listings have watcher/view data so far — the rest fill in as the sync continues.`;
     } else {
-      banner.innerHTML = `Watcher/view data current as of the last sync. This shows relative interest only — it does not yet pull actual incoming Best Offer amounts from eBay.`;
+      banner.innerHTML = `Watcher/view data current as of the last sync.`;
     }
     render();
   } catch (e) {
@@ -141,6 +244,7 @@ async function load() {
 }
 
 load();
+loadBestOffers();
 </script>
 </body>
 </html>

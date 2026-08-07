@@ -189,6 +189,7 @@ async def start_background_jobs():
     asyncio.create_task(post_publish_sync_worker())
     asyncio.create_task(shopify_shipping_rule_worker())
     asyncio.create_task(inventory_value_sync_worker())
+    asyncio.create_task(ebay_best_offers_sync_worker())
 
 async def auction_archive_worker():
     """Runs once a day (00:20 UTC) and archives any capture session whose lots'
@@ -2426,11 +2427,11 @@ async def uncat_page(request: Request):
 
 @app.get("/api/offers")
 async def list_offers(request: Request):
-    """Backs the Offers page: every Active listing (all of them are Best-Offer-
-    enabled -- see push_listing_to_ebay_v2) with its watch_count/view_count,
-    sorted watch_count desc (nulls last) so the highest-interest items surface
-    first. Purely a watcher/view leaderboard for now -- no actual incoming
-    Best Offer amounts are pulled from eBay yet, that's a separate build."""
+    """Backs the lower (watcher/view leaderboard) section of the Offers page:
+    every Active listing with its watch_count/view_count, sorted watch_count
+    desc (nulls last) so the highest-interest items surface first. This is a
+    relative-interest signal, separate from the actual incoming Best Offers
+    (see /api/best-offers) that populate the top section of the same page."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
@@ -10186,6 +10187,169 @@ def _ebay_get_active_listings_page(token: str, page_number: int, entries_per_pag
     r = _req.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_body.encode("utf-8"), timeout=30)
     root = ET.fromstring(r.content)
     return _ebay_xml_to_dict(root)
+
+def _ebay_get_best_offers_page(token: str, page_number: int, entries_per_page: int = 200) -> dict:
+    """One page of eBay's Trading API GetBestOffers, called WITHOUT an ItemID --
+    passing BestOfferStatus=Active alone (no ItemID) returns every active Best
+    Offer across the whole account in one paginated call, instead of having to
+    loop GetBestOffers per listing (which would mean one API call per active
+    listing -- thousands of calls to find a handful of real offers)."""
+    import requests as _req
+    import xml.etree.ElementTree as ET
+
+    xml_body = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<GetBestOffersRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+        f'<RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>'
+        '<BestOfferStatus>Active</BestOfferStatus>'
+        f'<Pagination><EntriesPerPage>{entries_per_page}</EntriesPerPage><PageNumber>{page_number}</PageNumber></Pagination>'
+        '<DetailLevel>ReturnAll</DetailLevel>'
+        '</GetBestOffersRequest>'
+    )
+    headers = {
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "1193",
+        "X-EBAY-API-CALL-NAME": "GetBestOffers",
+        "X-EBAY-API-SITEID": "0",
+        "Content-Type": "text/xml",
+    }
+    r = _req.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_body.encode("utf-8"), timeout=30)
+    root = ET.fromstring(r.content)
+    return _ebay_xml_to_dict(root)
+
+def _sync_ebay_best_offers_work(business_id: str) -> dict:
+    """Pulls every currently-Active Best Offer for the account and upserts into
+    ebay_best_offers. Unlike the active-listings sync, this is small and fast
+    (offers are rare relative to listings -- ~20/day per direct report) so it
+    runs unpaginated-in-spirit (loops pages but there's rarely more than one)
+    and simply replaces the active set each run: any previously-stored offer
+    not seen this run (accepted/declined/expired/countered since last check)
+    is deleted outright -- there's no override or manually-corrected data on
+    this table worth preserving across a disappearance, unlike ebay_listing_status."""
+    import datetime as _dt
+
+    token = get_ebay_access_token(business_id)
+    page = 1
+    total_pages = 1
+    seen_ids = []
+    rows = []
+    now_iso = _dt.datetime.utcnow().isoformat()
+
+    while page <= total_pages:
+        resp = _ebay_get_best_offers_page(token, page)
+        ack = resp.get("Ack")
+        if ack not in ("Success", "Warning"):
+            # "Success" with zero results still returns Ack=Success; a real
+            # failure (bad token, etc.) is the only thing that should raise.
+            errors = resp.get("Errors")
+            raise Exception(f"eBay GetBestOffers failed (Ack={ack}): {errors}")
+
+        pagination = resp.get("PaginationResult") or {}
+        total_pages = _safe_int(pagination.get("TotalNumberOfPages")) or 1
+
+        item_offers_array = resp.get("ItemBestOffersArray") or {}
+        item_offers = item_offers_array.get("ItemBestOffersType") or []
+        if isinstance(item_offers, dict):
+            item_offers = [item_offers]
+
+        for item_offer in item_offers:
+            item = item_offer.get("Item") or {}
+            item_id = item.get("ItemID")
+            best_offer_array = item_offer.get("BestOfferArray") or {}
+            offers = best_offer_array.get("BestOffer") or []
+            if isinstance(offers, dict):
+                offers = [offers]
+            for off in offers:
+                status = off.get("Status")
+                if status != "Active":
+                    continue
+                buyer = (off.get("Buyer") or {}).get("UserID")
+                best_offer_id = off.get("BestOfferID")
+                if not best_offer_id:
+                    continue
+                seen_ids.append(best_offer_id)
+                rows.append({
+                    "business_id": business_id, "best_offer_id": best_offer_id,
+                    "item_id": item_id, "buyer_user_id": buyer,
+                    "offer_price": _safe_float((off.get("Price") or {}).get("value") if isinstance(off.get("Price"), dict) else off.get("Price")),
+                    "quantity": _safe_int(off.get("Quantity")),
+                    "status": status, "expiration_time": off.get("ExpirationTime"),
+                    "buyer_message": off.get("BuyerMessage"),
+                    "updated_at": now_iso,
+                })
+        page += 1
+
+    if rows:
+        supabase.table("ebay_best_offers").upsert(rows, on_conflict="business_id,best_offer_id").execute()
+
+    # Drop anything stored for this business that wasn't in this run's active set.
+    existing = (supabase.table("ebay_best_offers").select("best_offer_id")
+                .eq("business_id", business_id).execute()).data or []
+    stale = [r["best_offer_id"] for r in existing if r["best_offer_id"] not in seen_ids]
+    if stale:
+        supabase.table("ebay_best_offers").delete().eq("business_id", business_id).in_("best_offer_id", stale).execute()
+
+    return {"active_offers": len(rows), "cleared": len(stale), "synced_at": now_iso}
+
+async def ebay_best_offers_sync_worker():
+    """Independent worker, own 10-minute clock -- offers are time-sensitive
+    (buyers expect a response, and the whole point is deciding fast vs. holding
+    firm based on watcher activity) so this runs more often than the 15-min
+    Shopify shipping rule worker or the once-daily full active-listings sync."""
+    import asyncio
+    while True:
+        try:
+            res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
+            business_ids = list(set(r["business_id"] for r in (res.data or [])))
+            for biz_id in business_ids:
+                try:
+                    result = await asyncio.to_thread(_sync_ebay_best_offers_work, biz_id)
+                    print(f"ebay_best_offers_sync_worker: business {biz_id}: {result}")
+                except Exception as e:
+                    print(f"ebay_best_offers_sync_worker: business {biz_id} failed: {e}")
+        except Exception as e:
+            print(f"ebay_best_offers_sync_worker error: {e}")
+        await asyncio.sleep(600)  # 10 min
+
+@app.get("/api/best-offers")
+async def list_best_offers(request: Request):
+    """Backs the top section of the Offers page: currently-Active incoming
+    Best Offers, joined against ebay_listing_status for title/price/photo so
+    the page doesn't need a second round trip. Read-only for now -- accepting,
+    declining, or countering an offer is a separate build (real eBay actions,
+    wants its own confirmation step rather than being bolted on here)."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    offers = (supabase.table("ebay_best_offers").select("*")
+              .eq("business_id", business_id).eq("status", "Active")
+              .order("expiration_time").execute()).data or []
+    item_ids = list({o["item_id"] for o in offers if o.get("item_id")})
+    listings_by_id = {}
+    if item_ids:
+        # Supabase .in_() is fine at this scale -- offer volume is small (~20/day),
+        # unlike the listings table itself which needs real pagination.
+        listing_rows = (supabase.table("ebay_listing_status")
+                         .select("item_id,title,price,gallery_url,sku")
+                         .eq("business_id", business_id).in_("item_id", item_ids).execute()).data or []
+        listings_by_id = {r["item_id"]: r for r in listing_rows}
+    for o in offers:
+        listing = listings_by_id.get(o.get("item_id")) or {}
+        o["title"] = listing.get("title")
+        o["listing_price"] = listing.get("price")
+        o["gallery_url"] = listing.get("gallery_url")
+        o["sku"] = listing.get("sku")
+    return {"offers": offers, "count": len(offers)}
+
+@app.post("/api/best-offers/sync-now")
+async def best_offers_sync_now(request: Request):
+    """Manual trigger for the same job the 10-min worker runs -- lets the page
+    (or the person) force a fresh pull without waiting for the clock."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio
+    result = await asyncio.to_thread(_sync_ebay_best_offers_work, business_id)
+    return result
 
 def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> dict:
     """Pulls eBay's real ActiveList one page at a time, upserting each page
