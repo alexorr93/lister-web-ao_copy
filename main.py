@@ -10247,7 +10247,12 @@ def _sync_ebay_best_offers_work(business_id: str) -> dict:
         total_pages = _safe_int(pagination.get("TotalNumberOfPages")) or 1
 
         item_offers_array = resp.get("ItemBestOffersArray") or {}
-        item_offers = item_offers_array.get("ItemBestOffersType") or []
+        # BUG FIXED: this was reading "ItemBestOffersType" (the XSD *type* name)
+        # instead of "ItemBestOffers" (the actual repeating XML element name inside
+        # ItemBestOffersArray) -- classic type-vs-element-name mixup. The wrong key
+        # silently returned an empty list every run (no exception, Ack=Success,
+        # active_offers always 0) even with real active offers on the account.
+        item_offers = item_offers_array.get("ItemBestOffers") or []
         if isinstance(item_offers, dict):
             item_offers = [item_offers]
 
@@ -10280,6 +10285,11 @@ def _sync_ebay_best_offers_work(business_id: str) -> dict:
 
     if rows:
         supabase.table("ebay_best_offers").upsert(rows, on_conflict="business_id,best_offer_id").execute()
+    elif not rows:
+        # Diagnostic only for the empty case -- so if this is still wrong next
+        # run, the actual response shape is right there in Railway logs instead
+        # of guessing blind again.
+        print(f"_sync_ebay_best_offers_work: 0 offers parsed, top-level response keys: {list(resp.keys())}")
 
     # Drop anything stored for this business that wasn't in this run's active set.
     existing = (supabase.table("ebay_best_offers").select("best_offer_id")
