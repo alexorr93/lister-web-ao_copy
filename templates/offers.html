@@ -210,11 +210,20 @@ async function loadBestOffers() {
 
 async function refreshOffers() {
   const btn = document.getElementById('offers-refresh-btn');
+  const label = document.getElementById('offers-count-label');
   btn.disabled = true;
   btn.textContent = 'Syncing...';
   try {
-    await fetch('/api/best-offers/sync-now', { method: 'POST' });
+    const r = await fetch('/api/best-offers/sync-now', { method: 'POST' });
+    const result = await r.json();
+    if (result.candidates === 0) {
+      label.textContent = `0 listings currently flagged as having an offer — this reads best_offer_count from the last Inventory sync. If you know you have offers right now, run "🛰️ Sync eBay Live" on Inventory first, then sync here again.`;
+    } else {
+      label.textContent = `Checked ${result.checked} of ${result.candidates} flagged listings — found ${result.active_offers} active offer(s).`;
+    }
     await loadBestOffers();
+  } catch (e) {
+    label.textContent = 'Sync failed — check server logs.';
   } finally {
     btn.disabled = false;
     btn.textContent = '↻ Sync now';

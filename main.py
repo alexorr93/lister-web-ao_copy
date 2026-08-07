@@ -10188,12 +10188,12 @@ def _ebay_get_active_listings_page(token: str, page_number: int, entries_per_pag
     root = ET.fromstring(r.content)
     return _ebay_xml_to_dict(root)
 
-def _ebay_get_best_offers_page(token: str, page_number: int, entries_per_page: int = 200) -> dict:
-    """One page of eBay's Trading API GetBestOffers, called WITHOUT an ItemID --
-    passing BestOfferStatus=Active alone (no ItemID) returns every active Best
-    Offer across the whole account in one paginated call, instead of having to
-    loop GetBestOffers per listing (which would mean one API call per active
-    listing -- thousands of calls to find a handful of real offers)."""
+def _ebay_get_best_offers_for_item(token: str, item_id: str) -> dict:
+    """GetBestOffers for a single ItemID -- this is the documented, individually
+    tested mode (eBay's own Sandbox validation steps call this out explicitly
+    as step 2, after confirming step 1 -- no ItemID at all -- works). Used
+    instead of the account-wide no-ItemID call, which returned an empty
+    ItemBestOffersArray in practice on this account despite Ack=Success."""
     import requests as _req
     import xml.etree.ElementTree as ET
 
@@ -10201,8 +10201,8 @@ def _ebay_get_best_offers_page(token: str, page_number: int, entries_per_page: i
         '<?xml version="1.0" encoding="utf-8"?>'
         '<GetBestOffersRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
         f'<RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>'
+        f'<ItemID>{item_id}</ItemID>'
         '<BestOfferStatus>Active</BestOfferStatus>'
-        f'<Pagination><EntriesPerPage>{entries_per_page}</EntriesPerPage><PageNumber>{page_number}</PageNumber></Pagination>'
         '<DetailLevel>ReturnAll</DetailLevel>'
         '</GetBestOffersRequest>'
     )
@@ -10217,88 +10217,77 @@ def _ebay_get_best_offers_page(token: str, page_number: int, entries_per_page: i
     return _ebay_xml_to_dict(root)
 
 def _sync_ebay_best_offers_work(business_id: str) -> dict:
-    """Pulls every currently-Active Best Offer for the account and upserts into
-    ebay_best_offers. Unlike the active-listings sync, this is small and fast
-    (offers are rare relative to listings -- ~20/day per direct report) so it
-    runs unpaginated-in-spirit (loops pages but there's rarely more than one)
-    and simply replaces the active set each run: any previously-stored offer
-    not seen this run (accepted/declined/expired/countered since last check)
-    is deleted outright -- there's no override or manually-corrected data on
-    this table worth preserving across a disappearance, unlike ebay_listing_status."""
+    """Two-step, per-item approach -- NOT the account-wide no-ItemID GetBestOffers
+    call (that returned an empty ItemBestOffersArray on this account despite
+    Ack=Success and matching docs; see commit history). Step 1: read
+    best_offer_count off ebay_listing_status, which the active-listings sync
+    already populates for free via GetMyeBaySelling's BestOfferDetails.
+    Step 2: call GetBestOffers per-ItemID only for items with a count > 0 --
+    a handful of calls, not one per active listing. IMPORTANT: best_offer_count
+    is only as fresh as the last full active-listings sync -- if that hasn't
+    run recently, this will correctly find zero candidates even with real
+    offers sitting on eBay, until that sync runs."""
     import datetime as _dt
 
     token = get_ebay_access_token(business_id)
-    page = 1
-    total_pages = 1
-    seen_ids = []
-    rows = []
     now_iso = _dt.datetime.utcnow().isoformat()
 
-    while page <= total_pages:
-        resp = _ebay_get_best_offers_page(token, page)
+    candidates = (supabase.table("ebay_listing_status")
+                  .select("item_id,best_offer_count")
+                  .eq("business_id", business_id).eq("listing_status", "Active")
+                  .gt("best_offer_count", 0).execute()).data or []
+
+    seen_ids = []
+    rows = []
+    checked = 0
+    for c in candidates:
+        item_id = c["item_id"]
+        try:
+            resp = _ebay_get_best_offers_for_item(token, item_id)
+        except Exception as e:
+            print(f"_sync_ebay_best_offers_work: GetBestOffers failed for item {item_id}: {e}")
+            continue
+        checked += 1
         ack = resp.get("Ack")
         if ack not in ("Success", "Warning"):
-            # "Success" with zero results still returns Ack=Success; a real
-            # failure (bad token, etc.) is the only thing that should raise.
-            errors = resp.get("Errors")
-            raise Exception(f"eBay GetBestOffers failed (Ack={ack}): {errors}")
-
-        pagination = resp.get("PaginationResult") or {}
-        total_pages = _safe_int(pagination.get("TotalNumberOfPages")) or 1
-
-        item_offers_array = resp.get("ItemBestOffersArray") or {}
-        # BUG FIXED: this was reading "ItemBestOffersType" (the XSD *type* name)
-        # instead of "ItemBestOffers" (the actual repeating XML element name inside
-        # ItemBestOffersArray) -- classic type-vs-element-name mixup. The wrong key
-        # silently returned an empty list every run (no exception, Ack=Success,
-        # active_offers always 0) even with real active offers on the account.
-        item_offers = item_offers_array.get("ItemBestOffers") or []
-        if isinstance(item_offers, dict):
-            item_offers = [item_offers]
-
-        for item_offer in item_offers:
-            item = item_offer.get("Item") or {}
-            item_id = item.get("ItemID")
-            best_offer_array = item_offer.get("BestOfferArray") or {}
-            offers = best_offer_array.get("BestOffer") or []
-            if isinstance(offers, dict):
-                offers = [offers]
-            for off in offers:
-                status = off.get("Status")
-                if status != "Active":
-                    continue
-                buyer = (off.get("Buyer") or {}).get("UserID")
-                best_offer_id = off.get("BestOfferID")
-                if not best_offer_id:
-                    continue
-                seen_ids.append(best_offer_id)
-                rows.append({
-                    "business_id": business_id, "best_offer_id": best_offer_id,
-                    "item_id": item_id, "buyer_user_id": buyer,
-                    "offer_price": _safe_float((off.get("Price") or {}).get("value") if isinstance(off.get("Price"), dict) else off.get("Price")),
-                    "quantity": _safe_int(off.get("Quantity")),
-                    "status": status, "expiration_time": off.get("ExpirationTime"),
-                    "buyer_message": off.get("BuyerMessage"),
-                    "updated_at": now_iso,
-                })
-        page += 1
+            print(f"_sync_ebay_best_offers_work: item {item_id} Ack={ack}: {resp.get('Errors')}")
+            continue
+        best_offer_array = resp.get("BestOfferArray") or {}
+        offers = best_offer_array.get("BestOffer") or []
+        if isinstance(offers, dict):
+            offers = [offers]
+        for off in offers:
+            status = off.get("Status")
+            if status != "Active":
+                continue
+            best_offer_id = off.get("BestOfferID")
+            if not best_offer_id:
+                continue
+            buyer = (off.get("Buyer") or {}).get("UserID")
+            price_raw = off.get("Price")
+            price = (price_raw.get("value") if isinstance(price_raw, dict) else price_raw)
+            seen_ids.append(best_offer_id)
+            rows.append({
+                "business_id": business_id, "best_offer_id": best_offer_id,
+                "item_id": item_id, "buyer_user_id": buyer,
+                "offer_price": _safe_float(price),
+                "quantity": _safe_int(off.get("Quantity")),
+                "status": status, "expiration_time": off.get("ExpirationTime"),
+                "buyer_message": off.get("BuyerMessage"),
+                "updated_at": now_iso,
+            })
 
     if rows:
         supabase.table("ebay_best_offers").upsert(rows, on_conflict="business_id,best_offer_id").execute()
-    elif not rows:
-        # Diagnostic only for the empty case -- so if this is still wrong next
-        # run, the actual response shape is right there in Railway logs instead
-        # of guessing blind again.
-        print(f"_sync_ebay_best_offers_work: 0 offers parsed, top-level response keys: {list(resp.keys())}")
 
-    # Drop anything stored for this business that wasn't in this run's active set.
     existing = (supabase.table("ebay_best_offers").select("best_offer_id")
                 .eq("business_id", business_id).execute()).data or []
     stale = [r["best_offer_id"] for r in existing if r["best_offer_id"] not in seen_ids]
     if stale:
         supabase.table("ebay_best_offers").delete().eq("business_id", business_id).in_("best_offer_id", stale).execute()
 
-    return {"active_offers": len(rows), "cleared": len(stale), "synced_at": now_iso}
+    return {"candidates": len(candidates), "checked": checked, "active_offers": len(rows),
+            "cleared": len(stale), "synced_at": now_iso}
 
 async def ebay_best_offers_sync_worker():
     """Independent worker, own 10-minute clock -- offers are time-sensitive
@@ -10456,6 +10445,18 @@ def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> di
                 # set) and a hit-counter style that isn't HiddenStyle-for-non-seller.
                 "watch_count": _safe_int(it.get("WatchCount")),
                 "view_count": _safe_int(it.get("HitCount")),
+                # BestOfferCount only appears in the response at all when >0 --
+                # this is the cheap per-item signal used to decide which items
+                # are worth an individual GetBestOffers call (see
+                # _sync_ebay_best_offers_work): calling GetBestOffers with no
+                # ItemID/BestOfferID to get everything account-wide in one shot
+                # is documented as supported but returned an empty
+                # ItemBestOffersArray in practice on this ~4,700-listing
+                # account (Ack=Success, no error) -- so the reliable, actually-
+                # tested path (per eBay's own step-by-step call validation) is
+                # per-ItemID, and this count is what keeps that from meaning
+                # one API call per active listing.
+                "best_offer_count": _safe_int((it.get("BestOfferDetails") or {}).get("BestOfferCount")),
                 "updated_at": now_iso,
             })
         if rows:
