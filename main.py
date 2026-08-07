@@ -10482,6 +10482,72 @@ async def best_offers_sync_now(request: Request):
     result = await asyncio.to_thread(_sync_ebay_best_offers_work, business_id)
     return result
 
+_best_offers_full_scan_status = {}  # business_id -> {"running": bool, "checked": int, "total": int, "found": int, "started_at": iso, "finished_at": iso|None}
+
+async def _run_best_offers_full_scan(business_id: str):
+    """Checks EVERY active listing directly via GetBestOffers, concurrently
+    (semaphore-limited) -- does NOT depend on best_offer_count, so it finds a
+    real pending offer even though the Inventory sync that populates that
+    count has been stuck. This is a one-time heavy fallback (thousands of API
+    calls), not something to run routinely -- the push notification handler
+    and the 10-min safety-net poller are the real ongoing mechanisms; this
+    exists to find what's ALREADY sitting there right now, since nothing else
+    currently can."""
+    import asyncio
+
+    token = get_ebay_access_token(business_id)
+    items = (supabase.table("ebay_listing_status").select("item_id")
+             .eq("business_id", business_id).eq("listing_status", "Active").execute()).data or []
+    item_ids = [r["item_id"] for r in items if r.get("item_id")]
+
+    status = _best_offers_full_scan_status[business_id]
+    status["total"] = len(item_ids)
+
+    sem = asyncio.Semaphore(15)
+
+    async def _check_one(item_id):
+        async with sem:
+            try:
+                found = await asyncio.to_thread(_sync_one_item_best_offers, business_id, token, item_id)
+                status["checked"] += 1
+                status["found"] += len(found)
+            except Exception as e:
+                status["checked"] += 1
+                print(f"_run_best_offers_full_scan: item {item_id} failed: {e}")
+
+    await asyncio.gather(*[_check_one(i) for i in item_ids])
+
+    import datetime as _dt
+    status["running"] = False
+    status["finished_at"] = _dt.datetime.utcnow().isoformat()
+    print(f"_run_best_offers_full_scan: business {business_id} done -- checked {status['checked']}/{status['total']}, found {status['found']} active offer(s)")
+
+@app.post("/api/best-offers/full-scan")
+async def best_offers_full_scan(request: Request):
+    """One-time direct scan of every active listing -- bypasses best_offer_count
+    entirely, so it works even though the Inventory sync is currently stuck.
+    Runs as a background task (thousands of listings, concurrency-limited) and
+    returns immediately; poll /api/best-offers/full-scan-status for progress."""
+    import asyncio, datetime as _dt
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    if _best_offers_full_scan_status.get(business_id, {}).get("running"):
+        return {"started": False, "already_running": True}
+    _best_offers_full_scan_status[business_id] = {
+        "running": True, "checked": 0, "total": 0, "found": 0,
+        "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None,
+    }
+    asyncio.create_task(_run_best_offers_full_scan(business_id))
+    return {"started": True}
+
+@app.get("/api/best-offers/full-scan-status")
+async def best_offers_full_scan_status(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    return _best_offers_full_scan_status.get(business_id, {"running": False, "checked": 0, "total": 0, "found": 0})
+
 def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> dict:
     """Pulls eBay's real ActiveList one page at a time, upserting each page
     immediately and checkpointing progress in app_settings (via

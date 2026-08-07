@@ -65,11 +65,12 @@ a.item-link:hover { color: var(--accent); }
 
   <div class="section">
     <h2>💵 Active Best Offers</h2>
-    <p class="section-sub">Live — eBay pushes new offers here the instant they're placed. No refresh needed.</p>
+    <p class="section-sub">Live — eBay pushes new offers here the instant they're placed. This page also auto-refreshes every 15s.</p>
     <div class="sort-row">
       <span class="section-sub" id="offers-count-label" style="margin:0;">Loading...</span>
-      <button class="refresh-btn" id="offers-refresh-btn" onclick="refreshOffers()">↻ Check now</button>
+      <button class="refresh-btn" id="fullscan-btn" onclick="startFullScan()">🔍 Full scan (check every listing directly)</button>
     </div>
+    <div class="section-sub" id="scan-progress-label"></div>
     <table>
       <thead>
         <tr>
@@ -210,26 +211,57 @@ async function loadBestOffers() {
 }
 
 async function refreshOffers() {
-  const btn = document.getElementById('offers-refresh-btn');
-  const label = document.getElementById('offers-count-label');
+  await loadBestOffers();
+}
+
+async function startFullScan() {
+  const btn = document.getElementById('fullscan-btn');
   btn.disabled = true;
-  btn.textContent = 'Syncing...';
   try {
-    const r = await fetch('/api/best-offers/sync-now', { method: 'POST' });
+    const r = await fetch('/api/best-offers/full-scan', { method: 'POST' });
     const result = await r.json();
-    if (result.candidates === 0) {
-      label.textContent = `0 listings currently flagged as having an offer — this reads best_offer_count from the last Inventory sync. If you know you have offers right now, run "🛰️ Sync eBay Live" on Inventory first, then sync here again.`;
-    } else {
-      label.textContent = `Checked ${result.checked} of ${result.candidates} flagged listings — found ${result.active_offers} active offer(s).`;
+    if (result.already_running) {
+      pollFullScan();
+      return;
     }
-    await loadBestOffers();
+    pollFullScan();
   } catch (e) {
-    label.textContent = 'Sync failed — check server logs.';
-  } finally {
     btn.disabled = false;
-    btn.textContent = '↻ Sync now';
+    btn.textContent = '🔍 Full scan (check every listing directly)';
   }
 }
+
+async function pollFullScan() {
+  const btn = document.getElementById('fullscan-btn');
+  const progressLabel = document.getElementById('scan-progress-label');
+  const poll = async () => {
+    try {
+      const r = await fetch('/api/best-offers/full-scan-status');
+      const s = await r.json();
+      if (s.total) {
+        btn.textContent = `Scanning... ${s.checked}/${s.total}`;
+        progressLabel.textContent = `Scan in progress: ${s.checked} of ${s.total} listings checked, ${s.found} active offer(s) found so far.`;
+      }
+      await loadBestOffers();
+      if (s.running) {
+        setTimeout(poll, 3000);
+      } else {
+        btn.disabled = false;
+        btn.textContent = '🔍 Full scan (check every listing directly)';
+        if (s.total) {
+          progressLabel.textContent = `Scan complete: checked ${s.checked} listings, found ${s.found} active offer(s).`;
+        }
+      }
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = '🔍 Full scan (check every listing directly)';
+    }
+  };
+  poll();
+}
+
+// Auto-refresh the Active Offers table on its own, no click needed.
+setInterval(loadBestOffers, 15000);
 
 async function load() {
   const banner = document.getElementById('status-banner');
