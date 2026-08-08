@@ -2425,17 +2425,16 @@ async def rematch_category(item_id: str, request: Request, mode: str = "industri
     current_category_id = str(res.data[0].get("ebay_category_id") or "")
     if not title or title == "Scanning...":
         raise HTTPException(400, "No title yet")
-    # If it's currently sitting at the generic fallback for this mode, exclude that ID
-    # so suggest_ebay_category can't just deterministically hand the identical fallback
-    # back again -- eBay's suggestion API returns the same ranked results for the same
-    # title every time, so without this a stuck item would look unchanged on every
-    # click. This is the actual bug: the tile "BI"/"AP" buttons never excluded anything
-    # (unlike the modal's Auto-pick, which excludes lastCategoryTried on repeat clicks),
-    # so recalculating an item already at the fallback just re-confirmed the fallback.
-    # Only excludes the fallback specifically -- an item already at a real, specific
-    # match isn't forced away from a correct answer just because someone re-checks it.
-    fallback_id = _motors_fallback_id(business_id) if mode == "motors" else "26261"
-    exclude_id = current_category_id if current_category_id == str(fallback_id) else None
+    # Always exclude whatever category the item is CURRENTLY sitting at before
+    # re-searching -- eBay's suggestion API returns identical ranked results for the
+    # same title every time, so without this, pressing recalc on an item already at
+    # a real (but wrong) specific match just re-confirms that same match; there's no
+    # way to ever get a different answer. This mirrors the modal's Auto-pick button,
+    # which excludes lastCategoryTried on every repeat click for the same reason.
+    # Previously this only excluded when the current category was the generic 26261
+    # fallback specifically -- that missed the actual reported case: a specific but
+    # incorrect match (e.g. "5C Collets") that recalc could never move off of.
+    exclude_id = current_category_id if current_category_id else None
     suggestion = suggest_ebay_category(title, business_id, restrict=True, exclude_id=exclude_id, mode=mode)
     if suggestion and suggestion.get("category_id"):
         supabase.table("listings").update({
