@@ -191,34 +191,41 @@ async def start_background_jobs():
     asyncio.create_task(inventory_value_sync_worker())
     asyncio.create_task(ebay_best_offers_sync_worker())
     asyncio.create_task(ebay_notification_subscribe_worker())
-    asyncio.create_task(_diagnostic_test_analytics_scope())
+    asyncio.create_task(ebay_analytics_sync_worker())
 
-async def _diagnostic_test_analytics_scope():
-    """ONE-TIME TEST 8/8 -- remove after reading debug_log key
-    'analytics_traffic_test'. Confirms the fresh sell.analytics.readonly
-    consent actually took and the real getTrafficReport response parses
-    the way _sync_ebay_analytics_work expects, against 5 real items,
-    before trusting it in the full sweep."""
-    import asyncio
-    test_item_ids = ["405422141582", "405718638332", "406743545611", "406119059723", "405511025867"]
-    try:
-        res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
-        business_ids = list(set(r["business_id"] for r in (res.data or [])))
-        for biz_id in business_ids:
-            try:
-                token = await asyncio.to_thread(get_ebay_access_token, biz_id)
-                raw = await asyncio.to_thread(_ebay_get_traffic_report, token, test_item_ids)
-                supabase.table("debug_log").insert({
-                    "business_id": biz_id, "key": "analytics_traffic_test", "payload": raw,
-                }).execute()
-                print(f"_diagnostic_test_analytics_scope: business {biz_id} logged successfully")
-            except Exception as e:
-                supabase.table("debug_log").insert({
-                    "business_id": biz_id, "key": "analytics_traffic_test", "payload": {"error": str(e)},
-                }).execute()
-                print(f"_diagnostic_test_analytics_scope: business {biz_id} error: {e}")
-    except Exception as e:
-        print(f"_diagnostic_test_analytics_scope error: {e}")
+async def ebay_analytics_sync_worker():
+    """Once-a-day sweep of real view counts via the Sell Analytics API,
+    confirmed working 8/8 (fresh sell.analytics.readonly consent verified
+    against real data). Checks hourly but only actually syncs a business
+    once its last run is >= 1 day old, settling into a daily cadence --
+    same pattern as active_listings_sync_worker. Deliberately not more
+    frequent than that: this API has its own separate, real daily call
+    limit (see _sync_ebay_analytics_work notes above), not the Trading
+    API's, but still a finite one not worth burning on a tight clock."""
+    import asyncio, datetime as _dt
+    while True:
+        try:
+            res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
+            business_ids = list(set(r["business_id"] for r in (res.data or [])))
+            for biz_id in business_ids:
+                try:
+                    settings = get_ebay_settings(biz_id)
+                    last_run = settings.get("EBAY_ANALYTICS_SYNC_LAST_RUN_AT")
+                    needs_sync = True
+                    if last_run:
+                        age = _dt.datetime.utcnow() - _dt.datetime.fromisoformat(
+                            last_run.replace("Z", "+00:00")).replace(tzinfo=None)
+                        needs_sync = age >= _dt.timedelta(days=1)
+                    if not needs_sync:
+                        continue
+                    result = await asyncio.to_thread(_sync_ebay_analytics_work, biz_id)
+                    save_ebay_setting(biz_id, "EBAY_ANALYTICS_SYNC_LAST_RUN_AT", _dt.datetime.utcnow().isoformat())
+                    print(f"ebay_analytics_sync_worker: business {biz_id}: {result}")
+                except Exception as e:
+                    print(f"ebay_analytics_sync_worker: business {biz_id} failed: {e}")
+        except Exception as e:
+            print(f"ebay_analytics_sync_worker error: {e}")
+        await asyncio.sleep(3600)  # check hourly; actual sync per business gated to ~daily above
 
 async def auction_archive_worker():
     """Runs once a day (00:20 UTC) and archives any capture session whose lots'
