@@ -646,7 +646,8 @@ EBAY_OAUTH_SCOPES = (
     "https://api.ebay.com/oauth/api_scope "
     "https://api.ebay.com/oauth/api_scope/sell.inventory "
     "https://api.ebay.com/oauth/api_scope/sell.fulfillment "
-    "https://api.ebay.com/oauth/api_scope/sell.finances"
+    "https://api.ebay.com/oauth/api_scope/sell.finances "
+    "https://api.ebay.com/oauth/api_scope/sell.analytics.readonly"
 )
 
 def _lot_prefix(sku: str) -> str:
@@ -10770,6 +10771,114 @@ async def best_offers_debug_item(item_id: str, request: Request):
     token = await asyncio.to_thread(get_ebay_access_token, business_id)
     raw = await asyncio.to_thread(_ebay_get_best_offers_for_item, token, item_id)
     return raw
+
+# ── SELL ANALYTICS (real view counts) ──────────────────────────── #
+# Trading API's HitCount is effectively dead (deprecated for AddItem/GetItem,
+# and GetSellerList/GetMyeBaySelling only return it to specially-authorized
+# apps -- confirmed via eBay's own docs and dev-support forum, 8/8). Real
+# page-view data lives in the separate Sell Analytics API's getTrafficReport
+# method, which needs its own OAuth scope (sell.analytics.readonly) --
+# added to EBAY_OAUTH_SCOPES above, requires the account to re-consent once.
+#
+# NOTE: this API's own daily call limit is real and separate from the
+# Trading API's -- eBay's own docs say "use this method for up to a few
+# thousand listings per day; it is not intended to return daily metrics for
+# all your listings," and sellers report an effective ~500 calls/day cap.
+# listing_ids can be batched (pipe-separated) into one call, so a full sweep
+# of ~4,700 active listings is ~35-50 calls in batches of 100-150 -- fine for
+# a once-a-day job, NOT something to run on a 10-min clock like best offers.
+
+_ANALYTICS_BATCH_SIZE = 100  # ids per call -- keeps URL length and per-call cost modest
+
+def _ebay_get_traffic_report(token: str, item_ids: list, days: int = 30) -> dict:
+    """One getTrafficReport call, dimension=LISTING, metric=LISTING_VIEWS_TOTAL,
+    for up to _ANALYTICS_BATCH_SIZE item_ids at once, over a trailing `days`-day
+    window (getTrafficReport's date_range has its own max span -- 30 days is
+    comfortably inside every limit eBay documents, and matches what a
+    'currently getting attention' leaderboard actually wants to show)."""
+    import requests as _req, datetime as _dt, urllib.parse as _up
+
+    end = _dt.datetime.utcnow().date()
+    start = end - _dt.timedelta(days=days)
+    ids_part = "|".join(item_ids)
+    filter_val = f"marketplace_ids:{{EBAY_US}},date_range:[{start:%Y%m%d}..{end:%Y%m%d}],listing_ids:{{{ids_part}}}"
+    params = {
+        "filter": filter_val,
+        "dimension": "LISTING",
+        "metric": "LISTING_VIEWS_TOTAL",
+    }
+    url = "https://api.ebay.com/sell/analytics/v1/traffic_report?" + _up.urlencode(params, safe="{}[]|,:")
+    r = _req.get(url, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, timeout=30)
+    if r.status_code != 200:
+        raise Exception(f"getTrafficReport {r.status_code}: {r.text[:500]}")
+    return r.json()
+
+@app.get("/api/analytics/debug-traffic-test")
+async def analytics_debug_traffic_test(request: Request, item_ids: str = ""):
+    """MANUAL, one-time-use diagnostic -- NOT called automatically anywhere.
+    Confirms the real getTrafficReport response shape against a small,
+    caller-specified batch of item_ids (comma-separated) before any
+    unattended batch job is built to rely on parsing it. Requires the
+    account to have already re-consented with sell.analytics.readonly,
+    or this will fail with an insufficient-scope error, which is itself
+    useful confirmation that re-consent is still needed."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    ids = [i.strip() for i in item_ids.split(",") if i.strip()]
+    if not ids:
+        raise HTTPException(400, "Pass ?item_ids=123,456 (a few real item IDs from this account)")
+    import asyncio
+    token = await asyncio.to_thread(get_ebay_access_token, business_id)
+    raw = await asyncio.to_thread(_ebay_get_traffic_report, token, ids)
+    return raw
+
+def _sync_ebay_analytics_work(business_id: str) -> dict:
+    """Full sweep: pulls LISTING_VIEWS_TOTAL for every Active listing in
+    batches of _ANALYTICS_BATCH_SIZE, writes into ebay_listing_status.view_count.
+    NOT wired into an automatic worker yet -- run manually via
+    /api/analytics/sync-views once the debug-traffic-test above has confirmed
+    the real response parses correctly, then this becomes the daily job."""
+    import datetime as _dt
+
+    token = get_ebay_access_token(business_id)
+    active = (supabase.table("ebay_listing_status").select("item_id")
+              .eq("business_id", business_id).eq("listing_status", "Active").execute()).data or []
+    item_ids = [r["item_id"] for r in active if r.get("item_id")]
+
+    updated = 0
+    now_iso = _dt.datetime.utcnow().isoformat()
+    for i in range(0, len(item_ids), _ANALYTICS_BATCH_SIZE):
+        batch = item_ids[i:i + _ANALYTICS_BATCH_SIZE]
+        resp = _ebay_get_traffic_report(token, batch)
+        records = resp.get("records") or []
+        for rec in records:
+            dim_vals = rec.get("dimensionValues") or []
+            met_vals = rec.get("metricValues") or []
+            if not dim_vals or not met_vals:
+                continue
+            item_id = dim_vals[0].get("value")
+            views = _safe_int(met_vals[0].get("value"))
+            if item_id is None:
+                continue
+            supabase.table("ebay_listing_status").update({"view_count": views, "updated_at": now_iso}) \
+                .eq("business_id", business_id).eq("item_id", item_id).execute()
+            updated += 1
+
+    return {"total_active": len(item_ids), "updated": updated, "synced_at": now_iso}
+
+@app.post("/api/analytics/sync-views")
+async def analytics_sync_views(request: Request):
+    """Manual trigger for the full view-count sweep. Kept manual (not an
+    automatic worker) until confirmed working end-to-end at least once --
+    same pattern as every other 8/8 fix: prove the response shape, then
+    automate."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio
+    result = await asyncio.to_thread(_sync_ebay_analytics_work, business_id)
+    return result
 
 def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> dict:
     """Pulls eBay's real ActiveList one page at a time, upserting each page
