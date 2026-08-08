@@ -8795,6 +8795,79 @@ def _scrape_all_lot_photos(listing_url: str, lot_title: Optional[str] = None) ->
         print(f"lot photo re-scrape failed for {listing_url}: {e}")
     return urls[:10]
 
+def _fetch_main_photo_sync(lot_id: str, listing_url_override: Optional[str] = None) -> dict:
+    """Grabs just the first (main) full-res photo for a lot and re-hosts it —
+    deliberately lighter than flag-as-lot: no is_bulk_lot flip, no Gemini itemize
+    call. Built for backfilling photos on lots that were inserted directly (e.g.
+    from a watchlist import) and so never went through the normal capture flow
+    that scrapes photos automatically. If the row has no listing_url yet, pass
+    one in and it gets saved."""
+    lot_res = supabase.table("auction_lots").select("*").eq("id", lot_id).single().execute()
+    if not lot_res.data:
+        raise Exception("404: Lot not found")
+    lot = lot_res.data
+
+    listing_url = listing_url_override or lot.get("listing_url")
+    if not listing_url:
+        raise Exception("400: No listing_url available to scrape a photo from")
+
+    found_urls = _scrape_all_lot_photos(listing_url, lot.get("title"))
+    if not found_urls:
+        raise Exception("404: No photo found on listing page")
+
+    main_url = found_urls[0]
+    stored = _download_and_store_lot_photo(main_url, lot["session_id"], lot.get("lot_number") or "lot", 0)
+    stored_url = stored or main_url
+
+    patch = {"photo_urls": [stored_url]}
+    if listing_url_override and not lot.get("listing_url"):
+        patch["listing_url"] = listing_url_override
+    supabase.table("auction_lots").update(patch).eq("id", lot_id).execute()
+    return {"lot_id": lot_id, "lot_number": lot.get("lot_number"), "photo_url": stored_url}
+
+class MainPhotoFetchItem(BaseModel):
+    lot_id: str
+    listing_url: Optional[str] = None
+
+class MainPhotoFetchBulk(BaseModel):
+    items: List[MainPhotoFetchItem]
+
+def _fetch_main_photos_bulk_sync(items: List["MainPhotoFetchItem"]) -> dict:
+    results = []
+    for it in items:
+        try:
+            r = _fetch_main_photo_sync(it.lot_id, it.listing_url)
+            results.append({**r, "status": "ok"})
+        except Exception as e:
+            msg = str(e)
+            for prefix in ("404:", "400:"):
+                if msg.startswith(prefix):
+                    msg = msg[len(prefix):].strip()
+                    break
+            results.append({"lot_id": it.lot_id, "status": "error", "error": msg})
+    return {"results": results}
+
+@app.post("/api/auction/capture/lots/fetch-main-photos-bulk")
+async def fetch_main_photos_bulk(body: MainPhotoFetchBulk, request: Request):
+    """Batch version of the main-photo backfill above, scoped to sessions the
+    caller owns (same ownership check as bulk-delete). Runs off-thread since
+    it's a chain of blocking network scrapes."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    if not body.items:
+        return {"results": []}
+    lot_ids = [it.lot_id for it in body.items]
+    owned_sessions = {s["id"] for s in supabase.table("auction_capture_sessions").select("id").eq("business_id", str(business_id)).execute().data}
+    lots = supabase.table("auction_lots").select("id,session_id").in_("id", lot_ids).execute().data
+    owned_ids = {l["id"] for l in lots if l["session_id"] in owned_sessions}
+    filtered = [it for it in body.items if it.lot_id in owned_ids]
+    if not filtered:
+        raise HTTPException(404, "No matching owned lots found")
+    import asyncio
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _fetch_main_photos_bulk_sync, filtered)
+
 def _itemize_capture_lot_sync(lot_id: str) -> dict:
     lot_res = supabase.table("auction_lots").select("*").eq("id", lot_id).single().execute()
     if not lot_res.data:
