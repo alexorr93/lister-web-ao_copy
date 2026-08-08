@@ -194,6 +194,20 @@ async def start_background_jobs():
     asyncio.create_task(ebay_analytics_sync_worker())
     asyncio.create_task(ebay_sync_check_worker())
 
+    async def _one_time_verify_ebay_sync_status_fix():
+        try:
+            biz_id = "e6aa8f2d-4e17-4b88-b511-2cffd3c2168d"
+            rows = (supabase.table("ebay_sync_queue").select("id,ebay_item_id,title,live_listing_status")
+                    .eq("business_id", biz_id).eq("status", "pending").execute()).data or []
+            for row in rows:
+                live_status = await asyncio.to_thread(_live_check_ebay_listing_status, biz_id, row["ebay_item_id"])
+                if live_status != row.get("live_listing_status"):
+                    supabase.table("ebay_sync_queue").update({"live_listing_status": live_status}).eq("id", row["id"]).execute()
+                print(f"ONE_TIME_VERIFY: {row['title']}: live_status={live_status} (was {row.get('live_listing_status')})")
+        except Exception as e:
+            print(f"ONE_TIME_VERIFY failed: {e}")
+    asyncio.create_task(_one_time_verify_ebay_sync_status_fix())
+
 async def ebay_analytics_sync_worker():
     """Once-a-day sweep of real view counts via the Sell Analytics API,
     confirmed working 8/8 (fresh sell.analytics.readonly consent verified
