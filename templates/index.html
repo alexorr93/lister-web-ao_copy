@@ -2371,7 +2371,11 @@ async function publishToShopify() {
       : (ch.error ? ` (channel publish issue: ${ch.error})` : '');
     document.getElementById('modal-shopify-status').innerHTML =
       `<span style="color:#95bf47;">✅ Live on Shopify (product ${r.product_id})${chNote}</span>`;
+    const l = listings.find(x => x.id === modalItemId);
+    if (l) { l.shopify_status = 'active'; l.shopify_product_id = r.product_id; }
     toast('Published to Shopify ✓');
+    document.getElementById('modal').classList.remove('open');
+    renderTiles();
   } catch(e) {
     document.getElementById('modal-shopify-status').innerHTML = `<span style="color:var(--red,#c0392b);">❌ ${e.message}</span>`;
     toast('Shopify publish failed: ' + e.message, 'error');
