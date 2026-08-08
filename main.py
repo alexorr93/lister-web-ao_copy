@@ -352,6 +352,160 @@ async def shopify_sync_run_now(request: Request):
     result = await asyncio.to_thread(run_hourly_shopify_sync_for_business, business_id)
     return result
 
+# ── EBAY SYNC (Shopify -> eBay, manual-only for now) ───────────── #
+# Deliberately the reverse of the automated direction above, and deliberately
+# NOT wired into any worker -- explicit instruction: prove it works via a
+# manual button first, automate later once trusted. Matching uses ONLY a
+# confirmed HDID (inventory_match.hd_id not null) -- an item with no HDID is
+# skipped outright, never fuzzy-matched, by design.
+
+def _find_shopify_sales_with_hdid_match(business_id: str, start_iso: str, end_iso: str) -> dict:
+    """Finds Shopify order lines in [start_iso, end_iso), aggregates quantity
+    sold per variant_id, and joins against inventory_match on shopify_id --
+    but ONLY rows where hd_id is not null (a confirmed, locked pairing).
+    Anything sold with no confirmed HDID is counted but not returned as an
+    actionable row -- 'if it doesn't have one, it should do nothing.'"""
+    order_lines = fetch_shopify_orders(business_id, start_iso, end_iso)
+    sold_by_variant = {}
+    no_variant_id = 0
+    for li in order_lines:
+        vid = li.get("variant_id")
+        if not vid:
+            no_variant_id += 1
+            continue
+        entry = sold_by_variant.setdefault(vid, {"qty_sold": 0, "title": li.get("title"), "sku": li.get("sku")})
+        entry["qty_sold"] += li.get("quantity", 0)
+
+    if not sold_by_variant:
+        return {"rows": [], "unmatched_no_hdid": 0, "no_variant_id": no_variant_id}
+
+    variant_ids = list(sold_by_variant.keys())
+    matches = (supabase.table("inventory_match").select("ebay_id,shopify_id,title")
+               .eq("business_id", business_id).in_("shopify_id", variant_ids)
+               .not_.is_("hd_id", "null").execute()).data or []
+    matched_by_variant = {m["shopify_id"]: m for m in matches}
+
+    rows = []
+    unmatched = 0
+    for vid, sold in sold_by_variant.items():
+        match = matched_by_variant.get(vid)
+        if not match or not match.get("ebay_id"):
+            unmatched += 1
+            continue
+        rows.append({
+            "shopify_variant_id": vid, "ebay_item_id": match["ebay_id"],
+            "title": match.get("title") or sold["title"], "sku": sold["sku"],
+            "qty_sold": sold["qty_sold"],
+        })
+    return {"rows": rows, "unmatched_no_hdid": unmatched, "no_variant_id": no_variant_id}
+
+@app.get("/api/ebay-sync/today")
+async def ebay_sync_today(request: Request, start: str, end: str):
+    """Manual-only lookup: Shopify sales in range, matched to eBay via
+    confirmed HDID. Read-only, local-data-cheap where possible (order fetch
+    is live Shopify, matching is local) -- no eBay calls happen here; those
+    only happen on an actual Push click, per-row."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio
+    start_iso = f"{start}T00:00:00-00:00"
+    end_iso = f"{end}T23:59:59-00:00"
+    result = await asyncio.to_thread(_find_shopify_sales_with_hdid_match, business_id, start_iso, end_iso)
+    return result
+
+class EbaySyncPush(BaseModel):
+    shopify_variant_id: str
+
+@app.post("/api/ebay-sync/push")
+async def ebay_sync_push(body: EbaySyncPush, request: Request):
+    """Pushes ONE eBay-only quantity update: sets eBay's available quantity to
+    match Shopify's CURRENT live quantity for a confirmed-HDID pair. Shopify
+    is the source of truth here and is never written to -- this is the
+    mirror-image of push_inventory_quantity's eBay leg, minus the Shopify
+    write, since Shopify already has the correct number (that's WHY this is
+    running). Re-confirms the HDID match and re-checks both platforms live,
+    immediately before writing -- never trusts what the table on screen
+    showed, since time may have passed since it loaded."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio
+
+    match_res = (supabase.table("inventory_match").select("ebay_id,shopify_id,title,hd_id")
+                 .eq("business_id", business_id).eq("shopify_id", body.shopify_variant_id).execute())
+    match = (match_res.data or [None])[0]
+    if not match or not match.get("hd_id") or not match.get("ebay_id"):
+        raise HTTPException(400, "No confirmed HDID match for this Shopify variant — refusing to push.")
+    ebay_item_id = match["ebay_id"]
+    title = match.get("title") or ""
+
+    log_row = {"business_id": business_id, "ebay_item_id": str(ebay_item_id),
+               "shopify_variant_id": str(body.shopify_variant_id), "title": title,
+               "requested_available_qty": 0}
+
+    # Fresh live Shopify quantity — the source of truth this push is copying from.
+    try:
+        settings = get_ebay_settings(business_id)
+        domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+        if not domain:
+            raise Exception("Shopify not connected")
+        shopify_token = await asyncio.to_thread(get_shopify_access_token, business_id)
+        sp_headers = {"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"}
+        location_id = await asyncio.to_thread(_get_shopify_primary_location_id, domain, sp_headers)
+        if not location_id:
+            raise Exception("Could not determine Shopify location")
+        variant_data = await asyncio.to_thread(_fetch_shopify_variants_by_ids, domain, shopify_token, location_id, [str(body.shopify_variant_id)])
+        shopify_qty = (variant_data.get(str(body.shopify_variant_id)) or {}).get("qty")
+        if shopify_qty is None:
+            raise Exception(f"Could not read live Shopify quantity for variant {body.shopify_variant_id}")
+    except Exception as e:
+        log_row.update({"ebay_status": "error", "ebay_error": f"Shopify live-qty check failed: {e}"})
+        supabase.table("ebay_quantity_push_log").insert(log_row).execute()
+        raise HTTPException(502, f"Could not read Shopify's live quantity: {e}")
+
+    log_row["requested_available_qty"] = shopify_qty
+
+    # Fresh eBay Active-check, same discipline as push_inventory_quantity.
+    ebay_token = await asyncio.to_thread(get_ebay_access_token, business_id)
+    try:
+        status_resp = await asyncio.to_thread(_ebay_get_item_status, ebay_token, ebay_item_id)
+    except Exception as e:
+        log_row.update({"ebay_status": "error", "ebay_error": f"GetItem failed: {e}"})
+        supabase.table("ebay_quantity_push_log").insert(log_row).execute()
+        raise HTTPException(502, f"Could not check eBay's live listing status: {e}")
+    item = status_resp.get("Item") or {}
+    selling_status = item.get("SellingStatus") or {}
+    listing_status = selling_status.get("ListingStatus")
+    if status_resp.get("Ack") not in ("Success", "Warning") or listing_status != "Active":
+        log_row.update({"ebay_status": "refused", "ebay_error": f"Listing not Active (status={listing_status})"})
+        supabase.table("ebay_quantity_push_log").insert(log_row).execute()
+        raise HTTPException(409, f"eBay listing {ebay_item_id} is not currently Active "
+                                  f"(status: {listing_status or 'unknown'}) — refusing to push.")
+
+    quantity_sold = _safe_int(selling_status.get("QuantitySold")) or 0
+    new_total_qty = shopify_qty + quantity_sold
+    log_row["live_quantity_sold"] = quantity_sold
+    log_row["new_total_qty_sent"] = new_total_qty
+
+    try:
+        await asyncio.to_thread(_ebay_revise_quantity_only, business_id, ebay_item_id, new_total_qty)
+        log_row["ebay_status"] = "success"
+    except Exception as e:
+        log_row.update({"ebay_status": "error", "ebay_error": str(e)})
+        supabase.table("ebay_quantity_push_log").insert(log_row).execute()
+        raise HTTPException(502, f"eBay quantity update failed: {e}")
+
+    try:
+        supabase.table("ebay_listing_status").update({
+            "quantity": new_total_qty, "quantity_available": shopify_qty,
+        }).eq("business_id", business_id).eq("item_id", ebay_item_id).execute()
+    except Exception as e:
+        print(f"ebay_sync_push: local ebay_listing_status update failed (eBay itself succeeded): {e}")
+
+    supabase.table("ebay_quantity_push_log").insert(log_row).execute()
+    return {"ok": True, "ebay_item_id": ebay_item_id, "new_available_qty": shopify_qty}
+
 async def shopify_shipping_rule_worker():
     """Fully independent, fully automatic -- no button, and by DESIGN never
     calls eBay at all (explicit instruction: this must never be bundled with
@@ -4198,6 +4352,7 @@ def fetch_shopify_orders(business_id: str, start_iso: str, end_iso: str) -> list
                     "platform": "Shopify",
                     "sku": li.get("sku") or "(no SKU)",
                     "title": li.get("title", ""),
+                    "variant_id": str(li.get("variant_id")) if li.get("variant_id") else None,
                     "quantity": int(li.get("quantity", 1)),
                     "line_item_id": li.get("id"),
                     "revenue": gross,
