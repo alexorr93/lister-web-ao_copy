@@ -2990,7 +2990,7 @@ async def list_offers(request: Request, limit: int = 150, sort: str = "watchers"
     sort_col = _OFFERS_SORT_COLUMNS.get(sort, "watch_count")
     descending = dir != "asc"
     # Tiebreaker keeps ordering stable/sensible when the primary column has
-    # many equal or null values (e.g. many items with 0 watchers).
+    # many equal values (e.g. many items tied on 0 watchers).
     tiebreak = "view_count" if sort_col != "view_count" else "watch_count"
 
     def _apply_filters(q):
@@ -3004,9 +3004,32 @@ async def list_offers(request: Request, limit: int = 150, sort: str = "watchers"
              .select("item_id,sku,title,price,watch_count,view_count,watch_per_view_pct,gallery_url")
              .eq("business_id", business_id).eq("listing_status", "Active"))
     query = _apply_filters(query)
-    top_rows = (query.order(sort_col, desc=descending, nullsfirst=False)
-                .order(tiebreak, desc=True, nullsfirst=False)
-                .limit(limit).execute()).data or []
+    # REAL BUG FIXED 8/8, TWO SEPARATE ISSUES:
+    # (1) nullsfirst=False in this Supabase client does NOT mean "nulls last" --
+    #     it only omits the nulls directive entirely when False, leaving
+    #     Postgres's own actual default in place: NULL sorts as larger than
+    #     any real value, in BOTH directions -- so DESC puts nulls first,
+    #     ASC puts nulls last. With most listings missing watch_count/
+    #     view_count data, "Sort by Watchers" was showing null-data rows at
+    #     the very top of a 150-row leaderboard, burying every item that
+    #     actually had watcher data. Correct behavior for a metric column is
+    #     nulls-always-last regardless of direction ("no data" isn't a value
+    #     to rank as highest OR lowest, it just shouldn't be at the top) --
+    #     so NULLS LAST is made explicit on both directions, not left to
+    #     Postgres's default, and not by dropping the rows either: a
+    #     null-metric row still shows in the table, just trailing the real
+    #     values instead of leading them.
+    # (2) Chaining .order() twice sends TWO separate order= query params
+    #     (verified directly: produces "order=a.desc&order=b.desc" in the
+    #     request), not PostgREST's documented single comma-joined
+    #     multi-column syntax ("order=a.desc,b.desc") -- meaning the
+    #     "tiebreak" second .order() call was never confirmed to actually
+    #     combine with the first as intended. Built as one explicit combined
+    #     order string instead, matching PostgREST's real documented format,
+    #     with nullslast made explicit on the tiebreak column too.
+    order_str = f"{sort_col}.{'desc' if descending else 'asc'}.nullslast,{tiebreak}.desc.nullslast"
+    query.params = query.params.add("order", order_str)
+    top_rows = (query.limit(limit).execute()).data or []
 
     total_query = _apply_filters(supabase.table("ebay_listing_status")
                                   .select("item_id", count="exact")
