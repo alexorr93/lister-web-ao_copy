@@ -703,19 +703,35 @@ async def ebay_sync_push(body: EbaySyncPush, request: Request):
     log_row["new_total_qty_sent"] = new_total_qty
 
     try:
-        await asyncio.to_thread(_ebay_revise_quantity_only, business_id, ebay_item_id, new_total_qty)
-        log_row["ebay_status"] = "success"
+        if shopify_qty <= 0:
+            # 0 available can't go through ReviseItem -- see _ebay_end_item.
+            # This is genuinely the case in the screenshot Alex reported:
+            # sold out on Shopify means nothing physical is left, so the eBay
+            # listing needs to end, not report an available quantity of 0.
+            await asyncio.to_thread(_ebay_end_item, business_id, ebay_item_id, "NotAvailable")
+            # Re-check live rather than assume a status string -- eBay uses
+            # different ListingStatus values (e.g. "Completed") depending on
+            # why an item ended, and this helper already self-heals
+            # ebay_listing_status.listing_status + quantity_available itself.
+            final_status = await asyncio.to_thread(_live_check_ebay_listing_status, business_id, ebay_item_id)
+            log_row["ebay_status"] = f"success_ended ({final_status})"
+        else:
+            await asyncio.to_thread(_ebay_revise_quantity_only, business_id, ebay_item_id, new_total_qty)
+            log_row["ebay_status"] = "success"
     except Exception as e:
         log_row.update({"ebay_status": "error", "ebay_error": str(e)})
         supabase.table("ebay_quantity_push_log").insert(log_row).execute()
         raise HTTPException(502, f"eBay quantity update failed: {e}")
 
-    try:
-        supabase.table("ebay_listing_status").update({
-            "quantity": new_total_qty, "quantity_available": shopify_qty,
-        }).eq("business_id", business_id).eq("item_id", ebay_item_id).execute()
-    except Exception as e:
-        print(f"ebay_sync_push: local ebay_listing_status update failed (eBay itself succeeded): {e}")
+    if shopify_qty > 0:
+        # The ended-item branch above already wrote listing_status +
+        # quantity_available via _live_check_ebay_listing_status.
+        try:
+            supabase.table("ebay_listing_status").update({
+                "quantity": new_total_qty, "quantity_available": shopify_qty,
+            }).eq("business_id", business_id).eq("item_id", ebay_item_id).execute()
+        except Exception as e:
+            print(f"ebay_sync_push: local ebay_listing_status update failed (eBay itself succeeded): {e}")
 
     try:
         import datetime as _dt
@@ -1733,6 +1749,42 @@ def _ebay_revise_quantity_only(business_id: str, ebay_item_id: str, new_total_qu
     ack = resp.get("Ack")
     if ack not in ("Success", "Warning"):
         raise Exception(f"ReviseItem (Quantity only) failed (Ack={ack}): {resp.get('Errors')}")
+    return resp
+
+def _ebay_end_item(business_id: str, ebay_item_id: str, reason: str = "NotAvailable"):
+    """Trading API EndItem -- pulls a listing down entirely. eBay's ReviseItem
+    flatly refuses a Quantity that computes to 0 available (error 515: "The
+    quantity must be a valid number greater than 0."), confirmed against
+    eBay's own docs: 0 isn't a quantity state to them, it's "this item should
+    no longer be for sale," which is EndItem's job, not ReviseItem's. Callers
+    pushing a target quantity of 0 (e.g. sold out on Shopify) must call this
+    instead of _ebay_revise_quantity_only. EndingReason "NotAvailable" is
+    eBay's documented code for exactly this case -- the item sold out
+    elsewhere, not a listing mistake or a sale to the high bidder."""
+    import requests as _req
+    import xml.etree.ElementTree as ET
+    from xml.sax.saxutils import escape as _xesc
+
+    token = get_ebay_access_token(business_id)
+    xml_body = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<EndItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+        f'<RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>'
+        f'<ItemID>{_xesc(ebay_item_id)}</ItemID>'
+        f'<EndingReason>{_xesc(reason)}</EndingReason>'
+        '</EndItemRequest>'
+    )
+    headers = {
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "1193",
+        "X-EBAY-API-CALL-NAME": "EndItem",
+        "X-EBAY-API-SITEID": "0",
+        "Content-Type": "text/xml",
+    }
+    r = _req.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_body.encode("utf-8"), timeout=20)
+    resp = _ebay_xml_to_dict(ET.fromstring(r.content))
+    ack = resp.get("Ack")
+    if ack not in ("Success", "Warning"):
+        raise Exception(f"EndItem failed (Ack={ack}): {resp.get('Errors')}")
     return resp
 
 class UpdateSkuV2(BaseModel):
@@ -12797,21 +12849,31 @@ async def push_inventory_quantity(row_id: str, body: InventoryQuantityPush, requ
 
     # eBay first. If this fails, stop entirely -- Shopify is never touched.
     try:
-        _ebay_revise_quantity_only(business_id, ebay_item_id, new_total_qty)
-        log_row["ebay_status"] = "success"
+        if body.quantity <= 0:
+            # Same fix as ebay_sync_push -- ReviseItem refuses a Quantity that
+            # computes to 0 available (error 515), so 0 has to end the listing
+            # via EndItem instead. See _ebay_end_item for why.
+            _ebay_end_item(business_id, ebay_item_id, "NotAvailable")
+            final_status = _live_check_ebay_listing_status(business_id, ebay_item_id)
+            log_row["ebay_status"] = f"success_ended ({final_status})"
+        else:
+            _ebay_revise_quantity_only(business_id, ebay_item_id, new_total_qty)
+            log_row["ebay_status"] = "success"
     except Exception as e:
         log_row.update({"ebay_status": "error", "ebay_error": str(e)})
         supabase.table("ebay_quantity_push_log").insert(log_row).execute()
         raise HTTPException(502, f"eBay quantity update failed — nothing was changed on Shopify either. Error: {e}")
 
     # eBay succeeded — reflect it locally right away so the Inventory view
-    # doesn't show a stale number until the next scheduled sync.
-    try:
-        supabase.table("ebay_listing_status").update({
-            "quantity": new_total_qty, "quantity_available": body.quantity,
-        }).eq("business_id", business_id).eq("item_id", ebay_item_id).execute()
-    except Exception as e:
-        print(f"push_inventory_quantity: local ebay_listing_status update failed (eBay itself succeeded): {e}")
+    # doesn't show a stale number until the next scheduled sync. (The ended-
+    # item branch above already wrote this via _live_check_ebay_listing_status.)
+    if body.quantity > 0:
+        try:
+            supabase.table("ebay_listing_status").update({
+                "quantity": new_total_qty, "quantity_available": body.quantity,
+            }).eq("business_id", business_id).eq("item_id", ebay_item_id).execute()
+        except Exception as e:
+            print(f"push_inventory_quantity: local ebay_listing_status update failed (eBay itself succeeded): {e}")
 
     # Now Shopify — same proven absolute-set mutation shape already used by
     # the automated sync (_push_shopify_qty_updates), not a relative delta.
