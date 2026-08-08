@@ -10594,7 +10594,7 @@ async def ebay_best_offers_sync_worker():
 
 @app.get("/api/best-offers")
 async def list_best_offers(request: Request):
-    """Backs the top section of the Offers page: currently-Active incoming
+    """Backs the top section of the Offers page: currently-open incoming
     Best Offers, joined against ebay_listing_status for title/price/photo so
     the page doesn't need a second round trip. Read-only for now -- accepting,
     declining, or countering an offer is a separate build (real eBay actions,
@@ -10602,8 +10602,14 @@ async def list_best_offers(request: Request):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
+    # REAL BUG FIXED 8/8: this filtered status == "Active" only, which hid
+    # any offer eBay reports as "Pending" (an open counter-offer) even
+    # though the sync worker (fixed earlier the same day) was already
+    # writing those rows correctly -- the write path got fixed, this read
+    # path didn't, so nothing changed on the actual page. Now excludes
+    # only genuinely closed/terminal statuses, matching the sync worker.
     offers = (supabase.table("ebay_best_offers").select("*")
-              .eq("business_id", business_id).eq("status", "Active")
+              .eq("business_id", business_id).not_.in_("status", list(_CLOSED_OFFER_STATUSES))
               .order("expiration_time").execute()).data or []
     item_ids = list({o["item_id"] for o in offers if o.get("item_id")})
     listings_by_id = {}
