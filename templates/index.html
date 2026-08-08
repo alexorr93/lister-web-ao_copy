@@ -1784,8 +1784,12 @@ async function recalcTileCategory(id, mode, btn) {
   const orig = btn.textContent;
   btn.disabled = true; btn.textContent = '…';
   try {
-    const r = await api('POST', `/api/listings/${id}/rematch-category?mode=${mode}`, {});
+    const hist = categoryHistory[id] || [];
+    const excludeParam = hist.length ? `&exclude_ids=${hist.join(',')}` : '';
+    const r = await api('POST', `/api/listings/${id}/rematch-category?mode=${mode}${excludeParam}`, {});
     if (r.category_id) {
+      if (!hist.includes(String(r.category_id))) hist.push(String(r.category_id));
+      categoryHistory[id] = hist;
       l.ebay_category_id = r.category_id;
       l.category_mode = mode;
       l.ebay_category_is_default = !!r.is_fallback;
@@ -2299,17 +2303,23 @@ async function findMpn() {
   }
 }
 
-let lastCategoryTried = {}; // itemId -> category_id, so re-clicking Auto-pick tries the NEXT suggestion, not the same one
+// itemId -> array of every category_id already tried this session (modal Auto-pick AND
+// tile BI/AP recalc both add to this). Excluding the whole history instead of just the
+// last value stops repeated presses from ping-ponging between two candidates -- each
+// press rotates to a genuinely new one until the real options run out.
+let categoryHistory = {};
 
 async function autoCategoryModal() {
   if (!modalItemId) return;
   const statusEl = document.getElementById('modal-category-status');
   statusEl.textContent = 'Matching category...';
   try {
-    const excludeParam = lastCategoryTried[modalItemId] ? `&exclude=${lastCategoryTried[modalItemId]}` : '';
+    const hist = categoryHistory[modalItemId] || [];
+    const excludeParam = hist.length ? `&exclude=${hist.join(',')}` : '';
     const r = await api('POST', `/api/listings/${modalItemId}/auto-category?broad=false&mode=${categoryMode}${excludeParam}`);
     statusEl.textContent = `✅ Matched: ${r.path} (ID ${r.category_id})`;
-    lastCategoryTried[modalItemId] = r.category_id;
+    if (r.category_id && !hist.includes(String(r.category_id))) hist.push(String(r.category_id));
+    categoryHistory[modalItemId] = hist;
     const l = listings.find(x => x.id === modalItemId);
     if (l) {
       l.ebay_category_id = r.category_id;

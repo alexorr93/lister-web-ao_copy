@@ -2405,7 +2405,7 @@ confident from context -- never guess or make one up."""
         raise HTTPException(500, f"Find MPN failed: {e}")
 
 @app.post("/api/listings/{item_id}/rematch-category")
-async def rematch_category(item_id: str, request: Request, mode: str = "industrial"):
+async def rematch_category(item_id: str, request: Request, mode: str = "industrial", exclude_ids: str = ""):
     """Re-runs category matching for one listing in the given lane (from the Intake
     toggle). Exists because the background auto_fill_worker's revalidation sweep
     only re-checks listings categorized OUTSIDE Business & Industrial / eBay Motors —
@@ -2425,17 +2425,17 @@ async def rematch_category(item_id: str, request: Request, mode: str = "industri
     current_category_id = str(res.data[0].get("ebay_category_id") or "")
     if not title or title == "Scanning...":
         raise HTTPException(400, "No title yet")
-    # Always exclude whatever category the item is CURRENTLY sitting at before
-    # re-searching -- eBay's suggestion API returns identical ranked results for the
-    # same title every time, so without this, pressing recalc on an item already at
-    # a real (but wrong) specific match just re-confirms that same match; there's no
-    # way to ever get a different answer. This mirrors the modal's Auto-pick button,
-    # which excludes lastCategoryTried on every repeat click for the same reason.
-    # Previously this only excluded when the current category was the generic 26261
-    # fallback specifically -- that missed the actual reported case: a specific but
-    # incorrect match (e.g. "5C Collets") that recalc could never move off of.
-    exclude_id = current_category_id if current_category_id else None
-    suggestion = suggest_ebay_category(title, business_id, restrict=True, exclude_id=exclude_id, mode=mode)
+    # Exclude the current category PLUS every category this item has already landed
+    # on this session (passed in by the frontend, which tracks it per-item in memory)
+    # -- excluding only the current one lets repeated presses ping-pong forever
+    # between just two candidates (the generic fallback and one wrong specific match)
+    # since each press only ever rules out the single most-recent answer. Excluding
+    # the full history instead means each press rotates to a genuinely new candidate
+    # until the real options are exhausted, at which point it settles on the fallback.
+    exclude_set = {c for c in (exclude_ids or "").split(",") if c}
+    if current_category_id:
+        exclude_set.add(current_category_id)
+    suggestion = suggest_ebay_category(title, business_id, restrict=True, exclude_ids=list(exclude_set), mode=mode)
     if suggestion and suggestion.get("category_id"):
         supabase.table("listings").update({
             "ebay_category_id": suggestion["category_id"],
@@ -2660,7 +2660,7 @@ def _motors_fallback_id(business_id: str) -> str:
 
 
 def suggest_ebay_category(title: str, business_id: str, restrict: bool = True,
-                           exclude_id: str = None, mode: str = "industrial") -> dict:
+                           exclude_ids: list = None, mode: str = "industrial") -> dict:
     """Match an item title to an eBay leaf category using eBay's own suggestion engine.
 
     mode is the intake toggle and is absolute — the two lanes never cross:
@@ -2725,8 +2725,9 @@ def suggest_ebay_category(title: str, business_id: str, restrict: bool = True,
                    if (x["path"] or "").split(" > ")[0].strip() == "Business & Industrial"]
     # mode == "motors" needs no filter: tree 100 IS eBay Motors by definition.
 
-    if exclude_id:
-        results = [x for x in results if x["category_id"] != exclude_id]
+    if exclude_ids:
+        exclude_set = {str(x) for x in exclude_ids if x}
+        results = [x for x in results if str(x["category_id"]) not in exclude_set]
 
     # Cross-check each candidate against our OWN synced category data before
     # trusting it. eBay's live suggestion API can hand back a category that's
@@ -2843,7 +2844,8 @@ async def api_auto_category(item_id: str, request: Request, broad: bool = False,
         effective_mode = mode if mode in ("industrial", "motors") else (res.data[0].get("category_mode") or "industrial")
         # restrict is always True now — this business only ever sells in Business &
         # Industrial / eBay Motors, full stop, no "search all categories" escape hatch.
-        suggestion = suggest_ebay_category(title, business_id, restrict=True, exclude_id=exclude, mode=effective_mode)
+        exclude_list = [c for c in (exclude or "").split(",") if c]
+        suggestion = suggest_ebay_category(title, business_id, restrict=True, exclude_ids=exclude_list, mode=effective_mode)
         if not suggestion or not suggestion.get("category_id"):
             fallback_mode_id = _motors_fallback_id(business_id) if effective_mode == "motors" else \
                 (get_ebay_settings(business_id).get("EBAY_DEFAULT_CATEGORY_ID", "") or "26261")
