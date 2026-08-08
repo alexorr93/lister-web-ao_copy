@@ -401,15 +401,18 @@ def _find_shopify_sales_with_hdid_match(business_id: str, start_iso: str, end_is
     return {"rows": rows, "unmatched_no_hdid": unmatched, "no_variant_id": no_variant_id}
 
 def _attach_current_quantities(business_id: str, rows: list) -> list:
-    """Enriches each row with the CURRENT eBay/Shopify quantity already sitting
-    in local cache (ebay_listing_status.quantity_available, shopify_inventory.
-    quantity) -- both routinely-synced tables, so this is a local join, not a
-    live API call. Exists specifically so a row never shows just a bare 'Push'
-    button with no visible number: with a business selling multiple similar
-    units of the same product (e.g. several centrifuges as separate eBay
-    listings), seeing the exact current eBay qty vs. Shopify qty, and the
-    exact item_id/title, is what makes it possible to trust which listing is
-    actually about to change and by how much."""
+    """Enriches each row with the CURRENT eBay/Shopify quantity. eBay comes
+    from local cache (ebay_listing_status.quantity_available) -- refreshed at
+    discovery time and via the explicit Refresh button, kept cache-based on
+    purpose to respect eBay's much stricter Trading API quota. Shopify is a
+    LIVE lookup instead -- Shopify's Admin API has no comparable quota
+    pressure, and the cached shopify_inventory table proved unreliable here:
+    a real example (Murphy switchgage) sat showing a stale cached quantity
+    that didn't match Shopify's actual live count, giving a wrong 'set eBay
+    qty to N' target. A bare cache read is cheap but was silently wrong;
+    a live batched GraphQL call is barely more expensive and can't be stale.
+    Self-heals the shopify_inventory cache with whatever's read live, same
+    healing pattern as the eBay listing-status fix."""
     if not rows:
         return rows
     ebay_ids = list({r["ebay_item_id"] for r in rows if r.get("ebay_item_id")})
@@ -426,12 +429,35 @@ def _attach_current_quantities(business_id: str, rows: list) -> list:
 
     shopify_qty_by_id = {}
     if shopify_ids:
-        for i in range(0, len(shopify_ids), 200):
-            chunk = shopify_ids[i:i + 200]
-            res = (supabase.table("shopify_inventory").select("id,quantity")
-                   .eq("business_id", business_id).in_("id", chunk).execute()).data or []
-            for r in res:
-                shopify_qty_by_id[r["id"]] = r.get("quantity")
+        try:
+            settings = get_ebay_settings(business_id)
+            domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+            if domain:
+                shopify_token = get_shopify_access_token(business_id)
+                sp_headers = {"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"}
+                location_id = _get_shopify_primary_location_id(domain, sp_headers)
+                if location_id:
+                    variant_data = _fetch_shopify_variants_by_ids(domain, shopify_token, location_id, shopify_ids)
+                    for vid, data in variant_data.items():
+                        if data.get("qty") is not None:
+                            shopify_qty_by_id[vid] = data["qty"]
+                            try:
+                                supabase.table("shopify_inventory").update({"quantity": data["qty"]}) \
+                                    .eq("business_id", business_id).eq("id", vid).execute()
+                            except Exception as e:
+                                print(f"_attach_current_quantities: shopify_inventory cache heal failed for {vid}: {e}")
+        except Exception as e:
+            print(f"_attach_current_quantities: live Shopify qty fetch failed, falling back to cache: {e}")
+        # Fallback to cache for anything the live call didn't cover (fetch failed entirely, or a
+        # specific variant came back missing) rather than showing nothing.
+        missing = [vid for vid in shopify_ids if vid not in shopify_qty_by_id]
+        if missing:
+            for i in range(0, len(missing), 200):
+                chunk = missing[i:i + 200]
+                res = (supabase.table("shopify_inventory").select("id,quantity")
+                       .eq("business_id", business_id).in_("id", chunk).execute()).data or []
+                for r in res:
+                    shopify_qty_by_id[r["id"]] = r.get("quantity")
 
     for r in rows:
         r["ebay_qty"] = ebay_qty_by_id.get(r.get("ebay_item_id"))
