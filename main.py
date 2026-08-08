@@ -4237,12 +4237,24 @@ async def api_uncategorized_listings_only(request: Request):
         prefix = _lot_prefix(sku) if sku else None
         needs_sku = _sku_needs_assignment(sku)
         matched_listing = listing_by_item_id.get(row.get("item_id"))
-        # SKU-editable means "can push a live ReviseItem SKU change to eBay" --
-        # never true for a non-Active listing, since eBay's Trading API can't
-        # revise an ended listing. Those must go through the local-only override
-        # path regardless of whether a matched local `listings` row exists.
+        # Two DIFFERENT questions that must not be collapsed into one flag:
+        #   1. Can a live ReviseItem SKU push happen right now? Requires Active --
+        #      eBay's Trading API can't revise an ended listing at all. This is
+        #      what the frontend uses to decide which Save button/endpoint to use.
+        #   2. Is this a "Locked, unverified" v1/Inventory-API listing that
+        #      genuinely needs a human to look at it? Depends ONLY on whether it
+        #      has an ebay_offer_id and no override -- has nothing to do with
+        #      whether it's still Active. REAL BUG, CAUGHT LIVE 8/8: sku_editable
+        #      used to double as the proxy for #2 (via `not sku_editable`), which
+        #      only worked because this endpoint used to be Active-only, so
+        #      sku_editable was never false FOR ANY OTHER REASON. The moment
+        #      Active status stopped being a given, `not sku_editable` started
+        #      being true for every single non-Active row regardless of offer_id,
+        #      falsely flagging 527 Ended listings with perfectly complete SKUs
+        #      as needing review. Never conflate these two again.
         sku_editable = is_active and bool(matched_listing) and not matched_listing.get("ebay_offer_id")
-        needs_review = needs_sku or (matched_listing is not None and not sku_editable and not override_sku)
+        is_locked_unverified = bool(matched_listing) and bool(matched_listing.get("ebay_offer_id")) and not override_sku
+        needs_review = needs_sku or is_locked_unverified
         if sku and not needs_review and prefix in known_lot_skus:
             continue
         uncategorized_value += value
