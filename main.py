@@ -11343,16 +11343,26 @@ async def best_offers_debug_item(item_id: str, request: Request):
 # listing_ids can be batched (pipe-separated) into one call, so a full sweep
 # of ~4,700 active listings is ~35-50 calls in batches of 100-150 -- fine for
 # a once-a-day job, NOT something to run on a 10-min clock like best offers.
+#
+# WINDOW: eBay's own docs state the hard max span for date_range on this
+# call is 90 days -- there is no lifetime/since-listing-start option at all.
+# watch_count (Trading API) is NOT windowed -- it's the current cumulative
+# total since the listing went live, which can be months old. That mismatch
+# (a 90-day view window vs. a lifetime watcher count) is real and will still
+# make an old, slow-moving listing look like it has "more watchers than
+# views" sometimes -- 90 days is just the closest we can get within eBay's
+# own limit, not a full fix. This used to be set to 30 days as an arbitrary
+# "trending" choice, not because eBay required it -- widened to the true 90-
+# day max since more real signal is strictly better here.
 
 _ANALYTICS_BATCH_SIZE = 100  # ids per call -- keeps URL length and per-call cost modest
-_ANALYTICS_WINDOW_DAYS = 30  # single source of truth -- shared by the fetch and any views/day math on the result
+_ANALYTICS_WINDOW_DAYS = 90  # eBay's documented max span for getTrafficReport's date_range
 
 def _ebay_get_traffic_report(token: str, item_ids: list, days: int = _ANALYTICS_WINDOW_DAYS) -> dict:
     """One getTrafficReport call, dimension=LISTING, metric=LISTING_VIEWS_TOTAL,
     for up to _ANALYTICS_BATCH_SIZE item_ids at once, over a trailing `days`-day
-    window (getTrafficReport's date_range has its own max span -- 30 days is
-    comfortably inside every limit eBay documents, and matches what a
-    'currently getting attention' leaderboard actually wants to show)."""
+    window (eBay's own docs cap date_range at 90 days max for this call --
+    there's no lifetime option, so this is the most history obtainable)."""
     import requests as _req, datetime as _dt, urllib.parse as _up
 
     end = _dt.datetime.utcnow().date()

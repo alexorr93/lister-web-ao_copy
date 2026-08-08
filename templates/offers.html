@@ -132,8 +132,8 @@ th.sortable.active .arrow { opacity: 1; color: var(--accent); }
           <th class="sortable" data-sort="title" onclick="setSort('title')">Title<span class="arrow"></span></th>
           <th class="sortable" data-sort="sku" onclick="setSort('sku')">SKU<span class="arrow"></span></th>
           <th class="num sortable" data-sort="price" onclick="setSort('price')">Price<span class="arrow"></span></th>
+          <th class="num sortable" data-sort="views" onclick="setSort('views')">📈 Views (90d)<span class="arrow"></span></th>
           <th class="num sortable active" data-sort="watchers" onclick="setSort('watchers')">👀 Watchers<span class="arrow">▼</span></th>
-          <th class="num sortable" data-sort="views" onclick="setSort('views')">📈 Views<span class="arrow"></span></th>
           <th class="num sortable" data-sort="watch_view" onclick="setSort('watch_view')">Watch/View<span class="arrow"></span></th>
           <th class="num sortable" data-sort="views_day" onclick="setSort('views_day')">Views/Day<span class="arrow"></span></th>
         </tr>
@@ -255,8 +255,8 @@ function render() {
       <td class="title-cell"><a class="item-link" href="https://www.ebay.com/itm/${o.item_id}" target="_blank">${escapeHtml(o.title || o.item_id)}</a></td>
       <td>${escapeHtml(o.sku || '')}</td>
       <td class="num">${o.price != null ? '$' + Number(o.price).toFixed(2) : '—'}</td>
-      <td class="num">${pill(o.watch_count, 'watch')}</td>
       <td class="num">${pill(o.view_count, 'view')}</td>
+      <td class="num">${pill(o.watch_count, 'watch')}</td>
       <td class="num">${o.watch_per_view_pct != null ? o.watch_per_view_pct.toFixed(1) + '%' : '<span class="count-dash">—</span>'}</td>
       <td class="num">${o.views_per_day != null ? o.views_per_day.toFixed(1) : '<span class="count-dash">—</span>'}</td>
     </tr>
