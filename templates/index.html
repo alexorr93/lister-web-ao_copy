@@ -670,6 +670,19 @@ select.field-input { background: #fff; color: #0f172a; }
 
 </div><!-- /main -->
 
+<!-- SCOPE RADAR select-mode action bar — lives outside .tab-content on purpose (see
+     lot-picker-overlay note below): fixed to the bottom of the viewport so it's
+     always reachable without scrolling back up, no matter how far down the lot
+     table you've scrolled. Shown/hidden by updateLotSelectBar(). -->
+<div id="lot-select-bar" style="position:fixed;bottom:0;left:0;right:0;z-index:40;display:none;justify-content:center;pointer-events:none;">
+  <div style="pointer-events:auto;background:var(--surface);border:1px solid var(--border);border-bottom:none;border-radius:12px 12px 0 0;padding:10px 16px;display:flex;gap:10px;align-items:center;box-shadow:0 -4px 20px rgba(0,0,0,.3);margin-bottom:0;">
+    <span id="lot-select-count" style="font-size:12px;color:var(--muted);white-space:nowrap;"></span>
+    <button class="btn" style="font-size:12px;padding:6px 12px;" onclick="flagSelectedLots()">🏷️ Flag as LOT</button>
+    <button class="btn" style="font-size:12px;padding:6px 12px;" onclick="deleteSelectedLots()">🗑️ Delete Selected</button>
+    <button class="btn" style="font-size:12px;padding:6px 12px;" onclick="toggleSelectMode()">✕ Done</button>
+  </div>
+</div>
+
 <!-- LOT PICKER SHEET (Fast Scan / Batch Upload "active lot") — lives outside .tab-content
      on purpose: it must stay visible/interactive no matter which tab is currently active,
      since a display:none tab-content ancestor would hide this whole overlay too. -->
@@ -2907,6 +2920,14 @@ function toggleSelectMode() {
   renderAuctionTable();
 }
 
+function updateLotSelectBar() {
+  const bar = document.getElementById('lot-select-bar');
+  if (!bar) return;
+  bar.style.display = lotSelectMode ? 'flex' : 'none';
+  const count = document.getElementById('lot-select-count');
+  if (count) count.textContent = `${selectedLotIds.size} selected`;
+}
+
 function applyLotSelection(lotId, checked, shiftKey) {
   if (shiftKey && lastClickedLotId) {
     const ids = auctionLotsCache.map(l => l.id);
@@ -3086,12 +3107,9 @@ function renderAuctionTable() {
     </tr>`;
   }).join('');
   const selectToolbar = lotSelectMode
-    ? `<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
-        <span style="font-size:11px;color:var(--muted);">${selectedLotIds.size} selected · shift-click to select a range</span>
-        <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="flagSelectedLots()">🏷️ Flag as LOT</button>
-        <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="deleteSelectedLots()">🗑️ Delete Selected</button>
-      </div>`
+    ? `<div style="font-size:11px;color:var(--muted);margin-bottom:8px;">Click anywhere on a row to select it · shift-click for a range · actions are in the bar at the bottom</div>`
     : '';
+  updateLotSelectBar();
   document.getElementById('auction-list').innerHTML = `
     ${selectToolbar}
     <div style="overflow-x:auto;">
