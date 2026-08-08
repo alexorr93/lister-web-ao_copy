@@ -119,8 +119,13 @@ async def auto_fill_worker():
     cycle = 0
     while True:
         try:
+            # REAL BUG FIXED 8/8: 49 orphaned listings rows have business_id IS NULL
+            # and can never be fixed (fix_row always skips them -- no business_id to
+            # look up settings/mode with) but were still being fetched and re-skipped
+            # every single 8s cycle forever, pure waste. Excluded at the query level.
             res = supabase.table("listings").select("id,title,brand,ebay_category_id,business_id,category_mode")\
                 .neq("status", "archived")\
+                .not_.is_("business_id", "null")\
                 .or_("ebay_category_id.is.null,ebay_category_id.eq.0,ebay_category_id.eq.")\
                 .limit(50).execute()
             rows = [r for r in (res.data or []) if needs_category(r)]
@@ -136,7 +141,7 @@ async def auto_fill_worker():
                 start = 0
                 while True:
                     page = supabase.table("listings").select("id,title,brand,ebay_category_id,business_id,category_mode")\
-                        .neq("status", "archived")\
+                        .neq("status", "archived").not_.is_("business_id", "null")\
                         .range(start, start + 999).execute().data or []
                     all_rows.extend(page)
                     if len(page) < 1000:
