@@ -10871,15 +10871,23 @@ async def analytics_debug_traffic_test(request: Request, item_ids: str = ""):
 def _sync_ebay_analytics_work(business_id: str) -> dict:
     """Full sweep: pulls LISTING_VIEWS_TOTAL for every Active listing in
     batches of _ANALYTICS_BATCH_SIZE, writes into ebay_listing_status.view_count.
-    NOT wired into an automatic worker yet -- run manually via
-    /api/analytics/sync-views once the debug-traffic-test above has confirmed
-    the real response parses correctly, then this becomes the daily job."""
+    REAL BUG FIXED 8/8 (caught on the very first live run): the active-item-id
+    query had no pagination, so it silently hit Supabase's default 1000-row
+    cap and only ever processed the first 1000 of 4,698 active listings --
+    the other 3,698 were never checked, with nothing in the return value to
+    say so. Now paginates the same way _fetch_all_for_business does."""
     import datetime as _dt
 
     token = get_ebay_access_token(business_id)
-    active = (supabase.table("ebay_listing_status").select("item_id")
-              .eq("business_id", business_id).eq("listing_status", "Active").execute()).data or []
-    item_ids = [r["item_id"] for r in active if r.get("item_id")]
+    item_ids, start_i, page_size = [], 0, 1000
+    while True:
+        page = (supabase.table("ebay_listing_status").select("item_id")
+                .eq("business_id", business_id).eq("listing_status", "Active")
+                .range(start_i, start_i + page_size - 1).execute()).data or []
+        item_ids.extend(r["item_id"] for r in page if r.get("item_id"))
+        if len(page) < page_size:
+            break
+        start_i += page_size
 
     updated = 0
     now_iso = _dt.datetime.utcnow().isoformat()
