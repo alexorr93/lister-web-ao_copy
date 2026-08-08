@@ -191,6 +191,58 @@ async def start_background_jobs():
     asyncio.create_task(inventory_value_sync_worker())
     asyncio.create_task(ebay_best_offers_sync_worker())
     asyncio.create_task(ebay_notification_subscribe_worker())
+    asyncio.create_task(_diagnostic_test_bulk_best_offers())
+
+async def _diagnostic_test_bulk_best_offers():
+    """ONE-TIME TEST 8/8 -- remove after reading debug_log key
+    'bulk_best_offers_pagination_test'. Prior attempt at the documented
+    account-wide GetBestOffers call (no ItemID) returned an empty
+    ItemBestOffersArray despite Ack=Success on this ~4,700-listing account.
+    eBay's own docs describe a Pagination container specifically for when
+    'the GetBestOffers call will retrieve a large number of results' --
+    the prior attempt didn't include one. Testing whether that's the
+    actual missing piece, since a real single paginated call would replace
+    the whole bulk-count-then-per-item-verify funnel with the real thing."""
+    import asyncio
+    try:
+        res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
+        business_ids = list(set(r["business_id"] for r in (res.data or [])))
+        for biz_id in business_ids:
+            try:
+                token = await asyncio.to_thread(get_ebay_access_token, biz_id)
+                raw = await asyncio.to_thread(_ebay_test_bulk_best_offers, token)
+                supabase.table("debug_log").insert({
+                    "business_id": biz_id,
+                    "key": "bulk_best_offers_pagination_test",
+                    "payload": raw,
+                }).execute()
+                print(f"_diagnostic_test_bulk_best_offers: business {biz_id} logged, Ack={raw.get('Ack')}")
+            except Exception as e:
+                print(f"_diagnostic_test_bulk_best_offers: business {biz_id} error: {e}")
+    except Exception as e:
+        print(f"_diagnostic_test_bulk_best_offers error: {e}")
+
+def _ebay_test_bulk_best_offers(token: str) -> dict:
+    import requests as _req
+    import xml.etree.ElementTree as ET
+    xml_body = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<GetBestOffersRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+        f'<RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>'
+        '<BestOfferStatus>Active</BestOfferStatus>'
+        '<Pagination><EntriesPerPage>200</EntriesPerPage><PageNumber>1</PageNumber></Pagination>'
+        '<DetailLevel>ReturnAll</DetailLevel>'
+        '</GetBestOffersRequest>'
+    )
+    headers = {
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "1193",
+        "X-EBAY-API-CALL-NAME": "GetBestOffers",
+        "X-EBAY-API-SITEID": "0",
+        "Content-Type": "text/xml",
+    }
+    r = _req.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_body.encode("utf-8"), timeout=30)
+    root = ET.fromstring(r.content)
+    return _ebay_xml_to_dict(root)
 
 async def auction_archive_worker():
     """Runs once a day (00:20 UTC) and archives any capture session whose lots'
