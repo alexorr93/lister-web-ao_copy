@@ -2418,13 +2418,25 @@ async def rematch_category(item_id: str, request: Request, mode: str = "industri
         raise HTTPException(401, "Unauthorized")
     if mode not in ("industrial", "motors"):
         mode = "industrial"
-    res = supabase.table("listings").select("id,title").eq("id", item_id).eq("business_id", business_id).execute()
+    res = supabase.table("listings").select("id,title,ebay_category_id").eq("id", item_id).eq("business_id", business_id).execute()
     if not res.data:
         raise HTTPException(404, "Listing not found")
     title = res.data[0].get("title") or ""
+    current_category_id = str(res.data[0].get("ebay_category_id") or "")
     if not title or title == "Scanning...":
         raise HTTPException(400, "No title yet")
-    suggestion = suggest_ebay_category(title, business_id, restrict=True, mode=mode)
+    # If it's currently sitting at the generic fallback for this mode, exclude that ID
+    # so suggest_ebay_category can't just deterministically hand the identical fallback
+    # back again -- eBay's suggestion API returns the same ranked results for the same
+    # title every time, so without this a stuck item would look unchanged on every
+    # click. This is the actual bug: the tile "BI"/"AP" buttons never excluded anything
+    # (unlike the modal's Auto-pick, which excludes lastCategoryTried on repeat clicks),
+    # so recalculating an item already at the fallback just re-confirmed the fallback.
+    # Only excludes the fallback specifically -- an item already at a real, specific
+    # match isn't forced away from a correct answer just because someone re-checks it.
+    fallback_id = _motors_fallback_id(business_id) if mode == "motors" else "26261"
+    exclude_id = current_category_id if current_category_id == str(fallback_id) else None
+    suggestion = suggest_ebay_category(title, business_id, restrict=True, exclude_id=exclude_id, mode=mode)
     if suggestion and suggestion.get("category_id"):
         supabase.table("listings").update({
             "ebay_category_id": suggestion["category_id"],
