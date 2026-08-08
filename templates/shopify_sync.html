@@ -690,6 +690,27 @@ async function checkShopifySales() {
   }
 }
 
+async function dismissEbaySyncRow(idx) {
+  const row = ebaySyncRows[idx];
+  if (!row || row.id == null) return;
+  const cell = document.getElementById('ebay-push-cell-' + idx);
+  const prevHtml = cell.innerHTML;
+  cell.innerHTML = '<span class="muted" style="font-size:12px;">Removing...</span>';
+  try {
+    const r = await fetch(`/api/ebay-sync/queue/${row.id}/dismiss`, {method: 'POST'});
+    if (!r.ok) throw new Error((await r.json()).detail || 'Failed');
+    ebaySyncRows.splice(idx, 1);
+    document.getElementById('ebay-queue-status').textContent = ebaySyncRows.length
+      ? `${ebaySyncRows.length} item(s) waiting to push, found automatically.`
+      : 'Nothing pending — checked automatically every 20 minutes.';
+    document.getElementById('ebay-push-all-btn').style.display = ebaySyncRows.length ? '' : 'none';
+    renderEbaySyncTable();
+  } catch(e) {
+    cell.innerHTML = prevHtml;
+    document.getElementById('ebay-queue-status').textContent = `❌ Failed to remove: ${e.message}`;
+  }
+}
+
 function renderEbaySyncTable() {
   const area = document.getElementById('ebay-table-area');
   if (!ebaySyncRows.length) {
@@ -704,16 +725,26 @@ function renderEbaySyncTable() {
     const toShopify = row.ebay_qty;
     const notActive = row.live_listing_status && row.live_listing_status !== 'Active';
     let actionCell;
+    // Only rows loaded from the automatic queue have a real ebay_sync_queue
+    // row id -- the manual date-range check computes rows fresh each time
+    // with nothing persisted to dismiss.
+    const dismissLink = row.id != null
+      ? `<a href="#" onclick="event.preventDefault();dismissEbaySyncRow(${idx})" class="muted" style="font-size:11px;text-decoration:underline;">Remove from list</a>`
+      : '';
     if (row.pushed) {
       actionCell = row.pushedDirection === 'shopify'
         ? `<span class="synced-badge">✔ Shopify set to ${row.new_available_qty}</span>`
         : `<span class="synced-badge">✔ eBay set to ${row.new_available_qty}</span>`;
     } else if (notActive) {
-      actionCell = `<span class="muted" style="font-size:12px;">eBay listing ${escapeHtml(row.live_listing_status)} — no eBay action available</span>`;
+      actionCell = `<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;">
+        <span class="muted" style="font-size:12px;">eBay listing ${escapeHtml(row.live_listing_status)} — no eBay action available</span>
+        ${dismissLink}
+      </div>`;
     } else {
       actionCell = `<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;">
         <button class="btn btn-primary" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOneToEbay(${idx})">Set eBay qty to ${toEbay != null ? toEbay : '?'}</button>
         <button class="btn" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOneToShopify(${idx})">Set Shopify qty to ${toShopify != null ? toShopify : '?'}</button>
+        ${dismissLink}
       </div>`;
     }
     const mismatch = !notActive && row.ebay_qty != null && toEbay != null && row.ebay_qty !== toEbay;

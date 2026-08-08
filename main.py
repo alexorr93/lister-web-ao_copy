@@ -607,6 +607,24 @@ async def ebay_sync_queue(request: Request):
     rows = await asyncio.to_thread(_attach_current_quantities, business_id, rows)
     return {"rows": rows}
 
+@app.post("/api/ebay-sync/queue/{row_id}/dismiss")
+async def ebay_sync_queue_dismiss(row_id: str, request: Request):
+    """Manually removes one row from the pending eBay-sync queue without
+    calling eBay or Shopify at all. Exists because nothing else ever clears
+    a 'pending' row except a successful push through this page -- a row
+    resolved outside this flow (e.g. manually ended directly on eBay) would
+    otherwise sit in the list forever. Scoped to status='pending' in the
+    WHERE clause so this can't silently no-op-overwrite a row that got
+    pushed in the meantime."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    res = (supabase.table("ebay_sync_queue").update({"status": "ignored"})
+           .eq("id", row_id).eq("business_id", business_id).eq("status", "pending").execute())
+    if not res.data:
+        raise HTTPException(404, "Row not found, or it was already pushed/resolved")
+    return {"ok": True}
+
 @app.post("/api/ebay-sync/refresh-status")
 async def ebay_sync_refresh_status(request: Request):
     """Live re-checks eBay's real status for every currently-pending queue
