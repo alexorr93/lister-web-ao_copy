@@ -3072,6 +3072,7 @@ function renderAuctionTable() {
   const selectToolbar = lotSelectMode
     ? `<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
         <span style="font-size:11px;color:var(--muted);">${selectedLotIds.size} selected · shift-click to select a range</span>
+        <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="flagSelectedLots()">🏷️ Flag as LOT</button>
         <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="deleteSelectedLots()">🗑️ Delete Selected</button>
       </div>`
     : '';
@@ -3252,17 +3253,32 @@ function resumeMetricJobIfAny() {
 }
 
 async function flagLotAsBulk(lotId, btn) {
-  btn.disabled = true;
-  btn.textContent = '⏳ Pulling photos + itemizing...';
+  // Just a tag — instant, no scrape/itemize, can't fail on a missing listing_url.
+  if (btn) btn.disabled = true;
   try {
-    await api('POST', `/api/auction/capture/lots/${lotId}/flag-as-lot`);
-    toast('Lot flagged and itemized in detail');
-    if (activeSession) loadAuctionItems(activeSession);
+    await api('PATCH', `/api/auction/capture/lots/${lotId}/set-lot-flag`, {is_bulk_lot: true});
+    const lot = auctionLotsCache.find(l => l.id === lotId);
+    if (lot) lot.is_bulk_lot = true;
+    renderAuctionTable();
   } catch(e) {
     toast('Flag failed: ' + e.message, 'error');
-    btn.disabled = false;
-    btn.textContent = '🏷️ Flag as LOT';
+    if (btn) btn.disabled = false;
   }
+}
+
+async function flagSelectedLots() {
+  if (!selectedLotIds.size) { toast('Nothing selected', 'error'); return; }
+  const n = selectedLotIds.size;
+  try {
+    const r = await api('POST', '/api/auction/capture/lots/bulk-flag', {lot_ids: Array.from(selectedLotIds), is_bulk_lot: true});
+    selectedLotIds.forEach(id => {
+      const lot = auctionLotsCache.find(l => l.id === id);
+      if (lot) lot.is_bulk_lot = true;
+    });
+    toast(`Flagged ${r.updated} lot(s) as LOT`);
+    selectedLotIds.clear();
+    renderAuctionTable();
+  } catch(e) { toast('Failed to flag selected lots', 'error'); }
 }
 
 async function saveLotNotes(lotId, textarea) {

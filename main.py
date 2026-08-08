@@ -8456,6 +8456,43 @@ async def bulk_delete_capture_lots(body: AuctionLotBulkDelete, request: Request)
     supabase.table("auction_lots").delete().in_("id", owned_lot_ids).execute()
     return {"ok": True, "deleted": len(owned_lot_ids)}
 
+class AuctionLotFlagUpdate(BaseModel):
+    is_bulk_lot: bool = True
+
+@app.patch("/api/auction/capture/lots/{lot_id}/set-lot-flag")
+async def set_lot_flag(lot_id: str, body: AuctionLotFlagUpdate):
+    """Pure tag toggle for the 'Flag as LOT' bucket — flips is_bulk_lot and nothing
+    else. No photo re-scrape, no itemization, so it can't fail on a missing
+    listing_url and is effectively instant. The heavy scrape+itemize pass
+    (flag_capture_lot_as_bulk below) is now a separate, opt-in step run once the
+    user has actually decided which lots are real bulk lots."""
+    res = supabase.table("auction_lots").update({"is_bulk_lot": body.is_bulk_lot}).eq("id", lot_id).execute()
+    if not res.data:
+        raise HTTPException(404, "Lot not found")
+    return res.data[0]
+
+class AuctionLotBulkFlag(BaseModel):
+    lot_ids: List[str]
+    is_bulk_lot: bool = True
+
+@app.post("/api/auction/capture/lots/bulk-flag")
+async def bulk_flag_lots(body: AuctionLotBulkFlag, request: Request):
+    """Multi-select version of set-lot-flag: tags (or un-tags) a batch of lots as
+    LOT in one call, instant, no scraping. Scoped to sessions the caller owns, same
+    ownership check as bulk-delete."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    if not body.lot_ids:
+        return {"ok": True, "updated": 0}
+    owned_sessions = {s["id"] for s in supabase.table("auction_capture_sessions").select("id").eq("business_id", str(business_id)).execute().data}
+    lots = supabase.table("auction_lots").select("id,session_id").in_("id", body.lot_ids).execute().data
+    owned_lot_ids = [l["id"] for l in lots if l["session_id"] in owned_sessions]
+    if not owned_lot_ids:
+        raise HTTPException(404, "No matching lots found")
+    supabase.table("auction_lots").update({"is_bulk_lot": body.is_bulk_lot}).in_("id", owned_lot_ids).execute()
+    return {"ok": True, "updated": len(owned_lot_ids)}
+
 def _download_and_store_lot_photo(url: str, session_id: str, lot_number: str, idx: int) -> Optional[str]:
     """Downloads an external lot photo and re-uploads it into Supabase Storage so it
     survives even if the auction listing is later removed. Returns the public URL,
