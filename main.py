@@ -191,6 +191,34 @@ async def start_background_jobs():
     asyncio.create_task(inventory_value_sync_worker())
     asyncio.create_task(ebay_best_offers_sync_worker())
     asyncio.create_task(ebay_notification_subscribe_worker())
+    asyncio.create_task(_diagnostic_test_analytics_scope())
+
+async def _diagnostic_test_analytics_scope():
+    """ONE-TIME TEST 8/8 -- remove after reading debug_log key
+    'analytics_traffic_test'. Confirms the fresh sell.analytics.readonly
+    consent actually took and the real getTrafficReport response parses
+    the way _sync_ebay_analytics_work expects, against 5 real items,
+    before trusting it in the full sweep."""
+    import asyncio
+    test_item_ids = ["405422141582", "405718638332", "406743545611", "406119059723", "405511025867"]
+    try:
+        res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
+        business_ids = list(set(r["business_id"] for r in (res.data or [])))
+        for biz_id in business_ids:
+            try:
+                token = await asyncio.to_thread(get_ebay_access_token, biz_id)
+                raw = await asyncio.to_thread(_ebay_get_traffic_report, token, test_item_ids)
+                supabase.table("debug_log").insert({
+                    "business_id": biz_id, "key": "analytics_traffic_test", "payload": raw,
+                }).execute()
+                print(f"_diagnostic_test_analytics_scope: business {biz_id} logged successfully")
+            except Exception as e:
+                supabase.table("debug_log").insert({
+                    "business_id": biz_id, "key": "analytics_traffic_test", "payload": {"error": str(e)},
+                }).execute()
+                print(f"_diagnostic_test_analytics_scope: business {biz_id} error: {e}")
+    except Exception as e:
+        print(f"_diagnostic_test_analytics_scope error: {e}")
 
 async def auction_archive_worker():
     """Runs once a day (00:20 UTC) and archives any capture session whose lots'
