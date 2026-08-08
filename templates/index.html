@@ -2907,9 +2907,8 @@ function toggleSelectMode() {
   renderAuctionTable();
 }
 
-function toggleLotSelect(evt, lotId) {
-  const checked = evt.target.checked;
-  if (evt.shiftKey && lastClickedLotId) {
+function applyLotSelection(lotId, checked, shiftKey) {
+  if (shiftKey && lastClickedLotId) {
     const ids = auctionLotsCache.map(l => l.id);
     const a = ids.indexOf(lastClickedLotId), b = ids.indexOf(lotId);
     if (a >= 0 && b >= 0) {
@@ -2923,10 +2922,23 @@ function toggleLotSelect(evt, lotId) {
   renderAuctionTable();
 }
 
+function toggleLotSelect(evt, lotId) {
+  applyLotSelection(lotId, evt.target.checked, evt.shiftKey);
+}
+
 function toggleSelectAllLots(headerCb) {
   if (headerCb.checked) auctionLotsCache.forEach(l => selectedLotIds.add(l.id));
   else selectedLotIds.clear();
   renderAuctionTable();
+}
+
+function handleLotRowClick(evt, lotId) {
+  // In select mode, clicking anywhere on the row toggles it — same pattern as the
+  // photo tile grid (handleTileClick). Only skip when the click landed on an
+  // actually-interactive element (checkbox, buttons, links, notes textarea) so
+  // those keep doing their own thing.
+  if (evt.target.closest('button, input, textarea, a')) return;
+  applyLotSelection(lotId, !selectedLotIds.has(lotId), evt.shiftKey);
 }
 
 async function deleteOneLot(lotId) {
@@ -3037,10 +3049,14 @@ function renderAuctionTable() {
       <a href="https://www.ebay.com/sch/i.html?_nkw=${q}" target="_blank" style="flex:1;text-align:center;font-size:10px;font-weight:700;padding:4px 0;border-radius:6px;background:#e53238;color:#fff;text-decoration:none;">eBay Active</a>
       <a href="https://www.ebay.com/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1" target="_blank" style="flex:1;text-align:center;font-size:10px;font-weight:700;padding:4px 0;border-radius:6px;background:#2e8b57;color:#fff;text-decoration:none;">eBay Sold</a>
     </div>`;
+    const isSelected = selectedLotIds.has(lot.id);
     const selectCell = lotSelectMode
-      ? `<td><input type="checkbox" ${selectedLotIds.has(lot.id) ? 'checked' : ''} onclick="toggleLotSelect(event,'${lot.id}')"></td>`
+      ? `<td><input type="checkbox" ${isSelected ? 'checked' : ''} onclick="toggleLotSelect(event,'${lot.id}')"></td>`
       : '';
-    return `<tr id="lot-row-${lot.id}">
+    const rowAttrs = lotSelectMode
+      ? `onclick="handleLotRowClick(event,'${lot.id}')" style="cursor:pointer;${isSelected ? 'background:var(--accent-soft,#3b82f622);' : ''}"`
+      : '';
+    return `<tr id="lot-row-${lot.id}" ${rowAttrs}>
       ${selectCell}
       <td>${imgHtml}</td>
       <td style="max-width:220px;">
