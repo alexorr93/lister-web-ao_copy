@@ -194,18 +194,6 @@ async def start_background_jobs():
     asyncio.create_task(ebay_analytics_sync_worker())
     asyncio.create_task(ebay_sync_check_worker())
 
-    async def _one_time_verify_shopify_qty_fix():
-        try:
-            biz_id = "e6aa8f2d-4e17-4b88-b511-2cffd3c2168d"
-            rows = (supabase.table("ebay_sync_queue").select("title,ebay_item_id,shopify_variant_id")
-                    .eq("business_id", biz_id).eq("status", "pending").execute()).data or []
-            enriched = await asyncio.to_thread(_attach_current_quantities, biz_id, rows)
-            for row in enriched:
-                print(f"ONE_TIME_VERIFY_QTY: {row['title']}: ebay_qty={row.get('ebay_qty')} shopify_qty={row.get('shopify_qty')}")
-        except Exception as e:
-            print(f"ONE_TIME_VERIFY_QTY failed: {e}")
-    asyncio.create_task(_one_time_verify_shopify_qty_fix())
-
 async def ebay_analytics_sync_worker():
     """Once-a-day sweep of real view counts via the Sell Analytics API,
     confirmed working 8/8 (fresh sell.analytics.readonly consent verified
