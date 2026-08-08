@@ -135,28 +135,36 @@ tr.ignored:hover td { opacity: 0.85; }
   </div>
 
   <div style="margin-top:40px;border-top:1px solid var(--border);padding-top:24px;">
-    <h2 style="font-size:16px;margin-bottom:2px;">🏷️ eBay (manual only — Shopify → eBay)</h2>
-    <div class="sub">Finds items sold on Shopify and matched to eBay via a confirmed HDID (a locked pairing — items with no HDID are shown but skipped, never guessed at). Nothing runs automatically here yet — check, review, then push one at a time or all at once, while this is still being proven out.</div>
+    <h2 style="font-size:16px;margin-bottom:2px;">🏷️ eBay (checks automatically — pushes manually)</h2>
+    <div class="sub">Items sold on Shopify, matched to eBay via a confirmed HDID (a locked pairing — anything sold with no HDID is skipped, never guessed at). Checked automatically in the background every 20 minutes, so this list is already here when you open the page. Pushing to eBay is still one click at a time, on purpose, while this is being proven out.</div>
 
     <div class="filter-bar">
-      <div>
-        <div class="field-label">Start Date</div>
-        <input type="date" class="field-input" id="ebay-start-date" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="ebay-start-date-nofill"/>
-      </div>
-      <div>
-        <div class="field-label">End Date</div>
-        <input type="date" class="field-input" id="ebay-end-date" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="ebay-end-date-nofill"/>
-      </div>
-      <button class="btn btn-primary" onclick="checkShopifySales()">🔍 Check Shopify Sales</button>
-      <div class="quick-range">
-        <button class="btn" onclick="ebaySetToday()">Today</button>
-        <button class="btn" onclick="ebaySetRange(7)">Last 7d</button>
-      </div>
-      <button class="btn btn-orange" id="ebay-push-all-btn" onclick="pushAllToEbay()" style="display:none;" title="Pushes every matched row below to eBay, one at a time">⚡ Push All to eBay <span style="font-size:10px;opacity:.8;">(live API — writes to eBay)</span></button>
+      <span id="ebay-queue-status" style="font-size:12px;color:var(--muted);"></span>
+      <button class="btn" onclick="loadEbaySyncQueue()">🔄 Refresh</button>
+      <button class="btn btn-orange" id="ebay-push-all-btn" onclick="pushAllToEbay()" style="display:none;" title="Pushes every row below to eBay, one at a time">⚡ Push All to eBay <span style="font-size:10px;opacity:.8;">(live API — writes to eBay)</span></button>
     </div>
 
     <div id="ebay-status" class="status-msg"></div>
-    <div id="ebay-table-area"><div class="empty">Pick a date range and click Check Shopify Sales.</div></div>
+    <div id="ebay-table-area"><div class="empty">Loading...</div></div>
+
+    <details style="margin-top:20px;">
+      <summary style="cursor:pointer;color:var(--muted);font-size:12px;">Manually check a specific date range instead</summary>
+      <div class="filter-bar" style="margin-top:10px;">
+        <div>
+          <div class="field-label">Start Date</div>
+          <input type="date" class="field-input" id="ebay-start-date" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="ebay-start-date-nofill"/>
+        </div>
+        <div>
+          <div class="field-label">End Date</div>
+          <input type="date" class="field-input" id="ebay-end-date" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="ebay-end-date-nofill"/>
+        </div>
+        <button class="btn btn-primary" onclick="checkShopifySales()">🔍 Check This Range</button>
+        <div class="quick-range">
+          <button class="btn" onclick="ebaySetToday()">Today</button>
+          <button class="btn" onclick="ebaySetRange(7)">Last 7d</button>
+        </div>
+      </div>
+    </details>
   </div>
 </div>
 
@@ -438,6 +446,7 @@ loadSyncStatus();
   document.getElementById('ebay-start-date').value = d;
   document.getElementById('ebay-end-date').value = d;
 })();
+loadEbaySyncQueue();
 
 // If a sync is already running when the page loads, resume polling instead of losing track of it.
 (async function checkSyncOnLoad() {
@@ -612,6 +621,24 @@ function renderInactiveTable() {
 // ── eBay sync (Shopify -> eBay, manual only) ──────────────────── //
 let ebaySyncRows = [];
 
+async function loadEbaySyncQueue() {
+  document.getElementById('ebay-status').textContent = '';
+  document.getElementById('ebay-queue-status').textContent = 'Loading...';
+  try {
+    const r = await fetch('/api/ebay-sync/queue', {cache: 'no-store'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    ebaySyncRows = (data.rows || []).map(row => ({...row, pushed: false}));
+    document.getElementById('ebay-queue-status').textContent = ebaySyncRows.length
+      ? `${ebaySyncRows.length} item(s) waiting to push, found automatically.`
+      : 'Nothing pending — checked automatically every 20 minutes.';
+    document.getElementById('ebay-push-all-btn').style.display = ebaySyncRows.length ? '' : 'none';
+    renderEbaySyncTable();
+  } catch(e) {
+    document.getElementById('ebay-queue-status').textContent = `❌ ${e.message}`;
+  }
+}
+
 function ebaySetToday() {
   const now = new Date();
   const d = now.toISOString().slice(0,10);
@@ -633,7 +660,7 @@ async function checkShopifySales() {
   const start = document.getElementById('ebay-start-date').value;
   const end = document.getElementById('ebay-end-date').value;
   if (!start || !end) { alert('Pick a start and end date first.'); return; }
-  document.getElementById('ebay-status').textContent = 'Checking Shopify sales and matching against confirmed HDIDs...';
+  document.getElementById('ebay-status').textContent = 'Checking this range live (this replaces the auto-found list below until you click Refresh)...';
   document.getElementById('ebay-table-area').innerHTML = '';
   document.getElementById('ebay-push-all-btn').style.display = 'none';
   try {
@@ -641,7 +668,7 @@ async function checkShopifySales() {
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed');
     ebaySyncRows = (data.rows || []).map(row => ({...row, pushed: false}));
-    let statusMsg = `${ebaySyncRows.length} item(s) sold on Shopify with a confirmed HDID match.`;
+    let statusMsg = `${ebaySyncRows.length} item(s) sold on Shopify with a confirmed HDID match in this range.`;
     if (data.unmatched_no_hdid) statusMsg += ` ${data.unmatched_no_hdid} other sold item(s) had no confirmed HDID — skipped.`;
     document.getElementById('ebay-status').textContent = statusMsg;
     document.getElementById('ebay-push-all-btn').style.display = ebaySyncRows.length ? '' : 'none';

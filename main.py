@@ -192,6 +192,7 @@ async def start_background_jobs():
     asyncio.create_task(ebay_best_offers_sync_worker())
     asyncio.create_task(ebay_notification_subscribe_worker())
     asyncio.create_task(ebay_analytics_sync_worker())
+    asyncio.create_task(ebay_sync_check_worker())
 
 async def ebay_analytics_sync_worker():
     """Once-a-day sweep of real view counts via the Sell Analytics API,
@@ -401,10 +402,11 @@ def _find_shopify_sales_with_hdid_match(business_id: str, start_iso: str, end_is
 
 @app.get("/api/ebay-sync/today")
 async def ebay_sync_today(request: Request, start: str, end: str):
-    """Manual-only lookup: Shopify sales in range, matched to eBay via
-    confirmed HDID. Read-only, local-data-cheap where possible (order fetch
-    is live Shopify, matching is local) -- no eBay calls happen here; those
-    only happen on an actual Push click, per-row."""
+    """Manual date-range lookup, kept as a secondary tool for checking a
+    specific past window on demand. The PRIMARY path is the automatic queue
+    below (ebay_sync_check_worker) -- this one still makes a live Shopify
+    call, so it's for deliberately re-checking a range, not the everyday
+    flow."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
@@ -413,6 +415,88 @@ async def ebay_sync_today(request: Request, start: str, end: str):
     end_iso = f"{end}T23:59:59-00:00"
     result = await asyncio.to_thread(_find_shopify_sales_with_hdid_match, business_id, start_iso, end_iso)
     return result
+
+def _check_new_shopify_sales_for_ebay_sync(business_id: str) -> dict:
+    """The actual periodic check: Shopify sales since the last successful
+    check (48h lookback on the very first run, then just the gap since last
+    time), matched via confirmed HDID, upserted into ebay_sync_queue as
+    'pending' rows. Pure discovery -- never calls eBay, never writes a
+    quantity anywhere. A variant already sitting in the queue as 'pending'
+    gets its qty_sold accumulated and discovered_at refreshed rather than
+    duplicated, so selling again before someone gets to the push button
+    doesn't create two rows for the same item."""
+    import datetime as _dt
+
+    settings = get_ebay_settings(business_id)
+    last_checked = settings.get("EBAY_SYNC_QUEUE_LAST_CHECKED_AT")
+    now = _dt.datetime.now(_dt.timezone.utc)
+    if last_checked:
+        start_dt = _dt.datetime.fromisoformat(last_checked.replace("Z", "+00:00"))
+    else:
+        start_dt = now - _dt.timedelta(hours=48)  # first-ever run: reasonable safe lookback
+
+    start_iso = start_dt.strftime("%Y-%m-%dT%H:%M:%S-00:00")
+    end_iso = now.strftime("%Y-%m-%dT%H:%M:%S-00:00")
+    found = _find_shopify_sales_with_hdid_match(business_id, start_iso, end_iso)
+
+    queued = 0
+    for row in found["rows"]:
+        existing = (supabase.table("ebay_sync_queue").select("id,qty_sold")
+                    .eq("business_id", business_id).eq("shopify_variant_id", row["shopify_variant_id"])
+                    .eq("status", "pending").execute()).data
+        if existing:
+            supabase.table("ebay_sync_queue").update({
+                "qty_sold": existing[0]["qty_sold"] + row["qty_sold"],
+                "discovered_at": now.isoformat(),
+            }).eq("id", existing[0]["id"]).execute()
+        else:
+            supabase.table("ebay_sync_queue").insert({
+                "business_id": business_id, "shopify_variant_id": row["shopify_variant_id"],
+                "ebay_item_id": row["ebay_item_id"], "title": row["title"], "sku": row["sku"],
+                "qty_sold": row["qty_sold"], "status": "pending",
+            }).execute()
+        queued += 1
+
+    save_ebay_setting(business_id, "EBAY_SYNC_QUEUE_LAST_CHECKED_AT", now.isoformat())
+    return {"queued": queued, "unmatched_no_hdid": found["unmatched_no_hdid"], "checked_at": now.isoformat()}
+
+async def ebay_sync_check_worker():
+    """Automatic discovery, no button needed -- runs every 20 min. Pure
+    read/match, zero eBay calls, zero writes anywhere except the local
+    queue table. The corresponding WRITE action (pushing a quantity to
+    eBay) stays manual-only via /api/ebay-sync/push -- explicit
+    instruction: checking can be automatic, pushing can't be yet."""
+    import asyncio
+    while True:
+        try:
+            res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
+            business_ids = list(set(r["business_id"] for r in (res.data or [])))
+            for biz_id in business_ids:
+                try:
+                    settings = get_ebay_settings(biz_id)
+                    if not (settings.get("SHOPIFY_STORE_DOMAIN") or "").strip():
+                        continue
+                    result = await asyncio.to_thread(_check_new_shopify_sales_for_ebay_sync, biz_id)
+                    if result.get("queued"):
+                        print(f"ebay_sync_check_worker: business {biz_id}: {result}")
+                except Exception as e:
+                    print(f"ebay_sync_check_worker: business {biz_id} failed: {e}")
+        except Exception as e:
+            print(f"ebay_sync_check_worker error: {e}")
+        await asyncio.sleep(1200)  # 20 min
+
+@app.get("/api/ebay-sync/queue")
+async def ebay_sync_queue(request: Request):
+    """What the page actually loads on open -- the automatically-discovered,
+    still-pending queue. No live Shopify or eBay call happens here at all;
+    just a read of what the background worker has already found."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    rows = (supabase.table("ebay_sync_queue").select("*")
+            .eq("business_id", business_id).eq("status", "pending")
+            .order("discovered_at", desc=True).execute()).data or []
+    return {"rows": rows}
 
 class EbaySyncPush(BaseModel):
     shopify_variant_id: str
@@ -502,6 +586,14 @@ async def ebay_sync_push(body: EbaySyncPush, request: Request):
         }).eq("business_id", business_id).eq("item_id", ebay_item_id).execute()
     except Exception as e:
         print(f"ebay_sync_push: local ebay_listing_status update failed (eBay itself succeeded): {e}")
+
+    try:
+        import datetime as _dt
+        supabase.table("ebay_sync_queue").update({
+            "status": "pushed", "pushed_at": _dt.datetime.utcnow().isoformat(), "new_available_qty": shopify_qty,
+        }).eq("business_id", business_id).eq("shopify_variant_id", body.shopify_variant_id).eq("status", "pending").execute()
+    except Exception as e:
+        print(f"ebay_sync_push: queue status update failed (eBay itself succeeded): {e}")
 
     supabase.table("ebay_quantity_push_log").insert(log_row).execute()
     return {"ok": True, "ebay_item_id": ebay_item_id, "new_available_qty": shopify_qty}
