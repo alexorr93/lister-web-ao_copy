@@ -55,6 +55,23 @@ a.item-link:hover { color: var(--accent); }
 .gap-pct.high { color: #f87171; }
 .expires { font-size: 12px; color: var(--muted); }
 .buyer { font-size: 12px; }
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+th.sortable:hover { color: var(--text); }
+th.sortable .arrow { display: inline-block; margin-left: 3px; opacity: .5; font-size: 10px; }
+th.sortable.active .arrow { opacity: 1; color: var(--accent); }
+.price-filter { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
+.price-filter-row { display: flex; align-items: center; gap: 10px; }
+.price-filter label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.price-input { width: 90px; background: #0f172a; border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 13px; padding: 5px 8px; font-family: inherit; }
+.price-input:focus { outline: none; border-color: var(--accent); }
+.price-slider-wrap { position: relative; height: 28px; flex: 1; min-width: 160px; }
+.price-slider-wrap input[type="range"] { position: absolute; top: 9px; left: 0; width: 100%; height: 4px; margin: 0; background: transparent; pointer-events: none; -webkit-appearance: none; appearance: none; }
+.price-slider-wrap input[type="range"]::-webkit-slider-runnable-track { height: 4px; background: transparent; }
+.price-slider-wrap input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; pointer-events: auto; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 2px solid var(--text); cursor: pointer; margin-top: -6px; }
+.price-slider-wrap input[type="range"]::-moz-range-thumb { pointer-events: auto; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 2px solid var(--text); cursor: pointer; }
+.price-slider-track { position: absolute; top: 9px; left: 0; width: 100%; height: 4px; border-radius: 2px; background: var(--border); }
+.price-slider-fill { position: absolute; top: 9px; height: 4px; border-radius: 2px; background: var(--accent); }
+.price-cap-note { font-size: 11px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -93,22 +110,32 @@ a.item-link:hover { color: var(--accent); }
     <h2>👀 Watcher / View Leaderboard</h2>
     <div class="banner" id="status-banner">Loading...</div>
 
-    <div class="sort-row">
-      <button class="sort-btn active" data-sort="watch" onclick="setSort('watch')">Sort by Watchers</button>
-      <button class="sort-btn" data-sort="view" onclick="setSort('view')">Sort by Views</button>
+    <div class="price-filter">
+      <div class="price-filter-row">
+        <label>Price</label>
+        <input type="number" class="price-input" id="price-min-input" placeholder="Min" min="0" step="1">
+        <div class="price-slider-wrap">
+          <div class="price-slider-track"></div>
+          <div class="price-slider-fill" id="price-slider-fill"></div>
+          <input type="range" id="price-slider-min" min="0" max="2000" step="5" value="0">
+          <input type="range" id="price-slider-max" min="0" max="2000" step="5" value="2000">
+        </div>
+        <input type="number" class="price-input" id="price-max-input" placeholder="Max" min="0" step="1">
+        <span class="price-cap-note" id="price-cap-note"></span>
+      </div>
     </div>
 
     <table>
       <thead>
         <tr>
           <th></th>
-          <th>Title</th>
-          <th>SKU</th>
-          <th class="num">Price</th>
-          <th class="num">👀 Watchers</th>
-          <th class="num">📈 Views</th>
-          <th class="num">Watch/View</th>
-          <th class="num">Views/Day</th>
+          <th class="sortable" data-sort="title" onclick="setSort('title')">Title<span class="arrow"></span></th>
+          <th class="sortable" data-sort="sku" onclick="setSort('sku')">SKU<span class="arrow"></span></th>
+          <th class="num sortable" data-sort="price" onclick="setSort('price')">Price<span class="arrow"></span></th>
+          <th class="num sortable active" data-sort="watchers" onclick="setSort('watchers')">👀 Watchers<span class="arrow">▼</span></th>
+          <th class="num sortable" data-sort="views" onclick="setSort('views')">📈 Views<span class="arrow"></span></th>
+          <th class="num sortable" data-sort="watch_view" onclick="setSort('watch_view')">Watch/View<span class="arrow"></span></th>
+          <th class="num sortable" data-sort="views_day" onclick="setSort('views_day')">Views/Day<span class="arrow"></span></th>
         </tr>
       </thead>
       <tbody id="offers-body">
@@ -120,13 +147,82 @@ a.item-link:hover { color: var(--accent); }
 
 <script>
 let allOffers = [];
-let currentSort = 'watch';
+let currentSort = 'watchers';
+let currentDir = 'desc';
+const TEXT_SORT_COLUMNS = new Set(['title', 'sku']);
+const PRICE_SLIDER_CAP = 2000; // real data: 99% of active listings are under this; slider stays usable, number inputs allow exact values above it
 
 function setSort(key) {
-  currentSort = key;
-  document.querySelectorAll('.sort-btn').forEach(b => b.classList.toggle('active', b.dataset.sort === key));
+  if (currentSort === key) {
+    currentDir = currentDir === 'desc' ? 'asc' : 'desc';
+  } else {
+    currentSort = key;
+    currentDir = TEXT_SORT_COLUMNS.has(key) ? 'asc' : 'desc';
+  }
+  document.querySelectorAll('th.sortable').forEach(th => {
+    const active = th.dataset.sort === currentSort;
+    th.classList.toggle('active', active);
+    th.querySelector('.arrow').textContent = active ? (currentDir === 'desc' ? '▼' : '▲') : '';
+  });
   loadLeaderboard();
 }
+
+// --- Price range filter: two overlapping range inputs + linked number inputs ---
+let priceDebounce = null;
+function priceFilterValues() {
+  const minSlider = document.getElementById('price-slider-min');
+  const maxSlider = document.getElementById('price-slider-max');
+  const minInput = document.getElementById('price-min-input');
+  const maxInput = document.getElementById('price-max-input');
+  const min = minInput.value !== '' ? Number(minInput.value) : (Number(minSlider.value) > 0 ? Number(minSlider.value) : null);
+  // Max slider pinned to its cap means "no upper limit" unless the number input has an explicit value above the cap.
+  let max = maxInput.value !== '' ? Number(maxInput.value) : (Number(maxSlider.value) < PRICE_SLIDER_CAP ? Number(maxSlider.value) : null);
+  return { min, max };
+}
+
+function updateSliderFill() {
+  const minSlider = document.getElementById('price-slider-min');
+  const maxSlider = document.getElementById('price-slider-max');
+  const fill = document.getElementById('price-slider-fill');
+  const lo = Number(minSlider.value) / PRICE_SLIDER_CAP * 100;
+  const hi = Number(maxSlider.value) / PRICE_SLIDER_CAP * 100;
+  fill.style.left = lo + '%';
+  fill.style.width = Math.max(0, hi - lo) + '%';
+}
+
+function onSliderInput(moved) {
+  const minSlider = document.getElementById('price-slider-min');
+  const maxSlider = document.getElementById('price-slider-max');
+  if (moved === 'min' && Number(minSlider.value) > Number(maxSlider.value)) minSlider.value = maxSlider.value;
+  if (moved === 'max' && Number(maxSlider.value) < Number(minSlider.value)) maxSlider.value = minSlider.value;
+  document.getElementById('price-min-input').value = Number(minSlider.value) > 0 ? minSlider.value : '';
+  document.getElementById('price-max-input').value = Number(maxSlider.value) < PRICE_SLIDER_CAP ? maxSlider.value : '';
+  updateSliderFill();
+  debouncedReload();
+}
+
+function onPriceInputChange() {
+  const minSlider = document.getElementById('price-slider-min');
+  const maxSlider = document.getElementById('price-slider-max');
+  const minInput = document.getElementById('price-min-input');
+  const maxInput = document.getElementById('price-max-input');
+  minSlider.value = minInput.value !== '' ? Math.min(Number(minInput.value), PRICE_SLIDER_CAP) : 0;
+  maxSlider.value = maxInput.value !== '' ? Math.min(Number(maxInput.value), PRICE_SLIDER_CAP) : PRICE_SLIDER_CAP;
+  updateSliderFill();
+  debouncedReload();
+}
+
+function debouncedReload() {
+  clearTimeout(priceDebounce);
+  priceDebounce = setTimeout(loadLeaderboard, 350);
+}
+
+document.getElementById('price-slider-min').addEventListener('input', () => onSliderInput('min'));
+document.getElementById('price-slider-max').addEventListener('input', () => onSliderInput('max'));
+document.getElementById('price-min-input').addEventListener('change', onPriceInputChange);
+document.getElementById('price-max-input').addEventListener('change', onPriceInputChange);
+document.getElementById('price-cap-note').textContent = `Slider covers $0–$${PRICE_SLIDER_CAP.toLocaleString()} (most listings) — type an exact value above that if needed.`;
+updateSliderFill();
 
 function escapeHtml(s) {
   return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -269,13 +365,18 @@ setInterval(loadBestOffers, 15000);
 async function loadLeaderboard() {
   const banner = document.getElementById('status-banner');
   try {
-    const r = await fetch(`/api/offers?sort=${currentSort}&limit=150`);
+    const { min, max } = priceFilterValues();
+    const params = new URLSearchParams({ sort: currentSort, dir: currentDir, limit: 150 });
+    if (min !== null) params.set('min_price', min);
+    if (max !== null) params.set('max_price', max);
+    const r = await fetch(`/api/offers?${params}`);
     const data = await r.json();
     allOffers = data.offers || [];
     const total = data.total_active || 0;
     const shown = data.shown || allOffers.length;
     const populated = data.populated || 0;
-    const topNote = total > shown ? ` Showing top ${shown} of ${total} active listings by ${currentSort === 'view' ? 'views' : 'watchers'}.` : '';
+    const priceNote = (min !== null || max !== null) ? ` (price ${min !== null ? '$' + min : '$0'}–${max !== null ? '$' + max : '∞'})` : '';
+    const topNote = total > shown ? ` Showing top ${shown} of ${total} active listings${priceNote}.` : (priceNote ? ` Filtered${priceNote}.` : '');
     if (populated === 0) {
       banner.innerHTML = `<b>Watcher/view data not populated yet.</b> Fills in on the next active-listings sync cycle.${topNote}`;
     } else if (populated < total) {
