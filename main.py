@@ -4180,9 +4180,18 @@ async def api_uncategorized_listings_only(request: Request):
     load that the Uncat tab never uses: acquisitions.select('*') (only the sku
     column is actually needed here -- known_lot_skus), and a SECOND full paginated
     fetch of the entire orders table (thousands of rows) that exists only to compute
-    a sales-total summary number this page doesn't display. The active_rows and
+    a sales-total summary number this page doesn't display. The listing_rows and
     listings fetches are kept as-is -- those are the actual, unavoidable work
-    classification depends on."""
+    classification depends on.
+
+    REAL GAP FIXED 8/8: this used to filter to listing_status='Active' only. An
+    item published with an incomplete placeholder SKU (e.g. 'AM1-', nothing after
+    the dash) that then SOLD before anyone got around to assigning it a real SKU
+    would flip to 'Ended' and silently vanish from this list forever -- the only
+    tool for fixing an incomplete SKU stopped being able to see it the moment it
+    became historically important to get right. Now pulls every status; the
+    existing needs_sku/known-lot skip logic below already does the real filtering,
+    so this only adds rows that still genuinely need a SKU, whatever their status."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
@@ -4191,13 +4200,13 @@ async def api_uncategorized_listings_only(request: Request):
                        supabase.table("acquisitions").select("sku").eq("business_id", business_id).execute().data or []
                        if r.get("sku")}
 
-    active_rows = []
+    listing_rows = []
     start = 0
     while True:
-        page = supabase.table("ebay_listing_status").select("item_id,sku,sku_override,title,price,quantity_available,updated_at,gallery_url,start_time")\
-            .eq("business_id", business_id).eq("listing_status", "Active")\
+        page = supabase.table("ebay_listing_status").select("item_id,sku,sku_override,title,price,quantity_available,updated_at,gallery_url,start_time,listing_status")\
+            .eq("business_id", business_id)\
             .range(start, start + 999).execute().data or []
-        active_rows.extend(page)
+        listing_rows.extend(page)
         if len(page) < 1000:
             break
         start += 1000
@@ -4215,15 +4224,24 @@ async def api_uncategorized_listings_only(request: Request):
         start += 1000
 
     uncategorized_value, uncategorized_count, uncategorized_items = 0, 0, []
-    for row in active_rows:
+    for row in listing_rows:
         raw_sku = row.get("sku") or ""
         override_sku = row.get("sku_override") or ""
         sku = override_sku or raw_sku
-        value = (row.get("price") or 0) * (row.get("quantity_available") or 0)
+        is_active = row.get("listing_status") == "Active"
+        # A non-Active listing's quantity_available is often stale (only self-heals
+        # to 0 when something explicitly live-checks it), so it can't be trusted as
+        # real sellable value once the listing has already ended -- zero it here
+        # rather than let a leftover cached number overstate what's actually at risk.
+        value = (row.get("price") or 0) * (row.get("quantity_available") or 0) if is_active else 0
         prefix = _lot_prefix(sku) if sku else None
         needs_sku = _sku_needs_assignment(sku)
         matched_listing = listing_by_item_id.get(row.get("item_id"))
-        sku_editable = bool(matched_listing) and not matched_listing.get("ebay_offer_id")
+        # SKU-editable means "can push a live ReviseItem SKU change to eBay" --
+        # never true for a non-Active listing, since eBay's Trading API can't
+        # revise an ended listing. Those must go through the local-only override
+        # path regardless of whether a matched local `listings` row exists.
+        sku_editable = is_active and bool(matched_listing) and not matched_listing.get("ebay_offer_id")
         needs_review = needs_sku or (matched_listing is not None and not sku_editable and not override_sku)
         if sku and not needs_review and prefix in known_lot_skus:
             continue
@@ -4237,6 +4255,7 @@ async def api_uncategorized_listings_only(request: Request):
             "sku_editable": sku_editable, "has_override": bool(override_sku),
             "has_matched_listing": matched_listing is not None,
             "gallery_url": row.get("gallery_url"), "created_at": row.get("start_time"),
+            "listing_status": row.get("listing_status"),
         })
     uncategorized_items.sort(key=lambda r: r.get("created_at") or "", reverse=True)
     return {"active_listings_value": round(uncategorized_value, 2), "active_listings_count": uncategorized_count, "items": uncategorized_items}
