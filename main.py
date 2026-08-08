@@ -191,58 +191,6 @@ async def start_background_jobs():
     asyncio.create_task(inventory_value_sync_worker())
     asyncio.create_task(ebay_best_offers_sync_worker())
     asyncio.create_task(ebay_notification_subscribe_worker())
-    asyncio.create_task(_diagnostic_test_bulk_best_offers())
-
-async def _diagnostic_test_bulk_best_offers():
-    """ONE-TIME TEST 8/8 -- remove after reading debug_log key
-    'bulk_best_offers_pagination_test'. Prior attempt at the documented
-    account-wide GetBestOffers call (no ItemID) returned an empty
-    ItemBestOffersArray despite Ack=Success on this ~4,700-listing account.
-    eBay's own docs describe a Pagination container specifically for when
-    'the GetBestOffers call will retrieve a large number of results' --
-    the prior attempt didn't include one. Testing whether that's the
-    actual missing piece, since a real single paginated call would replace
-    the whole bulk-count-then-per-item-verify funnel with the real thing."""
-    import asyncio
-    try:
-        res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
-        business_ids = list(set(r["business_id"] for r in (res.data or [])))
-        for biz_id in business_ids:
-            try:
-                token = await asyncio.to_thread(get_ebay_access_token, biz_id)
-                raw = await asyncio.to_thread(_ebay_test_bulk_best_offers, token)
-                supabase.table("debug_log").insert({
-                    "business_id": biz_id,
-                    "key": "bulk_best_offers_pagination_test",
-                    "payload": raw,
-                }).execute()
-                print(f"_diagnostic_test_bulk_best_offers: business {biz_id} logged, Ack={raw.get('Ack')}")
-            except Exception as e:
-                print(f"_diagnostic_test_bulk_best_offers: business {biz_id} error: {e}")
-    except Exception as e:
-        print(f"_diagnostic_test_bulk_best_offers error: {e}")
-
-def _ebay_test_bulk_best_offers(token: str) -> dict:
-    import requests as _req
-    import xml.etree.ElementTree as ET
-    xml_body = (
-        '<?xml version="1.0" encoding="utf-8"?>'
-        '<GetBestOffersRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
-        f'<RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>'
-        '<BestOfferStatus>Active</BestOfferStatus>'
-        '<Pagination><EntriesPerPage>200</EntriesPerPage><PageNumber>1</PageNumber></Pagination>'
-        '<DetailLevel>ReturnAll</DetailLevel>'
-        '</GetBestOffersRequest>'
-    )
-    headers = {
-        "X-EBAY-API-COMPATIBILITY-LEVEL": "1193",
-        "X-EBAY-API-CALL-NAME": "GetBestOffers",
-        "X-EBAY-API-SITEID": "0",
-        "Content-Type": "text/xml",
-    }
-    r = _req.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_body.encode("utf-8"), timeout=30)
-    root = ET.fromstring(r.content)
-    return _ebay_xml_to_dict(root)
 
 async def auction_archive_worker():
     """Runs once a day (00:20 UTC) and archives any capture session whose lots'
@@ -10326,9 +10274,11 @@ def _ebay_get_best_offers_for_item(token: str, item_id: str) -> dict:
     root = ET.fromstring(r.content)
     return _ebay_xml_to_dict(root)
 
+_CLOSED_OFFER_STATUSES = {"Declined", "Expired", "Retracted", "Withdrawn", "AdminEnded", "Accepted"}
+
 def _sync_one_item_best_offers(business_id: str, token: str, item_id: str) -> list:
     """Shared by the notification handler, the 10-min poll worker (safety
-    net), and the full-scan. Returns the list of currently-Active best-offer-
+    net), and the full-scan. Returns the list of currently-open best-offer-
     ids found for this item after upsert. IMPORTANT: raises on a failed Ack
     instead of silently returning [] -- a rate-limit or auth failure must
     never look identical to a confirmed no-offer-here result to any caller
@@ -10351,7 +10301,15 @@ def _sync_one_item_best_offers(business_id: str, token: str, item_id: str) -> li
     rows = []
     for off in offers:
         status = off.get("Status")
-        if status != "Active":
+        # REAL BUG FIXED 8/8: this used to keep only status == "Active",
+        # which silently dropped offers eBay reports as "Pending" -- the
+        # state a currently-open counter-offer negotiation is actually in.
+        # That's exactly why an offer someone was actively waiting to
+        # respond to never showed up here. Now excludes only genuinely
+        # closed/terminal statuses and keeps everything else, since the
+        # safe failure mode for "did I miss an offer" is to over-include,
+        # never to silently drop something still open.
+        if status in _CLOSED_OFFER_STATUSES:
             continue
         best_offer_id = off.get("BestOfferID")
         if not best_offer_id:
@@ -10371,8 +10329,8 @@ def _sync_one_item_best_offers(business_id: str, token: str, item_id: str) -> li
         })
     if rows:
         supabase.table("ebay_best_offers").upsert(rows, on_conflict="business_id,best_offer_id").execute()
-    # Clear any previously-stored offer for THIS item that's no longer active
-    # (accepted/declined/expired/countered) -- scoped to item_id so a partial
+    # Clear any previously-stored offer for THIS item that's no longer open
+    # (accepted/declined/expired/withdrawn) -- scoped to item_id so a partial
     # (single-item) sync never touches other items' offers.
     existing = (supabase.table("ebay_best_offers").select("best_offer_id")
                 .eq("business_id", business_id).eq("item_id", item_id).execute()).data or []
@@ -10518,36 +10476,103 @@ async def ebay_notification_subscribe_worker():
             print(f"ebay_notification_subscribe_worker error (attempt {attempt}): {e}")
         await asyncio.sleep(min(30 * attempt, 1800))  # fast backoff early, capped at 30 min steady-state
 
+def _ebay_get_all_best_offers(token: str) -> list:
+    """The real, documented, account-wide GetBestOffers call -- confirmed
+    working 8/8 after adding the Pagination container eBay's own docs
+    describe as being for exactly this case ('the GetBestOffers call will
+    retrieve a large number of results'). Its absence on the first attempt
+    is why that earlier try returned an empty result on this ~4,700-listing
+    account and made a whole per-item-candidate funnel seem necessary.
+    Loops pages defensively in case entries ever exceed one page."""
+    import requests as _req
+    import xml.etree.ElementTree as ET
+
+    all_entries = []
+    page = 1
+    while True:
+        xml_body = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<GetBestOffersRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+            f'<RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>'
+            '<BestOfferStatus>Active</BestOfferStatus>'
+            f'<Pagination><EntriesPerPage>200</EntriesPerPage><PageNumber>{page}</PageNumber></Pagination>'
+            '<DetailLevel>ReturnAll</DetailLevel>'
+            '</GetBestOffersRequest>'
+        )
+        headers = {
+            "X-EBAY-API-COMPATIBILITY-LEVEL": "1193",
+            "X-EBAY-API-CALL-NAME": "GetBestOffers",
+            "X-EBAY-API-SITEID": "0",
+            "Content-Type": "text/xml",
+        }
+        r = _req.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_body.encode("utf-8"), timeout=30)
+        root = ET.fromstring(r.content)
+        resp = _ebay_xml_to_dict(root)
+        ack = resp.get("Ack")
+        if ack not in ("Success", "Warning"):
+            errors = resp.get("Errors") or {}
+            error_code = (errors.get("ErrorCode") if isinstance(errors, dict) else None)
+            raise EbayCallLimitError(f"bulk-page-{page}", errors) if error_code == "518" else Exception(f"bulk best offers page {page} Ack={ack}: {errors}")
+        array = (resp.get("ItemBestOffersArray") or {}).get("ItemBestOffers") or []
+        if isinstance(array, dict):
+            array = [array]
+        for entry in array:
+            item = entry.get("Item") or {}
+            item_id = item.get("ItemID")
+            offers = (entry.get("BestOfferArray") or {}).get("BestOffer") or []
+            if isinstance(offers, dict):
+                offers = [offers]
+            for off in offers:
+                if off.get("Status") in _CLOSED_OFFER_STATUSES:
+                    continue
+                all_entries.append({"item_id": item_id, "item_title": item.get("Title"), "offer": off})
+        total_pages = _safe_int((resp.get("PaginationResult") or {}).get("TotalNumberOfPages")) or 1
+        if page >= total_pages:
+            break
+        page += 1
+    return all_entries
+
 def _sync_ebay_best_offers_work(business_id: str) -> dict:
-    """Poll-based SAFETY NET, not the primary path -- BestOfferPlaced push
-    notifications (/api/ebay/notifications) handle the instant case. Still
-    runs its own 10-min clock to catch anything a missed push would leave
-    stale. Reads best_offer_count off ebay_listing_status (populated by the
-    active-listings sync) to decide which items are worth checking."""
+    """PRIMARY mechanism as of 8/8 -- one documented paginated call
+    (_ebay_get_all_best_offers) instead of a bulk-listing-count filter
+    followed by per-item verification. Still runs on its own 10-min clock
+    as a safety net alongside push notifications, but no longer depends on
+    ebay_listing_status.best_offer_count at all (that field turned out to
+    be a lifetime/historical count, not 'currently open' -- see 8/8 notes)."""
     import datetime as _dt
 
     token = get_ebay_access_token(business_id)
     now_iso = _dt.datetime.utcnow().isoformat()
 
-    candidates = (supabase.table("ebay_listing_status")
-                  .select("item_id,best_offer_count")
-                  .eq("business_id", business_id).eq("listing_status", "Active")
-                  .gt("best_offer_count", 0).execute()).data or []
+    entries = _ebay_get_all_best_offers(token)
+    seen_ids = []
+    rows = []
+    for e in entries:
+        off = e["offer"]
+        best_offer_id = off.get("BestOfferID")
+        if not best_offer_id:
+            continue
+        price_raw = off.get("Price")
+        price = (price_raw.get("value") if isinstance(price_raw, dict) else price_raw)
+        seen_ids.append(best_offer_id)
+        rows.append({
+            "business_id": business_id, "best_offer_id": best_offer_id,
+            "item_id": e["item_id"], "buyer_user_id": (off.get("Buyer") or {}).get("UserID"),
+            "offer_price": _safe_float(price),
+            "quantity": _safe_int(off.get("Quantity")),
+            "status": off.get("Status"), "expiration_time": off.get("ExpirationTime"),
+            "buyer_message": off.get("BuyerMessage"),
+            "updated_at": now_iso,
+        })
+    if rows:
+        supabase.table("ebay_best_offers").upsert(rows, on_conflict="business_id,best_offer_id").execute()
+    existing = (supabase.table("ebay_best_offers").select("best_offer_id")
+                .eq("business_id", business_id).execute()).data or []
+    stale = [r["best_offer_id"] for r in existing if r["best_offer_id"] not in seen_ids]
+    if stale:
+        supabase.table("ebay_best_offers").delete().eq("business_id", business_id).in_("best_offer_id", stale).execute()
 
-    checked = 0
-    total_found = 0
-    for c in candidates:
-        try:
-            found = _sync_one_item_best_offers(business_id, token, c["item_id"])
-            checked += 1
-            total_found += len(found)
-        except EbayCallLimitError:
-            print(f"_sync_ebay_best_offers_work: eBay call limit hit at item {c['item_id']} -- stopping this run early")
-            break
-        except Exception as e:
-            print(f"_sync_ebay_best_offers_work: item {c['item_id']} failed: {e}")
-
-    return {"candidates": len(candidates), "checked": checked, "active_offers": total_found, "synced_at": now_iso}
+    return {"active_offers": len(rows), "synced_at": now_iso}
 
 async def ebay_best_offers_sync_worker():
     """Safety-net worker, own 10-minute clock -- see _sync_ebay_best_offers_work.
