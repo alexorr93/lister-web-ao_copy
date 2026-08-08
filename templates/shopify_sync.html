@@ -80,8 +80,42 @@ tr.ignored:hover td { opacity: 0.85; }
   <h1>Sync</h1>
   <div class="sub" style="margin-bottom:24px;">eBay ↔ Shopify quantity sync, both directions.</div>
 
-  <h2 style="font-size:16px;margin-bottom:2px;">🔁 Shopify (automated — eBay → Shopify)</h2>
-  <div class="sub">Everything sold on eBay in the selected range, matched against the last synced Shopify/eBay quantities. Reads local data only — click Sync Now to refresh it. Nothing gets changed until you push.</div>
+  <div>
+    <h2 style="font-size:16px;margin-bottom:2px;">🏷️ eBay (checks automatically — pushes manually)</h2>
+    <div class="sub">Items sold on Shopify, matched to eBay via a confirmed HDID (a locked pairing — anything sold with no HDID is skipped, never guessed at). Checked automatically in the background every 20 minutes, so this list is already here when you open the page. Pushing to eBay is still one click at a time, on purpose, while this is being proven out.</div>
+
+    <div class="filter-bar">
+      <span id="ebay-queue-status" style="font-size:12px;color:var(--muted);"></span>
+      <button class="btn" onclick="loadEbaySyncQueue()">🔄 Refresh</button>
+      <button class="btn btn-orange" id="ebay-push-all-btn" onclick="pushAllToEbay()" style="display:none;" title="Pushes every row below to eBay, one at a time">⚡ Push All to eBay <span style="font-size:10px;opacity:.8;">(live API — writes to eBay)</span></button>
+    </div>
+
+    <div id="ebay-status" class="status-msg"></div>
+    <div id="ebay-table-area"><div class="empty">Loading...</div></div>
+
+    <details style="margin-top:20px;">
+      <summary style="cursor:pointer;color:var(--muted);font-size:12px;">Manually check a specific date range instead</summary>
+      <div class="filter-bar" style="margin-top:10px;">
+        <div>
+          <div class="field-label">Start Date</div>
+          <input type="date" class="field-input" id="ebay-start-date" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="ebay-start-date-nofill"/>
+        </div>
+        <div>
+          <div class="field-label">End Date</div>
+          <input type="date" class="field-input" id="ebay-end-date" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="ebay-end-date-nofill"/>
+        </div>
+        <button class="btn btn-primary" onclick="checkShopifySales()">🔍 Check This Range</button>
+        <div class="quick-range">
+          <button class="btn" onclick="ebaySetToday()">Today</button>
+          <button class="btn" onclick="ebaySetRange(7)">Last 7d</button>
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <div style="margin-top:40px;border-top:1px solid var(--border);padding-top:24px;">
+    <h2 style="font-size:16px;margin-bottom:2px;">🔁 Shopify (automated — eBay → Shopify)</h2>
+    <div class="sub">Everything sold on eBay in the selected range, matched against the last synced Shopify/eBay quantities. Reads local data only — click Sync Now to refresh it. Nothing gets changed until you push.</div>
 
   <div class="view-tabs">
     <button class="view-tab active" id="tab-active" onclick="setView('active')">Active</button>
@@ -133,38 +167,6 @@ tr.ignored:hover td { opacity: 0.85; }
 
     <div id="inactive-table-area"><div class="empty">Click "Sync eBay Listings" to pull your inactive eBay listings.</div></div>
   </div>
-
-  <div style="margin-top:40px;border-top:1px solid var(--border);padding-top:24px;">
-    <h2 style="font-size:16px;margin-bottom:2px;">🏷️ eBay (checks automatically — pushes manually)</h2>
-    <div class="sub">Items sold on Shopify, matched to eBay via a confirmed HDID (a locked pairing — anything sold with no HDID is skipped, never guessed at). Checked automatically in the background every 20 minutes, so this list is already here when you open the page. Pushing to eBay is still one click at a time, on purpose, while this is being proven out.</div>
-
-    <div class="filter-bar">
-      <span id="ebay-queue-status" style="font-size:12px;color:var(--muted);"></span>
-      <button class="btn" onclick="loadEbaySyncQueue()">🔄 Refresh</button>
-      <button class="btn btn-orange" id="ebay-push-all-btn" onclick="pushAllToEbay()" style="display:none;" title="Pushes every row below to eBay, one at a time">⚡ Push All to eBay <span style="font-size:10px;opacity:.8;">(live API — writes to eBay)</span></button>
-    </div>
-
-    <div id="ebay-status" class="status-msg"></div>
-    <div id="ebay-table-area"><div class="empty">Loading...</div></div>
-
-    <details style="margin-top:20px;">
-      <summary style="cursor:pointer;color:var(--muted);font-size:12px;">Manually check a specific date range instead</summary>
-      <div class="filter-bar" style="margin-top:10px;">
-        <div>
-          <div class="field-label">Start Date</div>
-          <input type="date" class="field-input" id="ebay-start-date" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="ebay-start-date-nofill"/>
-        </div>
-        <div>
-          <div class="field-label">End Date</div>
-          <input type="date" class="field-input" id="ebay-end-date" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="ebay-end-date-nofill"/>
-        </div>
-        <button class="btn btn-primary" onclick="checkShopifySales()">🔍 Check This Range</button>
-        <div class="quick-range">
-          <button class="btn" onclick="ebaySetToday()">Today</button>
-          <button class="btn" onclick="ebaySetRange(7)">Last 7d</button>
-        </div>
-      </div>
-    </details>
   </div>
 </div>
 
@@ -685,15 +687,19 @@ function renderEbaySyncTable() {
     return;
   }
   let html = `<table><thead><tr>
-    <th>SKU</th><th>Item</th><th class="num">Qty Sold (Shopify)</th><th>Action</th>
+    <th>SKU</th><th>Item</th><th class="num">eBay Qty</th><th class="num">Shopify Qty</th><th class="num">Qty Sold (Shopify)</th><th>Action</th>
   </tr></thead><tbody>`;
   ebaySyncRows.forEach((row, idx) => {
+    const target = row.shopify_qty;
     const actionCell = row.pushed
-      ? `<span class="synced-badge">✔ Pushed to eBay (set to ${row.new_available_qty})</span>`
-      : `<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOneToEbay(${idx})">Push to eBay</button>`;
+      ? `<span class="synced-badge">✔ eBay set to ${row.new_available_qty}</span>`
+      : `<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOneToEbay(${idx})">Set eBay qty to ${target != null ? target : '?'}</button>`;
+    const mismatch = row.ebay_qty != null && target != null && row.ebay_qty !== target;
     html += `<tr id="ebay-row-${idx}">
       <td class="muted">${escapeHtml(row.sku || '')}</td>
-      <td>${escapeHtml(row.title || row.ebay_item_id)}</td>
+      <td><a class="item-link" href="https://www.ebay.com/itm/${row.ebay_item_id}" target="_blank">${escapeHtml(row.title || row.ebay_item_id)}</a></td>
+      <td class="num${mismatch ? ' no' : ''}">${row.ebay_qty != null ? row.ebay_qty : '—'}</td>
+      <td class="num">${row.shopify_qty != null ? row.shopify_qty : '—'}</td>
       <td class="num">${row.qty_sold}</td>
       <td id="ebay-push-cell-${idx}">${actionCell}</td>
     </tr>`;

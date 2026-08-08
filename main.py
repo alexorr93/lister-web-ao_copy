@@ -400,6 +400,44 @@ def _find_shopify_sales_with_hdid_match(business_id: str, start_iso: str, end_is
         })
     return {"rows": rows, "unmatched_no_hdid": unmatched, "no_variant_id": no_variant_id}
 
+def _attach_current_quantities(business_id: str, rows: list) -> list:
+    """Enriches each row with the CURRENT eBay/Shopify quantity already sitting
+    in local cache (ebay_listing_status.quantity_available, shopify_inventory.
+    quantity) -- both routinely-synced tables, so this is a local join, not a
+    live API call. Exists specifically so a row never shows just a bare 'Push'
+    button with no visible number: with a business selling multiple similar
+    units of the same product (e.g. several centrifuges as separate eBay
+    listings), seeing the exact current eBay qty vs. Shopify qty, and the
+    exact item_id/title, is what makes it possible to trust which listing is
+    actually about to change and by how much."""
+    if not rows:
+        return rows
+    ebay_ids = list({r["ebay_item_id"] for r in rows if r.get("ebay_item_id")})
+    shopify_ids = list({r["shopify_variant_id"] for r in rows if r.get("shopify_variant_id")})
+
+    ebay_qty_by_id = {}
+    if ebay_ids:
+        for i in range(0, len(ebay_ids), 200):
+            chunk = ebay_ids[i:i + 200]
+            res = (supabase.table("ebay_listing_status").select("item_id,quantity_available")
+                   .eq("business_id", business_id).in_("item_id", chunk).execute()).data or []
+            for r in res:
+                ebay_qty_by_id[r["item_id"]] = r.get("quantity_available")
+
+    shopify_qty_by_id = {}
+    if shopify_ids:
+        for i in range(0, len(shopify_ids), 200):
+            chunk = shopify_ids[i:i + 200]
+            res = (supabase.table("shopify_inventory").select("id,quantity")
+                   .eq("business_id", business_id).in_("id", chunk).execute()).data or []
+            for r in res:
+                shopify_qty_by_id[r["id"]] = r.get("quantity")
+
+    for r in rows:
+        r["ebay_qty"] = ebay_qty_by_id.get(r.get("ebay_item_id"))
+        r["shopify_qty"] = shopify_qty_by_id.get(r.get("shopify_variant_id"))
+    return rows
+
 @app.get("/api/ebay-sync/today")
 async def ebay_sync_today(request: Request, start: str, end: str):
     """Manual date-range lookup, kept as a secondary tool for checking a
@@ -414,6 +452,7 @@ async def ebay_sync_today(request: Request, start: str, end: str):
     start_iso = f"{start}T00:00:00-00:00"
     end_iso = f"{end}T23:59:59-00:00"
     result = await asyncio.to_thread(_find_shopify_sales_with_hdid_match, business_id, start_iso, end_iso)
+    result["rows"] = await asyncio.to_thread(_attach_current_quantities, business_id, result["rows"])
     return result
 
 def _check_new_shopify_sales_for_ebay_sync(business_id: str) -> dict:
@@ -489,13 +528,17 @@ async def ebay_sync_check_worker():
 async def ebay_sync_queue(request: Request):
     """What the page actually loads on open -- the automatically-discovered,
     still-pending queue. No live Shopify or eBay call happens here at all;
-    just a read of what the background worker has already found."""
+    just a read of what the background worker has already found, plus
+    current cached quantities so it's never a bare Push button with no
+    visible number behind it."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
+    import asyncio
     rows = (supabase.table("ebay_sync_queue").select("*")
             .eq("business_id", business_id).eq("status", "pending")
             .order("discovered_at", desc=True).execute()).data or []
+    rows = await asyncio.to_thread(_attach_current_quantities, business_id, rows)
     return {"rows": rows}
 
 class EbaySyncPush(BaseModel):
