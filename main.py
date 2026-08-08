@@ -641,6 +641,110 @@ async def ebay_sync_push(body: EbaySyncPush, request: Request):
     supabase.table("ebay_quantity_push_log").insert(log_row).execute()
     return {"ok": True, "ebay_item_id": ebay_item_id, "new_available_qty": shopify_qty}
 
+@app.post("/api/ebay-sync/push-to-shopify")
+async def ebay_sync_push_to_shopify(body: EbaySyncPush, request: Request):
+    """Reverse of /api/ebay-sync/push: sets SHOPIFY's quantity to match eBay's
+    CURRENT live quantity for a confirmed-HDID pair. eBay is the source of
+    truth here and is never written to. Exists for the case where eBay's
+    number is trusted and Shopify's is the one that's stale/wrong -- the
+    mirror-image direction of the main queue action, same live-recheck
+    discipline (re-confirms HDID, re-reads eBay live right before writing,
+    never trusts what the table on screen showed)."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio
+
+    match_res = (supabase.table("inventory_match").select("ebay_id,shopify_id,title,hd_id")
+                 .eq("business_id", business_id).eq("shopify_id", body.shopify_variant_id).execute())
+    match = (match_res.data or [None])[0]
+    if not match or not match.get("hd_id") or not match.get("ebay_id"):
+        raise HTTPException(400, "No confirmed HDID match for this Shopify variant — refusing to push.")
+    ebay_item_id = match["ebay_id"]
+    title = match.get("title") or ""
+
+    log_row = {"business_id": business_id, "ebay_item_id": str(ebay_item_id),
+               "shopify_variant_id": str(body.shopify_variant_id), "title": title,
+               "requested_available_qty": 0, "ebay_status": "not_touched"}
+
+    # Fresh eBay live check -- the source of truth this push is copying from.
+    ebay_token = await asyncio.to_thread(get_ebay_access_token, business_id)
+    try:
+        status_resp = await asyncio.to_thread(_ebay_get_item_status, ebay_token, ebay_item_id)
+    except Exception as e:
+        log_row.update({"shopify_status": "error", "shopify_error": f"eBay GetItem failed: {e}"})
+        supabase.table("ebay_quantity_push_log").insert(log_row).execute()
+        raise HTTPException(502, f"Could not check eBay's live listing status: {e}")
+    item = status_resp.get("Item") or {}
+    selling_status = item.get("SellingStatus") or {}
+    listing_status = selling_status.get("ListingStatus")
+    if status_resp.get("Ack") not in ("Success", "Warning") or listing_status != "Active":
+        log_row.update({"shopify_status": "refused", "shopify_error": f"Listing not Active (status={listing_status})"})
+        supabase.table("ebay_quantity_push_log").insert(log_row).execute()
+        raise HTTPException(409, f"eBay listing {ebay_item_id} is not currently Active "
+                                  f"(status: {listing_status or 'unknown'}) — refusing to push.")
+
+    quantity = _safe_int(item.get("Quantity")) or 0
+    quantity_sold = _safe_int(selling_status.get("QuantitySold")) or 0
+    ebay_available = max(quantity - quantity_sold, 0)
+    log_row["requested_available_qty"] = ebay_available
+    log_row["live_quantity_sold"] = quantity_sold
+
+    try:
+        settings = get_ebay_settings(business_id)
+        domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+        if not domain:
+            raise Exception("Shopify not connected")
+        shopify_token = await asyncio.to_thread(get_shopify_access_token, business_id)
+        sp_headers = {"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"}
+        location_id = await asyncio.to_thread(_get_shopify_primary_location_id, domain, sp_headers)
+        if not location_id:
+            raise Exception("Could not determine Shopify location")
+        variant_data = await asyncio.to_thread(_fetch_shopify_variants_by_ids, domain, shopify_token, location_id, [str(body.shopify_variant_id)])
+        inv_item_id = (variant_data.get(str(body.shopify_variant_id)) or {}).get("inventory_item_id")
+        if not inv_item_id:
+            raise Exception(f"Could not resolve Shopify variant {body.shopify_variant_id} to a live inventory item")
+        import requests as _req
+        mutation = {
+            "query": """mutation setQty($input: InventorySetQuantitiesInput!) {
+                inventorySetQuantities(input: $input) {
+                    inventoryAdjustmentGroup { changes { name delta quantityAfterChange } }
+                    userErrors { field message }
+                }
+            }""",
+            "variables": {"input": {
+                "reason": "correction", "name": "available", "ignoreCompareQuantity": True,
+                "quantities": [{"inventoryItemId": inv_item_id, "locationId": location_id, "quantity": ebay_available}],
+            }},
+        }
+        r = await asyncio.to_thread(_req.post, f"https://{domain}/admin/api/2024-10/graphql.json", headers=sp_headers, json=mutation, timeout=20)
+        resp = r.json() if r.status_code == 200 else {}
+        gql_errors = resp.get("errors") or []
+        user_errors = (resp.get("data", {}) or {}).get("inventorySetQuantities", {}).get("userErrors", []) if not gql_errors else gql_errors
+        if r.status_code != 200 or gql_errors or user_errors:
+            raise Exception("; ".join(e.get("message", "") for e in user_errors) or f"HTTP {r.status_code}")
+        log_row["shopify_status"] = "success"
+    except Exception as e:
+        log_row.update({"shopify_status": "error", "shopify_error": str(e)})
+        supabase.table("ebay_quantity_push_log").insert(log_row).execute()
+        raise HTTPException(502, f"Shopify quantity update failed: {e}")
+
+    try:
+        supabase.table("shopify_inventory").update({"quantity": ebay_available}).eq("business_id", business_id).eq("id", str(body.shopify_variant_id)).execute()
+    except Exception as e:
+        print(f"ebay_sync_push_to_shopify: local shopify_inventory update failed (Shopify itself succeeded): {e}")
+
+    try:
+        import datetime as _dt
+        supabase.table("ebay_sync_queue").update({
+            "status": "pushed_to_shopify", "pushed_at": _dt.datetime.utcnow().isoformat(), "new_available_qty": ebay_available,
+        }).eq("business_id", business_id).eq("shopify_variant_id", body.shopify_variant_id).eq("status", "pending").execute()
+    except Exception as e:
+        print(f"ebay_sync_push_to_shopify: queue status update failed (Shopify itself succeeded): {e}")
+
+    supabase.table("ebay_quantity_push_log").insert(log_row).execute()
+    return {"ok": True, "shopify_variant_id": body.shopify_variant_id, "new_available_qty": ebay_available}
+
 async def shopify_shipping_rule_worker():
     """Fully independent, fully automatic -- no button, and by DESIGN never
     calls eBay at all (explicit instruction: this must never be bundled with

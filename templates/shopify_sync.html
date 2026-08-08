@@ -690,11 +690,20 @@ function renderEbaySyncTable() {
     <th>SKU</th><th>Item</th><th class="num">eBay Qty</th><th class="num">Shopify Qty</th><th class="num">Qty Sold (Shopify)</th><th>Action</th>
   </tr></thead><tbody>`;
   ebaySyncRows.forEach((row, idx) => {
-    const target = row.shopify_qty;
-    const actionCell = row.pushed
-      ? `<span class="synced-badge">✔ eBay set to ${row.new_available_qty}</span>`
-      : `<button class="btn btn-primary" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOneToEbay(${idx})">Set eBay qty to ${target != null ? target : '?'}</button>`;
-    const mismatch = row.ebay_qty != null && target != null && row.ebay_qty !== target;
+    const toEbay = row.shopify_qty;
+    const toShopify = row.ebay_qty;
+    let actionCell;
+    if (row.pushed) {
+      actionCell = row.pushedDirection === 'shopify'
+        ? `<span class="synced-badge">✔ Shopify set to ${row.new_available_qty}</span>`
+        : `<span class="synced-badge">✔ eBay set to ${row.new_available_qty}</span>`;
+    } else {
+      actionCell = `<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;">
+        <button class="btn btn-primary" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOneToEbay(${idx})">Set eBay qty to ${toEbay != null ? toEbay : '?'}</button>
+        <button class="btn" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOneToShopify(${idx})">Set Shopify qty to ${toShopify != null ? toShopify : '?'}</button>
+      </div>`;
+    }
+    const mismatch = row.ebay_qty != null && toEbay != null && row.ebay_qty !== toEbay;
     html += `<tr id="ebay-row-${idx}">
       <td class="muted">${escapeHtml(row.sku || '')}</td>
       <td><a class="item-link" href="https://www.ebay.com/itm/${row.ebay_item_id}" target="_blank">${escapeHtml(row.title || row.ebay_item_id)}</a></td>
@@ -720,6 +729,27 @@ async function pushOneToEbay(idx) {
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Failed');
     row.pushed = true;
+    row.pushedDirection = 'ebay';
+    row.new_available_qty = data.new_available_qty;
+    renderEbaySyncTable();
+  } catch(e) {
+    cell.innerHTML = `<span class="no">✘ ${e.message}</span>`;
+  }
+}
+
+async function pushOneToShopify(idx) {
+  const row = ebaySyncRows[idx];
+  const cell = document.getElementById('ebay-push-cell-' + idx);
+  cell.textContent = 'Pushing...';
+  try {
+    const r = await fetch('/api/ebay-sync/push-to-shopify', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({shopify_variant_id: row.shopify_variant_id}),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Failed');
+    row.pushed = true;
+    row.pushedDirection = 'shopify';
     row.new_available_qty = data.new_available_qty;
     renderEbaySyncTable();
   } catch(e) {
