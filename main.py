@@ -2507,6 +2507,14 @@ async def list_offers(request: Request, limit: int = 150, sort: str = "watch"):
                       .limit(1).execute())
     populated = populated_res.count or 0
 
+    # Both derived here, on the already-limited top_rows only (150 rows, not
+    # the full 4,698) -- cheap, and doesn't reintroduce pulling the whole
+    # table into Python just to compute two numbers per row.
+    for r in top_rows:
+        wc, vc = r.get("watch_count"), r.get("view_count")
+        r["watch_per_view_pct"] = round(wc / vc * 100, 1) if wc is not None and vc else None
+        r["views_per_day"] = round(vc / _ANALYTICS_WINDOW_DAYS, 2) if vc is not None else None
+
     return {"offers": top_rows, "total_active": total_active, "populated": populated, "shown": len(top_rows)}
 
 class NoteCreate(BaseModel):
@@ -10824,8 +10832,9 @@ async def best_offers_debug_item(item_id: str, request: Request):
 # a once-a-day job, NOT something to run on a 10-min clock like best offers.
 
 _ANALYTICS_BATCH_SIZE = 100  # ids per call -- keeps URL length and per-call cost modest
+_ANALYTICS_WINDOW_DAYS = 30  # single source of truth -- shared by the fetch and any views/day math on the result
 
-def _ebay_get_traffic_report(token: str, item_ids: list, days: int = 30) -> dict:
+def _ebay_get_traffic_report(token: str, item_ids: list, days: int = _ANALYTICS_WINDOW_DAYS) -> dict:
     """One getTrafficReport call, dimension=LISTING, metric=LISTING_VIEWS_TOTAL,
     for up to _ANALYTICS_BATCH_SIZE item_ids at once, over a trailing `days`-day
     window (getTrafficReport's date_range has its own max span -- 30 days is

@@ -107,10 +107,12 @@ a.item-link:hover { color: var(--accent); }
           <th class="num">Price</th>
           <th class="num">👀 Watchers</th>
           <th class="num">📈 Views</th>
+          <th class="num">Watch/View</th>
+          <th class="num">Views/Day</th>
         </tr>
       </thead>
       <tbody id="offers-body">
-        <tr><td colspan="6" class="empty">Loading...</td></tr>
+        <tr><td colspan="8" class="empty">Loading...</td></tr>
       </tbody>
     </table>
   </div>
@@ -148,7 +150,7 @@ function timeUntil(iso) {
 function render() {
   const body = document.getElementById('offers-body');
   if (!allOffers.length) {
-    body.innerHTML = '<tr><td colspan="6" class="empty">No active listings found.</td></tr>';
+    body.innerHTML = '<tr><td colspan="8" class="empty">No active listings found.</td></tr>';
     return;
   }
   body.innerHTML = allOffers.map(o => `
@@ -159,6 +161,8 @@ function render() {
       <td class="num">${o.price != null ? '$' + Number(o.price).toFixed(2) : '—'}</td>
       <td class="num">${pill(o.watch_count, 'watch')}</td>
       <td class="num">${pill(o.view_count, 'view')}</td>
+      <td class="num">${o.watch_per_view_pct != null ? o.watch_per_view_pct.toFixed(1) + '%' : '<span class="count-dash">—</span>'}</td>
+      <td class="num">${o.views_per_day != null ? o.views_per_day.toFixed(1) : '<span class="count-dash">—</span>'}</td>
     </tr>
   `).join('');
 }
@@ -282,7 +286,7 @@ async function loadLeaderboard() {
     render();
   } catch (e) {
     banner.innerHTML = 'Failed to load offers data.';
-    document.getElementById('offers-body').innerHTML = '<tr><td colspan="6" class="empty">Failed to load.</td></tr>';
+    document.getElementById('offers-body').innerHTML = '<tr><td colspan="8" class="empty">Failed to load.</td></tr>';
   }
 }
 
