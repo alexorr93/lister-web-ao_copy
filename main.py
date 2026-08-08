@@ -455,15 +455,54 @@ async def ebay_sync_today(request: Request, start: str, end: str):
     result["rows"] = await asyncio.to_thread(_attach_current_quantities, business_id, result["rows"])
     return result
 
+def _live_check_ebay_listing_status(business_id: str, ebay_item_id: str) -> str:
+    """One live GetItem call for the TRUE current status, bypassing whatever
+    the periodic full-listing sync last cached. Exists because that sync only
+    ever pulls eBay's ActiveList -- it has no mechanism to notice a listing
+    that was manually ended outside this app, so a row can sit indefinitely
+    showing stale 'Active' with a stale quantity until something explicitly
+    re-checks it. Self-heals the ebay_listing_status cache row when it
+    disagrees, so this correction sticks instead of just being read once and
+    forgotten."""
+    import datetime as _dt
+    token = get_ebay_access_token(business_id)
+    try:
+        resp = _ebay_get_item_status(token, ebay_item_id)
+    except Exception as e:
+        print(f"_live_check_ebay_listing_status: GetItem failed for {ebay_item_id}: {e}")
+        return "Unknown"
+    item = resp.get("Item") or {}
+    selling_status = item.get("SellingStatus") or {}
+    live_status = selling_status.get("ListingStatus") or "Unknown"
+    if resp.get("Ack") not in ("Success", "Warning"):
+        return "Unknown"
+    try:
+        cached = (supabase.table("ebay_listing_status").select("listing_status")
+                  .eq("business_id", business_id).eq("item_id", ebay_item_id).execute()).data
+        if cached and cached[0].get("listing_status") != live_status:
+            quantity = _safe_int(item.get("Quantity")) or 0
+            quantity_sold = _safe_int(selling_status.get("QuantitySold")) or 0
+            supabase.table("ebay_listing_status").update({
+                "listing_status": live_status,
+                "quantity_available": max(quantity - quantity_sold, 0) if live_status == "Active" else 0,
+                "updated_at": _dt.datetime.utcnow().isoformat(),
+            }).eq("business_id", business_id).eq("item_id", ebay_item_id).execute()
+    except Exception as e:
+        print(f"_live_check_ebay_listing_status: cache correction failed for {ebay_item_id}: {e}")
+    return live_status
+
 def _check_new_shopify_sales_for_ebay_sync(business_id: str) -> dict:
     """The actual periodic check: Shopify sales since the last successful
     check (48h lookback on the very first run, then just the gap since last
     time), matched via confirmed HDID, upserted into ebay_sync_queue as
-    'pending' rows. Pure discovery -- never calls eBay, never writes a
-    quantity anywhere. A variant already sitting in the queue as 'pending'
-    gets its qty_sold accumulated and discovered_at refreshed rather than
-    duplicated, so selling again before someone gets to the push button
-    doesn't create two rows for the same item."""
+    'pending' rows. Live-verifies each NEWLY matched item's eBay status right
+    here at discovery time (cheap -- only a handful of rows per run, not a
+    full-catalog sweep) so a manually-ended listing never gets queued
+    pretending it still has a live quantity to push. Never calls eBay for
+    rows already sitting in the queue -- only brand-new discoveries. A
+    variant already pending gets its qty_sold accumulated and discovered_at
+    refreshed rather than duplicated, so selling again before someone gets
+    to the push button doesn't create two rows for the same item."""
     import datetime as _dt
 
     settings = get_ebay_settings(business_id)
@@ -489,10 +528,11 @@ def _check_new_shopify_sales_for_ebay_sync(business_id: str) -> dict:
                 "discovered_at": now.isoformat(),
             }).eq("id", existing[0]["id"]).execute()
         else:
+            live_status = _live_check_ebay_listing_status(business_id, row["ebay_item_id"])
             supabase.table("ebay_sync_queue").insert({
                 "business_id": business_id, "shopify_variant_id": row["shopify_variant_id"],
                 "ebay_item_id": row["ebay_item_id"], "title": row["title"], "sku": row["sku"],
-                "qty_sold": row["qty_sold"], "status": "pending",
+                "qty_sold": row["qty_sold"], "status": "pending", "live_listing_status": live_status,
             }).execute()
         queued += 1
 
@@ -540,6 +580,27 @@ async def ebay_sync_queue(request: Request):
             .order("discovered_at", desc=True).execute()).data or []
     rows = await asyncio.to_thread(_attach_current_quantities, business_id, rows)
     return {"rows": rows}
+
+@app.post("/api/ebay-sync/refresh-status")
+async def ebay_sync_refresh_status(request: Request):
+    """Live re-checks eBay's real status for every currently-pending queue
+    row and corrects any that have drifted (e.g. manually ended on eBay
+    outside this app). Manual/on-demand -- this is the one action in this
+    section that DOES call eBay live, so it's tied to the explicit Refresh
+    button rather than running on every page load."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio
+    rows = (supabase.table("ebay_sync_queue").select("id,ebay_item_id,live_listing_status")
+            .eq("business_id", business_id).eq("status", "pending").execute()).data or []
+    changed = 0
+    for row in rows:
+        live_status = await asyncio.to_thread(_live_check_ebay_listing_status, business_id, row["ebay_item_id"])
+        if live_status != row.get("live_listing_status"):
+            supabase.table("ebay_sync_queue").update({"live_listing_status": live_status}).eq("id", row["id"]).execute()
+            changed += 1
+    return {"checked": len(rows), "changed": changed}
 
 class EbaySyncPush(BaseModel):
     shopify_variant_id: str

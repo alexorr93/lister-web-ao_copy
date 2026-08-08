@@ -86,7 +86,7 @@ tr.ignored:hover td { opacity: 0.85; }
 
     <div class="filter-bar">
       <span id="ebay-queue-status" style="font-size:12px;color:var(--muted);"></span>
-      <button class="btn" onclick="loadEbaySyncQueue()">🔄 Refresh</button>
+      <button class="btn" onclick="refreshEbaySyncQueue()">🔄 Refresh</button>
       <button class="btn btn-orange" id="ebay-push-all-btn" onclick="pushAllToEbay()" style="display:none;" title="Pushes every row below to eBay, one at a time">⚡ Push All to eBay <span style="font-size:10px;opacity:.8;">(live API — writes to eBay)</span></button>
     </div>
 
@@ -641,6 +641,16 @@ async function loadEbaySyncQueue() {
   }
 }
 
+async function refreshEbaySyncQueue() {
+  document.getElementById('ebay-queue-status').textContent = 'Checking eBay status on pending items...';
+  try {
+    await fetch('/api/ebay-sync/refresh-status', {method: 'POST'});
+  } catch(e) {
+    // Non-fatal — still reload the queue below with whatever status is cached.
+  }
+  await loadEbaySyncQueue();
+}
+
 function ebaySetToday() {
   const now = new Date();
   const d = now.toISOString().slice(0,10);
@@ -692,22 +702,26 @@ function renderEbaySyncTable() {
   ebaySyncRows.forEach((row, idx) => {
     const toEbay = row.shopify_qty;
     const toShopify = row.ebay_qty;
+    const notActive = row.live_listing_status && row.live_listing_status !== 'Active';
     let actionCell;
     if (row.pushed) {
       actionCell = row.pushedDirection === 'shopify'
         ? `<span class="synced-badge">✔ Shopify set to ${row.new_available_qty}</span>`
         : `<span class="synced-badge">✔ eBay set to ${row.new_available_qty}</span>`;
+    } else if (notActive) {
+      actionCell = `<span class="muted" style="font-size:12px;">eBay listing ${escapeHtml(row.live_listing_status)} — no eBay action available</span>`;
     } else {
       actionCell = `<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;">
         <button class="btn btn-primary" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOneToEbay(${idx})">Set eBay qty to ${toEbay != null ? toEbay : '?'}</button>
         <button class="btn" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOneToShopify(${idx})">Set Shopify qty to ${toShopify != null ? toShopify : '?'}</button>
       </div>`;
     }
-    const mismatch = row.ebay_qty != null && toEbay != null && row.ebay_qty !== toEbay;
+    const mismatch = !notActive && row.ebay_qty != null && toEbay != null && row.ebay_qty !== toEbay;
+    const ebayQtyCell = notActive ? `Ended` : (row.ebay_qty != null ? row.ebay_qty : '—');
     html += `<tr id="ebay-row-${idx}">
       <td class="muted">${escapeHtml(row.sku || '')}</td>
       <td><a class="item-link" href="https://www.ebay.com/itm/${row.ebay_item_id}" target="_blank">${escapeHtml(row.title || row.ebay_item_id)}</a></td>
-      <td class="num${mismatch ? ' no' : ''}">${row.ebay_qty != null ? row.ebay_qty : '—'}</td>
+      <td class="num${mismatch ? ' no' : ''}${notActive ? ' muted' : ''}">${ebayQtyCell}</td>
       <td class="num">${row.shopify_qty != null ? row.shopify_qty : '—'}</td>
       <td class="num">${row.qty_sold}</td>
       <td id="ebay-push-cell-${idx}">${actionCell}</td>
