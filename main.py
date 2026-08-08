@@ -2427,22 +2427,51 @@ async def uncat_page(request: Request):
     return templates.TemplateResponse("uncat.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "uncat"})
 
 @app.get("/api/offers")
-async def list_offers(request: Request):
+async def list_offers(request: Request, limit: int = 150, sort: str = "watch"):
     """Backs the lower (watcher/view leaderboard) section of the Offers page:
-    every Active listing with its watch_count/view_count, sorted watch_count
-    desc (nulls last) so the highest-interest items surface first. This is a
-    relative-interest signal, separate from the actual incoming Best Offers
-    (see /api/best-offers) that populate the top section of the same page."""
+    top `limit` Active listings by watch_count/view_count. REAL BUG FIXED
+    8/8: this used to pull every single Active listing (~4,700 rows, paged
+    1000 at a time server-side) into Python, sort there, and ship the FULL
+    list to the browser -- which then built ~4,700 DOM rows with images
+    client-side on every page load. That's the actual page-load slowness,
+    and it's exactly the 'render on the front instead of the back' pattern
+    this account has a standing rule against (see /topics/tooling.md-style
+    precedent: precomputed/server-side, never client-side over a raw,
+    growing table). A leaderboard only ever needs its top N -- Postgres
+    does ORDER BY + LIMIT directly, so this now transfers ~150 rows
+    instead of ~4,700, and never pulls the full table into Python at all.
+    `sort` picks which column leads the ORDER BY -- the other column is
+    always the tiebreaker -- so switching sort on the page re-queries the
+    real top-N for that column instead of re-sorting an already-limited,
+    watch_count-biased slice client-side (that would silently hide a
+    high-view/low-watch item on 'Sort by Views')."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
-    rows = _fetch_all_for_business(business_id, "ebay_listing_status",
-        "item_id,sku,title,price,watch_count,view_count,gallery_url,listing_status,updated_at")
-    active = [r for r in rows if r.get("listing_status") == "Active"]
-    active.sort(key=lambda r: (r.get("watch_count") is None, -(r.get("watch_count") or 0),
-                                r.get("view_count") is None, -(r.get("view_count") or 0)))
-    populated = sum(1 for r in active if r.get("watch_count") is not None or r.get("view_count") is not None)
-    return {"offers": active, "total_active": len(active), "populated": populated}
+    limit = max(1, min(limit, 500))
+    primary, secondary = ("view_count", "watch_count") if sort == "view" else ("watch_count", "view_count")
+
+    top_rows = (supabase.table("ebay_listing_status")
+                .select("item_id,sku,title,price,watch_count,view_count,gallery_url")
+                .eq("business_id", business_id).eq("listing_status", "Active")
+                .order(primary, desc=True, nullsfirst=False)
+                .order(secondary, desc=True, nullsfirst=False)
+                .limit(limit).execute()).data or []
+
+    total_res = (supabase.table("ebay_listing_status")
+                 .select("item_id", count="exact")
+                 .eq("business_id", business_id).eq("listing_status", "Active")
+                 .limit(1).execute())
+    total_active = total_res.count or 0
+
+    populated_res = (supabase.table("ebay_listing_status")
+                      .select("item_id", count="exact")
+                      .eq("business_id", business_id).eq("listing_status", "Active")
+                      .or_("watch_count.not.is.null,view_count.not.is.null")
+                      .limit(1).execute())
+    populated = populated_res.count or 0
+
+    return {"offers": top_rows, "total_active": total_active, "populated": populated, "shown": len(top_rows)}
 
 class NoteCreate(BaseModel):
     section: str
