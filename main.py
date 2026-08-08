@@ -194,29 +194,6 @@ async def start_background_jobs():
     asyncio.create_task(ebay_analytics_sync_worker())
     asyncio.create_task(ebay_sync_check_worker())
 
-    async def _one_time_verify_offers_sort_filter():
-        try:
-            biz_id = "e6aa8f2d-4e17-4b88-b511-2cffd3c2168d"
-
-            def check(sort_col, descending, min_p=None, max_p=None):
-                q = (supabase.table("ebay_listing_status")
-                     .select("title,price,watch_count,view_count,watch_per_view_pct")
-                     .eq("business_id", biz_id).eq("listing_status", "Active"))
-                if min_p is not None: q = q.gte("price", min_p)
-                if max_p is not None: q = q.lte("price", max_p)
-                order_str = f"{sort_col}.{'desc' if descending else 'asc'}.nullslast"
-                q.params = q.params.add("order", order_str)
-                rows = q.limit(3).execute().data or []
-                return rows
-
-            print(f"VERIFY sort=price asc: {check('price', False)}")
-            print(f"VERIFY sort=watch_per_view_pct desc: {check('watch_per_view_pct', True)}")
-            print(f"VERIFY sort=watchers desc: {check('watch_count', True)}")
-            print(f"VERIFY price 100-500: {check('watch_count', True, 100, 500)}")
-        except Exception as e:
-            print(f"VERIFY_OFFERS failed: {e}")
-    asyncio.create_task(_one_time_verify_offers_sort_filter())
-
 async def ebay_analytics_sync_worker():
     """Once-a-day sweep of real view counts via the Sell Analytics API,
     confirmed working 8/8 (fresh sell.analytics.readonly consent verified
