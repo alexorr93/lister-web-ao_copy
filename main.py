@@ -11699,16 +11699,37 @@ def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> di
 
     page = 1
     run_started_at = None
+    baseline_active_count = None
+    rows_so_far = 0
     if resume:
         checkpoint_page = _safe_int(settings.get("EBAY_ACTIVE_LISTINGS_SYNC_CHECKPOINT_PAGE"))
         run_started_at = settings.get("EBAY_ACTIVE_LISTINGS_SYNC_RUN_STARTED_AT") or None
+        baseline_active_count = _safe_int(settings.get("EBAY_ACTIVE_LISTINGS_SYNC_BASELINE_COUNT"))
+        rows_so_far = _safe_int(settings.get("EBAY_ACTIVE_LISTINGS_SYNC_ROWS_SO_FAR")) or 0
         if checkpoint_page and run_started_at:
             page = checkpoint_page + 1
 
     if not run_started_at:
         run_started_at = _dt.datetime.utcnow().isoformat()
+        # SAFETY BASELINE (added 8/9): snapshot how many rows are Active for this
+        # business BEFORE this run touches anything. REAL INCIDENT this fixes: eBay
+        # can return Ack=Warning with fewer items AND a smaller TotalNumberOfPages
+        # in the very same response during throttling -- no exception raised, this
+        # loop has no way to tell that apart from a legitimately small account, so
+        # it believed it had seen everything, completed "normally", and the cleanup
+        # below marked everything it didn't personally touch as Ended. Confirmed
+        # live: ~4,700 Active rows dropped to ~1,600 over three separate same-day
+        # runs (14:00-19:00 UTC), each one completing cleanly. The baseline lets
+        # the cleanup step below refuse to trust a run that came back suspiciously
+        # short instead of silently mass-Ending real, still-live listings.
+        baseline_res = supabase.table("ebay_listing_status").select("item_id", count="exact")\
+            .eq("business_id", business_id).eq("listing_status", "Active").execute()
+        baseline_active_count = baseline_res.count or 0
+        rows_so_far = 0
         save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_RUN_STARTED_AT", run_started_at)
         save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_CHECKPOINT_PAGE", "0")
+        save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_BASELINE_COUNT", str(baseline_active_count))
+        save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_ROWS_SO_FAR", "0")
 
     total_pages = page  # guarantees at least one fetch even when resuming past page 1
     total_rows = 0
@@ -11796,6 +11817,8 @@ def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> di
         if rows:
             supabase.table("ebay_listing_status").upsert(rows, on_conflict="business_id,item_id").execute()
         total_rows += len(rows)
+        rows_so_far += len(rows)
+        save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_ROWS_SO_FAR", str(rows_so_far))
 
         # Checkpoint AFTER this page lands, so an interruption mid-next-page still
         # resumes from here rather than re-doing this completed one.
@@ -11821,12 +11844,28 @@ def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> di
     # count elsewhere already filters on listing_status="Active" specifically,
     # so marking Ended (instead of leaving stale "Active") keeps that count
     # correct without erasing anything.
-    supabase.table("ebay_listing_status").update({"listing_status": "Ended"})\
-        .eq("business_id", business_id).eq("listing_status", "Active")\
-        .lt("updated_at", run_started_at).execute()
+    # SAFETY CHECK (added 8/9, see baseline comment above): only trust this run's
+    # "everything else must be Ended" conclusion if it actually saw something close
+    # to the account's real size. 70% is deliberately loose -- ordinary week-to-week
+    # turnover never comes close to that -- so this only trips on a genuinely broken
+    # run, not normal sales. Only applies once there's a meaningful baseline (a
+    # small/new account under 20 rows would trip this on ordinary variance alone).
+    skipped_cleanup_for_safety = False
+    if baseline_active_count and baseline_active_count >= 20 and rows_so_far < baseline_active_count * 0.7:
+        skipped_cleanup_for_safety = True
+        print(f"active_listings_sync SAFETY: business {business_id} run only saw "
+              f"{rows_so_far}/{baseline_active_count} previously-active rows -- skipping "
+              f"the Ended cleanup. Most likely a throttled/partial eBay response, not a "
+              f"real mass sell-off. Nothing was marked Ended this run.")
+    else:
+        supabase.table("ebay_listing_status").update({"listing_status": "Ended"})\
+            .eq("business_id", business_id).eq("listing_status", "Active")\
+            .lt("updated_at", run_started_at).execute()
 
     save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_CHECKPOINT_PAGE", "")
     save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_RUN_STARTED_AT", "")
+    save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_BASELINE_COUNT", "")
+    save_ebay_setting(business_id, "EBAY_ACTIVE_LISTINGS_SYNC_ROWS_SO_FAR", "")
 
     # Snapshotting runs AFTER the live sync is fully committed and checkpoints
     # are cleared, and is wrapped so it can never affect this function's
@@ -11840,7 +11879,8 @@ def _sync_ebay_active_listings_work(business_id: str, resume: bool = True) -> di
     except Exception as e:
         print(f"_snapshot_active_listings failed for business {business_id} (live sync unaffected): {e}")
 
-    return {"checked": total_rows, "synced_at": _dt.datetime.utcnow().isoformat()}
+    return {"checked": total_rows, "synced_at": _dt.datetime.utcnow().isoformat(),
+            "skipped_cleanup_for_safety": skipped_cleanup_for_safety}
 
 def _shopify_gql(business_id: str, query: str, variables: dict = None):
     import requests as _req
