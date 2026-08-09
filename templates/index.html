@@ -2962,6 +2962,21 @@ function handleLotRowClick(evt, lotId) {
   applyLotSelection(lotId, !selectedLotIds.has(lotId), evt.shiftKey);
 }
 
+async function toggleLotFavorite(lotId, btn) {
+  const lot = auctionLotsCache.find(l => l.id === lotId);
+  if (!lot) return;
+  const next = !lot.is_favorite;
+  lot.is_favorite = next; // optimistic
+  renderAuctionTable();
+  try {
+    await api('PATCH', `/api/auction/capture/lots/${lotId}/set-favorite`, {is_favorite: next});
+  } catch(e) {
+    lot.is_favorite = !next; // revert on failure
+    renderAuctionTable();
+    toast('Failed to update favorite', 'error');
+  }
+}
+
 async function deleteOneLot(lotId) {
   try {
     await api('POST', '/api/auction/capture/lots/bulk-delete', {lot_ids: [lotId]});
@@ -3058,6 +3073,7 @@ function renderAuctionTable() {
     const imgHtml = photos.length
       ? `<img src="${photos[0]}" style="width:220px;height:220px;border-radius:10px;object-fit:cover;cursor:zoom-in;" onerror="this.style.display='none'" onclick="window.open('${photos[0]}','_blank')"/>`
       : `<div class="auction-img" style="width:220px;height:220px;font-size:3rem;">🔨</div>`;
+    const starHtml = `<button onclick="toggleLotFavorite('${lot.id}', this)" title="${lot.is_favorite ? 'Unfavorite' : 'Favorite'}" style="background:none;border:none;cursor:pointer;font-size:20px;line-height:1;padding:2px;color:${lot.is_favorite ? '#22c55e' : 'var(--muted)'};">${lot.is_favorite ? '★' : '☆'}</button>`;
     const itemsHtml = lot.items && lot.items.length
       ? lot.items.map(it => `<div><b>${it.item_name || 'Unknown item'}</b>${it.quantity ? ' × ' + it.quantity : ''}</div>`).join('')
       : '';
@@ -3074,12 +3090,13 @@ function renderAuctionTable() {
     const selectCell = lotSelectMode
       ? `<td><input type="checkbox" ${isSelected ? 'checked' : ''} onclick="toggleLotSelect(event,'${lot.id}')"></td>`
       : '';
+    const rowBg = isSelected ? 'background:var(--accent-soft,#3b82f622);' : (lot.is_favorite ? 'background:#22c55e26;' : '');
     const rowAttrs = lotSelectMode
-      ? `onclick="handleLotRowClick(event,'${lot.id}')" style="cursor:pointer;${isSelected ? 'background:var(--accent-soft,#3b82f622);' : ''}"`
-      : '';
+      ? `onclick="handleLotRowClick(event,'${lot.id}')" style="cursor:pointer;${rowBg}"`
+      : (rowBg ? `style="${rowBg}"` : '');
     return `<tr id="lot-row-${lot.id}" ${rowAttrs}>
       ${selectCell}
-      <td>${imgHtml}</td>
+      <td><div style="display:flex;align-items:center;gap:4px;">${starHtml}${imgHtml}</div></td>
       <td style="max-width:220px;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
           <div style="font-weight:700;font-size:12px;color:var(--text);">Lot ${lot.lot_number || '?'}: ${lot.title || 'Unknown'}</div>
@@ -3089,7 +3106,7 @@ function renderAuctionTable() {
           </div>
         </div>
         ${lot.current_bid != null ? `<div style="font-size:11px;color:var(--muted);">Bid: $${parseFloat(lot.current_bid).toFixed(2)}</div>` : ''}
-        ${lot.listing_url ? `<a href="${lot.listing_url}" target="_blank" style="font-size:10px;color:var(--accent);">View ↗</a>` : ''}
+        ${lot.listing_url ? `<a href="${lot.listing_url}" onclick="window.open('${lot.listing_url}','_blank','noopener,width=1200,height=900'); return false;" style="font-size:10px;color:var(--accent);">View ↗</a>` : ''}
         <div style="margin-top:4px;">${bulkBadge}</div>
         ${searchBtns}
       </td>

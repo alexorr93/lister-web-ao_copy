@@ -8599,6 +8599,17 @@ async def bulk_flag_lots(body: AuctionLotBulkFlag, request: Request):
     supabase.table("auction_lots").update({"is_bulk_lot": body.is_bulk_lot}).in_("id", owned_lot_ids).execute()
     return {"ok": True, "updated": len(owned_lot_ids)}
 
+class AuctionLotFavoriteUpdate(BaseModel):
+    is_favorite: bool = True
+
+@app.patch("/api/auction/capture/lots/{lot_id}/set-favorite")
+async def set_lot_favorite(lot_id: str, body: AuctionLotFavoriteUpdate):
+    """Star toggle for a lot — pure tag flip, same instant pattern as set-lot-flag."""
+    res = supabase.table("auction_lots").update({"is_favorite": body.is_favorite}).eq("id", lot_id).execute()
+    if not res.data:
+        raise HTTPException(404, "Lot not found")
+    return res.data[0]
+
 def _download_and_store_lot_photo(url: str, session_id: str, lot_number: str, idx: int) -> Optional[str]:
     """Downloads an external lot photo and re-uploads it into Supabase Storage so it
     survives even if the auction listing is later removed. Returns the public URL,
