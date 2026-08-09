@@ -2977,6 +2977,21 @@ async function toggleLotFavorite(lotId, btn) {
   }
 }
 
+async function toggleLotDoubleDeep(lotId, btn) {
+  const lot = auctionLotsCache.find(l => l.id === lotId);
+  if (!lot) return;
+  const next = !lot.is_double_deep;
+  lot.is_double_deep = next; // optimistic
+  renderAuctionTable();
+  try {
+    await api('PATCH', `/api/auction/capture/lots/${lotId}/set-double-deep`, {is_double_deep: next});
+  } catch(e) {
+    lot.is_double_deep = !next; // revert on failure
+    renderAuctionTable();
+    toast('Failed to update Double Deep', 'error');
+  }
+}
+
 async function deleteOneLot(lotId) {
   try {
     await api('POST', '/api/auction/capture/lots/bulk-delete', {lot_ids: [lotId]});
@@ -3074,6 +3089,7 @@ function renderAuctionTable() {
       ? `<img src="${photos[0]}" style="width:220px;height:220px;border-radius:10px;object-fit:cover;cursor:zoom-in;" onerror="this.style.display='none'" onclick="window.open('${photos[0]}','_blank')"/>`
       : `<div class="auction-img" style="width:220px;height:220px;font-size:3rem;">🔨</div>`;
     const starHtml = `<button onclick="toggleLotFavorite('${lot.id}', this)" title="${lot.is_favorite ? 'Unfavorite' : 'Favorite'}" style="background:none;border:none;cursor:pointer;font-size:20px;line-height:1;padding:2px;color:${lot.is_favorite ? '#22c55e' : 'var(--muted)'};">${lot.is_favorite ? '★' : '☆'}</button>`;
+    const doubleDeepHtml = `<button onclick="toggleLotDoubleDeep('${lot.id}', this)" title="${lot.is_double_deep ? 'Unflag Double Deep' : 'Flag as Double Deep'}" style="background:${lot.is_double_deep ? '#3b82f6' : 'none'};border:1px solid ${lot.is_double_deep ? '#3b82f6' : 'var(--muted)'};border-radius:5px;cursor:pointer;font-size:9px;font-weight:700;line-height:1;padding:3px 4px;color:${lot.is_double_deep ? '#fff' : 'var(--muted)'};">DD</button>`;
     const itemsHtml = lot.items && lot.items.length
       ? lot.items.map(it => `<div><b>${it.item_name || 'Unknown item'}</b>${it.quantity ? ' × ' + it.quantity : ''}</div>`).join('')
       : '';
@@ -3096,7 +3112,7 @@ function renderAuctionTable() {
       : (rowBg ? `style="${rowBg}"` : '');
     return `<tr id="lot-row-${lot.id}" ${rowAttrs}>
       ${selectCell}
-      <td><div style="display:flex;align-items:center;gap:4px;">${starHtml}${imgHtml}</div></td>
+      <td><div style="display:flex;align-items:center;gap:4px;">${starHtml}${doubleDeepHtml}${imgHtml}</div></td>
       <td style="max-width:220px;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
           <div style="font-weight:700;font-size:12px;color:var(--text);">Lot ${lot.lot_number || '?'}: ${lot.title || 'Unknown'}</div>
