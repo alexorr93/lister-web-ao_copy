@@ -716,6 +716,9 @@ select.field-input { background: #fff; color: #0f172a; }
       <div class="modal-meta" id="modal-meta"></div>
       <div class="modal-price" id="modal-price"></div>
       <div class="modal-refs" id="modal-refs"></div>
+      <button class="btn" id="modal-ask-gemini-btn" onclick="askGemini()" title="Sends this item's photos and title to Gemini: identifies the item from the photos, and separately searches the live market for sold/asking prices" style="width:100%;margin-bottom:10px;color:#c084fc;border-color:#7e22ce;">🤖 Ask Gemini</button>
+      <div id="modal-ask-gemini-status" style="display:none;font-size:12px;color:var(--muted);margin-bottom:10px;"></div>
+      <div id="modal-ask-gemini-result" style="display:none;font-size:12px;line-height:1.5;color:var(--text);background:#161925;border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:14px;"></div>
       <div class="modal-fields">
         <div>
           <div class="field-label">Title</div>
@@ -2097,6 +2100,8 @@ function openModal(id) {
   document.getElementById('modal-mpn-flag').style.display = needsMpnAttention(l) ? 'block' : 'none';
   document.getElementById('modal-find-mpn-btn').style.display = (l.category_mode === 'motors') ? '' : 'none';
   document.getElementById('modal-find-mpn-status').style.display = 'none';
+  document.getElementById('modal-ask-gemini-status').style.display = 'none';
+  document.getElementById('modal-ask-gemini-result').style.display = 'none';
   document.getElementById('modal-shipping-policy-select').value = l.ebay_fulfillment_policy_id || '';
   document.getElementById('modal-price-input').value = l.price.toFixed(2);
   document.getElementById('modal-cond-input').value  = l.condition || 'used';
@@ -2313,6 +2318,40 @@ async function findMpn() {
   } finally {
     btn.disabled = false;
     btn.textContent = '🔍 Find MPN';
+  }
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function askGemini() {
+  if (!modalItemId) return;
+  const btn = document.getElementById('modal-ask-gemini-btn');
+  const statusEl = document.getElementById('modal-ask-gemini-status');
+  const resultEl = document.getElementById('modal-ask-gemini-result');
+  btn.disabled = true;
+  btn.textContent = '🤖 Asking...';
+  resultEl.style.display = 'none';
+  statusEl.style.display = 'block';
+  statusEl.textContent = 'Reading the photos and searching current sold/asking prices...';
+  try {
+    const r = await api('POST', `/api/listings/${modalItemId}/ask-gemini`, {});
+    statusEl.style.display = 'none';
+    let html = `<div style="margin-bottom:8px;"><b>What Gemini sees:</b><br>${escapeHtml(r.identification)}</div>`;
+    html += `<div><b>Market context:</b><br>${escapeHtml(r.market_context || 'No live pricing found.')}</div>`;
+    if (r.sources && r.sources.length) {
+      html += '<div style="margin-top:8px;">' + r.sources.map(s =>
+        `<a href="${s.url}" target="_blank" rel="noopener" style="color:#38bdf8;display:block;font-size:11px;">${escapeHtml(s.title || s.url)}</a>`
+      ).join('') + '</div>';
+    }
+    resultEl.innerHTML = html;
+    resultEl.style.display = 'block';
+  } catch(e) {
+    statusEl.textContent = `Failed: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🤖 Ask Gemini';
   }
 }
 

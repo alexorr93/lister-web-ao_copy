@@ -2479,6 +2479,89 @@ confident from context -- never guess or make one up."""
     except Exception as e:
         raise HTTPException(500, f"Find MPN failed: {e}")
 
+@app.post("/api/listings/{item_id}/ask-gemini")
+async def ask_gemini_about_item(item_id: str, request: Request):
+    """Modal 'Ask Gemini' button: identifies the item from its actual photos (same
+    vision call as find_mpn above) AND separately gets live resale-market context for
+    the title via Google Search grounding (same REST pattern as gemini_search_grounding
+    elsewhere in this file) -- two proven calls combined, not a novel one. This replaces
+    the 'open a new eBay tab and paste stuff into Gemini manually' idea: that has no
+    reliable way to hand Gemini the photo at all (no URL scheme for it), and even the
+    text-only version relies on an undocumented, unofficial Gemini URL parameter that
+    could stop working at any time. This calls Gemini's actual API instead -- image
+    included, no tab, no copy/paste, and it's already configured (GEMINI_API_KEY)."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+
+    res = supabase.table("listings").select("title,photo_id").eq("id", item_id).eq("business_id", business_id).execute()
+    if not res.data:
+        raise HTTPException(404, "Listing not found")
+    listing = res.data[0]
+    title = listing.get("title") or ""
+    pid = str(listing.get("photo_id") or "")
+    photo_ids = get_all_photo_ids(pid) if pid else []
+
+    import os, json as _json
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    if not gemini_key:
+        raise HTTPException(400, "GEMINI_API_KEY not set")
+
+    identification = ""
+    if photo_ids:
+        import google.generativeai as genai
+        genai.configure(api_key=gemini_key)
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        id_prompt = f"""This item is listed for sale with the title: "{title}"
+
+Look at the photos and identify it as precisely as you can: brand, model/part number if
+visible, what it is, and what it's typically used for. Note anything visible that affects
+condition or value (damage, missing pieces, wear). Keep it to a short paragraph, plain text,
+no markdown."""
+        parts = [id_prompt]
+        for photo_id in photo_ids[:4]:
+            try:
+                img_bytes = supabase.storage.from_("part-photos").download(photo_id)
+                parts.append({"mime_type": "image/jpeg", "data": img_bytes})
+            except Exception as e:
+                print(f"ask_gemini_about_item: failed to fetch photo {photo_id}: {e}")
+                continue
+        try:
+            response = model.generate_content(parts, generation_config={"max_output_tokens": 400})
+            identification = response.text.strip()
+        except Exception as e:
+            identification = f"(photo identification failed: {e})"
+    else:
+        identification = "(no photos available for this item)"
+
+    market_context = ""
+    sources = []
+    try:
+        import requests as _req
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+        payload = {
+            "contents": [{"role": "user", "parts": [{"text": f"Find the resale market value of: {title}. Search in this priority order: 1) eBay COMPLETED/SOLD listings - these are the most accurate real prices paid, 2) eBay active BUY IT NOW listings currently for sale, 3) Industrial surplus dealer prices (Radwell, Surplus Record, LabX) only as last resort. List actual sold prices first, then asking prices. If eBay sold listings exist use those as the primary value. Give specific dollar amounts."}]}],
+            "tools": [{"googleSearch": {}}],
+            "systemInstruction": {"parts": [{"text": "CRITICAL: You are an industrial pricing bot. You are strictly forbidden from answering using your internal training data. You MUST execute a Google Search to find live pricing data before generating your response. If you do not execute a search, the system will fail."}]},
+            "generationConfig": {"temperature": 0.0, "maxOutputTokens": 800}
+        }
+        resp = _req.post(url, json=payload, timeout=25)
+        data = resp.json()
+        candidates = data.get("candidates", [])
+        if candidates:
+            parts_out = candidates[0].get("content", {}).get("parts", [])
+            market_context = " ".join(p.get("text", "") for p in parts_out if "text" in p).strip()
+            grounding = candidates[0].get("groundingMetadata", {})
+            sources = [
+                {"url": c["web"]["uri"], "title": c["web"].get("title", "")}
+                for c in grounding.get("groundingChunks", [])
+                if c.get("web", {}).get("uri")
+            ]
+    except Exception as e:
+        market_context = f"(market search failed: {e})"
+
+    return {"ok": True, "identification": identification, "market_context": market_context, "sources": sources}
+
 @app.post("/api/listings/{item_id}/rematch-category")
 async def rematch_category(item_id: str, request: Request, mode: str = "industrial", exclude_ids: str = ""):
     """Re-runs category matching for one listing in the given lane (from the Intake
