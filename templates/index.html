@@ -344,8 +344,6 @@ select.field-input { background: #fff; color: #0f172a; }
         <button class="tile-cond-btn catmode-btn" data-catmode="industrial" onclick="setCategoryMode('industrial')">B&amp;I</button>
         <button class="tile-cond-btn catmode-btn" data-catmode="motors" onclick="setCategoryMode('motors')">Auto Parts</button>
       </div>
-      <button class="btn" style="color:#a78bfa;border-color:#7c3aed;" onclick="autofillLotSku()" title="Fills in the Lot SKU for selected items using the lot that was active when each was scanned — no waiting on scan completion">🏷️ Autofill Lot SKU</button>
-      <button class="btn" id="find-mpns-btn" style="color:#38bdf8;border-color:#0369a1;" onclick="findMpnsForSelected()" title="For SELECTED items: reads the real part number off each item's photos (same as the modal's 🔍 Find MPN, done in one pass) and saves it into the MPN box where you can see and correct it before publishing. Never runs on its own — only when you press this. Skips items that already have a saved MPN.">🔍 Find MPNs (selected)</button>
       <div style="display:flex;align-items:center;gap:4px;" title="Sets the active lot — same as the dropdown on the Fast Scan/Upload tabs.">
         <span style="font-size:11px;color:var(--muted);white-space:nowrap;">SKU:</span>
         <select class="field-input" id="actionbar-lot-select" onchange="setActiveLotSku(this.value)" style="font-size:12px;padding:5px 8px;width:100px;">
@@ -357,6 +355,7 @@ select.field-input { background: #fff; color: #0f172a; }
         <input type="text" class="field-input" id="actionbar-suffix-input" placeholder="optional" oninput="setActiveLotSuffix(this.value)" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="actionbar-suffix-nofill" disabled style="font-size:12px;padding:5px 8px;width:70px;"/>
         <button class="btn" style="font-size:11px;padding:5px 6px;" onclick="unlockSuffixInput(this)" title="Click to type a custom 2nd half">✏️</button>
       </div>
+      <button class="btn" style="color:#a78bfa;border-color:#7c3aed;" onclick="autofillLotSku()" title="Fills in the Lot SKU for selected items using the lot that was active when each was scanned — no waiting on scan completion">🏷️ Autofill Lot SKU</button>
       <button class="btn btn-primary" id="publish-now-v2-btn" style="display:none;background:#ea580c;border-color:#ea580c;" onclick="submitSelectedNowV2()" title="SKU stays editable after publishing">📤 Publish to eBay</button>
       <button class="btn btn-primary" id="submit-shopify-btn" style="display:none;background:#95bf47;border-color:#95bf47;" onclick="submitSelectedToShopify()">🛍️ Publish to Shopify</button>
       <button class="btn" id="archive-selected-btn" style="display:none;color:var(--red);border-color:#991b1b;" onclick="archiveSelected()">🗄️ Archive Selected</button>
