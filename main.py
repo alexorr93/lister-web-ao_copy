@@ -2368,8 +2368,21 @@ async def update_listing(item_id: str, body: UpdateField, request: Request):
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     try:
-        supabase.table("listings").update({body.field: body.value}).eq("id", item_id).execute()
+        # REAL GAP FIXED, per direct instruction (title-reset investigation):
+        # this returned {"ok": True} unconditionally, even if .eq("id", item_id)
+        # matched zero rows -- a save could silently do nothing while the
+        # frontend still cleared its "unsaved edit" flag and believed it had
+        # saved. Root cause of the actual reported symptom turned out to be
+        # elsewhere (see _apply_cash_to_profit), but this was still a real,
+        # separate blind spot worth closing: now genuinely confirms a row was
+        # touched before reporting success, so any future silent-failure shows
+        # up as a real error instead of a lie.
+        res = supabase.table("listings").update({body.field: body.value}).eq("id", item_id).execute()
+        if not res.data:
+            raise HTTPException(404, f"listing {item_id} not found or not updated")
         return {"ok": True}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
 
@@ -3641,11 +3654,27 @@ def _apply_cash_to_profit(business_id: str):
 
     Still safe to run any number of times: reads the RPC's fresh eBay-only
     total_payouts each time (never reads back a previously-cash-adjusted
-    value), so repeated Recalculate runs can't compound cash on top of itself."""
+    value), so repeated Recalculate runs can't compound cash on top of itself.
+
+    REAL BUG FIXED, per direct instruction (title-reset investigation traced
+    here): this used to issue one .update().eq("id",...) call per acquisition
+    row -- ~160 sequential blocking round trips for this business. Every one
+    of those blocks the whole single-process event loop (supabase-py's calls
+    are synchronous), so the ENTIRE app -- every GET/PATCH from every open
+    tab, including someone mid-edit on an Intake title -- froze for however
+    long this loop took. Confirmed live via Railway logs: a GET /api/listings
+    stuck 32.5s and PATCH /api/listings/* calls stuck 20-30s, all completing
+    in the same instant once a stall like this finally cleared -- consistent
+    with title edits silently reverting when a stale queued GET response
+    landed after a slow-but-real PATCH. Batched into one upsert per 500-row
+    page instead: same net effect (only the listed columns are touched via
+    Postgres's ON CONFLICT DO UPDATE, every other column on each row is left
+    alone), just 1 round trip instead of ~160."""
     start = 0
     while True:
         page = supabase.table("acquisitions").select("id,cost,cash,total_payouts")\
             .eq("business_id", business_id).range(start, start + 999).execute().data or []
+        batch = []
         for row in page:
             cost = row.get("cost") or 0
             cash = row.get("cash") or 0
@@ -3653,9 +3682,11 @@ def _apply_cash_to_profit(business_id: str):
             total_payouts = ebay_total_payouts + cash
             profit = total_payouts - cost
             roi_pct = round(profit / cost * 100, 2) if cost else None
-            supabase.table("acquisitions").update({
-                "total_payouts": total_payouts, "profit": profit, "roi_pct": roi_pct,
-            }).eq("id", row["id"]).execute()
+            batch.append({
+                "id": row["id"], "total_payouts": total_payouts, "profit": profit, "roi_pct": roi_pct,
+            })
+        for i in range(0, len(batch), 500):
+            supabase.table("acquisitions").upsert(batch[i:i + 500]).execute()
         if len(page) < 1000:
             break
         start += 1000
@@ -3703,6 +3734,11 @@ def _apply_shopify_sales_to_profit(business_id: str):
             break
         start += 1000
 
+    # REAL BUG FIXED here too, same root cause as _apply_cash_to_profit above --
+    # this was the second of the two per-row update loops actually responsible
+    # for the app-wide freeze (together ~320 sequential round trips). Collect
+    # every row's update first, then upsert in 500-row batches.
+    batch = []
     for a in acquisitions:
         sales = shopify_sales_by_prefix.get(a.get("sku")) or 0
         cost = a.get("cost") or 0
@@ -3724,13 +3760,16 @@ def _apply_shopify_sales_to_profit(business_id: str):
         else:
             became_green_at = None
 
-        supabase.table("acquisitions").update({
+        batch.append({
+            "id": a["id"],
             "profit": profit,
             "roi_pct": roi_pct,
             "shopify_payouts": sales,
             "total_payouts": total_payouts,
             "became_green_at": became_green_at,
-        }).eq("id", a["id"]).execute()
+        })
+    for i in range(0, len(batch), 500):
+        supabase.table("acquisitions").upsert(batch[i:i + 500]).execute()
 
 @app.post("/api/analytics/refresh-snapshot-now")
 async def refresh_snapshot_now(request: Request):
