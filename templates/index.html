@@ -1944,9 +1944,22 @@ async function submitSelectedNowV2() {
     const id = ids[i];
     showBatchProgress(i + 1, ids.length, 'Publishing to eBay');
     try {
-      const r = await api('POST', `/api/listings/${id}/ebay-v2`, {mode: 'now'});
+      // REAL BUG FIXED, per direct instruction: this used to send only
+      // {mode:'now'} -- never the item's current MPN/brand at all, unlike
+      // the modal's publish call just below (which always has). That meant
+      // publishing from here silently ignored whatever was actually typed
+      // and saved in the tile's MPN/brand fields and let the server compute
+      // its own independent guess instead, which could overwrite a real,
+      // already-confirmed value in the DB with something else -- exactly
+      // the "I typed it, it saved, then it was gone after publishing"
+      // symptom reported. Now sends the tile's real current value for both
+      // (including anything typed but not yet blurred/saved, via
+      // dirtyMpns/dirtyBrands) so publish can never clobber what's shown.
       const l = listings.find(x => String(x.id) === id);
-      if (l) { l.ebay_status = r.status; l.ebay_item_id = r.item_id; l.ebay_sku = r.sku; }
+      const mpn = dirtyMpns[id] ?? (l ? l.ebay_mpn : undefined) ?? undefined;
+      const brand = dirtyBrands[id] ?? (l ? l.brand : undefined) ?? undefined;
+      const r = await api('POST', `/api/listings/${id}/ebay-v2`, {mode: 'now', mpn, brand});
+      if (l) { l.ebay_status = r.status; l.ebay_item_id = r.item_id; l.ebay_sku = r.sku; l.ebay_mpn = r.mpn; l.ebay_mpn_is_fallback = r.mpn_is_fallback; l.brand = r.brand; }
       success++;
     } catch(e) { failed++; }
     renderTiles();
