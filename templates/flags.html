@@ -411,7 +411,7 @@ function renderTable() {
     const rowStyle = c.viewed ? ' style="background:rgba(22,163,74,.15);"' : '';
     html += `<tr data-catalog-url="${c.catalog_url}"${rowStyle}>
       <td style="text-align:center;padding:10px 2px;max-width:24px;"><span style="cursor:pointer;font-size:13px;color:${c.favorite ? '#f59e0b' : 'var(--border)'};" onclick="toggleFavorite('${c.catalog_url}', ${!c.favorite})">★</span></td>
-      <td>${looksLikeBadTitle(c.title)
+      <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${looksLikeBadTitle(c.title) ? '' : displayTitle(c).replace(/"/g,'&quot;')}">${looksLikeBadTitle(c.title)
         ? `<span class="muted" style="font-size:12px;">Untitled catalog</span> <button class="btn" style="font-size:11px;padding:3px 8px;" onclick="recastMetadata('${c.catalog_url}', this)">🔁 Recast title</button>`
         : `<a href="${href}" target="_blank" onclick="markViewed('${c.catalog_url}')">${displayTitle(c).replace(/</g,'&lt;')}</a>`}</td>
       <td class="muted" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(c.auctioneer || '').replace(/"/g,'&quot;')}">${c.auctioneer || '—'}</td>
