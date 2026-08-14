@@ -3672,7 +3672,7 @@ def _apply_cash_to_profit(business_id: str):
     alone), just 1 round trip instead of ~160."""
     start = 0
     while True:
-        page = supabase.table("acquisitions").select("id,cost,cash,total_payouts")\
+        page = supabase.table("acquisitions").select("id,business_id,sku,cost,cash,total_payouts")\
             .eq("business_id", business_id).range(start, start + 999).execute().data or []
         batch = []
         for row in page:
@@ -3683,7 +3683,8 @@ def _apply_cash_to_profit(business_id: str):
             profit = total_payouts - cost
             roi_pct = round(profit / cost * 100, 2) if cost else None
             batch.append({
-                "id": row["id"], "total_payouts": total_payouts, "profit": profit, "roi_pct": roi_pct,
+                "id": row["id"], "business_id": row["business_id"], "sku": row["sku"],
+                "total_payouts": total_payouts, "profit": profit, "roi_pct": roi_pct,
             })
         for i in range(0, len(batch), 500):
             supabase.table("acquisitions").upsert(batch[i:i + 500]).execute()
@@ -3708,7 +3709,7 @@ def _apply_shopify_sales_to_profit(business_id: str):
     import datetime as _dt
     start = 0
     while True:
-        page = supabase.table("acquisitions").select("id,sku,cost,profit,total_payouts,became_green_at")\
+        page = supabase.table("acquisitions").select("id,business_id,sku,cost,profit,total_payouts,became_green_at")\
             .eq("business_id", business_id).range(start, start + 999).execute().data or []
         acquisitions.extend(page)
         if len(page) < 1000:
@@ -3762,6 +3763,8 @@ def _apply_shopify_sales_to_profit(business_id: str):
 
         batch.append({
             "id": a["id"],
+            "business_id": a["business_id"],
+            "sku": a.get("sku"),
             "profit": profit,
             "roi_pct": roi_pct,
             "shopify_payouts": sales,
