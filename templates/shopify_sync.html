@@ -450,6 +450,24 @@ loadSyncStatus();
 })();
 loadEbaySyncQueue();
 
+// Keep the auto-queue current without any manual reload:
+// 1) re-pull it every 2 minutes while the page is open;
+// 2) re-pull IMMEDIATELY whenever the tab comes back into view (phone tab
+//    resume, switching back to the tab) -- a resumed mobile tab doesn't
+//    reload the page, so without this it silently shows a frozen snapshot
+//    from whenever it last loaded (confirmed real case: a sale sat pending
+//    for hours, invisible in an already-open tab).
+// Skips while a manual date-range view is up (don't clobber it) or while a
+// push is mid-flight (don't shift row indexes under the user's finger).
+async function autoRefreshEbayQueue() {
+  if (ebayManualRangeActive || ebayPushInFlight > 0) return;
+  await loadEbaySyncQueue();
+}
+setInterval(autoRefreshEbayQueue, 120000);
+document.addEventListener('visibilitychange', function() {
+  if (!document.hidden) autoRefreshEbayQueue();
+});
+
 // If a sync is already running when the page loads, resume polling instead of losing track of it.
 (async function checkSyncOnLoad() {
   try {
@@ -622,6 +640,13 @@ function renderInactiveTable() {
 
 // ── eBay sync (Shopify -> eBay, manual only) ──────────────────── //
 let ebaySyncRows = [];
+// True while the user is viewing a manual date-range result -- auto-refresh
+// must not clobber that view; the Refresh button (refreshEbaySyncQueue)
+// returns to the live auto-queue and clears this.
+let ebayManualRangeActive = false;
+// Count of pushes currently in flight -- auto-refresh skips while any push
+// is running so a re-render can't shift row indexes mid-push.
+let ebayPushInFlight = 0;
 
 async function loadEbaySyncQueue() {
   document.getElementById('ebay-status').textContent = '';
@@ -642,6 +667,7 @@ async function loadEbaySyncQueue() {
 }
 
 async function refreshEbaySyncQueue() {
+  ebayManualRangeActive = false;
   document.getElementById('ebay-queue-status').textContent = 'Checking eBay status on pending items...';
   try {
     await fetch('/api/ebay-sync/refresh-status', {method: 'POST'});
@@ -672,6 +698,7 @@ async function checkShopifySales() {
   const start = document.getElementById('ebay-start-date').value;
   const end = document.getElementById('ebay-end-date').value;
   if (!start || !end) { alert('Pick a start and end date first.'); return; }
+  ebayManualRangeActive = true;
   document.getElementById('ebay-status').textContent = 'Checking this range live (this replaces the auto-found list below until you click Refresh)...';
   document.getElementById('ebay-table-area').innerHTML = '';
   document.getElementById('ebay-push-all-btn').style.display = 'none';
@@ -766,6 +793,7 @@ async function pushOneToEbay(idx) {
   const row = ebaySyncRows[idx];
   const cell = document.getElementById('ebay-push-cell-' + idx);
   cell.textContent = 'Pushing...';
+  ebayPushInFlight++;
   try {
     const r = await fetch('/api/ebay-sync/push', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -779,6 +807,8 @@ async function pushOneToEbay(idx) {
     renderEbaySyncTable();
   } catch(e) {
     cell.innerHTML = `<span class="no">✘ ${e.message}</span>`;
+  } finally {
+    ebayPushInFlight--;
   }
 }
 
@@ -786,6 +816,7 @@ async function pushOneToShopify(idx) {
   const row = ebaySyncRows[idx];
   const cell = document.getElementById('ebay-push-cell-' + idx);
   cell.textContent = 'Pushing...';
+  ebayPushInFlight++;
   try {
     const r = await fetch('/api/ebay-sync/push-to-shopify', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -799,6 +830,8 @@ async function pushOneToShopify(idx) {
     renderEbaySyncTable();
   } catch(e) {
     cell.innerHTML = `<span class="no">✘ ${e.message}</span>`;
+  } finally {
+    ebayPushInFlight--;
   }
 }
 
