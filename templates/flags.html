@@ -371,8 +371,9 @@ function renderTable() {
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     filtered = filtered.filter(c => {
+      if (/recast/i.test(c.end_date)) return false; // Recast = auction is over
       const t = parseDateForSort(c.end_date);
-      return t === null || t >= startOfToday; // keep blanks visible -- unknown isn't the same as past
+      return t === null || t >= startOfToday;
     });
   }
   if (flaggedOnly) filtered = filtered.filter(isFlagged);
