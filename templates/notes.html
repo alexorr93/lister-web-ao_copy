@@ -85,10 +85,21 @@ h1 { font-size: 20px; margin-bottom: 4px; }
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
       <h3 style="margin:0;font-size:14px;">📎 Documents</h3>
       <label class="btn" style="cursor:pointer;font-size:12px;">
-        Upload PDF
-        <input type="file" accept="application/pdf" style="display:none;" onchange="uploadAuditPdf(this)">
+        Upload File
+        <input type="file" style="display:none;" onchange="stagePendingUpload(this)">
       </label>
       <span id="pdf-upload-status" style="font-size:12px;color:var(--muted);"></span>
+    </div>
+    <div id="pending-upload-box" class="add-note-box" style="display:none;margin-bottom:14px;">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px;" id="pending-upload-filename"></div>
+      <input id="pending-upload-name" type="text" placeholder="Name (optional — defaults to filename)" autocomplete="off"
+             style="width:100%;padding:8px 10px;margin-bottom:8px;border-radius:8px;border:1px solid var(--border);font-size:14px;font-family:inherit;background:#fff;color:#0f172a;">
+      <textarea id="pending-upload-note" placeholder="Note (optional)" autocomplete="off"
+                style="width:100%;min-height:50px;background:#fff;color:#0f172a;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:14px;font-family:inherit;resize:vertical;"></textarea>
+      <div class="row" style="justify-content:flex-end;gap:8px;">
+        <button class="btn" onclick="cancelPendingUpload()">Cancel</button>
+        <button class="btn btn-primary" onclick="confirmPendingUpload()">Upload</button>
+      </div>
     </div>
     <div class="note-list" id="file-list"><div class="empty">Loading...</div></div>
   </div>
@@ -133,7 +144,12 @@ async function loadFiles() {
     }
     list.innerHTML = files.map(f => `
       <div class="note-row">
-        <div class="content"><a href="/api/notes/files/${f.id}/download" target="_blank" style="color:var(--accent);text-decoration:none;">📄 ${escapeHtml(f.filename)}</a> <span style="color:var(--muted);font-size:11px;">${fmtSize(f.size_bytes)}</span></div>
+        <div class="content">
+          <a href="/api/notes/files/${f.id}/download" target="_blank" style="color:var(--accent);text-decoration:none;">📄 ${escapeHtml(f.label || f.filename)}</a>
+          <span style="color:var(--muted);font-size:11px;">${fmtSize(f.size_bytes)}</span>
+          ${f.label ? `<div style="color:var(--muted);font-size:11px;">${escapeHtml(f.filename)}</div>` : ''}
+          ${f.note ? `<div style="font-size:13px;margin-top:4px;white-space:pre-wrap;">${escapeHtml(f.note)}</div>` : ''}
+        </div>
         <div class="meta">
           <div class="date">${fmtDate(f.uploaded_at)}</div>
           <button class="del-btn" onclick="deleteFile('${f.id}')" title="Delete this document">✕</button>
@@ -145,13 +161,36 @@ async function loadFiles() {
   }
 }
 
-async function uploadAuditPdf(input) {
+let pendingUploadFile = null;
+
+function stagePendingUpload(input) {
   const file = input.files[0];
+  input.value = ''; // reset so selecting the same file again still fires onchange
   if (!file) return;
+  pendingUploadFile = file;
+  document.getElementById('pending-upload-filename').textContent = file.name + ' (' + fmtSize(file.size) + ')';
+  document.getElementById('pending-upload-name').value = '';
+  document.getElementById('pending-upload-note').value = '';
+  document.getElementById('pending-upload-box').style.display = 'block';
+}
+
+function cancelPendingUpload() {
+  pendingUploadFile = null;
+  document.getElementById('pending-upload-box').style.display = 'none';
+}
+
+async function confirmPendingUpload() {
+  if (!pendingUploadFile) return;
+  const file = pendingUploadFile;
+  const label = document.getElementById('pending-upload-name').value.trim();
+  const note = document.getElementById('pending-upload-note').value.trim();
   const status = document.getElementById('pdf-upload-status');
+  document.getElementById('pending-upload-box').style.display = 'none';
   status.textContent = 'Uploading ' + file.name + '...';
   const fd = new FormData();
   fd.append('file', file);
+  if (label) fd.append('label', label);
+  if (note) fd.append('note', note);
   try {
     const r = await fetch('/api/notes/files?section=' + encodeURIComponent(currentSection), {method: 'POST', body: fd});
     if (!r.ok) throw new Error((await r.json()).detail || 'upload failed');
@@ -160,7 +199,7 @@ async function uploadAuditPdf(input) {
   } catch(e) {
     status.textContent = 'Upload failed: ' + e.message;
   }
-  input.value = '';
+  pendingUploadFile = null;
 }
 
 async function deleteFile(id) {

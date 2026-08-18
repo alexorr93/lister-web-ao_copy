@@ -8,7 +8,7 @@ import io
 import re
 from datetime import datetime
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, HTTPException, UploadFile, File, Body, Response, BackgroundTasks
+from fastapi import FastAPI, Request, HTTPException, UploadFile, File, Form, Body, Response, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -3256,28 +3256,35 @@ async def delete_note(note_id: int, request: Request):
     return {"ok": True}
 
 @app.post("/api/notes/files")
-async def upload_audit_file(request: Request, file: UploadFile = File(...), section: str = "audit"):
-    """PDF attachments for the Notes page (Audit Notes etc.) — stored in the
-    private 'audit-docs' Supabase bucket, indexed in audit_files, downloadable
-    any time later. Same storage pattern as part-photos/auction-pdfs."""
+async def upload_audit_file(request: Request, file: UploadFile = File(...), section: str = "audit",
+                             label: str = Form(None), note: str = Form(None)):
+    """Attachments for the Notes page (Audit Notes etc.) — any file type,
+    stored in the private 'audit-docs' Supabase bucket, indexed in
+    audit_files, downloadable any time later. Optional label (display name)
+    and note (freeform text) can be attached at upload time. Same storage
+    pattern as part-photos/auction-pdfs."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
-    fname = (file.filename or "document.pdf").strip()
-    if not fname.lower().endswith(".pdf"):
-        raise HTTPException(400, "Only PDF files are accepted here")
+    fname = (file.filename or "document").strip()
     content = await file.read()
     if not content:
         raise HTTPException(400, "File is empty")
+    import os as _os
     import uuid as _uuid
+    ext = _os.path.splitext(fname)[1]
     file_id = str(_uuid.uuid4())
-    storage_path = f"{business_id}/{file_id}.pdf"
+    storage_path = f"{business_id}/{file_id}{ext}"
+    content_type = file.content_type or "application/octet-stream"
     supabase.storage.from_("audit-docs").upload(
-        storage_path, content, {"content-type": "application/pdf"}
+        storage_path, content, {"content-type": content_type}
     )
     res = supabase.table("audit_files").insert({
         "id": file_id, "business_id": business_id, "section": section,
         "filename": fname, "storage_path": storage_path, "size_bytes": len(content),
+        "content_type": content_type,
+        "label": (label or "").strip() or None,
+        "note": (note or "").strip() or None,
     }).execute()
     return {"ok": True, "file": (res.data or [{}])[0]}
 
@@ -3286,7 +3293,7 @@ async def list_audit_files(request: Request, section: str = "audit"):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
-    res = (supabase.table("audit_files").select("id,filename,size_bytes,uploaded_at")
+    res = (supabase.table("audit_files").select("id,filename,label,note,content_type,size_bytes,uploaded_at")
            .eq("business_id", business_id).eq("section", section)
            .order("uploaded_at", desc=True).execute())
     return {"files": res.data or []}
@@ -3296,7 +3303,7 @@ async def download_audit_file(file_id: str, request: Request):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
-    res = (supabase.table("audit_files").select("filename,storage_path")
+    res = (supabase.table("audit_files").select("filename,storage_path,content_type")
            .eq("id", file_id).eq("business_id", business_id).limit(1).execute())
     if not res.data:
         raise HTTPException(404, "File not found")
@@ -3304,7 +3311,8 @@ async def download_audit_file(file_id: str, request: Request):
     data = supabase.storage.from_("audit-docs").download(row["storage_path"])
     from fastapi.responses import Response as _Resp
     safe_name = row["filename"].replace('"', "")
-    return _Resp(content=data, media_type="application/pdf",
+    media_type = row.get("content_type") or "application/octet-stream"
+    return _Resp(content=data, media_type=media_type,
                  headers={"Content-Disposition": f'inline; filename="{safe_name}"'})
 
 @app.delete("/api/notes/files/{file_id}")
