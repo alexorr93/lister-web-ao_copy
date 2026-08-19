@@ -1372,7 +1372,7 @@ function renderTiles() {
         </div>
       </div>
       <div class="tile-body">
-        <textarea class="tile-title-input${fieldClassFor(l.id,'title')}" rows="1" data-id="${l.id}" placeholder="Title" autocomplete="off" spellcheck="false">${(dirtyTitles[l.id] ?? (l.title||'')).replace(/</g,'&lt;')}</textarea>
+        <textarea class="tile-title-input${fieldClassFor(l.id,'title')}" rows="1" data-id="${l.id}" placeholder="Title" maxlength="80" autocomplete="off" spellcheck="false">${(dirtyTitles[l.id] ?? (l.title||'')).replace(/</g,'&lt;')}</textarea>
         <div class="tile-search-btns">
           <button class="tile-search-btn${isResearched(l.id,'google')?' active':''}" onclick="markResearched('${l.id}','google',this); window.open('https://www.google.com/search?q='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value),'popupwin','noopener,width=1200,height=800')">Google</button>
           <button class="tile-search-btn${isResearched(l.id,'ebay_active')?' active':''}" onclick="markResearched('${l.id}','ebay_active',this); window.open('https://www.ebay.com/sch/i.html?_nkw='+encodeURIComponent(document.querySelector('.tile-title-input[data-id=&quot;${l.id}&quot;]').value)+'&LH_Sold=0&LH_Complete=0','popupwin','noopener,width=1200,height=800')">eBay Active</button>
