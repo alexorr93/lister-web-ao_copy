@@ -9770,6 +9770,18 @@ def push_listing_to_shopify(listing: dict, image_urls_override: list = None) -> 
             }],
         }
     }
+    # Storewide sale coverage for NEW products: if a sale is active (set via the
+    # Sync page's Storewide Sale panel), publish at the discounted price with the
+    # full price as compare-at strikethrough -- so new listings match the rest of
+    # the catalog instead of silently going up at full price mid-sale (the exact
+    # gap the old paid discount app left).
+    try:
+        _sale_pct = float((settings.get("SHOPIFY_SALE_PCT") or "").strip() or 0)
+    except Exception:
+        _sale_pct = 0.0
+    if 0 < _sale_pct < 90 and price > 0:
+        body["product"]["variants"][0]["compare_at_price"] = f"{price:.2f}"
+        body["product"]["variants"][0]["price"] = f"{price * (1 - _sale_pct / 100.0):.2f}"
     headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
     # Shopify has to fetch every image URL itself before it can respond to this
     # call (images are sent as external src URLs here, not embedded data) --
@@ -13759,3 +13771,146 @@ async def logout(request: Request):
     resp = RedirectResponse("/login", status_code=302)
     resp.delete_cookie("session_id")
     return resp
+
+# ============================================================
+# Storewide Shopify Sale (replaces the paid discount app)
+# ============================================================
+# Bulk-applies a percentage sale across the ENTIRE Shopify catalog by editing
+# each variant's price/compare-at directly (price -> discounted, original ->
+# compare_at strikethrough), and cleanly reverts it later. This is literally
+# all the $20/mo discount apps do. Handles the mixed frozen state the removed
+# app left behind: apply treats compare_at (when > price) as the canonical
+# original -- so already-discounted items get recomputed off their true
+# original, not double-discounted -- and revert restores originals and clears
+# compare_at everywhere, normalizing the whole catalog in one run.
+# New products are covered at publish time (see push_listing_to_shopify).
+
+_shopify_sale_progress = {}
+
+def _run_shopify_sale(business_id: str, mode: str, pct: float):
+    import requests as _req, time as _time
+    prog = _shopify_sale_progress[business_id] = {
+        "status": "running", "mode": mode, "pct": pct, "pages": 0,
+        "products_seen": 0, "variants_changed": 0, "errors": 0,
+        "started_at": _time.time(), "detail": "",
+    }
+    try:
+        settings = get_ebay_settings(business_id)
+        domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+        if not domain:
+            raise Exception("Shopify not connected — set Store Domain in Settings")
+        token = get_shopify_access_token(business_id)
+        headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
+        api = f"https://{domain}/admin/api/2024-10/graphql.json"
+
+        def gql(query, variables=None):
+            for attempt in range(8):
+                r = _req.post(api, headers=headers, json={"query": query, "variables": variables or {}}, timeout=30)
+                if r.status_code == 200:
+                    return r.json()
+                if r.status_code == 429:
+                    _time.sleep(min(float(r.headers.get("Retry-After", 2 ** attempt)), 60))
+                    continue
+                if r.status_code == 401:
+                    headers["X-Shopify-Access-Token"] = get_shopify_access_token(business_id, force_refresh=True)
+                    continue
+                raise Exception(f"Shopify {r.status_code}: {r.text[:200]}")
+            raise Exception("Shopify rate limiting exhausted retries")
+
+        cursor = None
+        while True:
+            after = f', after: "{cursor}"' if cursor else ""
+            q = ('{ products(first: 100' + after + ') { pageInfo { hasNextPage endCursor } edges { node { id '
+                 'variants(first: 50) { edges { node { id price compareAtPrice } } } } } } }')
+            body = gql(q)
+            prog["pages"] += 1
+            products = (body.get("data", {}) or {}).get("products", {}) or {}
+            for e in products.get("edges", []):
+                node = e["node"]
+                prog["products_seen"] += 1
+                updates = []
+                for ve in (node.get("variants") or {}).get("edges", []):
+                    v = ve["node"]
+                    try:
+                        price = float(v.get("price") or 0)
+                    except Exception:
+                        continue
+                    ca_raw = v.get("compareAtPrice")
+                    try:
+                        ca = float(ca_raw) if ca_raw not in (None, "") else None
+                    except Exception:
+                        ca = None
+                    if mode == "apply":
+                        # compare_at (when higher than price) is the canonical
+                        # original -- recompute off it so re-running with a new
+                        # pct adjusts instead of compounding discounts.
+                        original = ca if (ca and ca > price) else price
+                        if original <= 0:
+                            continue
+                        new_price = round(original * (1 - pct / 100.0), 2)
+                        if abs(new_price - price) < 0.005 and ca is not None and abs(ca - original) < 0.005:
+                            continue  # already exactly at target -- idempotent skip
+                        updates.append({"id": v["id"], "price": f"{new_price:.2f}", "compareAtPrice": f"{original:.2f}"})
+                    else:  # revert
+                        if ca and ca > 0:
+                            updates.append({"id": v["id"], "price": f"{ca:.2f}", "compareAtPrice": None})
+                if updates:
+                    m = ('mutation($productId: ID!, $variants: [ProductVariantsBulkInput!]!) { '
+                         'productVariantsBulkUpdate(productId: $productId, variants: $variants) { userErrors { field message } } }')
+                    res = gql(m, {"productId": node["id"], "variants": updates})
+                    errs = (((res.get("data") or {}).get("productVariantsBulkUpdate") or {}).get("userErrors") or [])
+                    if errs:
+                        prog["errors"] += 1
+                        prog["detail"] = str(errs[0])[:200]
+                    else:
+                        prog["variants_changed"] += len(updates)
+            throttle = ((body.get("extensions", {}) or {}).get("cost", {}) or {}).get("throttleStatus", {})
+            available = throttle.get("currentlyAvailable")
+            cost = ((body.get("extensions", {}) or {}).get("cost", {}) or {}).get("requestedQueryCost")
+            restore_rate = throttle.get("restoreRate")
+            if available is not None and cost and restore_rate and available < cost:
+                _time.sleep(min((cost - available) / restore_rate, 10))
+            page_info = products.get("pageInfo", {})
+            if not page_info.get("hasNextPage"):
+                break
+            cursor = page_info.get("endCursor")
+        # Persist active sale pct so publish-to-Shopify covers new products;
+        # cleared on revert so new products go up at full price again.
+        save_ebay_setting(business_id, "SHOPIFY_SALE_PCT", str(pct) if mode == "apply" else "")
+        prog["status"] = "done"
+    except Exception as ex:
+        prog["status"] = "error"
+        prog["detail"] = str(ex)[:300]
+        print(f"_run_shopify_sale({mode}) failed: {ex}")
+
+@app.post("/api/shopify/sale/start")
+async def shopify_sale_start(request: Request, body: dict = Body(...)):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    mode = (body.get("mode") or "apply").lower()
+    if mode not in ("apply", "revert"):
+        raise HTTPException(400, "mode must be apply or revert")
+    pct = 0.0
+    if mode == "apply":
+        try:
+            pct = float(body.get("pct"))
+        except Exception:
+            raise HTTPException(400, "pct is required for apply")
+        if not (0 < pct < 90):
+            raise HTTPException(400, "pct must be between 0 and 90")
+    cur = _shopify_sale_progress.get(business_id)
+    if cur and cur.get("status") == "running":
+        raise HTTPException(409, "A sale run is already in progress")
+    import threading
+    threading.Thread(target=_run_shopify_sale, args=(business_id, mode, pct), daemon=True).start()
+    return {"ok": True, "mode": mode, "pct": pct}
+
+@app.get("/api/shopify/sale/status")
+async def shopify_sale_status(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    settings = get_ebay_settings(business_id)
+    return {"progress": _shopify_sale_progress.get(business_id),
+            "active_pct": (settings.get("SHOPIFY_SALE_PCT") or "").strip()}
