@@ -852,6 +852,11 @@ async function pushOneToShopify(idx) {
 async function pushAllToEbay() {
   for (let idx = 0; idx < ebaySyncRows.length; idx++) {
     if (!ebaySyncRows[idx].pushed) {
+      await pushOneToEbay(idx);
+    }
+  }
+}
+
 async function startSale(mode) {
   let pct = null;
   if (mode === 'apply') {
