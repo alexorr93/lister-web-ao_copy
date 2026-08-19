@@ -2888,17 +2888,48 @@ def suggest_ebay_category(title: str, business_id: str, restrict: bool = True,
         results.append({"category_id": cat.get("categoryId"), "name": cat.get("categoryName"),
                          "path": full_path, "tree_id": tree_id, "is_fallback": False})
 
+    if not results:
+        # REAL GAP FIXED: eBay's own suggestion API returned zero candidates for this
+        # title/tree, with no error and no bad status code -- previously fell straight
+        # through to _fallback() with NOTHING printed, indistinguishable in the logs
+        # from a request that never ran at all. This was the actual, currently-live
+        # cause of repeated tile BI/AP recalc presses looking like no-ops: pressing
+        # the button genuinely re-queried eBay every time and eBay genuinely had no
+        # suggestion for that exact title text, but nothing said so anywhere.
+        print(f"suggest_ebay_category: eBay returned ZERO suggestions for '{title}' in tree {tree_id} "
+              f"-- falling back (not a bug, eBay's own suggestion engine had nothing for this title text; "
+              f"try a more category-like phrase, e.g. paste a category breadcrumb into the category field instead)")
+        return _fallback()
+
     if restrict and mode == "industrial":
         # Literal TOP-LEVEL segment must be exactly "Business & Industrial" — not a
         # substring match anywhere in the path, which is what previously let Home &
         # Garden results through on words like "Motors".
+        pre_restrict_paths = [x["path"] for x in results[:5]]
         results = [x for x in results
                    if (x["path"] or "").split(" > ")[0].strip() == "Business & Industrial"]
+        if not results:
+            # Same class of silent gap as above, one step later: eBay DID suggest
+            # something for this title, just nothing rooted under literal
+            # "Business & Industrial" -- e.g. everything it offered landed under a
+            # different top-level eBay tree-0 category instead. Also previously
+            # silent. Logging eBay's actual top suggestions here is the fastest way
+            # to tell a real taxonomy gap apart from a filter bug next time this
+            # is reported.
+            print(f"suggest_ebay_category: eBay suggested categories for '{title}' but none rooted under "
+                  f"'Business & Industrial' -- top raw suggestion(s): {pre_restrict_paths} -- falling back")
+            return _fallback()
     # mode == "motors" needs no filter: tree 100 IS eBay Motors by definition.
 
     if exclude_ids:
         exclude_set = {str(x) for x in exclude_ids if x}
+        pre_exclude_count = len(results)
         results = [x for x in results if str(x["category_id"]) not in exclude_set]
+        if pre_exclude_count and not results:
+            print(f"suggest_ebay_category: '{title}' -- every remaining eBay suggestion was already "
+                  f"in exclude_ids ({sorted(exclude_set)}) from a prior recalc press -- falling back "
+                  f"(this is expected once history is exhausted, not a bug)")
+            return _fallback()
 
     # Cross-check each candidate against our OWN synced category data before
     # trusting it. eBay's live suggestion API can hand back a category that's

@@ -1827,7 +1827,7 @@ async function recalcTileCategory(id, mode, btn) {
       l.ebay_category_is_default = !!r.is_fallback;
       if (r.category_path) l.ebay_category_path = r.category_path;
       else if (r.name) l.ebay_category_path = r.name;  // fallback only if the path lookup itself came up empty
-      toast(r.is_fallback ? `Fell back to the generic catch-all (${mode === 'motors' ? 'Auto Parts' : 'B&I'})` : `Category updated ✓`);
+      toast(r.is_fallback ? `No real ${mode === 'motors' ? 'Auto Parts' : 'B&I'} match — eBay's own suggestion engine has nothing for this exact title. Try typing a category name/breadcrumb directly into the category box below instead.` : `Category updated ✓`);
     } else {
       toast(`No ${mode === 'motors' ? 'Auto Parts' : 'B&I'} match found`, 'error');
     }
