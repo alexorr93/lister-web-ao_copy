@@ -6068,22 +6068,35 @@ def _fetch_all_for_business(business_id: str, table: str, select_cols: str) -> l
     return all_rows
 
 def _compute_inventory_snapshot_value(business_id: str) -> float:
-    """Current total (price x qty) across matched eBay/Shopify inventory, avoiding
-    double-counting a matched pair. Always 'as of right now' -- shared by both the
-    live /api/analytics endpoint and the daily snapshot worker below, so there's
-    exactly one place this math lives."""
-    inv_rows = _fetch_all_for_business(business_id, "inventory_match", "ebay_id,shopify_id")
-    ebay_by_id = {r["id"]: r for r in _fetch_all_for_business(business_id, "ebay_inventory", "id,price,quantity")}
-    shopify_by_id = {r["id"]: r for r in _fetch_all_for_business(business_id, "shopify_inventory", "id,price,quantity,product_id")}
-    shopify_by_product_id = {r["product_id"]: r for r in shopify_by_id.values() if r.get("product_id")}
+    """Current total asking-price value of ACTIVE EBAY LISTINGS ONLY:
+    sum of price x available quantity across ebay_listing_status rows with
+    listing_status='Active'. Always 'as of right now' -- shared by both the
+    live /api/analytics endpoint and the daily snapshot worker below, so
+    there's exactly one place this math lives.
+
+    REDEFINED per direct instruction (was previously wrong): the old version
+    walked inventory_match x ebay_inventory/shopify_inventory, but that match
+    table is never pruned as items sell/end -- confirmed against live data:
+    5,935 match rows vs only 4,886 truly-Active listings, including 430
+    matched-but-sold/ended items still counted at full price x qty, plus
+    duplicate matches (more match rows than inventory rows) double-counting.
+    Result was ~$1.34M shown vs ~$1.17M real. ebay_listing_status is the
+    authoritative platform-synced source of what's actually live right now."""
+    rows = _fetch_all_for_business(business_id, "ebay_listing_status",
+                                    "price,quantity,quantity_available,listing_status")
     value = 0.0
-    for row in inv_rows:
-        e = ebay_by_id.get(row.get("ebay_id")) or {}
-        s = shopify_by_id.get(row.get("shopify_id")) or shopify_by_product_id.get(row.get("shopify_id")) or {}
-        price = e.get("price") if e.get("price") is not None else s.get("price")
-        qty = e.get("quantity") if e.get("quantity") is not None else s.get("quantity")
-        if price is not None and qty is not None:
-            value += float(price) * float(qty)
+    for r in rows:
+        if r.get("listing_status") != "Active":
+            continue
+        price = r.get("price")
+        if price is None:
+            continue
+        qty = r.get("quantity_available")
+        if qty is None:
+            qty = r.get("quantity")
+        if qty is None:
+            qty = 1
+        value += float(price) * float(qty)
     return round(value, 2)
 
 def _nearest_inventory_snapshot(business_id: str, date_str: str):
