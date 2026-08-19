@@ -1798,6 +1798,12 @@ async function autofillLotSku() {
       if (activeLotSuffix) body.suffix = activeLotSuffix;
       const r = await api('POST', `/api/listings/${l.id}/assign-lot`, body);
       l.ebay_sku = r.ebay_sku;
+      // REAL BUG FIXED, per repeated direct instruction: this bulk path set
+      // the SKU correctly but never called markFieldChanged, so the tile's
+      // lotsku field never got the yellow "changed" highlight that manual
+      // per-cell typing gets (that path calls it via the input listener) --
+      // every SKU set through this button silently looked unstyled forever.
+      markFieldChanged(fieldKey(String(l.id), 'lotsku'));
       ok++;
     } catch(e) { failed++; }
   }
