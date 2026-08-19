@@ -1813,6 +1813,21 @@ async function recalcTileCategory(id, mode, btn) {
   // silently change based on whatever the toggle happens to be set to.
   const l = listings.find(x => String(x.id) === String(id));
   if (!l) return;
+  // REAL BUG FIXED: nothing previously stopped a second press from firing a
+  // concurrent request for the SAME item -- confirmed in logs as 5-10
+  // overlapping rematch-category calls stacking up for one item within
+  // seconds. Each press's disabled state lived only on that click's specific
+  // DOM button node, so a re-render from elsewhere (e.g. the 30s poll) mid-
+  // request could silently swap in a fresh, non-disabled button, making the
+  // UI look stuck/unresponsive while requests piled up underneath -- and a
+  // stale response landing after a newer one could clobber it. This set is
+  // shared, in-memory state, so it survives any re-render regardless of
+  // which specific button DOM node is currently showing.
+  if (recalcInFlight.has(String(id))) {
+    toast('Still recalculating that one — give it a second', 'error');
+    return;
+  }
+  recalcInFlight.add(String(id));
   const orig = btn.textContent;
   btn.disabled = true; btn.textContent = '…';
   try {
@@ -1833,6 +1848,8 @@ async function recalcTileCategory(id, mode, btn) {
     }
   } catch(e) {
     toast(`Recalc failed: ${e.message}`, 'error');
+  } finally {
+    recalcInFlight.delete(String(id));
   }
   btn.disabled = false; btn.textContent = orig;
   renderTiles();
@@ -2389,6 +2406,7 @@ async function askGemini() {
 // last value stops repeated presses from ping-ponging between two candidates -- each
 // press rotates to a genuinely new one until the real options run out.
 let categoryHistory = {};
+let recalcInFlight = new Set(); // item ids currently mid-recalc -- blocks a second overlapping press
 
 async function autoCategoryModal() {
   if (!modalItemId) return;
