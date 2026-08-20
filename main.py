@@ -750,8 +750,7 @@ def _live_verify_ended_rows(business_id: str, rows: list) -> list:
         return rows
     token = get_shopify_access_token(business_id)
     headers = {"X-Shopify-Access-Token": token}
-    kept = []
-    for r in rows[:60]:
+    def _check(r):
         pid = r.get("shopify_product_id")
         try:
             resp = _req.get(f"https://{domain}/admin/api/2024-10/products/{pid}.json",
@@ -762,35 +761,49 @@ def _live_verify_ended_rows(business_id: str, rows: list) -> list:
                                 headers=headers, params={"fields": "id,status,variants"}, timeout=15)
             if resp.status_code == 404:
                 supabase.table("shopify_inventory").update({"status": "deleted"}).eq("business_id", business_id).eq("product_id", pid).execute()
-                continue
+                return None
             if resp.status_code != 200:
                 r["live_check"] = f"HTTP {resp.status_code}"
-                kept.append(r)
-                continue
+                return r
             prod = resp.json().get("product") or {}
             status = (prod.get("status") or "").lower()
             qty = sum(int(v.get("inventory_quantity") or 0) for v in (prod.get("variants") or []))
             supabase.table("shopify_inventory").update({"status": status, "quantity": qty}).eq("business_id", business_id).eq("product_id", pid).execute()
             if status != "active" or qty <= 0:
-                continue  # already ended / zeroed on Shopify by hand -- nothing to do
+                return None  # already ended / zeroed on Shopify by hand -- nothing to do
             r["shopify_qty"] = qty
             r["live_check"] = "ok"
-            kept.append(r)
+            return r
         except Exception as ex:
             r["live_check"] = str(ex)[:80]
-            kept.append(r)
+            return r
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        checked = list(ex.map(_check, rows[:60]))
+    kept = [r for r in checked if r is not None]
     kept.extend(rows[60:])
     return kept
 
+_ended_ebay_cache = {}  # (business_id, days) -> (built_at, rows)
+_ENDED_EBAY_TTL = 600
+
 @app.get("/api/shopify-sync/ended-ebay")
-async def shopify_sync_ended_ebay(request: Request, days: int = 30):
+async def shopify_sync_ended_ebay(request: Request, days: int = 30, refresh: int = 0):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
-    import asyncio
-    rows = await asyncio.to_thread(_build_ended_ebay_rows, business_id, max(1, min(int(days or 30), 180)))
+    import asyncio, time as _t
+    days = max(1, min(int(days or 30), 180))
+    key = (business_id, days)
+    hit = _ended_ebay_cache.get(key)
+    if hit and not refresh and (_t.time() - hit[0]) < _ENDED_EBAY_TTL:
+        return {"rows": hit[1], "cached": True, "built_at": hit[0]}
+    # Both halves are DB/HTTP-heavy (measured 11-25s, stalling Intake behind
+    # it) -- never on the event loop, and cached so background polling is free.
+    rows = await asyncio.to_thread(_build_ended_ebay_rows, business_id, days)
     rows = await asyncio.to_thread(_live_verify_ended_rows, business_id, rows)
-    return {"rows": rows}
+    _ended_ebay_cache[key] = (_t.time(), rows)
+    return {"rows": rows, "cached": False, "built_at": _ended_ebay_cache[key][0]}
 
 @app.post("/api/shopify-sync/ended-ebay/end")
 async def shopify_sync_ended_ebay_end(request: Request, body: dict = Body(...)):
@@ -821,6 +834,8 @@ async def shopify_sync_ended_ebay_end(request: Request, body: dict = Body(...)):
             results.append({"item_id": iid, "ok": True})
         except Exception as ex:
             results.append({"item_id": iid, "ok": False, "error": str(ex)[:200]})
+    for k in [k for k in _ended_ebay_cache if k[0] == business_id]:
+        _ended_ebay_cache.pop(k, None)
     return {"results": results}
 
 @app.post("/api/shopify-sync/ended-ebay/dismiss")
@@ -834,6 +849,8 @@ async def shopify_sync_ended_ebay_dismiss(request: Request, body: dict = Body(..
     supabase.table("ebay_ended_shopify_actions").upsert({
         "business_id": business_id, "item_id": iid, "action": "dismissed"},
         on_conflict="business_id,item_id").execute()
+    for k in [k for k in _ended_ebay_cache if k[0] == business_id]:
+        _ended_ebay_cache.pop(k, None)
     return {"ok": True}
 
 @app.post("/api/ebay-sync/queue/{row_id}/dismiss")
