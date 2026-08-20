@@ -141,8 +141,10 @@ function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-async function loadInventory() {
-  const r = await fetch('/api/inventory');
+async function loadInventory(forceRefresh) {
+  // Cached server-side for 10 min; forceRefresh=1 bypasses (used after syncs
+  // so the table reflects what a sync just changed instead of the cache).
+  const r = await fetch('/api/inventory' + (forceRefresh ? '?refresh=1' : ''));
   const data = await r.json();
   inventory = data.inventory || [];
   renderTable();
@@ -178,7 +180,7 @@ async function pollSync() {
         document.getElementById('sync-status').textContent =
           `✅ eBay: ${data.result.ebay_synced}, Shopify: ${data.result.shopify_synced}, Matched: ${data.result.matched} (${data.result.newly_confirmed || 0} newly locked in this run, ${data.result.confirmed_preserved || 0} already permanent), eBay-only: ${data.result.ebay_only}, Shopify-only: ${data.result.shopify_only}${errMsg}`;
       }
-      loadInventory();
+      loadInventory(1);
     }
   } catch(e) {
     document.getElementById('sync-status').textContent = `❌ ${e.message}`;

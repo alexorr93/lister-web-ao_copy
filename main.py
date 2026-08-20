@@ -13232,11 +13232,19 @@ async def push_inventory_quantity(row_id: str, body: InventoryQuantityPush, requ
                                   f"{shopify_error} — you'll need to fix Shopify manually.")
     return {"ok": True, "ebay_available_qty": body.quantity, "shopify_qty": body.quantity}
 
+_inventory_page_cache = {}  # business_id -> (built_at_epoch, payload)
+_INVENTORY_CACHE_TTL = 600  # 10 min; underlying data only moves when syncs run
+
 @app.get("/api/inventory")
-async def list_inventory(request: Request):
+async def list_inventory(request: Request, refresh: int = 0):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
+    import time as _t
+    if not refresh:
+        hit = _inventory_page_cache.get(business_id)
+        if hit and (_t.time() - hit[0]) < _INVENTORY_CACHE_TTL:
+            return hit[1]
 
     def _fetch_all(table, select_cols):
         all_rows, start, page_size = [], 0, 1000
@@ -13250,9 +13258,13 @@ async def list_inventory(request: Request):
             start += page_size
         return all_rows
 
-    inv_rows = _fetch_all("inventory_match", "*")
-    ebay_by_id = {r["id"]: r for r in _fetch_all("ebay_inventory", "*")}
-    shopify_records_all = _fetch_all("shopify_inventory", "*")
+    # PERF: narrowed from select("*") -- these tables carry fat columns
+    # (descriptions, photo id blobs) that this page never displays; pulling
+    # only what the response actually uses cuts the transfer massively.
+    inv_rows = _fetch_all("inventory_match", "id,title,matched_by,hd_id,ebay_id,shopify_id,hidden")
+    ebay_by_id = {r["id"]: r for r in _fetch_all(
+        "ebay_inventory", "id,sku,quantity,condition,item_id,gallery_url,price,local_photo_ids,start_time")}
+    shopify_records_all = _fetch_all("shopify_inventory", "id,product_id,sku,quantity,price,status")
     # ebay_inventory.listing_status is never actually populated (sync_inventory
     # hardcodes it to None) -- ebay_listing_status is the real, reliably-kept-
     # current source for "is this eBay item still active", used here to tell a
@@ -13306,7 +13318,9 @@ async def list_inventory(request: Request):
             "listing_id": (matching_listing.get("id") if matching_listing and not matching_listing.get("shopify_product_id") else None),
             "qty_variance": (e.get("quantity") is not None and s.get("quantity") is not None and e.get("quantity") != s.get("quantity")),
         })
-    return {"inventory": results}
+    payload = {"inventory": results, "built_at": int(_t.time())}
+    _inventory_page_cache[business_id] = (_t.time(), payload)
+    return payload
 
 @app.get("/api/inventory/ebay-only")
 async def api_inventory_ebay_only(request: Request):
