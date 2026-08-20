@@ -13243,8 +13243,31 @@ async def list_inventory(request: Request, refresh: int = 0):
     import time as _t
     if not refresh:
         hit = _inventory_page_cache.get(business_id)
-        if hit and (_t.time() - hit[0]) < _INVENTORY_CACHE_TTL:
+        if hit:
+            if (_t.time() - hit[0]) >= _INVENTORY_CACHE_TTL:
+                # Stale-while-revalidate: serve the cached table INSTANTLY and
+                # rebuild in the background -- the page must open in a second
+                # every time, never block a human on a rebuild. Sentinel guards
+                # against stacking rebuilds.
+                if not _inventory_page_cache.get(f"{business_id}:rebuilding"):
+                    _inventory_page_cache[f"{business_id}:rebuilding"] = True
+                    import threading as _th
+                    def _rebuild():
+                        try:
+                            payload = _build_inventory_payload(business_id)
+                            _inventory_page_cache[business_id] = (__import__("time").time(), payload)
+                        except Exception as ex:
+                            print(f"inventory background rebuild failed: {ex}")
+                        finally:
+                            _inventory_page_cache.pop(f"{business_id}:rebuilding", None)
+                    _th.Thread(target=_rebuild, daemon=True).start()
             return hit[1]
+    payload = _build_inventory_payload(business_id)
+    _inventory_page_cache[business_id] = (_t.time(), payload)
+    return payload
+
+def _build_inventory_payload(business_id: str) -> dict:
+    import time as _t
 
     def _fetch_all(table, select_cols):
         all_rows, start, page_size = [], 0, 1000
@@ -13318,9 +13341,7 @@ async def list_inventory(request: Request, refresh: int = 0):
             "listing_id": (matching_listing.get("id") if matching_listing and not matching_listing.get("shopify_product_id") else None),
             "qty_variance": (e.get("quantity") is not None and s.get("quantity") is not None and e.get("quantity") != s.get("quantity")),
         })
-    payload = {"inventory": results, "built_at": int(_t.time())}
-    _inventory_page_cache[business_id] = (_t.time(), payload)
-    return payload
+    return {"inventory": results, "built_at": int(_t.time())}
 
 @app.get("/api/inventory/ebay-only")
 async def api_inventory_ebay_only(request: Request):
