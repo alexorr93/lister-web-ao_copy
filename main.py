@@ -198,6 +198,7 @@ async def start_background_jobs():
     asyncio.create_task(ebay_notification_subscribe_worker())
     asyncio.create_task(ebay_analytics_sync_worker())
     asyncio.create_task(ebay_sync_check_worker())
+    asyncio.create_task(inventory_cache_warm_worker())
 
 async def ebay_analytics_sync_worker():
     """Once-a-day sweep of real view counts via the Sell Analytics API,
@@ -13531,9 +13532,50 @@ async def list_inventory(request: Request, refresh: int = 0):
                             _inventory_page_cache.pop(f"{business_id}:rebuilding", None)
                     _th.Thread(target=_rebuild, daemon=True).start()
             return hit[1]
-    payload = _build_inventory_payload(business_id)
+    # Cold miss (first hit after a deploy/restart, or ?refresh=1): build OFF
+    # the event loop. Measured 10.6s inline on 8/20 -- and because it ran on
+    # the loop, every other request in the app stalled behind it.
+    import asyncio
+    payload = await asyncio.to_thread(_build_inventory_payload, business_id)
     _inventory_page_cache[business_id] = (_t.time(), payload)
     return payload
+
+def _kick_inventory_rebuild(business_id: str) -> None:
+    """Background rebuild of the Inventory cache for one business (no-op if
+    one is already running). Called from the startup warmer and after any
+    action that changes what the table shows (sync, hide/unhide, match)."""
+    if _inventory_page_cache.get(f"{business_id}:rebuilding"):
+        return
+    _inventory_page_cache[f"{business_id}:rebuilding"] = True
+    import threading as _th, time as _t
+    def _run():
+        try:
+            payload = _build_inventory_payload(business_id)
+            _inventory_page_cache[business_id] = (_t.time(), payload)
+        except Exception as ex:
+            print(f"inventory rebuild failed for {business_id}: {ex}")
+        finally:
+            _inventory_page_cache.pop(f"{business_id}:rebuilding", None)
+    _th.Thread(target=_run, daemon=True).start()
+
+async def inventory_cache_warm_worker():
+    """Keeps /api/inventory warm so a human never waits on the 10s build:
+    builds for every business ~15s after boot (every deploy used to start
+    cold), then refreshes any entry older than 8 min so the 10-min TTL is
+    never actually reached by a page load."""
+    import asyncio, time as _t
+    await asyncio.sleep(15)
+    while True:
+        try:
+            res = supabase.table("businesses").select("id").execute()
+            for b in (res.data or []):
+                bid = b["id"]
+                hit = _inventory_page_cache.get(bid)
+                if not hit or (_t.time() - hit[0]) > 480:
+                    _kick_inventory_rebuild(bid)
+        except Exception as ex:
+            print(f"inventory warm worker: {ex}")
+        await asyncio.sleep(60)
 
 def _build_inventory_payload(business_id: str) -> dict:
     import time as _t
@@ -13673,6 +13715,7 @@ async def hide_inventory_row(row_id: str, request: Request):
         .eq("id", row_id).eq("business_id", business_id).execute()
     if not res.data:
         raise HTTPException(404, "Row not found")
+    _kick_inventory_rebuild(business_id)
     return {"ok": True, "id": row_id, "hidden": True}
 
 @app.post("/api/inventory/{row_id}/unhide")
@@ -13684,6 +13727,7 @@ async def unhide_inventory_row(row_id: str, request: Request):
         .eq("id", row_id).eq("business_id", business_id).execute()
     if not res.data:
         raise HTTPException(404, "Row not found")
+    _kick_inventory_rebuild(business_id)
     return {"ok": True, "id": row_id, "hidden": False}
 
 @app.get("/api/inventory/hidden")
