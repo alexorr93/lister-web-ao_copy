@@ -182,6 +182,20 @@ tr.ignored:hover td { opacity: 0.85; }
     <div id="inactive-table-area"><div class="empty">Click "Sync eBay Listings" to pull your inactive eBay listings.</div></div>
   </div>
   </div>
+
+  <div style="margin-top:40px;border-top:1px solid var(--border);padding-top:24px;">
+    <h2 style="font-size:16px;margin-bottom:2px;">🛑 Ended on eBay — still live on Shopify</h2>
+    <div class="sub">Listings you pulled off eBay by hand (Ended/Unsold in the last <span id="ended-days-label">30</span> days, no sale against them, not relisted) whose matched Shopify product is still active. Reads local data only. "End on Shopify" archives the product (live write) and removes it from this list.</div>
+    <div class="filter-bar">
+      <span id="ended-status" style="font-size:12px;color:var(--muted);"></span>
+      <select class="field-input" id="ended-days" onchange="loadEndedEbay()" style="width:auto;">
+        <option value="7">Last 7d</option><option value="30" selected>Last 30d</option><option value="90">Last 90d</option>
+      </select>
+      <button class="btn" onclick="loadEndedEbay()">🔄 Refresh</button>
+      <button class="btn btn-orange" id="ended-end-all-btn" onclick="endSelectedOnShopify()" style="display:none;">⛔ End Selected on Shopify <span style="font-size:10px;opacity:.8;">(live API — writes to Shopify)</span></button>
+    </div>
+    <div id="ended-table-area"><div class="empty">Loading...</div></div>
+  </div>
 </div>
 
 <script>
@@ -905,6 +919,93 @@ async function pollSaleStatus() {
   document.getElementById('sale-revert-btn').disabled = false;
 }
 pollSaleStatus();
+
+// --- Ended on eBay -> end on Shopify (bottom section) ---
+let endedRows = [];
+let endedInFlight = 0;
+async function loadEndedEbay() {
+  if (endedInFlight > 0) return;
+  const days = document.getElementById('ended-days').value;
+  document.getElementById('ended-days-label').textContent = days;
+  const st = document.getElementById('ended-status');
+  st.textContent = 'Loading...';
+  try {
+    const r = await fetch('/api/shopify-sync/ended-ebay?days=' + encodeURIComponent(days), {cache: 'no-store'});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Failed');
+    endedRows = d.rows || [];
+    st.textContent = endedRows.length ? `${endedRows.length} item(s) still active on Shopify` : '';
+    renderEndedEbay();
+  } catch (e) {
+    st.textContent = '';
+    document.getElementById('ended-table-area').innerHTML = `<div class="empty">Error: ${escapeHtml(e.message)}</div>`;
+  }
+}
+function renderEndedEbay() {
+  const area = document.getElementById('ended-table-area');
+  document.getElementById('ended-end-all-btn').style.display = endedRows.length ? '' : 'none';
+  if (!endedRows.length) { area.innerHTML = '<div class="empty">Nothing pending — every recently-ended eBay listing is already off Shopify.</div>'; return; }
+  let html = `<table><thead><tr>
+    <th><input type="checkbox" id="ended-select-all" onchange="toggleEndedAll(this.checked)" autocomplete="off"/></th>
+    <th>SKU</th><th>eBay Title</th><th>eBay Status</th><th>Ended</th><th>Shopify Product</th><th>Shopify Qty</th><th>Action</th>
+  </tr></thead><tbody>`;
+  endedRows.forEach((it, idx) => {
+    const when = it.ended_at ? new Date(it.ended_at).toLocaleDateString() : '—';
+    html += `<tr id="ended-row-${idx}">
+      <td><input type="checkbox" class="ended-cb" data-idx="${idx}" autocomplete="off"/></td>
+      <td class="muted">${escapeHtml(it.sku || '')}</td>
+      <td>${escapeHtml(it.title || '')}</td>
+      <td>${escapeHtml(it.listing_status || '')}</td>
+      <td class="muted">${when}</td>
+      <td class="muted">${escapeHtml(it.shopify_title || it.shopify_product_id)}</td>
+      <td>${it.shopify_qty ?? '—'}</td>
+      <td id="ended-cell-${idx}">
+        <button class="btn btn-orange" style="padding:6px 12px;font-size:12px;margin:0;" onclick="endOneOnShopify(${idx})">End on Shopify</button>
+        <button class="ignore-link" onclick="dismissEnded(${idx})">dismiss</button>
+      </td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  area.innerHTML = html;
+}
+function toggleEndedAll(on) { document.querySelectorAll('.ended-cb').forEach(cb => cb.checked = on); }
+async function endItemsOnShopify(items) {
+  if (!items.length) return;
+  if (!confirm(`Archive ${items.length} product(s) on Shopify? This is a live write.`)) return;
+  endedInFlight++;
+  const st = document.getElementById('ended-status');
+  st.textContent = `Ending ${items.length} on Shopify...`;
+  try {
+    const r = await fetch('/api/shopify-sync/ended-ebay/end', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({items: items.map(it => ({item_id: it.item_id, shopify_product_id: it.shopify_product_id}))})});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Failed');
+    const ok = (d.results || []).filter(x => x.ok).length;
+    const bad = (d.results || []).filter(x => !x.ok);
+    st.textContent = `✅ ${ok} ended on Shopify` + (bad.length ? ` — ${bad.length} failed (${bad[0].error})` : '');
+  } catch (e) {
+    st.textContent = `❌ ${e.message}`;
+  } finally {
+    endedInFlight--;
+    await loadEndedEbay();
+  }
+}
+function endOneOnShopify(idx) { endItemsOnShopify([endedRows[idx]]); }
+function endSelectedOnShopify() {
+  const picked = [...document.querySelectorAll('.ended-cb:checked')].map(cb => endedRows[+cb.dataset.idx]);
+  if (!picked.length) { alert('Select at least one row first.'); return; }
+  endItemsOnShopify(picked);
+}
+async function dismissEnded(idx) {
+  const it = endedRows[idx];
+  try {
+    await fetch('/api/shopify-sync/ended-ebay/dismiss', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({item_id: it.item_id})});
+  } catch (e) {}
+  await loadEndedEbay();
+}
+loadEndedEbay();
+setInterval(() => { if (endedInFlight === 0) loadEndedEbay(); }, 120000);
+document.addEventListener('visibilitychange', function() { if (!document.hidden && endedInFlight === 0) loadEndedEbay(); });
 </script>
 </body>
 </html>

@@ -612,6 +612,182 @@ async def ebay_sync_queue(request: Request):
     rows = await asyncio.to_thread(_attach_current_quantities, business_id, rows)
     return {"rows": rows}
 
+
+# ---------------------------------------------------------------------------
+# "Ended on eBay -> end on Shopify" section (bottom of the Sync page).
+# Surfaces listings the user pulled off eBay BY HAND (Ended/Unsold in the
+# local mirror, no order against them, not relisted under the same title)
+# that still have a live matched Shopify product, so the Shopify side can be
+# ended with one click instead of going hunting for it. Reads local data
+# only; the only live call is the explicit End-on-Shopify action.
+# ---------------------------------------------------------------------------
+def _shopify_set_product_status(business_id: str, product_id: str, status: str = "archived") -> None:
+    import requests as _req
+    settings = get_ebay_settings(business_id)
+    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+    if not domain:
+        raise Exception("Shopify not connected")
+    token = get_shopify_access_token(business_id)
+    url = f"https://{domain}/admin/api/2024-10/products/{product_id}.json"
+    payload = {"product": {"id": int(product_id), "status": status}}
+    for attempt in range(4):
+        r = _req.put(url, headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+                     json=payload, timeout=30)
+        if r.status_code == 200:
+            return
+        if r.status_code == 401:
+            token = get_shopify_access_token(business_id, force_refresh=True)
+            continue
+        if r.status_code == 429 or r.status_code >= 500:
+            import time as _t
+            _t.sleep(min(float(r.headers.get("Retry-After", 2 ** attempt)), 30))
+            continue
+        raise Exception(f"Shopify {r.status_code}: {r.text[:200]}")
+    raise Exception("Shopify: retries exhausted")
+
+def _build_ended_ebay_rows(business_id: str, days: int = 30) -> list:
+    from datetime import datetime, timedelta, timezone
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    def _page(q):
+        out, start, size = [], 0, 1000
+        while True:
+            res = q.range(start, start + size - 1).execute()
+            page = res.data or []
+            out.extend(page)
+            if len(page) < size:
+                break
+            start += size
+        return out
+
+    ended = _page(supabase.table("ebay_listing_status")
+                  .select("item_id,title,norm_title,sku,sku_override,price,end_time,updated_at,listing_status,gallery_url")
+                  .eq("business_id", business_id).in_("listing_status", ["Ended", "Unsold", "Completed"])
+                  .gte("updated_at", since).order("updated_at", desc=True))
+    if not ended:
+        return []
+    item_ids = [str(r["item_id"]) for r in ended if r.get("item_id")]
+
+    # Exclude anything that actually sold -- quantity_sold on the mirror row is
+    # NOT reliable for this (verified: 195/229 recent Ended rows had orders but
+    # quantity_sold=0), orders.legacy_item_id is.
+    sold = set()
+    for i in range(0, len(item_ids), 200):
+        res = supabase.table("orders").select("legacy_item_id").eq("business_id", business_id)\
+            .in_("legacy_item_id", item_ids[i:i+200]).execute()
+        sold.update(str(r["legacy_item_id"]) for r in (res.data or []) if r.get("legacy_item_id"))
+
+    # Exclude end-and-relist: same normalized title is Active again under a new item id.
+    active_titles = {r["norm_title"] for r in _page(
+        supabase.table("ebay_listing_status").select("norm_title")
+        .eq("business_id", business_id).eq("listing_status", "Active")) if r.get("norm_title")}
+
+    # Already handled through this section (ended on Shopify or dismissed).
+    handled = {str(r["item_id"]) for r in _page(
+        supabase.table("ebay_ended_shopify_actions").select("item_id").eq("business_id", business_id))}
+
+    # Resolve the matched Shopify product (two paths, same as the Inventory page).
+    shop_rows = _page(supabase.table("shopify_inventory").select("id,product_id,status,title,quantity")
+                      .eq("business_id", business_id))
+    shop_by_variant = {str(r["id"]): r for r in shop_rows}
+    shop_by_product = {str(r["product_id"]): r for r in shop_rows if r.get("product_id")}
+    match_by_ebay = {}
+    for i in range(0, len(item_ids), 200):
+        res = supabase.table("inventory_match").select("ebay_id,shopify_id").eq("business_id", business_id)\
+            .in_("ebay_id", item_ids[i:i+200]).execute()
+        for r in (res.data or []):
+            if r.get("shopify_id"):
+                match_by_ebay.setdefault(str(r["ebay_id"]), str(r["shopify_id"]))
+    listing_by_ebay = {}
+    for i in range(0, len(item_ids), 200):
+        res = supabase.table("listings").select("ebay_item_id,shopify_product_id")\
+            .in_("ebay_item_id", item_ids[i:i+200]).execute()
+        for r in (res.data or []):
+            if r.get("shopify_product_id"):
+                listing_by_ebay.setdefault(str(r["ebay_item_id"]), str(r["shopify_product_id"]))
+
+    rows = []
+    for r in ended:
+        iid = str(r.get("item_id") or "")
+        if not iid or iid in sold or iid in handled:
+            continue
+        if r.get("norm_title") and r["norm_title"] in active_titles:
+            continue
+        shop = None
+        sid = match_by_ebay.get(iid)
+        if sid:
+            shop = shop_by_variant.get(sid) or shop_by_product.get(sid)
+        if not shop and iid in listing_by_ebay:
+            shop = shop_by_product.get(listing_by_ebay[iid])
+        if not shop or (shop.get("status") or "").lower() != "active":
+            continue
+        rows.append({
+            "item_id": iid,
+            "title": r.get("title"),
+            "sku": r.get("sku_override") or r.get("sku"),
+            "price": r.get("price"),
+            "listing_status": r.get("listing_status"),
+            "ended_at": r.get("end_time") or r.get("updated_at"),
+            "gallery_url": r.get("gallery_url"),
+            "shopify_product_id": str(shop.get("product_id")),
+            "shopify_title": shop.get("title"),
+            "shopify_qty": shop.get("quantity"),
+        })
+    return rows
+
+@app.get("/api/shopify-sync/ended-ebay")
+async def shopify_sync_ended_ebay(request: Request, days: int = 30):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio
+    rows = await asyncio.to_thread(_build_ended_ebay_rows, business_id, max(1, min(int(days or 30), 180)))
+    return {"rows": rows}
+
+@app.post("/api/shopify-sync/ended-ebay/end")
+async def shopify_sync_ended_ebay_end(request: Request, body: dict = Body(...)):
+    """Archives the matched Shopify product for each given eBay item id (live
+    Shopify write), records it so the row drops off this list, and updates the
+    local shopify_inventory mirror so the Inventory page agrees immediately."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    items = body.get("items") or []
+    if not items:
+        raise HTTPException(400, "items required")
+    import asyncio
+    results = []
+    for it in items:
+        iid = str(it.get("item_id") or "")
+        pid = str(it.get("shopify_product_id") or "")
+        if not iid or not pid:
+            results.append({"item_id": iid, "ok": False, "error": "missing ids"})
+            continue
+        try:
+            await asyncio.to_thread(_shopify_set_product_status, business_id, pid, "archived")
+            supabase.table("shopify_inventory").update({"status": "archived"})\
+                .eq("business_id", business_id).eq("product_id", pid).execute()
+            supabase.table("ebay_ended_shopify_actions").upsert({
+                "business_id": business_id, "item_id": iid, "action": "ended_shopify",
+                "shopify_product_id": pid}, on_conflict="business_id,item_id").execute()
+            results.append({"item_id": iid, "ok": True})
+        except Exception as ex:
+            results.append({"item_id": iid, "ok": False, "error": str(ex)[:200]})
+    return {"results": results}
+
+@app.post("/api/shopify-sync/ended-ebay/dismiss")
+async def shopify_sync_ended_ebay_dismiss(request: Request, body: dict = Body(...)):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    iid = str(body.get("item_id") or "")
+    if not iid:
+        raise HTTPException(400, "item_id required")
+    supabase.table("ebay_ended_shopify_actions").upsert({
+        "business_id": business_id, "item_id": iid, "action": "dismissed"},
+        on_conflict="business_id,item_id").execute()
+    return {"ok": True}
+
 @app.post("/api/ebay-sync/queue/{row_id}/dismiss")
 async def ebay_sync_queue_dismiss(row_id: str, request: Request):
     """Manually removes one row from the pending eBay-sync queue without
