@@ -171,7 +171,7 @@ tr.ignored:hover td { opacity: 0.85; }
 
   <div style="margin-top:40px;border-top:1px solid var(--border);padding-top:24px;">
     <h2 style="font-size:16px;margin-bottom:2px;">🛑 Ended on eBay — still live on Shopify</h2>
-    <div class="sub">Listings you pulled off eBay by hand (Ended/Unsold in the last <span id="ended-days-label">30</span> days, no sale against them, not relisted) whose matched Shopify product is still active. Reads local data only. "End on Shopify" archives the product (live write) and removes it from this list.</div>
+    <div class="sub">Listings you pulled off eBay by hand (Ended/Unsold in the last <span id="ended-days-label">30</span> days, no sale against them, not relisted) whose matched Shopify product is still active. Each row is live-checked against Shopify when this loads, so anything you already archived or zeroed by hand drops off automatically. "End on Shopify" archives the product (live write) and removes it from this list.</div>
     <div class="filter-bar">
       <span id="ended-status" style="font-size:12px;color:var(--muted);"></span>
       <select class="field-input" id="ended-days" onchange="loadEndedEbay()" style="width:auto;">

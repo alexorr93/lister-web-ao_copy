@@ -735,6 +735,53 @@ def _build_ended_ebay_rows(business_id: str, days: int = 30) -> list:
         })
     return rows
 
+def _live_verify_ended_rows(business_id: str, rows: list) -> list:
+    """The local shopify_inventory mirror can be hours stale -- a product the
+    user already archived or zeroed by hand on Shopify still shows active/1
+    here until the next sync (confirmed real case: Cummins chisel set). So
+    check each candidate live against Shopify (small N), correct the local
+    mirror, and drop anything that's already handled on Shopify's side."""
+    import requests as _req
+    if not rows:
+        return rows
+    settings = get_ebay_settings(business_id)
+    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+    if not domain:
+        return rows
+    token = get_shopify_access_token(business_id)
+    headers = {"X-Shopify-Access-Token": token}
+    kept = []
+    for r in rows[:60]:
+        pid = r.get("shopify_product_id")
+        try:
+            resp = _req.get(f"https://{domain}/admin/api/2024-10/products/{pid}.json",
+                            headers=headers, params={"fields": "id,status,variants"}, timeout=15)
+            if resp.status_code == 401:
+                headers["X-Shopify-Access-Token"] = get_shopify_access_token(business_id, force_refresh=True)
+                resp = _req.get(f"https://{domain}/admin/api/2024-10/products/{pid}.json",
+                                headers=headers, params={"fields": "id,status,variants"}, timeout=15)
+            if resp.status_code == 404:
+                supabase.table("shopify_inventory").update({"status": "deleted"}).eq("business_id", business_id).eq("product_id", pid).execute()
+                continue
+            if resp.status_code != 200:
+                r["live_check"] = f"HTTP {resp.status_code}"
+                kept.append(r)
+                continue
+            prod = resp.json().get("product") or {}
+            status = (prod.get("status") or "").lower()
+            qty = sum(int(v.get("inventory_quantity") or 0) for v in (prod.get("variants") or []))
+            supabase.table("shopify_inventory").update({"status": status, "quantity": qty}).eq("business_id", business_id).eq("product_id", pid).execute()
+            if status != "active" or qty <= 0:
+                continue  # already ended / zeroed on Shopify by hand -- nothing to do
+            r["shopify_qty"] = qty
+            r["live_check"] = "ok"
+            kept.append(r)
+        except Exception as ex:
+            r["live_check"] = str(ex)[:80]
+            kept.append(r)
+    kept.extend(rows[60:])
+    return kept
+
 @app.get("/api/shopify-sync/ended-ebay")
 async def shopify_sync_ended_ebay(request: Request, days: int = 30):
     business_id = require_auth(request)
@@ -742,6 +789,7 @@ async def shopify_sync_ended_ebay(request: Request, days: int = 30):
         raise HTTPException(401, "Unauthorized")
     import asyncio
     rows = await asyncio.to_thread(_build_ended_ebay_rows, business_id, max(1, min(int(days or 30), 180)))
+    rows = await asyncio.to_thread(_live_verify_ended_rows, business_id, rows)
     return {"rows": rows}
 
 @app.post("/api/shopify-sync/ended-ebay/end")
