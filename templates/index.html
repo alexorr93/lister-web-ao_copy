@@ -1205,9 +1205,17 @@ document.addEventListener('DOMContentLoaded', function() {
   syncPricingModeUI();
 });
 
+// Bumped by every local mutation (photo delete / make-main etc). A poll that
+// STARTED before the mutation carries pre-mutation data; if it lands after,
+// it would silently revert the UI (real case: photo delete returned 200, the
+// concurrent auto-refresh overwrote the tile with the old photo, user clicked
+// delete again on a photo that was already gone -> 404). Discard those.
+let listingsMutationEpoch = 0;
 async function loadListings() {
   try {
+    const epochAtStart = listingsMutationEpoch;
     const fresh = await api('GET', '/api/listings');
+    if (epochAtStart !== listingsMutationEpoch) { return loadListings(); }
     if (seenListingIds === null) {
       // First load this session/page-open -- just establish the baseline.
       // Nothing here gets auto-assigned; these items were already in the
@@ -1709,6 +1717,7 @@ async function makeMainPhoto(id) {
   const chosen = photos[idx];
   if (!chosen || !chosen.id) return;
   try {
+    listingsMutationEpoch++;
     await api('PATCH', `/api/listings/${id}`, {field: 'photo_id', value: chosen.id});
     const l = listings.find(x => String(x.id) === id);
     if (l) {
@@ -1734,6 +1743,7 @@ async function deletePhotoFromTile(id) {
   if (!chosen || !chosen.id) return;
   if (!confirm('Delete this photo? This can\'t be undone.')) return;
   try {
+    listingsMutationEpoch++;
     const r = await api('DELETE', `/api/listings/${id}/photos/${chosen.id}`);
     const l = listings.find(x => String(x.id) === id);
     if (l) {
@@ -1743,6 +1753,12 @@ async function deletePhotoFromTile(id) {
     toast('Photo deleted ✓');
     renderTiles();
   } catch(e) {
+    if (/not found in this listing/i.test(e.message)) {
+      // Already gone server-side (earlier click succeeded but the UI was reverted by a stale poll).
+      toast('Photo was already deleted — refreshing');
+      await loadListings();
+      return;
+    }
     toast('Failed to delete photo: ' + e.message, 'error');
   }
 }
