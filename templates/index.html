@@ -859,12 +859,40 @@ let changedFields  = loadFieldSet('lister_changed_fields');
 function markFieldReviewed(key) {
   reviewedFields.add(key);
   localStorage.setItem('lister_reviewed_fields', JSON.stringify([...reviewedFields]));
+  persistFieldMark(key, 'reviewed');
 }
 function markFieldChanged(key) {
   changedFields.add(key);
   reviewedFields.delete(key);
   localStorage.setItem('lister_changed_fields', JSON.stringify([...changedFields]));
   localStorage.setItem('lister_reviewed_fields', JSON.stringify([...reviewedFields]));
+  persistFieldMark(key, 'changed');
+}
+// Server-side copy of the yellow/pink marks (listings.field_marks). localStorage
+// is per-origin, so marks made on one Railway domain / browser never showed on
+// another -- the "price colour keeps disappearing" bug. The server copy is
+// merged into the local sets on every /api/listings load (see loadListings).
+function persistFieldMark(key, state) {
+  const i = key.indexOf('_');
+  if (i < 1) return;
+  const id = key.slice(0, i), field = key.slice(i + 1);
+  fetch('/api/listings/' + id + '/field-mark', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({field: field, state: state})}).catch(function() {});
+}
+function mergeServerFieldMarks(rows) {
+  let touched = false;
+  (rows || []).forEach(function(l) {
+    const m = l.field_marks || {};
+    Object.keys(m).forEach(function(f) {
+      const key = fieldKey(l.id, f);
+      if (m[f] === 'changed' && !changedFields.has(key)) { changedFields.add(key); reviewedFields.delete(key); touched = true; }
+      else if (m[f] === 'reviewed' && !changedFields.has(key) && !reviewedFields.has(key)) { reviewedFields.add(key); touched = true; }
+    });
+  });
+  if (touched) {
+    localStorage.setItem('lister_changed_fields', JSON.stringify([...changedFields]));
+    localStorage.setItem('lister_reviewed_fields', JSON.stringify([...reviewedFields]));
+  }
 }
 
 // A listing's ebay_sku is "{lotSku}-{listingId}" once a real lot has been picked
@@ -1216,6 +1244,7 @@ async function loadListings() {
     const epochAtStart = listingsMutationEpoch;
     const fresh = await api('GET', '/api/listings');
     if (epochAtStart !== listingsMutationEpoch) { return loadListings(); }
+    mergeServerFieldMarks(fresh);
     if (seenListingIds === null) {
       // First load this session/page-open -- just establish the baseline.
       // Nothing here gets auto-assigned; these items were already in the

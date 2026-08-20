@@ -2627,6 +2627,34 @@ async def update_listing(item_id: str, body: UpdateField, request: Request):
     except Exception as e:
         raise HTTPException(500, str(e))
 
+@app.post("/api/listings/{item_id}/field-mark")
+async def set_field_mark(item_id: str, body: dict = Body(...), request: Request = None):
+    """Persists the per-field review colour (yellow = changed, pink = reviewed)
+    on the listing row itself. These used to live only in the browser's
+    localStorage, which is per-origin -- so they vanished whenever the app
+    was opened on a different Railway domain / browser / device and looked
+    like the feature kept breaking. Now they follow the listing everywhere."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    field = str(body.get("field") or "").strip()
+    state = body.get("state")  # "changed" | "reviewed" | None (clear)
+    if not field or state not in ("changed", "reviewed", None):
+        raise HTTPException(400, "field and state (changed|reviewed|null) required")
+    res = supabase.table("listings").select("field_marks").eq("id", item_id).eq("business_id", business_id).limit(1).execute()
+    if not res.data:
+        raise HTTPException(404, "listing not found")
+    marks = dict(res.data[0].get("field_marks") or {})
+    # changed is sticky: a later "reviewed" click must not downgrade it
+    if state == "reviewed" and marks.get(field) == "changed":
+        return {"ok": True, "field_marks": marks}
+    if state is None:
+        marks.pop(field, None)
+    else:
+        marks[field] = state
+    supabase.table("listings").update({"field_marks": marks}).eq("id", item_id).execute()
+    return {"ok": True, "field_marks": marks}
+
 class AssignLot(BaseModel):
     lot_sku: str
     suffix: Optional[str] = None
