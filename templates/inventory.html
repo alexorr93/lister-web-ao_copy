@@ -141,13 +141,31 @@ function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// The table data is inlined into the page by the server (built and kept
+// warm in the background), so the first paint happens during parse with no
+// fetch. loadInventory() is then only for (a) the 20-min background refresh,
+// (b) after an action that changed the table. Swaps are whole-table: the old
+// table stays on screen until the new data has arrived.
+const INLINE_INVENTORY = {{ inline_inventory_json | safe }};
+let inventoryBuiltAt = 0;
 async function loadInventory(forceRefresh) {
-  // Cached server-side for 10 min; forceRefresh=1 bypasses (used after syncs
-  // so the table reflects what a sync just changed instead of the cache).
-  const r = await fetch('/api/inventory' + (forceRefresh ? '?refresh=1' : ''));
+  const r = await fetch('/api/inventory' + (forceRefresh ? '?refresh=1' : ''), {cache: 'no-store'});
   const data = await r.json();
+  if (!forceRefresh && data.built_at && data.built_at <= inventoryBuiltAt) return; // nothing newer
   inventory = data.inventory || [];
+  inventoryBuiltAt = data.built_at || Math.floor(Date.now() / 1000);
   renderTable();
+}
+function bootInventory() {
+  if (INLINE_INVENTORY && INLINE_INVENTORY.inventory) {
+    inventory = INLINE_INVENTORY.inventory;
+    inventoryBuiltAt = INLINE_INVENTORY.built_at || 0;
+    renderTable();
+  } else {
+    loadInventory(); // only right after a deploy, before the warm worker has built it
+  }
+  setInterval(function() { if (!document.hidden) loadInventory(); }, 20 * 60 * 1000);
+  document.addEventListener('visibilitychange', function() { if (!document.hidden) loadInventory(); });
 }
 
 async function syncInventory() {
@@ -649,7 +667,7 @@ async function promptPushQuantity(rowId, ebayItemId, title) {
   }
 }
 
-loadInventory();
+bootInventory();
 loadHiddenInventory();
 </script>
 </body>

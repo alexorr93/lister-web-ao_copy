@@ -3752,7 +3752,16 @@ async def inventory_page(request: Request):
     if nav is None:
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/login", status_code=302)
-    return templates.TemplateResponse("inventory.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "inventory"})
+    # Ship the already-built table WITH the page: the warm worker keeps
+    # _inventory_page_cache populated for every business, so the HTML arrives
+    # with the data inlined and the table paints during parse -- no second
+    # round-trip, no spinner. Page then swaps in a fresh copy every 20 min
+    # in the background (see inventory.html).
+    import json as _json
+    business_id = require_auth(request)
+    hit = _inventory_page_cache.get(business_id) if business_id else None
+    inline = _json.dumps(hit[1]) if hit else "null"
+    return templates.TemplateResponse("inventory.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "inventory", "inline_inventory_json": inline.replace("</", "<\\/")})
 
 @app.get("/shopify-sync", response_class=HTMLResponse)
 async def shopify_sync_page(request: Request):
@@ -13504,7 +13513,7 @@ async def push_inventory_quantity(row_id: str, body: InventoryQuantityPush, requ
     return {"ok": True, "ebay_available_qty": body.quantity, "shopify_qty": body.quantity}
 
 _inventory_page_cache = {}  # business_id -> (built_at_epoch, payload)
-_INVENTORY_CACHE_TTL = 600  # 10 min; underlying data only moves when syncs run
+_INVENTORY_CACHE_TTL = 1200  # 20 min; warm worker refreshes at 18 so a page load never sees it expire
 
 @app.get("/api/inventory")
 async def list_inventory(request: Request, refresh: int = 0):
@@ -13562,7 +13571,7 @@ def _kick_inventory_rebuild(business_id: str) -> None:
 async def inventory_cache_warm_worker():
     """Keeps /api/inventory warm so a human never waits on the 10s build:
     builds for every business ~15s after boot (every deploy used to start
-    cold), then refreshes any entry older than 8 min so the 10-min TTL is
+    cold), then refreshes any entry older than 18 min so the 20-min TTL is
     never actually reached by a page load."""
     import asyncio, time as _t
     await asyncio.sleep(15)
@@ -13572,7 +13581,7 @@ async def inventory_cache_warm_worker():
             for b in (res.data or []):
                 bid = b["id"]
                 hit = _inventory_page_cache.get(bid)
-                if not hit or (_t.time() - hit[0]) > 480:
+                if not hit or (_t.time() - hit[0]) > 1080:
                     _kick_inventory_rebuild(bid)
         except Exception as ex:
             print(f"inventory warm worker: {ex}")
