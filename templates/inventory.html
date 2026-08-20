@@ -336,7 +336,13 @@ function renderTable() {
   let html = `<table><thead><tr>
     <th></th>${th('title','Title')}${th('ebay_item_id','eBay Item ID')}<th onclick="setInvSort('ebay_sku')" style="cursor:pointer;width:90px;">eBay SKU${invSortKey==='ebay_sku' ? (invSortDir===1?' ▲':' ▼') : ''}</th>${th('ebay_qty','eBay Qty')}${th('ebay_shipping_cost','Ship $')}${th('ebay_created_at','Created')}${th('shopify_product_id','Shopify Product ID')}<th onclick="setInvSort('shopify_sku')" style="cursor:pointer;width:90px;">Shopify SKU${invSortKey==='shopify_sku' ? (invSortDir===1?' ▲':' ▼') : ''}</th>${th('shopify_qty','Shopify Qty')}${th('shopify_price','Shopify Price')}<th>Status</th><th>Matched By</th><th>HD_ID</th><th>Action</th><th>Match</th><th>Hide</th>
   </tr></thead><tbody>`;
-  for (const r of filtered) {
+  // 6,000+ rows with an <img> each used to be built into the DOM in one shot --
+  // the server answers in <1s (cached) but the browser then spent several
+  // seconds laying it out. Render the first chunk immediately and append the
+  // rest as the user scrolls near the bottom.
+  const INV_CHUNK = 200;
+  const renderRow = (r) => {
+    let rowHtml = '';
     const status = !r.ebay_item_id ? '<span class="missing">Shopify only</span>'
       : !r.shopify_product_id ? '<span class="missing">eBay only</span>'
       : r.qty_variance ? '<span class="warn">Qty mismatch</span>'
@@ -377,7 +383,7 @@ function renderTable() {
       ? `<img src="${escapeHtml(r.ebay_gallery_url)}" style="width:36px;height:36px;object-fit:cover;border-radius:4px;" loading="lazy" onerror="this.style.display='none'"/>`
       : '';
     const createdCell = r.ebay_created_at ? escapeHtml(String(r.ebay_created_at).slice(0, 10)) : '—';
-    html += `<tr>
+    rowHtml += `<tr>
       <td>${photoCell}</td>
       <td>${escapeHtml(r.title)}</td>
       <td class="muted">${escapeHtml(r.ebay_item_id || '—')}</td>
@@ -396,10 +402,41 @@ function renderTable() {
       <td>${matchCell}</td>
       <td><button class="btn" style="font-size:11px;padding:4px 8px;color:var(--red,#ef4444);" onclick="hideInventoryRow(this, '${r.id}', '${escapeHtml(r.title).replace(/'/g, "\\'")}')" title="Permanently removes this row from the list. Undo any time from the Unhide panel at the top.">🙈 Hide</button></td>
     </tr>`;
-  }
+    return rowHtml;
+  };
+  html += filtered.slice(0, INV_CHUNK).map(renderRow).join('');
   html += '</tbody></table>';
-  document.getElementById('table-area').innerHTML = html;
+  const area = document.getElementById('table-area');
+  area.innerHTML = html;
+  invRenderedUpTo = Math.min(INV_CHUNK, filtered.length);
+  invFilteredRows = filtered;
+  invRenderRow = renderRow;
+  if (filtered.length > INV_CHUNK) {
+    const more = document.createElement('div');
+    more.id = 'inv-more';
+    more.className = 'muted';
+    more.style.cssText = 'padding:10px;font-size:12px;text-align:center;';
+    more.textContent = `Showing ${invRenderedUpTo} of ${filtered.length} — scroll for more`;
+    area.appendChild(more);
+  }
 }
+let invRenderedUpTo = 0, invFilteredRows = [], invRenderRow = null;
+function appendMoreInventoryRows() {
+  if (!invRenderRow || invRenderedUpTo >= invFilteredRows.length) return;
+  const tbody = document.querySelector('#table-area tbody');
+  if (!tbody) return;
+  const next = invFilteredRows.slice(invRenderedUpTo, invRenderedUpTo + 200);
+  tbody.insertAdjacentHTML('beforeend', next.map(invRenderRow).join(''));
+  invRenderedUpTo += next.length;
+  const more = document.getElementById('inv-more');
+  if (more) {
+    if (invRenderedUpTo >= invFilteredRows.length) more.remove();
+    else more.textContent = `Showing ${invRenderedUpTo} of ${invFilteredRows.length} — scroll for more`;
+  }
+}
+window.addEventListener('scroll', function() {
+  if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 800) appendMoreInventoryRows();
+}, {passive: true});
 
 async function publishRowToShopify(btn, listingId) {
   if (!confirm('Publish this item to Shopify now, using its saved title/price/photos from Lister?')) return;
