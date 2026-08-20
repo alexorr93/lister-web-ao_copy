@@ -13808,7 +13808,7 @@ def _run_shopify_sale(business_id: str, mode: str, pct: float):
                 r = _req.post(api, headers=headers, json={"query": query, "variables": variables or {}}, timeout=30)
                 if r.status_code == 200:
                     return r.json()
-                if r.status_code == 429:
+                if r.status_code == 429 or r.status_code >= 500:
                     _time.sleep(min(float(r.headers.get("Retry-After", 2 ** attempt)), 60))
                     continue
                 if r.status_code == 401:
