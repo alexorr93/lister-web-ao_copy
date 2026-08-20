@@ -10773,6 +10773,7 @@ async def sync_inventory_now(request: Request):
         try:
             result = await asyncio.to_thread(sync_inventory, business_id)
             _sync_status[business_id] = {"running": False, "result": result, "started_at": _sync_status.get(business_id, {}).get("started_at"), "finished_at": _dt.datetime.utcnow().isoformat()}
+            _kick_inventory_rebuild(business_id)  # table changed -- refresh the page cache now, not in 10 min
         except Exception as e:
             _sync_status[business_id] = {"running": False, "result": {"error": str(e)}, "started_at": _sync_status.get(business_id, {}).get("started_at"), "finished_at": _dt.datetime.utcnow().isoformat()}
     asyncio.create_task(_run())
