@@ -80,20 +80,6 @@ tr.ignored:hover td { opacity: 0.85; }
   <h1>Sync</h1>
   <div class="sub" style="margin-bottom:24px;">eBay ↔ Shopify quantity sync, both directions.</div>
 
-  <div style="margin-bottom:32px;">
-    <h2 style="font-size:16px;margin-bottom:2px;">💸 Storewide Shopify Sale</h2>
-    <div class="sub">Applies a % off every Shopify product (full price shows as strikethrough). New products published mid-sale get it automatically. Revert restores every original price and clears all strikethroughs — including leftovers from the old discount app. Free — this edits your products directly, no app needed.</div>
-    <div class="filter-bar">
-      <div>
-        <div class="field-label">Sale %</div>
-        <input type="number" class="field-input" id="sale-pct" min="1" max="89" step="1" placeholder="e.g. 10" style="width:90px;" autocomplete="off"/>
-      </div>
-      <button class="btn btn-primary" onclick="startSale('apply')" id="sale-apply-btn">🏷️ Apply to Whole Store <span style="font-size:10px;opacity:.8;">(live — writes to Shopify)</span></button>
-      <button class="btn" onclick="startSale('revert')" id="sale-revert-btn" title="Restores every original price, clears all strikethroughs">↩️ End Sale / Revert All</button>
-      <span id="sale-status" style="font-size:12px;color:var(--muted);"></span>
-    </div>
-  </div>
-
   <div>
     <h2 style="font-size:16px;margin-bottom:2px;">🏷️ eBay (checks automatically — pushes manually)</h2>
     <div class="sub">Items sold on Shopify, matched to eBay via a confirmed HDID (a locked pairing — anything sold with no HDID is skipped, never guessed at). Checked automatically in the background every 20 minutes, so this list is already here when you open the page. Pushing to eBay is still one click at a time, on purpose, while this is being proven out.</div>
@@ -195,6 +181,19 @@ tr.ignored:hover td { opacity: 0.85; }
       <button class="btn btn-orange" id="ended-end-all-btn" onclick="endSelectedOnShopify()" style="display:none;">⛔ End Selected on Shopify <span style="font-size:10px;opacity:.8;">(live API — writes to Shopify)</span></button>
     </div>
     <div id="ended-table-area"><div class="empty">Loading...</div></div>
+  </div>
+  <div style="margin-top:40px;border-top:1px solid var(--border);padding-top:24px;">
+    <h2 style="font-size:16px;margin-bottom:2px;">💸 Storewide Shopify Sale</h2>
+    <div class="sub">Applies a % off every Shopify product (full price shows as strikethrough). New products published mid-sale get it automatically. Revert restores every original price and clears all strikethroughs — including leftovers from the old discount app. Free — this edits your products directly, no app needed.</div>
+    <div class="filter-bar">
+      <div>
+        <div class="field-label">Sale %</div>
+        <input type="number" class="field-input" id="sale-pct" min="1" max="89" step="1" placeholder="e.g. 10" style="width:90px;" autocomplete="off"/>
+      </div>
+      <button class="btn btn-primary" onclick="startSale('apply')" id="sale-apply-btn">🏷️ Apply to Whole Store <span style="font-size:10px;opacity:.8;">(live — writes to Shopify)</span></button>
+      <button class="btn" onclick="startSale('revert')" id="sale-revert-btn" title="Restores every original price, clears all strikethroughs">↩️ End Sale / Revert All</button>
+      <span id="sale-status" style="font-size:12px;color:var(--muted);"></span>
+    </div>
   </div>
 </div>
 
