@@ -3971,7 +3971,27 @@ async function initTodayFilterFromSettings() {
     }
   } catch(e) { /* non-critical -- just defaults to off */ }
 }
-initTodayFilterFromSettings().then(() => loadListings());
+// Pre-built tiles (8/21): the server inlines listings + the today-filter flag
+// into this page, so the grid paints right here during parse instead of after
+// settings -> listings -> stats round trips (~5s on desktop). The normal
+// loadListings() still runs right after as a background refresh and keeps
+// polling every 30s -- this only removes the blank wait on open.
+const INLINE_LISTINGS = {{ inline_listings_json | safe }};
+if (INLINE_LISTINGS && Array.isArray(INLINE_LISTINGS.listings)) {
+  try {
+    if (INLINE_LISTINGS.today_only) {
+      todayOnly = true;
+      document.getElementById('today-filter-btn').classList.add('active');
+    }
+    mergeServerFieldMarks(INLINE_LISTINGS.listings);
+    listings = INLINE_LISTINGS.listings;
+    seenListingIds = new Set(listings.map(l => String(l.id)));
+    renderTiles();
+  } catch(e) { console.error('inline intake paint failed', e); }
+  loadListings();
+} else {
+  initTodayFilterFromSettings().then(() => loadListings());
+}
 initTileListeners();
 loadShippingPolicyOptions();
 loadLotSkus();

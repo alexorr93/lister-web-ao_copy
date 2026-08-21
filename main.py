@@ -2460,7 +2460,21 @@ async def dashboard(request: Request):
     if nav is None:
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/login", status_code=302)
-    return templates.TemplateResponse("index.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "intake"})
+    # Pre-build the Intake tiles server-side and inline them (8/21): the page
+    # paints during HTML parse instead of after settings -> listings -> stats
+    # round trips. Falls back to the old fetch-on-load path if the build fails.
+    import asyncio, json as _json
+    inline = "null"
+    try:
+        bid = nav["business_id"]
+        listings, settings = await asyncio.gather(
+            asyncio.to_thread(_build_listings_payload, bid, False),
+            asyncio.to_thread(get_ebay_settings, bid),
+        )
+        inline = _json.dumps({"listings": listings, "today_only": (settings or {}).get("INTAKE_TODAY_ONLY_FILTER") == "true"})
+    except Exception as e:
+        print(f"intake inline build failed, falling back to fetch-on-load: {e}")
+    return templates.TemplateResponse("index.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "intake", "inline_listings_json": inline.replace("</", "<\\/")})
 
 # ── API: LISTINGS ─────────────────────────────────────────────── #
 
@@ -2475,12 +2489,13 @@ async def get_shipping_policy_options(request: Request):
         "options": EBAY_SHIPPING_POLICY_OPTIONS,
     }
 
-@app.get("/api/listings")
-async def get_listings(request: Request, archived: bool = False):
-    business_id = require_auth(request)
-    if not business_id:
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
-    try:
+def _build_listings_payload(business_id: str, archived: bool = False) -> list:
+    """Everything GET /api/listings returns, as plain data. Split out (8/21) so
+    the Intake page route can build it server-side and INLINE it into the HTML
+    -- same pre-built pattern as Inventory -- instead of the browser fetching
+    settings, then listings, then stats in series before the first tile paints
+    (measured ~5s on desktop). Raises on error; callers decide how to report."""
+    if True:
         q = supabase.table("listings").select("*").eq("business_id", business_id)
         q = q.eq("status", "archived") if archived else q.neq("status", "archived")
         res = q.order("created_at", desc=True).execute()
@@ -2580,6 +2595,16 @@ async def get_listings(request: Request, archived: bool = False):
             lt = str(l.get("listing_type") or "").strip().lower()
             if lt not in ("auction", "fixed"):
                 l["listing_type"] = "fixed"
+        return listings
+
+@app.get("/api/listings")
+async def get_listings(request: Request, archived: bool = False):
+    business_id = require_auth(request)
+    if not business_id:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        import asyncio
+        listings = await asyncio.to_thread(_build_listings_payload, business_id, archived)
         return JSONResponse(listings)
     except Exception as e:
         import traceback; traceback.print_exc()
