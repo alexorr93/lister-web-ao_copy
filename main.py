@@ -11339,10 +11339,22 @@ def _shopify_sync_refresh_work(business_id: str, items: list) -> dict:
                               # timestamp keeps aging naturally toward the retry window,
                               # instead of being refreshed every run and never retried.
     for row in (existing_res.data or []):
-        if row.get("ebay_live_qty") is not None:
-            known_ebay[row["norm_title"]] = {"ebay_live_qty": row.get("ebay_live_qty"), "ebay_ended": bool(row.get("ebay_ended"))}
-            continue
         updated_at = row.get("updated_at")
+        if row.get("ebay_live_qty") is not None:
+            # Reuse a stored eBay answer ONLY if it is fresh. Before 8/21 any
+            # non-null value was reused forever, so a wrong/stale qty (R950011
+            # stuck at 3 while the listing was Ended with 0 left) was never
+            # re-checked by any later sync -- eBay sales never lowered Shopify.
+            fresh = False
+            if updated_at:
+                try:
+                    age = now_check - _dt.datetime.fromisoformat(updated_at.replace("Z", "+00:00")).replace(tzinfo=None)
+                    fresh = age.total_seconds() < 30 * 60
+                except Exception:
+                    fresh = False
+            if fresh:
+                known_ebay[row["norm_title"]] = {"ebay_live_qty": row.get("ebay_live_qty"), "ebay_ended": bool(row.get("ebay_ended"))}
+            continue
         if updated_at:
             try:
                 age = now_check - _dt.datetime.fromisoformat(updated_at.replace("Z", "+00:00")).replace(tzinfo=None)
