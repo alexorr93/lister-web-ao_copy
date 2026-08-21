@@ -771,6 +771,12 @@ def _build_ended_ebay_rows(business_id: str, days: int = 30) -> list:
             shop = shop_by_product.get(listing_by_ebay[iid])
         if not shop or (shop.get("status") or "").lower() != "active":
             continue
+        # 0 stock and "not active" are the same thing for this list's purpose --
+        # nothing can accidentally sell either way. Filter here (not just in
+        # _live_verify_ended_rows below, which only checks the first 60 rows)
+        # so a zero-stock item past that cap never shows as needing action.
+        if int(shop.get("quantity") or 0) <= 0:
+            continue
         rows.append({
             "item_id": iid,
             "title": r.get("title"),
