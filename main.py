@@ -182,13 +182,14 @@ async def auto_fill_worker():
         await asyncio.sleep(8)
 
 async def _oneshot_archive_shopify_duplicates():
-    """ONE-SHOT cleanup (8/21 v2): archive specific orphan duplicate Shopify
-    products by hardcoded product ID. Previous version failed because the DB
-    rows it needed to look up had already been deleted. This version just
-    archives the known list directly."""
+    """ONE-SHOT v3 (8/21 late): archive the 26 Shopify-only products the user
+    explicitly marked YES-delete in their reviewed CSV. All confirmed no-hd_id,
+    Shopify-only items. Product IDs from the verified DB query (user's Excel
+    copy mangled IDs to scientific notation; these are the originals matched
+    back by title+sku)."""
     import asyncio, requests as _req
     await asyncio.sleep(20)
-    flag_key = "SHOPIFY_DUPE_CLEANUP_V2_DONE_20260821"
+    flag_key = "SHOPIFY_USER_YES_DELETE_DONE_20260821"
     try:
         flag = (supabase.table("app_settings").select("value")
                 .eq("key", flag_key).limit(1).execute()).data
@@ -197,44 +198,60 @@ async def _oneshot_archive_shopify_duplicates():
     except Exception:
         pass
 
-    DUPE_PRODUCT_IDS = [
-        8801003536555,8896748617899,8896749797547,8896745373867,8896744554667,
-        8896748257451,8896744259755,8896745996459,8896741703851,8896750518443,
-        8896750551211,8891076640939,8803440427179,8883029442731,8883029409963,
-        8896745734315,8896748126379,8896741769387,8801498038443,8802997567659,
-        8803656007851,8917415329963,8896741834923,8896748191915,8801280950443,
-        8803074998443,8803437150379,8803438592171,8803437871275,8894325031083,
-        8896752451755,8802157232299,8802155102379,8905252864171,8905250537643,
-        8905250668715,8803915333803,8803015229611,8896778240171,8803115827371,
-        8803115729067,8896741408939,8801328988331,8896744390827,8896748290219,
+    YES_DELETE_PRODUCT_IDS = [
+        8802624831659,  # Rexroth Hydraulic Directional Control Valve R901169993
+        8803044524203,  # NEW! NOTIFIER CPU2-640
+        8889040339115,  # GROMAX DA40-5480/P-ER32
+        8804029923499,  # 10x ABC Industries MineVent Ventatex 885
+        8802048671915,  # NEW NUMATIC 081SS600K000030 SOLENOID VALVE
+        8802653307051,  # NEW WEG W22 3HP Electric Motor
+        8802649342123,  # Mercedes-Benz alternator A 015 154 23 02
+        8801180450987,  # Cummins Pressure Temperature Sensor 5698456
+        8802142388395,  # Standard Gage Versa-Dial
+        8801362641067,  # VIS 1-2in Thread Micrometer
+        8802074853547,  # Mitsubishi SVJBR-082SM Lathe Tool Turner
+        8803497115819,  # Parker DSL201CR Solenoid Cartridge Valve
+        8804396564651,  # 4 PC Eaton Crouse-Hinds C38
+        8801416249515,  # Cartridge - New Air Dryer AC2001C
+        8803953377451,  # Federal HEMCO 1E Dial Indicator
+        8802375467179,  # Sandvik 5/8 Shank Kennametal SVABR 103C-S
+        8803116187819,  # SNAP ON C-64B RED WRENCH KIT BAG
+        8801204207787,  # Snap On T15 & T30 TORX Screwdriver
+        8889040502955,  # E-T-A 413-K14-LN2 Circuit Breaker
+        8803486564523,  # KUBOTA OEM V1311-44130 V-BELT
+        8803365093547,  # METEORLITE SY361100-A
+        8802462204075,  # FEDERAL Dial Indicator 23Q
+        8801772667051,  # SG Tool Aid PICK SET HOOKED 2PC
+        8801108754603,  # SNAP ON PH51C AIR HAMMER BIT
+        8801022247083,  # SNAP-ON SAE HEX WRENCH SET AWEF9K
+        8803042001067,  # Swagelok SS-TBC8 Clamp
     ]
     try:
         res = supabase.table("app_settings").select("business_id").eq("key", "SHOPIFY_STORE_DOMAIN").execute()
         biz_id = (res.data or [{}])[0].get("business_id")
         if not biz_id:
-            print("[dupe-cleanup-v2] no business found"); return
+            print("[yes-delete] no business found"); return
         settings = get_ebay_settings(biz_id)
         domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://","").replace("http://","").strip("/")
         token = get_shopify_access_token(biz_id)
         headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
         archived = 0
-        for pid in DUPE_PRODUCT_IDS:
+        for pid in YES_DELETE_PRODUCT_IDS:
             try:
                 r = _req.put(f"https://{domain}/admin/api/2024-10/products/{pid}.json",
                     headers=headers, json={"product": {"id": pid, "status": "archived"}}, timeout=15)
                 if r.status_code in (200, 201):
                     archived += 1
-                    print(f"[dupe-cleanup-v2] archived {pid}")
+                    print(f"[yes-delete] archived {pid}")
                     supabase.table("shopify_inventory").delete().eq("product_id", str(pid)).execute()
-                    supabase.table("inventory_match").delete().eq("shopify_id", str(pid)).execute()
                 else:
-                    print(f"[dupe-cleanup-v2] {pid}: HTTP {r.status_code}")
+                    print(f"[yes-delete] {pid}: HTTP {r.status_code}")
             except Exception as e:
-                print(f"[dupe-cleanup-v2] {pid} error: {e}")
+                print(f"[yes-delete] {pid} error: {e}")
             await asyncio.sleep(0.4)
-        print(f"[dupe-cleanup-v2] done: {archived}/{len(DUPE_PRODUCT_IDS)} archived")
+        print(f"[yes-delete] done: {archived}/{len(YES_DELETE_PRODUCT_IDS)} archived")
     except Exception as e:
-        print(f"[dupe-cleanup-v2] fatal: {e}")
+        print(f"[yes-delete] fatal: {e}")
     try:
         supabase.table("app_settings").upsert({"business_id": biz_id, "key": flag_key, "value": "done"}).execute()
     except Exception:
