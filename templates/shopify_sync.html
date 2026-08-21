@@ -794,15 +794,22 @@ function renderEbaySyncTable() {
       actionCell = row.pushedDirection === 'shopify'
         ? `<span class="synced-badge">✔ Shopify set to ${row.new_available_qty}</span>`
         : `<span class="synced-badge">✔ eBay set to ${row.new_available_qty}</span>`;
+    } else if (row.status === 'unmatched' && !row.ebay_item_id) {
+      actionCell = `<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;">
+        <span class="muted" style="font-size:12px;">⚠ Sold on Shopify — no eBay listing found for this title</span>
+        ${dismissLink}
+      </div>`;
     } else if (notActive) {
       actionCell = `<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;">
-        <span class="muted" style="font-size:12px;">eBay listing ${escapeHtml(row.live_listing_status)} — no eBay action available</span>
+        <span class="muted" style="font-size:12px;">${row.status === 'unmatched' ? '⚠ No confirmed match — title-matched. ' : ''}eBay listing ${escapeHtml(row.live_listing_status)} — no eBay action available</span>
         ${dismissLink}
       </div>`;
     } else {
+      const unmatchedNote = row.status === 'unmatched' ? `<span class="muted" style="font-size:11px;">⚠ No confirmed match — title-matched, double-check before pushing</span>` : '';
       actionCell = `<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;">
         <button class="btn btn-primary" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOneToEbay(${idx})">Set eBay qty to ${toEbay != null ? toEbay : '?'}</button>
         <button class="btn" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOneToShopify(${idx})">Set Shopify qty to ${toShopify != null ? toShopify : '?'}</button>
+        ${unmatchedNote}
         ${dismissLink}
       </div>`;
     }
@@ -810,7 +817,7 @@ function renderEbaySyncTable() {
     const ebayQtyCell = notActive ? `Ended` : (row.ebay_qty != null ? row.ebay_qty : '—');
     html += `<tr id="ebay-row-${idx}">
       <td class="muted">${escapeHtml(row.sku || '')}</td>
-      <td><a class="item-link" href="https://www.ebay.com/itm/${row.ebay_item_id}" target="_blank">${escapeHtml(row.title || row.ebay_item_id)}</a></td>
+      <td>${row.ebay_item_id ? `<a class="item-link" href="https://www.ebay.com/itm/${row.ebay_item_id}" target="_blank">${escapeHtml(row.title || row.ebay_item_id)}</a>` : escapeHtml(row.title || '')}</td>
       <td class="num${mismatch ? ' no' : ''}${notActive ? ' muted' : ''}">${ebayQtyCell}</td>
       <td class="num">${row.shopify_qty != null ? row.shopify_qty : '—'}</td>
       <td class="num">${row.qty_sold}</td>

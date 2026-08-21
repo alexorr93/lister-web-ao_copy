@@ -395,17 +395,39 @@ def _find_shopify_sales_with_hdid_match(business_id: str, start_iso: str, end_is
 
     rows = []
     unmatched = 0
+    unmatched_rows = []
     for vid, sold in sold_by_variant.items():
         match = matched_by_variant.get(vid)
         if not match or not match.get("ebay_id"):
             unmatched += 1
+            # Don't drop it on the floor: a Shopify sale with no confirmed HDID
+            # used to vanish here with only a counter to show for it (8/21: the
+            # Snap-On C-190B bag sold on Shopify, never appeared anywhere). Fall
+            # back to an exact normalized-title match against the eBay mirror so
+            # the row can still be shown -- flagged, never auto-pushed.
+            fb_ebay_id, fb_status = None, None
+            try:
+                nt = _shopify_sync_norm(sold.get("title") or "")
+                if nt:
+                    fb = (supabase.table("ebay_listing_status").select("item_id,listing_status")
+                          .eq("business_id", business_id).eq("norm_title", nt)
+                          .order("updated_at", desc=True).limit(1).execute()).data
+                    if fb:
+                        fb_ebay_id, fb_status = str(fb[0]["item_id"]), fb[0].get("listing_status")
+            except Exception:
+                pass
+            unmatched_rows.append({
+                "shopify_variant_id": vid, "ebay_item_id": fb_ebay_id,
+                "title": sold["title"], "sku": sold["sku"], "qty_sold": sold["qty_sold"],
+                "fallback_status": fb_status,
+            })
             continue
         rows.append({
             "shopify_variant_id": vid, "ebay_item_id": match["ebay_id"],
             "title": match.get("title") or sold["title"], "sku": sold["sku"],
             "qty_sold": sold["qty_sold"],
         })
-    return {"rows": rows, "unmatched_no_hdid": unmatched, "no_variant_id": no_variant_id}
+    return {"rows": rows, "unmatched_no_hdid": unmatched, "unmatched_rows": unmatched_rows, "no_variant_id": no_variant_id}
 
 def _attach_current_quantities(business_id: str, rows: list) -> list:
     """Enriches each row with the CURRENT eBay/Shopify quantity. eBay comes
@@ -569,6 +591,32 @@ def _check_new_shopify_sales_for_ebay_sync(business_id: str) -> dict:
             }).execute()
         queued += 1
 
+    # Unmatched Shopify sales: queue them too, as status 'unmatched', so they
+    # show in the panel with an explanation instead of disappearing. Push is
+    # still manual; a row with a title-fallback eBay id can be pushed like any
+    # other, one with none just says so and can be dismissed.
+    for row in found.get("unmatched_rows") or []:
+        existing = (supabase.table("ebay_sync_queue").select("id,qty_sold")
+                    .eq("business_id", business_id).eq("shopify_variant_id", row["shopify_variant_id"])
+                    .in_("status", ["pending", "unmatched"]).execute()).data
+        if existing:
+            supabase.table("ebay_sync_queue").update({
+                "qty_sold": existing[0]["qty_sold"] + row["qty_sold"], "discovered_at": now.isoformat(),
+            }).eq("id", existing[0]["id"]).execute()
+        else:
+            live_status = row.get("fallback_status")
+            if row.get("ebay_item_id"):
+                try:
+                    live_status = _live_check_ebay_listing_status(business_id, row["ebay_item_id"])
+                except Exception:
+                    pass
+            supabase.table("ebay_sync_queue").insert({
+                "business_id": business_id, "shopify_variant_id": row["shopify_variant_id"],
+                "ebay_item_id": row.get("ebay_item_id"), "title": row["title"], "sku": row["sku"],
+                "qty_sold": row["qty_sold"], "status": "unmatched", "live_listing_status": live_status,
+            }).execute()
+        queued += 1
+
     save_ebay_setting(business_id, "EBAY_SYNC_QUEUE_LAST_CHECKED_AT", now.isoformat())
     return {"queued": queued, "unmatched_no_hdid": found["unmatched_no_hdid"], "checked_at": now.isoformat()}
 
@@ -609,7 +657,7 @@ async def ebay_sync_queue(request: Request):
         raise HTTPException(401, "Unauthorized")
     import asyncio
     rows = (supabase.table("ebay_sync_queue").select("*")
-            .eq("business_id", business_id).eq("status", "pending")
+            .eq("business_id", business_id).in_("status", ["pending", "unmatched"])
             .order("discovered_at", desc=True).execute()).data or []
     rows = await asyncio.to_thread(_attach_current_quantities, business_id, rows)
     return {"rows": rows}
@@ -868,7 +916,7 @@ async def ebay_sync_queue_dismiss(row_id: str, request: Request):
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     res = (supabase.table("ebay_sync_queue").update({"status": "ignored"})
-           .eq("id", row_id).eq("business_id", business_id).eq("status", "pending").execute())
+           .eq("id", row_id).eq("business_id", business_id).in_("status", ["pending", "unmatched"]).execute())
     if not res.data:
         raise HTTPException(404, "Row not found, or it was already pushed/resolved")
     return {"ok": True}
