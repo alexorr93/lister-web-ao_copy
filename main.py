@@ -1004,15 +1004,12 @@ def _push_qty_mismatch_rows(business_id: str, rows: list) -> dict:
     if not items:
         return {"ok": True, "results": []}
     res = _push_shopify_qty_updates(business_id, items)
-    # Keep the local mirror honest right away so the next candidate pass
-    # (and the Inventory page) doesn't keep showing the old number.
-    import datetime as _dt
-    for r in rows:
-        try:
-            supabase.table("shopify_inventory").update({"quantity": int(r["ebay_qty"]), "synced_at": _dt.datetime.utcnow().isoformat()})\
-                .eq("business_id", business_id).eq("id", str(r["shopify_variant_id"])).execute()
-        except Exception as e:
-            print(f"shopify_inventory mirror update failed: {e}")
+    # Deliberately do NOT lower the shopify_inventory mirror here. The mirror is
+    # what selects candidates; if it's lowered to eBay's number the row stops
+    # being a candidate, and anything that bumps Shopify back up afterwards
+    # (confirmed 8/21 15:55: the sales-window push re-raised 10 products) goes
+    # unseen until the daily full Shopify pull. Leaving the mirror high just
+    # means the row is re-checked live next cycle and dropped if it's fine.
     _qty_mismatch_cache.pop(business_id, None)
     return res
 
