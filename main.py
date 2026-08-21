@@ -13775,8 +13775,16 @@ def _push_shopify_qty_updates(business_id: str, items: list) -> dict:
                     log_row["new_quantity"] = new_qty
                     results.append({"title": it.get("title"), "status": "success", "new_quantity": new_qty})
                     try:
+                        # Deliberately do NOT touch updated_at here. The sales-window
+                        # sync reuses the snapshot's ebay_live_qty only while updated_at
+                        # is <30 min old (e47de25) — bumping it on every push made a
+                        # stale eBay qty look freshly-checked forever. Confirmed real
+                        # case (SK 616, 8/21): first sale left 13, second sale ended the
+                        # listing, but 20-min pushes kept refreshing updated_at so the
+                        # 13 was reused all day and re-pushed to Shopify on every cycle.
+                        # updated_at must only move when eBay is actually re-checked.
                         supabase.table("shopify_sync_snapshot")\
-                            .update({"shopify_live_qty": new_qty, "updated_at": _dt.datetime.utcnow().isoformat()})\
+                            .update({"shopify_live_qty": new_qty})\
                             .eq("business_id", business_id).eq("norm_title", _shopify_sync_norm(it.get("title"))).execute()
                     except Exception as e:
                         print(f"shopify_sync_snapshot update after push failed: {e}")
