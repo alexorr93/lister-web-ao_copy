@@ -182,14 +182,13 @@ async def auto_fill_worker():
         await asyncio.sleep(8)
 
 async def _oneshot_archive_shopify_duplicates():
-    """ONE-SHOT v5 (8/21 late): restore real Shopify quantities on the
-    Shopify-only PACCAR items (+ Kubota-adjacent O-ring) that the 15:54
-    qty-mismatch push wrongly zeroed. Quantities supplied by user from their
-    ended-eBay-listings screenshot. Flow per product: GET product -> read
-    variants[0].inventory_item_id -> POST inventory_levels/set.json."""
+    """ONE-SHOT v6 (8/21 late): archive ALL 152 products from the user-reviewed
+    shopify_hdid_ebay_not_active list -- Shopify products whose hd_id-linked eBay
+    listing is Ended or gone. User instruction: end all of them on Shopify, they
+    are all gone. Verified zero overlap with the 8 just-restored PACCAR items."""
     import asyncio, requests as _req
-    await asyncio.sleep(15)
-    flag_key = "SHOPIFY_PACCAR_QTY_RESTORE_DONE_20260821"
+    await asyncio.sleep(20)
+    flag_key = "SHOPIFY_ARCHIVE_152_DONE_20260821"
     try:
         flag = (supabase.table("app_settings").select("value")
                 .eq("key", flag_key).limit(1).execute()).data
@@ -198,15 +197,38 @@ async def _oneshot_archive_shopify_duplicates():
     except Exception:
         pass
 
-    RESTORE = [
-        (8801265942699, 2),  # PACCAR K180-5040-5 EXHAUST coupler
-        (8803871293611, 2),  # PACCAR 90-0012 Quick Latch V-Band Clamp
-        (8801296810155, 1),  # PACCAR CABLE-THROTTLE CONTROL R15-092F
-        (8801567244459, 1),  # PACCAR FREIGHTLINER TANK VENT KIT 8124
-        (8801270497451, 1),  # GASKET (P)A8979-1
-        (8801812644011, 2),  # PACCAR A/C Center Louver Vent S45-1005
-        (8801822343339, 2),  # PACCAR 0309812 (2-Pack) Sealing Plug
-        (8803574120619, 5),  # PACCAR O-Ring 1976264 (user: set to 5)
+    ARCHIVE_IDS = [
+        8804405280939,8803300573355,8801627898027,8803057041579,8801214300331,
+        8884821754027,8877876773035,8877876740267,8883589546155,8932629676203,
+        8882253398187,8877876936875,8877876871339,8877876969643,8802622800043,
+        8804065738923,8804424384683,8801281147051,8801434140843,8804423073963,
+        8803980214443,8801294745771,8801304346795,8801299497131,8801299890347,
+        8801312473259,8803769385131,8804398858411,8803766075563,8801419133099,
+        8801801928875,8803578970283,8803976315051,8804426416299,8801345536171,
+        8803571761323,8802653700267,8804426023083,8801439580331,8803668033707,
+        8803668918443,8801542078635,8883012239531,8882309202091,8884842299563,
+        8884414939307,8882253430955,8865545158827,8865545027755,8887242719403,
+        8887242948779,8887243112619,8884370964651,8889039716523,8887178559659,
+        8887178756267,8887182229675,8887178395819,8882253791403,8804364484779,
+        8882309562539,8882311233707,8882309365931,8803848487083,8803568058539,
+        8803569991851,8803565338795,8803577921707,8803564257451,8803555901611,
+        8801282949291,8803581952171,8803583918251,8803552231595,8803559571627,
+        8803556819115,8803570974891,8896730726571,8803726524587,8801228259499,
+        8801228456107,8926362861739,8887243473067,8884370604203,8883014041771,
+        8884370899115,8803432956075,8804208378027,8804372218027,8804056662187,
+        8803991486635,8804062855339,8804370514091,8803981394091,8803995615403,
+        8803988406443,8804371038379,8804240228523,8803977068715,8803990372523,
+        8804243833003,8803971006635,8803998367915,8801220952235,8803983818923,
+        8804248420523,8804225482923,8804374872235,8803993616555,8803987456171,
+        8803997384875,8883013517483,8883013157035,8803379249323,8883012960427,
+        8882311626923,8879556264107,8884370538667,8883012370603,8896730890411,
+        8884822048939,8801847410859,8803196436651,8804307730603,8803635560619,
+        8803551150251,8803550232747,8905219113131,8801283997867,8803442819243,
+        8801294647467,8801295171755,8801294942379,8803581067435,8803567304875,
+        8803548463275,8801241792683,8882253725867,8883013877931,8884371161259,
+        8883012796587,8887182262443,8882253594795,8883589382315,8883589677227,
+        8883589415083,8883589513387,8883589578923,8883012698283,8882253627563,
+        8883012632747,8801227407531,
     ]
     try:
         res = supabase.table("app_settings").select("business_id").eq("key", "SHOPIFY_STORE_DOMAIN").execute()
@@ -215,34 +237,25 @@ async def _oneshot_archive_shopify_duplicates():
         domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://","").replace("http://","").strip("/")
         token = get_shopify_access_token(biz_id)
         headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
-        location_id = _get_shopify_primary_location_id(domain, headers)
-        restored = 0
-        for pid, qty in RESTORE:
+        archived = 0
+        failed = 0
+        for pid in ARCHIVE_IDS:
             try:
-                pr = _req.get(f"https://{domain}/admin/api/2024-10/products/{pid}.json",
-                    headers=headers, timeout=15)
-                if pr.status_code != 200:
-                    print(f"[qty-restore] {pid}: product GET HTTP {pr.status_code}"); continue
-                variants = pr.json().get("product", {}).get("variants") or []
-                inv_item = variants[0].get("inventory_item_id") if variants else None
-                if not inv_item:
-                    print(f"[qty-restore] {pid}: no inventory_item_id"); continue
-                sr = _req.post(f"https://{domain}/admin/api/2024-10/inventory_levels/set.json",
-                    headers=headers,
-                    json={"location_id": int(location_id), "inventory_item_id": int(inv_item), "available": qty},
-                    timeout=15)
-                if sr.status_code in (200, 201):
-                    restored += 1
-                    print(f"[qty-restore] {pid} set to {qty}")
-                    supabase.table("shopify_inventory").update({"quantity": qty}).eq("product_id", str(pid)).execute()
+                r = _req.put(f"https://{domain}/admin/api/2024-10/products/{pid}.json",
+                    headers=headers, json={"product": {"id": pid, "status": "archived"}}, timeout=15)
+                if r.status_code in (200, 201):
+                    archived += 1
+                    supabase.table("shopify_inventory").delete().eq("product_id", str(pid)).execute()
                 else:
-                    print(f"[qty-restore] {pid}: set HTTP {sr.status_code} {sr.text[:150]}")
+                    failed += 1
+                    print(f"[archive-152] {pid}: HTTP {r.status_code}")
             except Exception as e:
-                print(f"[qty-restore] {pid} error: {e}")
+                failed += 1
+                print(f"[archive-152] {pid} error: {e}")
             await asyncio.sleep(0.4)
-        print(f"[qty-restore] done: {restored}/{len(RESTORE)} restored")
+        print(f"[archive-152] done: {archived} archived, {failed} failed of {len(ARCHIVE_IDS)}")
     except Exception as e:
-        print(f"[qty-restore] fatal: {e}")
+        print(f"[archive-152] fatal: {e}")
     try:
         supabase.table("app_settings").upsert({"business_id": biz_id, "key": flag_key, "value": "done"}).execute()
     except Exception:
