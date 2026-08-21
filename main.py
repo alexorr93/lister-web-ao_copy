@@ -14689,3 +14689,4 @@ async def shopify_sale_status(request: Request):
     settings = get_ebay_settings(business_id)
     return {"progress": _shopify_sale_progress.get(business_id),
             "active_pct": (settings.get("SHOPIFY_SALE_PCT") or "").strip()}
+# one-off corrective run trigger 2026-08-21T20:42:44Z
