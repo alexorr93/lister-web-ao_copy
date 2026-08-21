@@ -926,25 +926,62 @@ _qty_mismatch_cache = {}  # business_id -> (built_at, rows)
 _QTY_MISMATCH_TTL = 600
 
 def _qty_mismatch_candidates(business_id: str) -> list:
+    """All matched (ebay_item_id set) reconcile rows, Active or Ended, UNFILTERED
+    by qty. Duplicate-group detection below needs every sibling row, not just
+    the ones that individually look wrong -- a duplicate that's already sitting
+    at a "fine-looking" qty is still part of the overcount if its siblings are."""
     rows, start, page = [], 0, 1000
     while True:
         res = supabase.table("shopify_ebay_qty_reconcile").select("*")\
             .eq("business_id", business_id).in_("ebay_state", ["ACTIVE", "ENDED"])\
+            .not_.is_("ebay_item_id", "null")\
             .range(start, start + page - 1).execute()
         batch = res.data or []
-        rows.extend(r for r in batch if (r.get("shopify_qty_cached") or 0) > (r.get("target_qty") or 0))
+        rows.extend(batch)
         if len(batch) < page:
             break
         start += page
     return rows
 
 def _build_qty_mismatch_rows(business_id: str) -> list:
-    """Live-verifies every candidate on both platforms and returns only rows
-    where Shopify's live qty is still above eBay's live qty."""
+    """Live-verifies every candidate on both platforms and returns rows that
+    need a push, primary-vs-duplicate roles already resolved (see below)."""
     import concurrent.futures
-    cands = _qty_mismatch_candidates(business_id)
-    if not cands:
+    all_rows = _qty_mismatch_candidates(business_id)
+    if not all_rows:
         return []
+
+    # Group by eBay item id. REAL BUG FOUND 8/21 (KENNEDY 4" gate valve, item
+    # 407059327121): eBay title-matching can hit MULTIPLE separate Shopify
+    # PRODUCTS for one eBay listing (not variants of one product -- genuinely
+    # distinct product_ids, almost certainly duplicate publishes). The
+    # original version of this function treated every match independently and
+    # set EACH to eBay's full available qty -- 3 duplicates x 1 real unit
+    # became 3 "available" on Shopify. Scan of the whole account found 99+
+    # such groups (one eBay item had 24 separate Shopify product matches).
+    # Fix: a group with >1 distinct shopify_product_id gets exactly ONE
+    # eligible member (lowest product_id, deterministic) that may ever carry
+    # eBay's quantity; every OTHER member of that group is forced to 0
+    # regardless of its own qty, so the group's total can never exceed what
+    # eBay actually has. Singles (the overwhelming majority) are unaffected.
+    groups = {}
+    for r in all_rows:
+        groups.setdefault(r["ebay_item_id"], []).append(r)
+
+    to_check = []  # (row, role) -- role decides how live eBay qty is applied below
+    for ebay_id, members in groups.items():
+        product_ids = {m.get("shopify_product_id") for m in members if m.get("shopify_product_id")}
+        if len(product_ids) > 1:
+            primary_pid = min(product_ids, key=lambda x: int(x) if str(x).isdigit() else x)
+            for m in members:
+                to_check.append((m, "primary" if m.get("shopify_product_id") == primary_pid else "extra"))
+        else:
+            m = members[0]
+            if (m.get("shopify_qty_cached") or 0) > (m.get("target_qty") or 0):
+                to_check.append((m, "primary"))
+    if not to_check:
+        return []
+
     settings = get_ebay_settings(business_id)
     domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
     if not domain:
@@ -954,7 +991,7 @@ def _build_qty_mismatch_rows(business_id: str) -> list:
     location_id = _get_shopify_primary_location_id(domain, headers)
     if not location_id:
         raise Exception("Could not determine Shopify location")
-    variant_ids = [str(c["shopify_variant_id"]) for c in cands if c.get("shopify_variant_id")]
+    variant_ids = [str(m["shopify_variant_id"]) for m, _role in to_check if m.get("shopify_variant_id")]
     live_shop = _fetch_shopify_variants_by_ids(domain, shopify_token, location_id, variant_ids)
 
     ebay_token = get_ebay_access_token(business_id)
@@ -976,27 +1013,29 @@ def _build_qty_mismatch_rows(business_id: str) -> list:
         except Exception as e:
             print(f"qty-mismatch GetItem failed {item_id}: {e}")
             return None, None
+    unique_ebay_ids = list({m.get("ebay_item_id") for m, _role in to_check if m.get("ebay_item_id")})
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
-        ebay_live = dict(zip([c.get("ebay_item_id") for c in cands],
-                             ex.map(_ebay_live, [c.get("ebay_item_id") for c in cands])))
+        ebay_live = dict(zip(unique_ebay_ids, ex.map(_ebay_live, unique_ebay_ids)))
 
     out = []
-    for c in cands:
-        shop = live_shop.get(str(c.get("shopify_variant_id")))
+    for m, role in to_check:
+        shop = live_shop.get(str(m.get("shopify_variant_id")))
         if not shop or shop.get("qty") is None or not shop.get("inventory_item_id"):
             continue  # variant gone/archived on Shopify -- nothing to push
-        eq, estatus = ebay_live.get(c.get("ebay_item_id"), (None, None))
+        eq, estatus = ebay_live.get(m.get("ebay_item_id"), (None, None))
         if eq is None:
             continue  # could not read eBay live; never push on a guess
-        if shop["qty"] <= eq:
-            continue
+        live_target = eq if role == "primary" else 0
+        if shop["qty"] == live_target:
+            continue  # already correct
         out.append({
-            "title": c.get("title"), "sku": c.get("sku"), "price": c.get("price"),
-            "shopify_product_id": c.get("shopify_product_id"), "shopify_variant_id": c.get("shopify_variant_id"),
+            "title": m.get("title"), "sku": m.get("sku"), "price": m.get("price"),
+            "shopify_product_id": m.get("shopify_product_id"), "shopify_variant_id": m.get("shopify_variant_id"),
             "shopify_inventory_item_id": shop["inventory_item_id"],
-            "shopify_qty": shop["qty"], "ebay_qty": eq,
-            "ebay_item_id": c.get("ebay_item_id"), "ebay_status": estatus or ("Active" if c.get("ebay_state") == "ACTIVE" else "Ended"),
-            "bucket": "ended" if eq == 0 and (estatus or "") != "Active" else "over",
+            "shopify_qty": shop["qty"], "ebay_qty": live_target,
+            "ebay_item_id": m.get("ebay_item_id"),
+            "ebay_status": estatus or ("Active" if m.get("ebay_state") == "ACTIVE" else "Ended"),
+            "bucket": "duplicate" if role == "extra" else ("ended" if eq == 0 and (estatus or "") != "Active" else "over"),
         })
     out.sort(key=lambda r: -((r["shopify_qty"] - r["ebay_qty"]) * float(r.get("price") or 0)))
     return out

@@ -1065,6 +1065,8 @@ function renderQtyMismatch() {
   mmRows.forEach((it, idx) => {
     const tag = it.bucket === 'ended'
       ? '<span style="color:#c0392b;font-weight:600;">ENDED on eBay</span>'
+      : it.bucket === 'duplicate'
+      ? '<span style="color:#8e44ad;font-weight:600;">Duplicate Shopify listing</span>'
       : '<span style="color:#d68910;font-weight:600;">Shopify &gt; eBay</span>';
     html += `<tr id="mm-row-${idx}">
       <td><input type="checkbox" class="mm-cb" data-idx="${idx}" autocomplete="off"/></td>
