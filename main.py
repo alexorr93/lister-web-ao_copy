@@ -10326,6 +10326,25 @@ def push_listing_to_shopify(listing: dict, image_urls_override: list = None) -> 
             except Exception as e:
                 print(f"push_listing_to_shopify: eBay photo fallback failed: {e}")
 
+    # --- Dedup guard: never create a second Shopify product for the same title ---
+    # Shopify itself allows unlimited same-title products, so we enforce uniqueness
+    # here.  Check the local shopify_inventory mirror (refreshed by sync workers)
+    # for any active product with the exact same title.  If one already exists,
+    # refuse to create another — the caller gets a clear error instead of a silent
+    # duplicate that later causes qty-mismatch / oversell chaos.
+    _existing = (supabase.table("shopify_inventory")
+                 .select("id,product_id,title")
+                 .eq("business_id", biz_id)
+                 .eq("status", "active")
+                 .eq("title", title)
+                 .limit(1).execute()).data or []
+    if _existing:
+        raise Exception(
+            f"A Shopify product with this exact title already exists "
+            f"(product {_existing[0]['product_id']}). "
+            f"Duplicate publish blocked — edit the existing product instead."
+        )
+
     body = {
         "product": {
             "title": title,
