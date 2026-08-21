@@ -190,6 +190,10 @@ tr.ignored:hover td { opacity: 0.85; }
       <button class="btn" onclick="loadQtyMismatch(true)" title="Re-checks live on eBay and Shopify">🔄 Refresh</button>
       <button class="btn btn-orange" id="mm-push-sel-btn" onclick="pushSelectedMismatch()" style="display:none;">⚖️ Set Selected to eBay Qty <span style="font-size:10px;opacity:.8;">(live — writes to Shopify)</span></button>
       <button class="btn btn-orange" id="mm-push-all-btn" onclick="pushAllMismatch()" style="display:none;">⚖️ Set ALL to eBay Qty</button>
+      <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;">
+        <input type="checkbox" id="mm-auto-toggle" onchange="toggleMmAuto(this.checked)" autocomplete="off"/>
+        Run automatically every 20 min
+      </label>
     </div>
     <div id="mm-table-area"><div class="empty">Loading...</div></div>
   </div>
@@ -1047,6 +1051,8 @@ async function loadQtyMismatch(force) {
     st.textContent = mmRows.length
       ? `${mmRows.length} item(s): ${over} Shopify-above-eBay, ${ended} ended-on-eBay` + (when ? ` · checked ${when}` : '') + (d.cached ? ' (cached — Refresh to re-check live)' : '')
       : 'All clear — no Shopify product is above its eBay quantity.' + (when ? ` · checked ${when}` : '');
+    const autoCb = document.getElementById('mm-auto-toggle');
+    if (autoCb && typeof d.auto_enabled === 'boolean') autoCb.checked = d.auto_enabled;
     renderQtyMismatch();
   } catch (e) {
     st.textContent = '';
@@ -1086,6 +1092,18 @@ function renderQtyMismatch() {
   area.innerHTML = html;
 }
 function toggleMmAll(on) { document.querySelectorAll('.mm-cb').forEach(cb => cb.checked = on); }
+async function toggleMmAuto(on) {
+  const st = document.getElementById('mm-status');
+  const prev = st.textContent;
+  try {
+    const r = await fetch('/api/shopify-sync/qty-mismatch/auto-toggle', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({enabled: on})});
+    if (!r.ok) throw new Error('Failed to save');
+    st.textContent = on ? 'Automatic pushes turned ON (every ~20 min).' : 'Automatic pushes turned OFF — use the buttons above to run it manually.';
+  } catch (e) {
+    document.getElementById('mm-auto-toggle').checked = !on;
+    st.textContent = `❌ Could not change auto setting: ${e.message}`;
+  }
+}
 async function pushMismatchRows(rows) {
   if (!rows.length) return;
   if (!confirm(`Set ${rows.length} Shopify product(s) to their eBay quantity? This is a live write to Shopify.`)) return;

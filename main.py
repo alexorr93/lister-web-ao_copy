@@ -1064,12 +1064,24 @@ async def shopify_sync_qty_mismatch(request: Request, refresh: int = 0):
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     import asyncio, time as _t
+    settings = get_ebay_settings(business_id)
+    auto_enabled = (settings or {}).get("QTY_MISMATCH_AUTO_PUSH", "true") == "true"
     hit = _qty_mismatch_cache.get(business_id)
     if hit and not refresh and (_t.time() - hit[0]) < _QTY_MISMATCH_TTL:
-        return {"rows": hit[1], "cached": True, "built_at": hit[0]}
+        return {"rows": hit[1], "cached": True, "built_at": hit[0], "auto_enabled": auto_enabled}
     rows = await asyncio.to_thread(_build_qty_mismatch_rows, business_id)
     _qty_mismatch_cache[business_id] = (_t.time(), rows)
-    return {"rows": rows, "cached": False, "built_at": _qty_mismatch_cache[business_id][0]}
+    return {"rows": rows, "cached": False, "built_at": _qty_mismatch_cache[business_id][0], "auto_enabled": auto_enabled}
+
+@app.post("/api/shopify-sync/qty-mismatch/auto-toggle")
+async def shopify_sync_qty_mismatch_auto_toggle(request: Request, body: dict = Body(...)):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio
+    enabled = bool(body.get("enabled"))
+    await asyncio.to_thread(save_ebay_setting, business_id, "QTY_MISMATCH_AUTO_PUSH", "true" if enabled else "false")
+    return {"ok": True, "enabled": enabled}
 
 @app.post("/api/shopify-sync/qty-mismatch/push")
 async def shopify_sync_qty_mismatch_push(request: Request, body: dict = Body(...)):
@@ -11774,7 +11786,14 @@ async def shopify_sync_auto_refresh_worker():
                 # listing is ended) is live-verified and SET to eBay's number.
                 # This is what stops oversells that the sales-window logic
                 # missed (R950011 sat at 3 on Shopify for 8 days after ending).
+                # Gated on QTY_MISMATCH_AUTO_PUSH (default "true") -- toggled off from
+                # the Quantity Mismatch section on the Sync page (8/21, user request:
+                # doesn't want this running unattended). Manual Refresh/push buttons
+                # in that section still work regardless of this setting.
                 try:
+                    _mm_settings = await asyncio.to_thread(get_ebay_settings, bid)
+                    if (_mm_settings or {}).get("QTY_MISMATCH_AUTO_PUSH", "true") != "true":
+                        raise StopIteration
                     mm_rows = await asyncio.to_thread(_build_qty_mismatch_rows, bid)
                     if mm_rows:
                         mm_res = await asyncio.to_thread(_push_qty_mismatch_rows, bid, mm_rows)
@@ -11782,6 +11801,8 @@ async def shopify_sync_auto_refresh_worker():
                         print(f"auto qty-mismatch push: business {bid} -> {okc}/{len(mm_rows)} set to eBay qty")
                     else:
                         _qty_mismatch_cache[bid] = (_time.time(), [])
+                except StopIteration:
+                    pass  # auto-push disabled for this business
                 except Exception as ex:
                     print(f"auto qty-mismatch failed for {bid}: {ex}")
         except Exception as ex:
