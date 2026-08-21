@@ -959,22 +959,46 @@ def _build_qty_mismatch_rows(business_id: str) -> list:
     # set EACH to eBay's full available qty -- 3 duplicates x 1 real unit
     # became 3 "available" on Shopify. Scan of the whole account found 99+
     # such groups (one eBay item had 24 separate Shopify product matches).
-    # Fix: a group with >1 distinct shopify_product_id gets exactly ONE
-    # eligible member (lowest product_id, deterministic) that may ever carry
-    # eBay's quantity; every OTHER member of that group is forced to 0
-    # regardless of its own qty, so the group's total can never exceed what
-    # eBay actually has. Singles (the overwhelming majority) are unaffected.
     groups = {}
     for r in all_rows:
         groups.setdefault(r["ebay_item_id"], []).append(r)
+
+    # SECOND BUG FOUND SAME DAY: the first fix picked "primary" (the one
+    # duplicate allowed to carry stock) by lowest Shopify product_id -- a pure
+    # guess. inventory_match.hd_id already exists specifically to give one
+    # eBay listing ONE authoritative Shopify variant (a human-confirmed,
+    # locked pairing -- the whole reason that table and matching flow were
+    # built, and what the normal sales-triggered push already keys off).
+    # Checked the guess against it: disagreed in 44 of 99 groups, including
+    # Kennedy -- meaning the actually-correct, locked listing got zeroed and
+    # an arbitrary duplicate got left "in stock" instead. Fixed: hd_id-locked
+    # pairing is now authoritative whenever one exists; lowest-product-id is
+    # only a fallback for the minority of groups with no locked match at all.
+    locked_primary = {}
+    lm_start = 0
+    while True:
+        lm_res = supabase.table("inventory_match").select("ebay_id,shopify_id")\
+            .eq("business_id", business_id).not_.is_("hd_id", "null")\
+            .range(lm_start, lm_start + 999).execute()
+        batch = lm_res.data or []
+        for r in batch:
+            if r.get("ebay_id") and r.get("shopify_id"):
+                locked_primary[str(r["ebay_id"])] = str(r["shopify_id"])
+        if len(batch) < 1000:
+            break
+        lm_start += 1000
 
     to_check = []  # (row, role) -- role decides how live eBay qty is applied below
     for ebay_id, members in groups.items():
         product_ids = {m.get("shopify_product_id") for m in members if m.get("shopify_product_id")}
         if len(product_ids) > 1:
-            primary_pid = min(product_ids, key=lambda x: int(x) if str(x).isdigit() else x)
+            locked_variant_id = locked_primary.get(str(ebay_id))
+            primary_member = next((m for m in members if str(m.get("shopify_variant_id")) == locked_variant_id), None) if locked_variant_id else None
+            if primary_member is None:
+                primary_pid = min(product_ids, key=lambda x: int(x) if str(x).isdigit() else x)
+                primary_member = next(m for m in members if m.get("shopify_product_id") == primary_pid)
             for m in members:
-                to_check.append((m, "primary" if m.get("shopify_product_id") == primary_pid else "extra"))
+                to_check.append((m, "primary" if m is primary_member else "extra"))
         else:
             m = members[0]
             if (m.get("shopify_qty_cached") or 0) > (m.get("target_qty") or 0):
