@@ -11223,22 +11223,17 @@ def _shopify_sync_check_one(norm_title: str, entry: dict, ebay_token: str, shopi
     sku = entry["sku"]
     ebay_live_qty = None
     ebay_ended = False
-    if sku and sku != "(no SKU)" and not sku.lower().startswith("lister-"):
-        try:
-            r = _req.get(f"{EBAY_API_BASE}/sell/inventory/v1/inventory_item/{sku}",
-                         headers=ebay_headers(ebay_token, content_language=False), timeout=15)
-            if r.status_code == 200:
-                ebay_live_qty = (r.json().get("availability", {}) or {}).get("shipToLocationAvailability", {}).get("quantity")
-        except Exception:
-            pass
 
-    # Most of these listings weren't created via the Inventory API (no SKU-keyed
-    # inventory item exists for them), so the lookup above returns nothing for
-    # them. Fall back to Trading API's GetItem by the listing's own (legacy) item
-    # ID — the real seller-facing endpoint for this, works for any listing
-    # regardless of how it was created, on its own separate rate-limit quota.
+    # ORDER MATTERS. Trading GetItem by item id is the authoritative source:
+    # it reports ListingStatus and Quantity - QuantitySold. The Inventory API
+    # SKU lookup was tried FIRST before 8/21 and for SKU'd listings it returns
+    # the quantity the listing was CREATED with (R950011: said 3 while the
+    # listing was Ended with 0 left) -- so the hourly sync saw eBay==Shopify,
+    # called it "already correct" and never pushed. Result: eBay sales did not
+    # lower Shopify qty and an out-of-stock item sold on Shopify. GetItem is
+    # now primary; the SKU lookup is only a fallback when there is no item id.
     legacy_item_id = entry.get("legacy_item_id")
-    if ebay_live_qty is None and legacy_item_id:
+    if legacy_item_id:
         try:
             resp = _ebay_get_item_status(ebay_token, legacy_item_id)
             ack = resp.get("Ack")
@@ -11258,6 +11253,15 @@ def _shopify_sync_check_one(norm_title: str, entry: dict, ebay_token: str, shopi
                 # listing that no longer exists at all — treat the same as ended.
                 ebay_live_qty = 0
                 ebay_ended = True
+        except Exception:
+            pass
+
+    if ebay_live_qty is None and sku and sku != "(no SKU)" and not sku.lower().startswith("lister-"):
+        try:
+            r = _req.get(f"{EBAY_API_BASE}/sell/inventory/v1/inventory_item/{sku}",
+                         headers=ebay_headers(ebay_token, content_language=False), timeout=15)
+            if r.status_code == 200:
+                ebay_live_qty = (r.json().get("availability", {}) or {}).get("shipToLocationAvailability", {}).get("quantity")
         except Exception:
             pass
 
@@ -11465,6 +11469,32 @@ async def shopify_sync_refresh(request: Request, items: List[dict] = Body(...)):
     asyncio.create_task(_run_shopify_sync_refresh_background(business_id, items))
     return {"started": True}
 
+def _push_window_mismatches(business_id: str, norm_titles: set, sold_by_title: dict) -> dict:
+    """Push a Shopify qty update for every snapshot row in norm_titles whose
+    Shopify qty differs from eBay's live qty. Factored out of
+    run_hourly_shopify_sync_for_business so the 20-min auto worker can apply
+    the identical rule over a wider date window."""
+    snap_res = supabase.table("shopify_sync_snapshot").select("*").eq("business_id", business_id).execute()
+    push_items = []
+    for row in (snap_res.data or []):
+        if row.get("norm_title") not in norm_titles:
+            continue
+        if not row.get("shopify_inventory_item_id") or row.get("ebay_live_qty") is None:
+            continue
+        if row.get("shopify_live_qty") == row.get("ebay_live_qty"):
+            continue
+        sold_entry = sold_by_title.get(row["norm_title"], {})
+        push_items.append({
+            "title": row.get("title"), "sku": row.get("sku"),
+            "shopify_inventory_item_id": row.get("shopify_inventory_item_id"),
+            "ebay_live_qty": row.get("ebay_live_qty"),
+            "qty_sold_today": sold_entry.get("qty_sold_today", 0),
+            "order_ids": sold_entry.get("order_ids", []),
+        })
+    if not push_items:
+        return {"pushed": 0}
+    return _push_shopify_qty_updates(business_id, push_items)
+
 async def shopify_sync_auto_refresh_worker():
     """Runs the Sync page's "Sync Now" automatically every 20 minutes for every
     business (items sold in the last 7 days -> live eBay/Shopify quantity
@@ -11507,6 +11537,15 @@ async def shopify_sync_auto_refresh_worker():
                 }
                 await _run_shopify_sync_refresh_background(bid, items)
                 _shopify_sync_job_status[bid]["auto"] = True
+                # Then PUSH, same rule as the hourly job but over the 7-day window,
+                # so an eBay sale that was missed on its day (hourly only looks at
+                # "today") still gets Shopify corrected instead of being lost.
+                try:
+                    pushed = await asyncio.to_thread(_push_window_mismatches, bid, set(sold.keys()), sold)
+                    if pushed.get("pushed"):
+                        print(f"auto sync push: business {bid} -> {pushed}")
+                except Exception as ex:
+                    print(f"auto sync push failed for {bid}: {ex}")
         except Exception as ex:
             print(f"shopify sync auto-refresh worker: {ex}")
         await asyncio.sleep(20 * 60)
