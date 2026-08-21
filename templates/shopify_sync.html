@@ -183,6 +183,17 @@ tr.ignored:hover td { opacity: 0.85; }
     <div id="ended-table-area"><div class="empty">Loading...</div></div>
   </div>
   <div style="margin-top:40px;border-top:1px solid var(--border);padding-top:24px;">
+    <h2 style="font-size:16px;margin-bottom:2px;">⚖️ Quantity Mismatch — Shopify above eBay</h2>
+    <div class="sub">Two buckets only: Shopify stock higher than the eBay listing's available qty, and eBay listings that are Ended/Unsold while Shopify still shows stock. Every row is live-checked on BOTH platforms when this loads. "Set to eBay Qty" writes eBay's live number to Shopify (0 for ended). The 20-minute background worker does this same push automatically — this section is for seeing it and forcing it now.</div>
+    <div class="filter-bar">
+      <span id="mm-status" style="font-size:12px;color:var(--muted);"></span>
+      <button class="btn" onclick="loadQtyMismatch(true)" title="Re-checks live on eBay and Shopify">🔄 Refresh</button>
+      <button class="btn btn-orange" id="mm-push-sel-btn" onclick="pushSelectedMismatch()" style="display:none;">⚖️ Set Selected to eBay Qty <span style="font-size:10px;opacity:.8;">(live — writes to Shopify)</span></button>
+      <button class="btn btn-orange" id="mm-push-all-btn" onclick="pushAllMismatch()" style="display:none;">⚖️ Set ALL to eBay Qty</button>
+    </div>
+    <div id="mm-table-area"><div class="empty">Loading...</div></div>
+  </div>
+  <div style="margin-top:40px;border-top:1px solid var(--border);padding-top:24px;">
     <h2 style="font-size:16px;margin-bottom:2px;">💸 Storewide Shopify Sale</h2>
     <div class="sub">Applies a % off every Shopify product (full price shows as strikethrough). New products published mid-sale get it automatically. Revert restores every original price and clears all strikethroughs — including leftovers from the old discount app. Free — this edits your products directly, no app needed.</div>
     <div class="filter-bar">
@@ -1017,6 +1028,93 @@ async function dismissEnded(idx) {
 loadEndedEbay();
 setInterval(() => { if (!document.hidden && endedInFlight === 0) loadEndedEbay(); }, 120000);
 document.addEventListener('visibilitychange', function() { if (!document.hidden && endedInFlight === 0) loadEndedEbay(); });
+
+// --- Quantity Mismatch: Shopify above eBay / ended on eBay (bottom section) ---
+let mmRows = [];
+let mmInFlight = 0;
+async function loadQtyMismatch(force) {
+  if (mmInFlight > 0) return;
+  const st = document.getElementById('mm-status');
+  st.textContent = force ? 'Live-checking eBay + Shopify...' : 'Loading...';
+  try {
+    const r = await fetch('/api/shopify-sync/qty-mismatch' + (force ? '?refresh=1' : ''), {cache: 'no-store'});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Failed');
+    mmRows = d.rows || [];
+    const over = mmRows.filter(x => x.bucket === 'over').length;
+    const ended = mmRows.length - over;
+    const when = d.built_at ? new Date(d.built_at * 1000).toLocaleTimeString() : '';
+    st.textContent = mmRows.length
+      ? `${mmRows.length} item(s): ${over} Shopify-above-eBay, ${ended} ended-on-eBay` + (when ? ` · checked ${when}` : '') + (d.cached ? ' (cached — Refresh to re-check live)' : '')
+      : 'All clear — no Shopify product is above its eBay quantity.' + (when ? ` · checked ${when}` : '');
+    renderQtyMismatch();
+  } catch (e) {
+    st.textContent = '';
+    document.getElementById('mm-table-area').innerHTML = `<div class="empty">Error: ${escapeHtml(e.message)}</div>`;
+  }
+}
+function renderQtyMismatch() {
+  const area = document.getElementById('mm-table-area');
+  document.getElementById('mm-push-sel-btn').style.display = mmRows.length ? '' : 'none';
+  document.getElementById('mm-push-all-btn').style.display = mmRows.length ? '' : 'none';
+  if (!mmRows.length) { area.innerHTML = '<div class="empty">Nothing to fix.</div>'; return; }
+  let html = `<table><thead><tr>
+    <th><input type="checkbox" id="mm-select-all" onchange="toggleMmAll(this.checked)" autocomplete="off"/></th>
+    <th>Bucket</th><th>SKU</th><th>Title</th><th>eBay Status</th><th>Shopify Qty</th><th>eBay Qty</th><th>Price</th><th>Action</th>
+  </tr></thead><tbody>`;
+  mmRows.forEach((it, idx) => {
+    const tag = it.bucket === 'ended'
+      ? '<span style="color:#c0392b;font-weight:600;">ENDED on eBay</span>'
+      : '<span style="color:#d68910;font-weight:600;">Shopify &gt; eBay</span>';
+    html += `<tr id="mm-row-${idx}">
+      <td><input type="checkbox" class="mm-cb" data-idx="${idx}" autocomplete="off"/></td>
+      <td>${tag}</td>
+      <td class="muted">${escapeHtml(it.sku || '')}</td>
+      <td>${escapeHtml(it.title || '')}</td>
+      <td class="muted">${escapeHtml(it.ebay_status || '')}</td>
+      <td><b>${it.shopify_qty}</b></td>
+      <td>${it.ebay_qty}</td>
+      <td class="muted">$${Number(it.price || 0).toFixed(2)}</td>
+      <td id="mm-cell-${idx}">
+        <button class="btn btn-orange" style="padding:6px 12px;font-size:12px;margin:0;" onclick="pushOneMismatch(${idx})">Set to ${it.ebay_qty}</button>
+      </td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  area.innerHTML = html;
+}
+function toggleMmAll(on) { document.querySelectorAll('.mm-cb').forEach(cb => cb.checked = on); }
+async function pushMismatchRows(rows) {
+  if (!rows.length) return;
+  if (!confirm(`Set ${rows.length} Shopify product(s) to their eBay quantity? This is a live write to Shopify.`)) return;
+  mmInFlight++;
+  const st = document.getElementById('mm-status');
+  st.textContent = `Pushing ${rows.length} to Shopify...`;
+  try {
+    const r = await fetch('/api/shopify-sync/qty-mismatch/push', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({rows})});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Failed');
+    const ok = (d.results || []).filter(x => x.status === 'success').length;
+    const bad = (d.results || []).filter(x => x.status !== 'success');
+    st.textContent = `✅ ${ok} set to eBay qty` + (bad.length ? ` — ${bad.length} failed (${bad[0].error || bad[0].status})` : '');
+  } catch (e) {
+    st.textContent = `❌ ${e.message}`;
+  } finally {
+    mmInFlight--;
+    await loadQtyMismatch(true);
+  }
+}
+function pushOneMismatch(idx) { pushMismatchRows([mmRows[idx]]); }
+function pushSelectedMismatch() {
+  const picked = [...document.querySelectorAll('.mm-cb:checked')].map(cb => mmRows[+cb.dataset.idx]);
+  if (!picked.length) { alert('Select at least one row first.'); return; }
+  pushMismatchRows(picked);
+}
+function pushAllMismatch() { pushMismatchRows(mmRows.slice()); }
+loadQtyMismatch();
+setInterval(() => { if (!document.hidden && mmInFlight === 0) loadQtyMismatch(); }, 120000);
+document.addEventListener('visibilitychange', function() { if (!document.hidden && mmInFlight === 0) loadQtyMismatch(); });
 </script>
 </body>
 </html>

@@ -903,6 +903,145 @@ async def shopify_sync_ended_ebay_dismiss(request: Request, body: dict = Body(..
         _ended_ebay_cache.pop(k, None)
     return {"ok": True}
 
+# ---------------------------------------------------------------------------
+# Quantity Mismatch (8/21): the two buckets that actually cause oversells --
+#   (1) Shopify qty > eBay's active available qty
+#   (2) eBay listing Ended/Completed/Unsold but Shopify still has stock
+# Candidates come from the DB view shopify_ebay_qty_reconcile (shopify_inventory
+# mirror, refreshed by Sync Inventory / the daily inventory_value_sync_worker,
+# title-matched against ebay_listing_status). Every candidate is then
+# re-checked LIVE on both sides before it is shown or pushed: Shopify via the
+# variant-id GraphQL lookup, eBay via Trading GetItem (Quantity - QuantitySold,
+# 0 if not Active). Push SETS Shopify to eBay's number through the same
+# _push_shopify_qty_updates used everywhere else (logged to shopify_push_log).
+# Shopify-lower-than-eBay and no-eBay-match rows are deliberately out of scope.
+# ---------------------------------------------------------------------------
+_qty_mismatch_cache = {}  # business_id -> (built_at, rows)
+_QTY_MISMATCH_TTL = 600
+
+def _qty_mismatch_candidates(business_id: str) -> list:
+    rows, start, page = [], 0, 1000
+    while True:
+        res = supabase.table("shopify_ebay_qty_reconcile").select("*")\
+            .eq("business_id", business_id).in_("ebay_state", ["ACTIVE", "ENDED"])\
+            .range(start, start + page - 1).execute()
+        batch = res.data or []
+        rows.extend(r for r in batch if (r.get("shopify_qty_cached") or 0) > (r.get("target_qty") or 0))
+        if len(batch) < page:
+            break
+        start += page
+    return rows
+
+def _build_qty_mismatch_rows(business_id: str) -> list:
+    """Live-verifies every candidate on both platforms and returns only rows
+    where Shopify's live qty is still above eBay's live qty."""
+    import concurrent.futures
+    cands = _qty_mismatch_candidates(business_id)
+    if not cands:
+        return []
+    settings = get_ebay_settings(business_id)
+    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+    if not domain:
+        raise Exception("Shopify not connected")
+    shopify_token = get_shopify_access_token(business_id)
+    headers = {"X-Shopify-Access-Token": shopify_token, "Content-Type": "application/json"}
+    location_id = _get_shopify_primary_location_id(domain, headers)
+    if not location_id:
+        raise Exception("Could not determine Shopify location")
+    variant_ids = [str(c["shopify_variant_id"]) for c in cands if c.get("shopify_variant_id")]
+    live_shop = _fetch_shopify_variants_by_ids(domain, shopify_token, location_id, variant_ids)
+
+    ebay_token = get_ebay_access_token(business_id)
+    def _ebay_live(item_id):
+        if not item_id:
+            return None, None
+        try:
+            resp = _ebay_get_item_status(ebay_token, item_id)
+            item = resp.get("Item") or {}
+            if resp.get("Ack") in ("Success", "Warning") and item:
+                ss = item.get("SellingStatus") or {}
+                status = ss.get("ListingStatus")
+                if status and status != "Active":
+                    return 0, status
+                total = _safe_int(item.get("Quantity"))
+                sold = _safe_int(ss.get("QuantitySold")) or 0
+                return (max(total - sold, 0) if total is not None else None), status
+            return 0, "Gone"
+        except Exception as e:
+            print(f"qty-mismatch GetItem failed {item_id}: {e}")
+            return None, None
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+        ebay_live = dict(zip([c.get("ebay_item_id") for c in cands],
+                             ex.map(_ebay_live, [c.get("ebay_item_id") for c in cands])))
+
+    out = []
+    for c in cands:
+        shop = live_shop.get(str(c.get("shopify_variant_id")))
+        if not shop or shop.get("qty") is None or not shop.get("inventory_item_id"):
+            continue  # variant gone/archived on Shopify -- nothing to push
+        eq, estatus = ebay_live.get(c.get("ebay_item_id"), (None, None))
+        if eq is None:
+            continue  # could not read eBay live; never push on a guess
+        if shop["qty"] <= eq:
+            continue
+        out.append({
+            "title": c.get("title"), "sku": c.get("sku"), "price": c.get("price"),
+            "shopify_product_id": c.get("shopify_product_id"), "shopify_variant_id": c.get("shopify_variant_id"),
+            "shopify_inventory_item_id": shop["inventory_item_id"],
+            "shopify_qty": shop["qty"], "ebay_qty": eq,
+            "ebay_item_id": c.get("ebay_item_id"), "ebay_status": estatus or ("Active" if c.get("ebay_state") == "ACTIVE" else "Ended"),
+            "bucket": "ended" if eq == 0 and (estatus or "") != "Active" else "over",
+        })
+    out.sort(key=lambda r: -((r["shopify_qty"] - r["ebay_qty"]) * float(r.get("price") or 0)))
+    return out
+
+def _push_qty_mismatch_rows(business_id: str, rows: list) -> dict:
+    items = [{
+        "title": r.get("title"), "sku": r.get("sku") or "",
+        "shopify_inventory_item_id": r.get("shopify_inventory_item_id"),
+        "ebay_live_qty": int(r.get("ebay_qty")), "qty_sold_today": 0, "order_ids": [],
+    } for r in rows if r.get("shopify_inventory_item_id") and r.get("ebay_qty") is not None]
+    if not items:
+        return {"ok": True, "results": []}
+    res = _push_shopify_qty_updates(business_id, items)
+    # Keep the local mirror honest right away so the next candidate pass
+    # (and the Inventory page) doesn't keep showing the old number.
+    import datetime as _dt
+    for r in rows:
+        try:
+            supabase.table("shopify_inventory").update({"quantity": int(r["ebay_qty"]), "synced_at": _dt.datetime.utcnow().isoformat()})\
+                .eq("business_id", business_id).eq("id", str(r["shopify_variant_id"])).execute()
+        except Exception as e:
+            print(f"shopify_inventory mirror update failed: {e}")
+    _qty_mismatch_cache.pop(business_id, None)
+    return res
+
+@app.get("/api/shopify-sync/qty-mismatch")
+async def shopify_sync_qty_mismatch(request: Request, refresh: int = 0):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio, time as _t
+    hit = _qty_mismatch_cache.get(business_id)
+    if hit and not refresh and (_t.time() - hit[0]) < _QTY_MISMATCH_TTL:
+        return {"rows": hit[1], "cached": True, "built_at": hit[0]}
+    rows = await asyncio.to_thread(_build_qty_mismatch_rows, business_id)
+    _qty_mismatch_cache[business_id] = (_t.time(), rows)
+    return {"rows": rows, "cached": False, "built_at": _qty_mismatch_cache[business_id][0]}
+
+@app.post("/api/shopify-sync/qty-mismatch/push")
+async def shopify_sync_qty_mismatch_push(request: Request, body: dict = Body(...)):
+    """Sets Shopify qty = eBay live qty for the given rows (rows come straight
+    from the GET above). Live write to Shopify; every attempt logged."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio
+    rows = body.get("rows") or []
+    if not rows:
+        raise HTTPException(400, "rows required")
+    return await asyncio.to_thread(_push_qty_mismatch_rows, business_id, rows)
+
 @app.post("/api/ebay-sync/queue/{row_id}/dismiss")
 async def ebay_sync_queue_dismiss(row_id: str, request: Request):
     """Manually removes one row from the pending eBay-sync queue without
@@ -10779,6 +10918,8 @@ def sync_inventory(business_id: str) -> dict:
     when you actually need fresh data from the platforms; use the rematch-only
     endpoint instead when you just want to re-run matching against what's already
     stored locally."""
+    import datetime as _dt
+    _now_iso = _dt.datetime.utcnow().isoformat()
     errors = {}
     ebay_items, shopify_items = [], []
     try:
@@ -10800,6 +10941,7 @@ def sync_inventory(business_id: str) -> dict:
         "id": it["variant_id"], "business_id": business_id, "product_id": it["product_id"],
         "sku": it["sku"], "title": it["title"], "price": it["price"], "quantity": it["quantity"],
         "status": it["status"], "handle": it["handle"],
+        "synced_at": _now_iso,  # was never written on refresh, so the column froze at row-creation time and looked a month stale
     } for it in shopify_items if it.get("variant_id")]
 
     for i in range(0, len(ebay_records), 500):
@@ -11536,6 +11678,21 @@ async def shopify_sync_auto_refresh_worker():
                     await asyncio.to_thread(_sync_orders_window, bid, win_start, win_end)
                 except Exception as ex:
                     print(f"auto orders pull failed for {bid}: {ex}")
+                # Full quantity reconcile (8/21): not tied to the sales window.
+                # Every Shopify product whose qty is above eBay's (or whose eBay
+                # listing is ended) is live-verified and SET to eBay's number.
+                # This is what stops oversells that the sales-window logic
+                # missed (R950011 sat at 3 on Shopify for 8 days after ending).
+                try:
+                    mm_rows = await asyncio.to_thread(_build_qty_mismatch_rows, bid)
+                    if mm_rows:
+                        mm_res = await asyncio.to_thread(_push_qty_mismatch_rows, bid, mm_rows)
+                        okc = sum(1 for r in (mm_res.get("results") or []) if r.get("status") == "success")
+                        print(f"auto qty-mismatch push: business {bid} -> {okc}/{len(mm_rows)} set to eBay qty")
+                    else:
+                        _qty_mismatch_cache[bid] = (_time.time(), [])
+                except Exception as ex:
+                    print(f"auto qty-mismatch failed for {bid}: {ex}")
                 end = _dt.datetime.utcnow().strftime("%Y-%m-%d")
                 start = (_dt.datetime.utcnow() - _dt.timedelta(days=7)).strftime("%Y-%m-%d")
                 sold = await asyncio.to_thread(_shopify_sync_sold_by_title, bid, start, end)
