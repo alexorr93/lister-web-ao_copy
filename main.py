@@ -1068,6 +1068,7 @@ def _push_qty_mismatch_rows(business_id: str, rows: list) -> dict:
     items = [{
         "title": r.get("title"), "sku": r.get("sku") or "",
         "shopify_inventory_item_id": r.get("shopify_inventory_item_id"),
+        "shopify_product_id": r.get("shopify_product_id"),
         "ebay_live_qty": int(r.get("ebay_qty")), "qty_sold_today": 0, "order_ids": [],
     } for r in rows if r.get("shopify_inventory_item_id") and r.get("ebay_qty") is not None]
     if not items:
@@ -13651,6 +13652,9 @@ def _push_shopify_qty_updates(business_id: str, items: list) -> dict:
         log_row = {
             "business_id": business_id, "order_id": ",".join(order_ids) if order_ids else "",
             "sku": sku, "title": it.get("title"), "quantity_deducted": it.get("qty_sold_today", 0),
+            "shopify_product_id": it.get("shopify_product_id"),  # 8/21: previously untracked -- made it
+            # impossible to tell which of several identically-titled duplicate Shopify products a
+            # given push actually touched (confirmed real problem verifying the Kennedy dupe-group fix)
         }
         if not inv_item_id:
             log_row["status"] = "no_shopify_match"
