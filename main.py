@@ -182,12 +182,14 @@ async def auto_fill_worker():
         await asyncio.sleep(8)
 
 async def _oneshot_archive_shopify_duplicates():
-    """ONE-SHOT v4 (8/21 late): VERIFY the real live status of the 26 products
-    v3 claimed to archive. GETs each from Shopify and logs id, status, title.
-    Read-only — changes nothing."""
+    """ONE-SHOT v5 (8/21 late): restore real Shopify quantities on the
+    Shopify-only PACCAR items (+ Kubota-adjacent O-ring) that the 15:54
+    qty-mismatch push wrongly zeroed. Quantities supplied by user from their
+    ended-eBay-listings screenshot. Flow per product: GET product -> read
+    variants[0].inventory_item_id -> POST inventory_levels/set.json."""
     import asyncio, requests as _req
     await asyncio.sleep(15)
-    flag_key = "SHOPIFY_VERIFY_V4_DONE_20260821"
+    flag_key = "SHOPIFY_PACCAR_QTY_RESTORE_DONE_20260821"
     try:
         flag = (supabase.table("app_settings").select("value")
                 .eq("key", flag_key).limit(1).execute()).data
@@ -196,13 +198,15 @@ async def _oneshot_archive_shopify_duplicates():
     except Exception:
         pass
 
-    CHECK_IDS = [
-        8802624831659,8803044524203,8889040339115,8804029923499,8802048671915,
-        8802653307051,8802649342123,8801180450987,8802142388395,8801362641067,
-        8802074853547,8803497115819,8804396564651,8801416249515,8803953377451,
-        8802375467179,8803116187819,8801204207787,8889040502955,8803486564523,
-        8803365093547,8802462204075,8801772667051,8801108754603,8801022247083,
-        8803042001067,
+    RESTORE = [
+        (8801265942699, 2),  # PACCAR K180-5040-5 EXHAUST coupler
+        (8803871293611, 2),  # PACCAR 90-0012 Quick Latch V-Band Clamp
+        (8801296810155, 1),  # PACCAR CABLE-THROTTLE CONTROL R15-092F
+        (8801567244459, 1),  # PACCAR FREIGHTLINER TANK VENT KIT 8124
+        (8801270497451, 1),  # GASKET (P)A8979-1
+        (8801812644011, 2),  # PACCAR A/C Center Louver Vent S45-1005
+        (8801822343339, 2),  # PACCAR 0309812 (2-Pack) Sealing Plug
+        (8803574120619, 5),  # PACCAR O-Ring 1976264 (user: set to 5)
     ]
     try:
         res = supabase.table("app_settings").select("business_id").eq("key", "SHOPIFY_STORE_DOMAIN").execute()
@@ -210,22 +214,35 @@ async def _oneshot_archive_shopify_duplicates():
         settings = get_ebay_settings(biz_id)
         domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://","").replace("http://","").strip("/")
         token = get_shopify_access_token(biz_id)
-        headers = {"X-Shopify-Access-Token": token}
-        for pid in CHECK_IDS:
+        headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
+        location_id = _get_shopify_primary_location_id(domain, headers)
+        restored = 0
+        for pid, qty in RESTORE:
             try:
-                r = _req.get(f"https://{domain}/admin/api/2024-10/products/{pid}.json",
+                pr = _req.get(f"https://{domain}/admin/api/2024-10/products/{pid}.json",
                     headers=headers, timeout=15)
-                if r.status_code == 200:
-                    p = r.json().get("product", {})
-                    print(f"[verify-v4] {pid} status={p.get('status')} title={p.get('title','')[:50]}")
+                if pr.status_code != 200:
+                    print(f"[qty-restore] {pid}: product GET HTTP {pr.status_code}"); continue
+                variants = pr.json().get("product", {}).get("variants") or []
+                inv_item = variants[0].get("inventory_item_id") if variants else None
+                if not inv_item:
+                    print(f"[qty-restore] {pid}: no inventory_item_id"); continue
+                sr = _req.post(f"https://{domain}/admin/api/2024-10/inventory_levels/set.json",
+                    headers=headers,
+                    json={"location_id": int(location_id), "inventory_item_id": int(inv_item), "available": qty},
+                    timeout=15)
+                if sr.status_code in (200, 201):
+                    restored += 1
+                    print(f"[qty-restore] {pid} set to {qty}")
+                    supabase.table("shopify_inventory").update({"quantity": qty}).eq("product_id", str(pid)).execute()
                 else:
-                    print(f"[verify-v4] {pid}: HTTP {r.status_code}")
+                    print(f"[qty-restore] {pid}: set HTTP {sr.status_code} {sr.text[:150]}")
             except Exception as e:
-                print(f"[verify-v4] {pid} error: {e}")
-            await asyncio.sleep(0.3)
-        print("[verify-v4] verification complete")
+                print(f"[qty-restore] {pid} error: {e}")
+            await asyncio.sleep(0.4)
+        print(f"[qty-restore] done: {restored}/{len(RESTORE)} restored")
     except Exception as e:
-        print(f"[verify-v4] fatal: {e}")
+        print(f"[qty-restore] fatal: {e}")
     try:
         supabase.table("app_settings").upsert({"business_id": biz_id, "key": flag_key, "value": "done"}).execute()
     except Exception:
