@@ -182,13 +182,13 @@ async def auto_fill_worker():
         await asyncio.sleep(8)
 
 async def _oneshot_archive_shopify_duplicates():
-    """ONE-SHOT v6 (8/21 late): archive ALL 152 products from the user-reviewed
-    shopify_hdid_ebay_not_active list -- Shopify products whose hd_id-linked eBay
-    listing is Ended or gone. User instruction: end all of them on Shopify, they
-    are all gone. Verified zero overlap with the 8 just-restored PACCAR items."""
-    import asyncio, requests as _req
+    """ONE-SHOT v7 (8/21 late): republish ONE Shopify copy for the 3 items whose
+    dupes were all archived tonight (every copy was an orphan, so the whole group
+    vanished from Shopify while the eBay listing stayed Active). Uses the app's own
+    publish + local-record path so the new product gets its inventory_match link."""
+    import asyncio
     await asyncio.sleep(20)
-    flag_key = "SHOPIFY_ARCHIVE_152_DONE_20260821"
+    flag_key = "SHOPIFY_REPUBLISH_3_DONE_20260821"
     try:
         flag = (supabase.table("app_settings").select("value")
                 .eq("key", flag_key).limit(1).execute()).data
@@ -197,67 +197,29 @@ async def _oneshot_archive_shopify_duplicates():
     except Exception:
         pass
 
-    ARCHIVE_IDS = [
-        8804405280939,8803300573355,8801627898027,8803057041579,8801214300331,
-        8884821754027,8877876773035,8877876740267,8883589546155,8932629676203,
-        8882253398187,8877876936875,8877876871339,8877876969643,8802622800043,
-        8804065738923,8804424384683,8801281147051,8801434140843,8804423073963,
-        8803980214443,8801294745771,8801304346795,8801299497131,8801299890347,
-        8801312473259,8803769385131,8804398858411,8803766075563,8801419133099,
-        8801801928875,8803578970283,8803976315051,8804426416299,8801345536171,
-        8803571761323,8802653700267,8804426023083,8801439580331,8803668033707,
-        8803668918443,8801542078635,8883012239531,8882309202091,8884842299563,
-        8884414939307,8882253430955,8865545158827,8865545027755,8887242719403,
-        8887242948779,8887243112619,8884370964651,8889039716523,8887178559659,
-        8887178756267,8887182229675,8887178395819,8882253791403,8804364484779,
-        8882309562539,8882311233707,8882309365931,8803848487083,8803568058539,
-        8803569991851,8803565338795,8803577921707,8803564257451,8803555901611,
-        8801282949291,8803581952171,8803583918251,8803552231595,8803559571627,
-        8803556819115,8803570974891,8896730726571,8803726524587,8801228259499,
-        8801228456107,8926362861739,8887243473067,8884370604203,8883014041771,
-        8884370899115,8803432956075,8804208378027,8804372218027,8804056662187,
-        8803991486635,8804062855339,8804370514091,8803981394091,8803995615403,
-        8803988406443,8804371038379,8804240228523,8803977068715,8803990372523,
-        8804243833003,8803971006635,8803998367915,8801220952235,8803983818923,
-        8804248420523,8804225482923,8804374872235,8803993616555,8803987456171,
-        8803997384875,8883013517483,8883013157035,8803379249323,8883012960427,
-        8882311626923,8879556264107,8884370538667,8883012370603,8896730890411,
-        8884822048939,8801847410859,8803196436651,8804307730603,8803635560619,
-        8803551150251,8803550232747,8905219113131,8801283997867,8803442819243,
-        8801294647467,8801295171755,8801294942379,8803581067435,8803567304875,
-        8803548463275,8801241792683,8882253725867,8883013877931,8884371161259,
-        8883012796587,8887182262443,8882253594795,8883589382315,8883589677227,
-        8883589415083,8883589513387,8883589578923,8883012698283,8882253627563,
-        8883012632747,8801227407531,
-    ]
+    LISTING_IDS = [1247, 1093, 936]  # Nikken CNC202, BMT60 holder, Donaldson Torit EA905
+    biz_id = None
     try:
-        res = supabase.table("app_settings").select("business_id").eq("key", "SHOPIFY_STORE_DOMAIN").execute()
-        biz_id = (res.data or [{}])[0].get("business_id")
-        settings = get_ebay_settings(biz_id)
-        domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://","").replace("http://","").strip("/")
-        token = get_shopify_access_token(biz_id)
-        headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
-        archived = 0
-        failed = 0
-        for pid in ARCHIVE_IDS:
+        for lid in LISTING_IDS:
             try:
-                r = _req.put(f"https://{domain}/admin/api/2024-10/products/{pid}.json",
-                    headers=headers, json={"product": {"id": pid, "status": "archived"}}, timeout=15)
-                if r.status_code in (200, 201):
-                    archived += 1
-                    supabase.table("shopify_inventory").delete().eq("product_id", str(pid)).execute()
-                else:
-                    failed += 1
-                    print(f"[archive-152] {pid}: HTTP {r.status_code}")
+                lres = supabase.table("listings").select("*").eq("id", lid).limit(1).execute()
+                listing = (lres.data or [None])[0]
+                if not listing:
+                    print(f"[republish-3] listing {lid} not found"); continue
+                biz_id = listing.get("business_id") or biz_id
+                result = await asyncio.to_thread(push_listing_to_shopify, listing)
+                await asyncio.to_thread(_record_new_shopify_publish_locally,
+                                        listing["business_id"], result, listing.get("ebay_item_id"))
+                print(f"[republish-3] listing {lid} -> Shopify product {result.get('product_id')} qty {result.get('quantity')}")
             except Exception as e:
-                failed += 1
-                print(f"[archive-152] {pid} error: {e}")
-            await asyncio.sleep(0.4)
-        print(f"[archive-152] done: {archived} archived, {failed} failed of {len(ARCHIVE_IDS)}")
+                print(f"[republish-3] listing {lid} FAILED: {e}")
+            await asyncio.sleep(1)
+        print("[republish-3] done")
     except Exception as e:
-        print(f"[archive-152] fatal: {e}")
+        print(f"[republish-3] fatal: {e}")
     try:
-        supabase.table("app_settings").upsert({"business_id": biz_id, "key": flag_key, "value": "done"}).execute()
+        if biz_id:
+            supabase.table("app_settings").upsert({"business_id": biz_id, "key": flag_key, "value": "done"}).execute()
     except Exception:
         pass
 
