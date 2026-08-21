@@ -11678,7 +11678,31 @@ async def shopify_sync_auto_refresh_worker():
                     await asyncio.to_thread(_sync_orders_window, bid, win_start, win_end)
                 except Exception as ex:
                     print(f"auto orders pull failed for {bid}: {ex}")
-                # Full quantity reconcile (8/21): not tied to the sales window.
+                end = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+                start = (_dt.datetime.utcnow() - _dt.timedelta(days=7)).strftime("%Y-%m-%d")
+                sold = await asyncio.to_thread(_shopify_sync_sold_by_title, bid, start, end)
+                items = [{"title": v["title"], "sku": v.get("sku") or "", "legacy_item_id": v.get("legacy_item_id") or ""}
+                         for v in (sold or {}).values()]
+                if items:
+                    _shopify_sync_job_status[bid] = {
+                        "running": True, "result": None, "auto": True,
+                        "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None,
+                    }
+                    await _run_shopify_sync_refresh_background(bid, items)
+                    _shopify_sync_job_status[bid]["auto"] = True
+                    # Then PUSH, same rule as the hourly job but over the 7-day window,
+                    # so an eBay sale that was missed on its day (hourly only looks at
+                    # "today") still gets Shopify corrected instead of being lost.
+                    try:
+                        pushed = await asyncio.to_thread(_push_window_mismatches, bid, set(sold.keys()), sold)
+                        if pushed.get("pushed"):
+                            print(f"auto sync push: business {bid} -> {pushed}")
+                    except Exception as ex:
+                        print(f"auto sync push failed for {bid}: {ex}")
+                # Full quantity reconcile (8/21) -- runs LAST on purpose: the sales-window
+                # push above may reuse a snapshot eBay qty up to 30 min old, and on
+                # 8/21 15:55 it re-raised 10 products right after this reconcile had
+                # set them from a fresh GetItem. Fresh live check wins by going last.
                 # Every Shopify product whose qty is above eBay's (or whose eBay
                 # listing is ended) is live-verified and SET to eBay's number.
                 # This is what stops oversells that the sales-window logic
@@ -11693,28 +11717,6 @@ async def shopify_sync_auto_refresh_worker():
                         _qty_mismatch_cache[bid] = (_time.time(), [])
                 except Exception as ex:
                     print(f"auto qty-mismatch failed for {bid}: {ex}")
-                end = _dt.datetime.utcnow().strftime("%Y-%m-%d")
-                start = (_dt.datetime.utcnow() - _dt.timedelta(days=7)).strftime("%Y-%m-%d")
-                sold = await asyncio.to_thread(_shopify_sync_sold_by_title, bid, start, end)
-                items = [{"title": v["title"], "sku": v.get("sku") or "", "legacy_item_id": v.get("legacy_item_id") or ""}
-                         for v in (sold or {}).values()]
-                if not items:
-                    continue
-                _shopify_sync_job_status[bid] = {
-                    "running": True, "result": None, "auto": True,
-                    "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None,
-                }
-                await _run_shopify_sync_refresh_background(bid, items)
-                _shopify_sync_job_status[bid]["auto"] = True
-                # Then PUSH, same rule as the hourly job but over the 7-day window,
-                # so an eBay sale that was missed on its day (hourly only looks at
-                # "today") still gets Shopify corrected instead of being lost.
-                try:
-                    pushed = await asyncio.to_thread(_push_window_mismatches, bid, set(sold.keys()), sold)
-                    if pushed.get("pushed"):
-                        print(f"auto sync push: business {bid} -> {pushed}")
-                except Exception as ex:
-                    print(f"auto sync push failed for {bid}: {ex}")
         except Exception as ex:
             print(f"shopify sync auto-refresh worker: {ex}")
         await asyncio.sleep(20 * 60)
