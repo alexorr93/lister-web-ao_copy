@@ -140,7 +140,7 @@ tr.ignored:hover td { opacity: 0.85; }
         <button class="btn" onclick="setThisMonth()">This Month</button>
         <button class="btn" onclick="setLastMonth()">Last Month</button>
       </div>
-      <button class="btn btn-primary" onclick="syncNow()" title="Refreshes live eBay/Shopify quantities into the local snapshot — this is the only action that calls out to eBay/Shopify">🔄 Sync Now <span style="font-size:10px;opacity:.8;">(live API)</span></button>
+      <button class="btn btn-primary" onclick="syncNow()" title="Runs automatically every 20 min; click to force it now. Refreshes live eBay/Shopify quantities into the local snapshot — this is the only action that calls out to eBay/Shopify">🔄 Sync Now <span style="font-size:10px;opacity:.8;">(live API)</span></button>
       <button class="btn btn-orange" onclick="pushAllFound()" title="Pushes every row that's found in Shopify but not yet matching eBay — sets each to eBay's live quantity">⚡ Push All Found <span style="font-size:10px;opacity:.8;">(live API — writes to Shopify)</span></button>
       <button class="btn" onclick="testHourlySync()" title="Runs the same job the hourly automation runs (sync + push), right now, for today's sales only">🧪 Test Hourly Job <span style="font-size:10px;opacity:.8;">(live API)</span></button>
       <span id="last-synced" style="font-size:11px;color:var(--muted);align-self:center;"></span>
@@ -287,7 +287,7 @@ async function loadSyncStatus() {
     // timestamptz column — appending 'Z' on top of that produced "Invalid Date".
     document.getElementById('last-synced').textContent = data.last_synced_at
       ? 'Last synced: ' + new Date(data.last_synced_at).toLocaleString()
-      : 'Never synced — click Sync Now';
+      : 'Never synced — auto-sync runs every 20 min';
   } catch(e) {}
 }
 
@@ -470,6 +470,11 @@ function renderTable(items) {
 
 setToday();
 loadSyncStatus();
+// Server auto-runs Sync Now every 20 min (shopify_sync_auto_refresh_worker),
+// so the snapshot is already current when this page opens. Re-pull the table
+// + stamp on the same cadence and on tab focus so what's on screen matches.
+setInterval(function() { if (!document.hidden) { loadToday(); loadSyncStatus(); } }, 20 * 60 * 1000);
+document.addEventListener('visibilitychange', function() { if (!document.hidden) { loadToday(); loadSyncStatus(); } });
 (function() {
   const d = new Date().toISOString().slice(0,10);
   document.getElementById('ebay-start-date').value = d;

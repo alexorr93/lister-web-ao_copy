@@ -199,6 +199,7 @@ async def start_background_jobs():
     asyncio.create_task(ebay_analytics_sync_worker())
     asyncio.create_task(ebay_sync_check_worker())
     asyncio.create_task(inventory_cache_warm_worker())
+    asyncio.create_task(shopify_sync_auto_refresh_worker())
 
 async def ebay_analytics_sync_worker():
     """Once-a-day sweep of real view counts via the Sell Analytics API,
@@ -11415,6 +11416,40 @@ async def shopify_sync_refresh(request: Request, items: List[dict] = Body(...)):
     }
     asyncio.create_task(_run_shopify_sync_refresh_background(business_id, items))
     return {"started": True}
+
+async def shopify_sync_auto_refresh_worker():
+    """Runs the Sync page's "Sync Now" automatically every 20 minutes for every
+    business (items sold in the last 7 days -> live eBay/Shopify quantity
+    snapshot), so the page is already current when it's opened instead of the
+    user having to open it and click Sync every time. Uses the exact same
+    work function and job-status dict as the button, so a manual click while
+    an auto run is in flight just reports already_running, and the page's
+    "last synced" stamp reflects auto runs too."""
+    import asyncio, datetime as _dt
+    await asyncio.sleep(45)  # let boot + inventory warmer settle first
+    while True:
+        try:
+            res = supabase.table("businesses").select("id").execute()
+            for b in (res.data or []):
+                bid = b["id"]
+                if _shopify_sync_job_status.get(bid, {}).get("running"):
+                    continue
+                end = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+                start = (_dt.datetime.utcnow() - _dt.timedelta(days=7)).strftime("%Y-%m-%d")
+                sold = await asyncio.to_thread(_shopify_sync_sold_by_title, bid, start, end)
+                items = [{"title": v["title"], "sku": v.get("sku") or "", "legacy_item_id": v.get("legacy_item_id") or ""}
+                         for v in (sold or {}).values()]
+                if not items:
+                    continue
+                _shopify_sync_job_status[bid] = {
+                    "running": True, "result": None, "auto": True,
+                    "started_at": _dt.datetime.utcnow().isoformat(), "finished_at": None,
+                }
+                await _run_shopify_sync_refresh_background(bid, items)
+                _shopify_sync_job_status[bid]["auto"] = True
+        except Exception as ex:
+            print(f"shopify sync auto-refresh worker: {ex}")
+        await asyncio.sleep(20 * 60)
 
 @app.get("/api/shopify-sync/refresh-status")
 async def shopify_sync_refresh_status(request: Request, response: Response):
