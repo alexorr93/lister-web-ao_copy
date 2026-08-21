@@ -182,14 +182,12 @@ async def auto_fill_worker():
         await asyncio.sleep(8)
 
 async def _oneshot_archive_shopify_duplicates():
-    """ONE-SHOT v3 (8/21 late): archive the 26 Shopify-only products the user
-    explicitly marked YES-delete in their reviewed CSV. All confirmed no-hd_id,
-    Shopify-only items. Product IDs from the verified DB query (user's Excel
-    copy mangled IDs to scientific notation; these are the originals matched
-    back by title+sku)."""
+    """ONE-SHOT v4 (8/21 late): VERIFY the real live status of the 26 products
+    v3 claimed to archive. GETs each from Shopify and logs id, status, title.
+    Read-only — changes nothing."""
     import asyncio, requests as _req
-    await asyncio.sleep(20)
-    flag_key = "SHOPIFY_USER_YES_DELETE_DONE_20260821"
+    await asyncio.sleep(15)
+    flag_key = "SHOPIFY_VERIFY_V4_DONE_20260821"
     try:
         flag = (supabase.table("app_settings").select("value")
                 .eq("key", flag_key).limit(1).execute()).data
@@ -198,60 +196,36 @@ async def _oneshot_archive_shopify_duplicates():
     except Exception:
         pass
 
-    YES_DELETE_PRODUCT_IDS = [
-        8802624831659,  # Rexroth Hydraulic Directional Control Valve R901169993
-        8803044524203,  # NEW! NOTIFIER CPU2-640
-        8889040339115,  # GROMAX DA40-5480/P-ER32
-        8804029923499,  # 10x ABC Industries MineVent Ventatex 885
-        8802048671915,  # NEW NUMATIC 081SS600K000030 SOLENOID VALVE
-        8802653307051,  # NEW WEG W22 3HP Electric Motor
-        8802649342123,  # Mercedes-Benz alternator A 015 154 23 02
-        8801180450987,  # Cummins Pressure Temperature Sensor 5698456
-        8802142388395,  # Standard Gage Versa-Dial
-        8801362641067,  # VIS 1-2in Thread Micrometer
-        8802074853547,  # Mitsubishi SVJBR-082SM Lathe Tool Turner
-        8803497115819,  # Parker DSL201CR Solenoid Cartridge Valve
-        8804396564651,  # 4 PC Eaton Crouse-Hinds C38
-        8801416249515,  # Cartridge - New Air Dryer AC2001C
-        8803953377451,  # Federal HEMCO 1E Dial Indicator
-        8802375467179,  # Sandvik 5/8 Shank Kennametal SVABR 103C-S
-        8803116187819,  # SNAP ON C-64B RED WRENCH KIT BAG
-        8801204207787,  # Snap On T15 & T30 TORX Screwdriver
-        8889040502955,  # E-T-A 413-K14-LN2 Circuit Breaker
-        8803486564523,  # KUBOTA OEM V1311-44130 V-BELT
-        8803365093547,  # METEORLITE SY361100-A
-        8802462204075,  # FEDERAL Dial Indicator 23Q
-        8801772667051,  # SG Tool Aid PICK SET HOOKED 2PC
-        8801108754603,  # SNAP ON PH51C AIR HAMMER BIT
-        8801022247083,  # SNAP-ON SAE HEX WRENCH SET AWEF9K
-        8803042001067,  # Swagelok SS-TBC8 Clamp
+    CHECK_IDS = [
+        8802624831659,8803044524203,8889040339115,8804029923499,8802048671915,
+        8802653307051,8802649342123,8801180450987,8802142388395,8801362641067,
+        8802074853547,8803497115819,8804396564651,8801416249515,8803953377451,
+        8802375467179,8803116187819,8801204207787,8889040502955,8803486564523,
+        8803365093547,8802462204075,8801772667051,8801108754603,8801022247083,
+        8803042001067,
     ]
     try:
         res = supabase.table("app_settings").select("business_id").eq("key", "SHOPIFY_STORE_DOMAIN").execute()
         biz_id = (res.data or [{}])[0].get("business_id")
-        if not biz_id:
-            print("[yes-delete] no business found"); return
         settings = get_ebay_settings(biz_id)
         domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://","").replace("http://","").strip("/")
         token = get_shopify_access_token(biz_id)
-        headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
-        archived = 0
-        for pid in YES_DELETE_PRODUCT_IDS:
+        headers = {"X-Shopify-Access-Token": token}
+        for pid in CHECK_IDS:
             try:
-                r = _req.put(f"https://{domain}/admin/api/2024-10/products/{pid}.json",
-                    headers=headers, json={"product": {"id": pid, "status": "archived"}}, timeout=15)
-                if r.status_code in (200, 201):
-                    archived += 1
-                    print(f"[yes-delete] archived {pid}")
-                    supabase.table("shopify_inventory").delete().eq("product_id", str(pid)).execute()
+                r = _req.get(f"https://{domain}/admin/api/2024-10/products/{pid}.json",
+                    headers=headers, timeout=15)
+                if r.status_code == 200:
+                    p = r.json().get("product", {})
+                    print(f"[verify-v4] {pid} status={p.get('status')} title={p.get('title','')[:50]}")
                 else:
-                    print(f"[yes-delete] {pid}: HTTP {r.status_code}")
+                    print(f"[verify-v4] {pid}: HTTP {r.status_code}")
             except Exception as e:
-                print(f"[yes-delete] {pid} error: {e}")
-            await asyncio.sleep(0.4)
-        print(f"[yes-delete] done: {archived}/{len(YES_DELETE_PRODUCT_IDS)} archived")
+                print(f"[verify-v4] {pid} error: {e}")
+            await asyncio.sleep(0.3)
+        print("[verify-v4] verification complete")
     except Exception as e:
-        print(f"[yes-delete] fatal: {e}")
+        print(f"[verify-v4] fatal: {e}")
     try:
         supabase.table("app_settings").upsert({"business_id": biz_id, "key": flag_key, "value": "done"}).execute()
     except Exception:
