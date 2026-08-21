@@ -11426,7 +11426,7 @@ async def shopify_sync_auto_refresh_worker():
     an auto run is in flight just reports already_running, and the page's
     "last synced" stamp reflects auto runs too."""
     import asyncio, datetime as _dt
-    await asyncio.sleep(45)  # let boot + inventory warmer settle first
+    await asyncio.sleep(30)  # let boot + inventory warmer settle first
     while True:
         try:
             res = supabase.table("businesses").select("id").execute()
@@ -11434,6 +11434,18 @@ async def shopify_sync_auto_refresh_worker():
                 bid = b["id"]
                 if _shopify_sync_job_status.get(bid, {}).get("running"):
                     continue
+                # Step 0: pull NEW eBay orders first. The Sync page reads sales from
+                # the local `orders` table, and before this nothing filled that table
+                # except a manual Financials sync (confirmed 8/21: a sale at ~7:20am
+                # was missing because orders had last synced at 5:57am). 2-day window
+                # is small, resumable, and overlaps the previous run.
+                try:
+                    now = _dt.datetime.utcnow()
+                    win_end = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                    win_start = (now - _dt.timedelta(days=2)).strftime("%Y-%m-%dT00:00:00.000Z")
+                    await asyncio.to_thread(_sync_orders_window, bid, win_start, win_end)
+                except Exception as ex:
+                    print(f"auto orders pull failed for {bid}: {ex}")
                 end = _dt.datetime.utcnow().strftime("%Y-%m-%d")
                 start = (_dt.datetime.utcnow() - _dt.timedelta(days=7)).strftime("%Y-%m-%d")
                 sold = await asyncio.to_thread(_shopify_sync_sold_by_title, bid, start, end)
