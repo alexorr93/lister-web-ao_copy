@@ -182,99 +182,63 @@ async def auto_fill_worker():
         await asyncio.sleep(8)
 
 async def _oneshot_archive_shopify_duplicates():
-    """ONE-SHOT cleanup (8/21): archive orphan duplicate Shopify products that
-    have no hd_id in inventory_match. These were created by the publish button
-    having no dedup guard (now fixed). Archives the product on Shopify via
-    Admin REST, then deletes the local shopify_inventory + inventory_match rows.
-    Runs once on startup, skips if the setting flag says it already ran."""
+    """ONE-SHOT cleanup (8/21 v2): archive specific orphan duplicate Shopify
+    products by hardcoded product ID. Previous version failed because the DB
+    rows it needed to look up had already been deleted. This version just
+    archives the known list directly."""
     import asyncio, requests as _req
-    await asyncio.sleep(30)  # let other workers start first
-    flag_key = "SHOPIFY_DUPE_CLEANUP_DONE_20260821"
+    await asyncio.sleep(20)
+    flag_key = "SHOPIFY_DUPE_CLEANUP_V2_DONE_20260821"
     try:
         flag = (supabase.table("app_settings").select("value")
                 .eq("key", flag_key).limit(1).execute()).data
         if flag:
-            return  # already ran
+            return
     except Exception:
         pass
 
+    DUPE_PRODUCT_IDS = [
+        8801003536555,8896748617899,8896749797547,8896745373867,8896744554667,
+        8896748257451,8896744259755,8896745996459,8896741703851,8896750518443,
+        8896750551211,8891076640939,8803440427179,8883029442731,8883029409963,
+        8896745734315,8896748126379,8896741769387,8801498038443,8802997567659,
+        8803656007851,8917415329963,8896741834923,8896748191915,8801280950443,
+        8803074998443,8803437150379,8803438592171,8803437871275,8894325031083,
+        8896752451755,8802157232299,8802155102379,8905252864171,8905250537643,
+        8905250668715,8803915333803,8803015229611,8896778240171,8803115827371,
+        8803115729067,8896741408939,8801328988331,8896744390827,8896748290219,
+    ]
     try:
-        res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
-        business_ids = list(set(r["business_id"] for r in (res.data or [])))
+        res = supabase.table("app_settings").select("business_id").eq("key", "SHOPIFY_STORE_DOMAIN").execute()
+        biz_id = (res.data or [{}])[0].get("business_id")
+        if not biz_id:
+            print("[dupe-cleanup-v2] no business found"); return
+        settings = get_ebay_settings(biz_id)
+        domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://","").replace("http://","").strip("/")
+        token = get_shopify_access_token(biz_id)
+        headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
+        archived = 0
+        for pid in DUPE_PRODUCT_IDS:
+            try:
+                r = _req.put(f"https://{domain}/admin/api/2024-10/products/{pid}.json",
+                    headers=headers, json={"product": {"id": pid, "status": "archived"}}, timeout=15)
+                if r.status_code in (200, 201):
+                    archived += 1
+                    print(f"[dupe-cleanup-v2] archived {pid}")
+                    supabase.table("shopify_inventory").delete().eq("product_id", str(pid)).execute()
+                    supabase.table("inventory_match").delete().eq("shopify_id", str(pid)).execute()
+                else:
+                    print(f"[dupe-cleanup-v2] {pid}: HTTP {r.status_code}")
+            except Exception as e:
+                print(f"[dupe-cleanup-v2] {pid} error: {e}")
+            await asyncio.sleep(0.4)
+        print(f"[dupe-cleanup-v2] done: {archived}/{len(DUPE_PRODUCT_IDS)} archived")
     except Exception as e:
-        print(f"[dupe-cleanup] failed to get business_ids: {e}")
-        return
-
-    for biz_id in business_ids:
-        try:
-            settings = get_ebay_settings(biz_id)
-            domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
-            if not domain:
-                continue
-            token = get_shopify_access_token(biz_id)
-            headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
-
-            # Find all active shopify_inventory rows with no hd_id that share a title with another row
-            all_active = (supabase.table("shopify_inventory")
-                          .select("id,product_id,title")
-                          .eq("business_id", biz_id)
-                          .eq("status", "active")
-                          .execute()).data or []
-            # Build title counts
-            from collections import Counter
-            title_counts = Counter(r["title"] for r in all_active)
-            dupe_titles = {t for t, c in title_counts.items() if c > 1}
-
-            # For each dupe title, find which variant_ids have hd_id
-            if not dupe_titles:
-                continue
-            hd_rows = (supabase.table("inventory_match")
-                       .select("shopify_id,hd_id")
-                       .eq("business_id", biz_id)
-                       .not_.is_("hd_id", "null")
-                       .execute()).data or []
-            hd_variant_ids = {r["shopify_id"] for r in hd_rows}
-
-            archived = 0
-            for row in all_active:
-                if row["title"] not in dupe_titles:
-                    continue
-                if row["id"] in hd_variant_ids:
-                    continue  # this is the keeper
-                # Archive on Shopify
-                prod_id = row["product_id"]
-                try:
-                    r = _req.put(
-                        f"https://{domain}/admin/api/2024-10/products/{prod_id}.json",
-                        headers=headers,
-                        json={"product": {"id": int(prod_id), "status": "archived"}},
-                        timeout=15
-                    )
-                    if r.status_code in (200, 201):
-                        # Clean local DB
-                        supabase.table("shopify_inventory").delete().eq("id", row["id"]).execute()
-                        supabase.table("inventory_match").delete().eq("shopify_id", row["id"]).execute()
-                        archived += 1
-                        print(f"[dupe-cleanup] archived Shopify product {prod_id}: {row['title'][:60]}")
-                    else:
-                        print(f"[dupe-cleanup] failed to archive {prod_id} ({r.status_code}): {r.text[:200]}")
-                except Exception as e:
-                    print(f"[dupe-cleanup] error archiving {prod_id}: {e}")
-                await asyncio.sleep(0.5)  # rate limit
-
-            print(f"[dupe-cleanup] business {biz_id}: archived {archived} duplicate Shopify products")
-        except Exception as e:
-            print(f"[dupe-cleanup] error for business {biz_id}: {e}")
-
-    # Mark as done so it never runs again
+        print(f"[dupe-cleanup-v2] fatal: {e}")
     try:
-        supabase.table("app_settings").upsert({
-            "business_id": business_ids[0] if business_ids else "system",
-            "key": flag_key, "value": "done"
-        }).execute()
+        supabase.table("app_settings").upsert({"business_id": biz_id, "key": flag_key, "value": "done"}).execute()
     except Exception:
         pass
-    print("[dupe-cleanup] one-shot cleanup complete")
 
 @app.on_event("startup")
 async def start_background_jobs():
