@@ -7276,6 +7276,44 @@ def _compute_monthly_trend_payload(business_id: str, start_str: str, end_str: st
         for g, sa in zip(green_revenue_by_month, sales)
     ]
 
+    # --- YTD Business Appreciation (current year only) ---
+    # Uses the same sales/inventory_spend already computed above.
+    year_str = now.strftime("%Y")
+    ytd_months = [m for m in all_months if m.startswith(year_str)]
+    # Cumulative cash yield month by month
+    biz_labels = []
+    biz_cash_yield = []
+    biz_inv_app = []
+    biz_total = []
+    month_names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    cum_cy = 0.0
+    # Baseline = first inventory value in current year, or Dec prior year
+    inv_baseline = None
+    for d, v in real_points:
+        if d.startswith(str(int(year_str) - 1) + "-12"):
+            inv_baseline = v
+            break
+    if inv_baseline is None:
+        inv_baseline = 561000.0
+    for m in ytd_months:
+        mi = all_months.index(m)
+        cum_cy += sales[mi] - inventory_spend[mi]
+        # Find inventory value for this month
+        inv_val = None
+        if m in [im[:7] if len(im) > 5 else im for im in inv_months]:
+            # Match this month in inv_months
+            for j, im in enumerate(inv_months):
+                if im == m or im.startswith(m):
+                    v = inventory_value_by_month[j]
+                    if v is not None:
+                        inv_val = v
+        ia = (inv_val - inv_baseline) if inv_val is not None else None
+        month_idx = int(m[5:7]) - 1
+        biz_labels.append(month_names[month_idx])
+        biz_cash_yield.append(round(cum_cy, 2))
+        biz_inv_app.append(round(ia, 2) if ia is not None else None)
+        biz_total.append(round(cum_cy + ia, 2) if ia is not None else None)
+
     return {
         "start": start_str[:7],
         "end": end_str[:7],
@@ -7288,6 +7326,10 @@ def _compute_monthly_trend_payload(business_id: str, start_str: str, end_str: st
         "sales": sales,
         "pct_multiple": pct_multiple,
         "dollar_variance": dollar_variance,
+        "biz_app_labels": biz_labels,
+        "biz_app_cash_yield": biz_cash_yield,
+        "biz_app_inv_appreciation": biz_inv_app,
+        "biz_app_total": biz_total,
     }
 
 @app.get("/api/analytics/business-appreciation-trend")
