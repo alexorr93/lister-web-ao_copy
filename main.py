@@ -4325,14 +4325,15 @@ def _apply_cash_to_profit(business_id: str):
     alone), just 1 round trip instead of ~160."""
     start = 0
     while True:
-        page = supabase.table("acquisitions").select("id,business_id,sku,cost,cash,ebay")\
+        page = supabase.table("acquisitions").select("id,business_id,sku,cost,cash,ebay,payout_backfill")\
             .eq("business_id", business_id).range(start, start + 999).execute().data or []
         batch = []
         for row in page:
             cost = row.get("cost") or 0
             cash = row.get("cash") or 0
             ebay_total_payouts = row.get("ebay") or 0
-            total_payouts = ebay_total_payouts + cash
+            backfill = float(row.get("payout_backfill") or 0)
+            total_payouts = ebay_total_payouts + cash + backfill
             profit = total_payouts - cost
             roi_pct = round(profit / cost * 100, 2) if cost else None
             batch.append({
@@ -4362,7 +4363,7 @@ def _apply_shopify_sales_to_profit(business_id: str):
     import datetime as _dt
     start = 0
     while True:
-        page = supabase.table("acquisitions").select("id,business_id,sku,cost,ebay,cash,became_green_at")\
+        page = supabase.table("acquisitions").select("id,business_id,sku,cost,ebay,cash,payout_backfill,became_green_at")\
             .eq("business_id", business_id).range(start, start + 999).execute().data or []
         acquisitions.extend(page)
         if len(page) < 1000:
@@ -4398,7 +4399,8 @@ def _apply_shopify_sales_to_profit(business_id: str):
         cost = a.get("cost") or 0
         ebay = a.get("ebay") or 0
         cash = a.get("cash") or 0
-        total_payouts = ebay + cash + sales
+        backfill = float(a.get("payout_backfill") or 0)
+        total_payouts = ebay + cash + sales + backfill
         profit = total_payouts - cost
         roi_pct = round(profit / cost * 100, 2) if cost else None
 
