@@ -7375,11 +7375,11 @@ async def api_business_appreciation_trend(request: Request):
         running += rev_by_date.get(d, 0) + cash_by_date.get(d, 0) + backfill_by_date.get(d, 0) - spend_by_date.get(d, 0)
         cum_yield[d] = running
 
-    # Build output series at each inventory date
-    dates_out = []
-    cash_yield_out = []
-    inv_app_out = []
-    biz_app_out = []
+    # Build output series — start with Jan 1 at zero
+    dates_out = [jan1]
+    cash_yield_out = [0.0]
+    inv_app_out = [0.0]
+    biz_app_out = [0.0]
     # For dates before first money date, interpolate yield = 0
     last_known_yield = 0.0
     for d in all_dates:
