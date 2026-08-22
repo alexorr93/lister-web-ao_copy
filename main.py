@@ -7299,7 +7299,7 @@ async def api_business_appreciation_trend(request: Request):
     if not business_id:
         raise HTTPException(401, "Unauthorized")
 
-    year = str(_datetime.date.today().year)
+    year = str(datetime.now().year)
     jan1 = f"{year}-01-01"
     dec31 = f"{year}-12-31"
 
@@ -7323,16 +7323,18 @@ async def api_business_appreciation_trend(request: Request):
     baseline = inv_by_date.pop("2025-12-01", 561000.0)
 
     # --- Cumulative cash yield per date: net_revenue + cash - spend ---
-    # Orders (net after fees, before shipping)
-    order_rows = _fetch_all_paginated(
-        supabase.table("orders")
-        .select("order_date, net")
-        .eq("business_id", business_id)
-        .gte("order_date", jan1)
-        .lte("order_date", dec31)
-        .order("order_date"),
-        page_size=1000
-    )
+    # Orders (net after fees, before shipping) — paginated
+    order_rows = []
+    start = 0
+    while True:
+        page = supabase.table("orders").select("order_date, net") \
+            .eq("business_id", business_id) \
+            .gte("order_date", jan1).lte("order_date", dec31) \
+            .range(start, start + 999).execute().data or []
+        order_rows.extend(page)
+        if len(page) < 1000:
+            break
+        start += 1000
     # Acquisitions (spend + cash)
     acq_rows = supabase.table("acquisitions") \
         .select("date, cost, cash, payout_backfill") \
