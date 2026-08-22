@@ -594,6 +594,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <button class="btn" onclick="shareSelectedCaptureSession()">🔗 Share</button>
       <button class="btn" id="lot-select-mode-btn" onclick="toggleSelectMode()">☑️ Select Lots</button>
       <button class="btn btn-primary" onclick="runAllFields()">▶️ Run All Fields</button>
+      <button class="btn" onclick="gptEvaluateAll()" style="background:#10a37f;color:#fff;">🧠 Run All GPT</button>
       <button class="btn" onclick="refreshBids()">🔄 Refresh Bids</button>
       <button class="btn" style="background:#7a2020;color:#fff;" onclick="deleteSelectedCaptureSession()">🗑️ Delete Session</button>
     </div>
@@ -3510,6 +3511,26 @@ async function gptEvaluateSelectedLots() {
     toast(`GPT-evaluated ${ok}/${n} lot(s)`);
     renderAuctionTable();
   } catch(e) { toast('Failed to GPT-evaluate selected lots', 'error'); }
+}
+
+async function gptEvaluateAll() {
+  if (!activeSession) { toast('Select a session first', 'error'); return; }
+  const pending = auctionLotsCache.filter(l => !l.gpt_resale_evaluation);
+  if (!pending.length) { toast('All lots already have GPT evaluations'); return; }
+  const n = pending.length;
+  toast(`🧠 GPT-evaluating ${n} lot(s)…`);
+  try {
+    const r = await api('POST', '/api/auction/capture/lots/gpt-evaluate-bulk', {lot_ids: pending.map(l => l.id)});
+    let ok = 0;
+    for (const item of r.results) {
+      if (item.status === 'ok') {
+        const lot = auctionLotsCache.find(l => l.id === item.lot_id);
+        if (lot) { lot.gpt_resale_evaluation = item.gpt_resale_evaluation; ok++; }
+      }
+    }
+    toast(`GPT-evaluated ${ok}/${n} lot(s)`);
+    renderAuctionTable();
+  } catch(e) { toast('Failed to GPT-evaluate all lots: ' + e.message, 'error'); }
 }
 
 async function flagSelectedLots() {
