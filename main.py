@@ -3342,6 +3342,10 @@ def get_gemini_key(business_id: str) -> str:
     settings = get_ebay_settings(business_id)
     return settings.get("GEMINI_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
 
+def get_openai_key(business_id: str) -> str:
+    settings = get_ebay_settings(business_id)
+    return settings.get("OPENAI_API_KEY", "") or os.getenv("OPENAI_API_KEY", "")
+
 def sync_ebay_categories(token: str) -> dict:
     """Download eBay's full category tree(s) and save them locally — EVERY node, not
     just leaves, so parent/grouping categories show their real IDs too. is_leaf marks
@@ -9694,6 +9698,129 @@ def _itemize_lot_deep(lot: dict) -> list:
 
     supabase.table("auction_lots").update({"itemized": True, "is_bulk_lot": True}).eq("id", lot_id).execute()
     return inserted
+
+GPT_RESALE_PROMPT = """You are evaluating an auction lot for a reseller deciding where to deploy capital at auction. Be fast to scan, not exhaustive prose.
+
+Lot title: {title}
+Lot description: {description}
+
+Look at the attached photo(s) and the title/description. Respond in EXACTLY this plain-text format,
+no markdown headers, no bullets:
+
+ITEMS: <terse comma-separated list of brands/part numbers/what's actually visible -- no full
+sentences. If you can't confidently read a brand/model, describe it generically instead of
+guessing. Don't invent items that aren't shown or named.>
+VALUE: <one or two short sentences of reasoning, then real computed arithmetic (qty x per-unit
+estimate, summed) if there's more than one item -- not an eyeballed round number.> Final answer: **$X**
+LIQUIDITY: High|Medium|Low -- <one short clause why>
+
+The final dollar figure must be the literal result of the arithmetic shown, not a separately
+picked round number."""
+
+def _openai_resale_eval_call(client, title: str, description: str, photo_urls) -> str:
+    """One OpenAI vision call with all of a lot's photos attached together, mirroring
+    _gemini_itemize_call's one-call-sees-everything approach so the model dedupes items
+    across photos itself. photo_urls may be a string, a list, or None/empty."""
+    import base64
+    import requests as _requests
+
+    if isinstance(photo_urls, str):
+        photo_urls = [photo_urls]
+    photo_urls = photo_urls or []
+
+    content = [{"type": "text", "text": GPT_RESALE_PROMPT.format(
+        title=title or "(no title)", description=description or "(no description)")}]
+    for photo_url in photo_urls:
+        try:
+            img = _requests.get(photo_url, timeout=20)
+            img.raise_for_status()
+            ctype = img.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+            if ctype not in ("image/jpeg", "image/png", "image/webp"):
+                ctype = "image/jpeg"
+            b64 = base64.b64encode(img.content).decode("ascii")
+            content.append({"type": "image_url", "image_url": {"url": f"data:{ctype};base64,{b64}"}})
+        except Exception as e:
+            print(f"gpt-evaluate: could not fetch photo {photo_url}: {e}")
+
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": content}],
+        max_tokens=1200,
+    )
+    return (response.choices[0].message.content or "").strip()
+
+def _gpt_evaluate_lot(lot: dict, business_id: str) -> dict:
+    """Single-lot GPT resale evaluation -- writes gpt_resale_evaluation, the OpenAI
+    counterpart to the manual claude_itemization column."""
+    from openai import OpenAI
+
+    openai_key = get_openai_key(business_id)
+    if not openai_key:
+        raise HTTPException(400, "OPENAI_API_KEY not set")
+
+    client = OpenAI(api_key=openai_key)
+    lot_id = lot["id"]
+    try:
+        text = _openai_resale_eval_call(client, lot.get("title"), lot.get("description"), lot.get("photo_urls") or [])
+    except Exception as e:
+        raise HTTPException(500, f"OpenAI evaluate error: {e}")
+
+    supabase.table("auction_lots").update({"gpt_resale_evaluation": text}).eq("id", lot_id).execute()
+    return {"lot_id": lot_id, "gpt_resale_evaluation": text}
+
+@app.post("/api/auction/capture/lots/{lot_id}/gpt-evaluate")
+async def gpt_evaluate_lot(lot_id: str, request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    lot_res = supabase.table("auction_lots").select("*").eq("id", lot_id).single().execute()
+    if not lot_res.data:
+        raise HTTPException(404, "Lot not found")
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        result = await loop.run_in_executor(executor, _gpt_evaluate_lot, lot_res.data, str(business_id))
+    return result
+
+class GptEvaluateBulk(BaseModel):
+    lot_ids: List[str]
+
+@app.post("/api/auction/capture/lots/gpt-evaluate-bulk")
+async def gpt_evaluate_lots_bulk(body: GptEvaluateBulk, request: Request):
+    """Batch version, scoped to sessions the caller owns, same ownership pattern as
+    bulk-flag/bulk-delete. Runs a small thread pool since each call is an OpenAI
+    vision request (network + model latency bound, not CPU bound)."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    if not body.lot_ids:
+        return {"results": []}
+    owned_sessions = {s["id"] for s in supabase.table("auction_capture_sessions").select("id").eq("business_id", str(business_id)).execute().data}
+    lots = supabase.table("auction_lots").select("*").in_("id", body.lot_ids).execute().data
+    owned_lots = [l for l in lots if l["session_id"] in owned_sessions]
+    if not owned_lots:
+        raise HTTPException(404, "No matching lots found")
+
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    loop = asyncio.get_event_loop()
+    executor = ThreadPoolExecutor(max_workers=4)
+    tasks = [loop.run_in_executor(executor, _gpt_evaluate_lot, lot, str(business_id)) for lot in owned_lots]
+    done = await asyncio.gather(*tasks, return_exceptions=True)
+    results = []
+    for lot, r in zip(owned_lots, done):
+        if isinstance(r, Exception):
+            msg = str(r)
+            for prefix in ("400:", "404:", "500:"):
+                if msg.startswith(prefix):
+                    msg = msg[len(prefix):].strip()
+                    break
+            results.append({"lot_id": lot["id"], "status": "error", "error": msg})
+        else:
+            results.append({**r, "status": "ok"})
+    executor.shutdown(wait=False)
+    return {"results": results}
 
 _IMG_SKIP_PATTERNS = ("logo", "icon", "spinner", "favicon", "avatar", "sprite", ".svg")
 

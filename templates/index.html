@@ -624,6 +624,13 @@ select.field-input { background: #fff; color: #0f172a; }
       <input type="password" class="field-input" id="set-gemini" placeholder="AIza..." style="margin-bottom:10px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="set-gemini-nofill-setgemini"/>
       <button class="btn btn-primary" style="width:100%;" onclick="saveSetting('GEMINI_API_KEY','set-gemini')">Save</button>
     </div>
+    <div class="settings-section" style="border-left:4px solid var(--accent);">
+      <div class="settings-title">🧠 OpenAI API</div>
+      <div class="settings-sub">Used for GPT resale evaluation on Scope Radar lots.</div>
+      <div class="field-label">API Key</div>
+      <input type="password" class="field-input" id="set-openai" placeholder="sk-..." style="margin-bottom:10px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="set-openai-nofill-setopenai"/>
+      <button class="btn btn-primary" style="width:100%;" onclick="saveSetting('OPENAI_API_KEY','set-openai')">Save</button>
+    </div>
     <div class="settings-section" style="border-left:4px solid var(--orange);">
       <div class="settings-title">🏷️ eBay API Credentials</div>
       <div class="settings-sub">For direct listing submission. Find at developer.ebay.com<br><strong style="color:var(--amber);">⚠️ If these are set as Railway environment variables, that value is used instead — this form is a fallback only. Edit in Railway for security.</strong></div>
@@ -677,6 +684,7 @@ select.field-input { background: #fff; color: #0f172a; }
   <div style="pointer-events:auto;background:var(--surface);border:1px solid var(--border);border-bottom:none;border-radius:12px 12px 0 0;padding:10px 16px;display:flex;gap:10px;align-items:center;box-shadow:0 -4px 20px rgba(0,0,0,.3);margin-bottom:0;">
     <span id="lot-select-count" style="font-size:12px;color:var(--muted);white-space:nowrap;"></span>
     <button class="btn" style="font-size:12px;padding:6px 12px;" onclick="flagSelectedLots()">🏷️ Flag as LOT</button>
+    <button class="btn" style="font-size:12px;padding:6px 12px;" onclick="gptEvaluateSelectedLots()">🧠 GPT Evaluate</button>
     <button class="btn" style="font-size:12px;padding:6px 12px;" onclick="deleteSelectedLots()">🗑️ Delete Selected</button>
     <button class="btn" style="font-size:12px;padding:6px 12px;" onclick="toggleSelectMode()">✕ Done</button>
   </div>
@@ -3264,14 +3272,18 @@ function renderAuctionTable() {
         ${searchBtns}
       </td>
       <td style="max-width:200px;font-size:11px;color:var(--text);">${itemsHtml}</td>
-      <td style="font-size:11px;max-width:220px;white-space:pre-wrap;">${lot.claude_itemization || ''}</td>
+      <td style="font-size:11px;max-width:220px;white-space:pre-wrap;">
+        ${lot.gpt_resale_evaluation
+          ? `${lot.gpt_resale_evaluation}<div><button onclick="gptEvaluateLot('${lot.id}', this)" style="font-size:9px;padding:1px 6px;margin-top:4px;background:none;border:1px solid var(--border);border-radius:5px;color:var(--muted);cursor:pointer;">↻ Re-run</button></div>`
+          : `<button onclick="gptEvaluateLot('${lot.id}', this)" class="btn" style="font-size:10px;padding:2px 8px;">🧠 GPT Evaluate</button>`}
+      </td>
       <td style="font-size:11px;max-width:200px;white-space:pre-wrap;">${lot.claude_resale_evaluation || ''}</td>
       <td style="font-size:11px;">${lot.resale_value_low != null ? `<b>${money(lot.resale_value_low)}–${money(lot.resale_value_high)}</b><div style="color:var(--muted);">${lot.resale_value_notes||''}</div>` : ''}</td>
       <td style="font-size:11px;">${lot.liquidity_rating ? `<b style="text-transform:uppercase;">${lot.liquidity_rating}</b><div style="color:var(--muted);">${lot.liquidity_notes||''}</div>` : ''}</td>
       <td style="font-size:11px;">${lot.weight_lbs != null ? `<b>${Number(lot.weight_lbs).toLocaleString()} lbs</b><div style="color:var(--muted);">${lot.weight_notes||''}</div>` : ''}</td>
       <td style="font-size:11px;">${lot.max_bid != null ? `<b>${money(lot.max_bid)}</b><div style="color:var(--muted);">${lot.max_bid_notes||''}</div>` : ''}</td>
       <td style="min-width:160px;">
-        <textarea onblur="saveLotNotes('${lot.id}', this)" placeholder="Notes..." style="width:100%;min-height:50px;font-size:11px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px;resize:vertical;">${lot.notes || ''}</textarea>
+        <textarea class="lot-notes-input" data-lot-id="${lot.id}" oninput="scheduleSaveLotNotes('${lot.id}', this)" onblur="saveLotNotes('${lot.id}', this)" placeholder="Notes..." style="width:100%;min-height:50px;font-size:11px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px;resize:vertical;">${lot.notes || ''}</textarea>
         <div id="notes-saved-${lot.id}" style="font-size:9px;color:var(--muted);height:11px;"></div>
       </td>
     </tr>`;
@@ -3289,7 +3301,7 @@ function renderAuctionTable() {
           <th></th>
           <th style="cursor:pointer;user-select:none;" onclick="toggleLotSort()" title="Sort by lot number">Lot${lotSortArrow()}</th>
           <th>Itemization</th>
-          <th>Claude Itemization</th>
+          <th>GPT Resale Eval</th>
           <th>Claude Resale Evaluation</th>
           <th>Resale Value ${metricRunBtn('resale_value')}</th>
           <th>Liquidity ${metricRunBtn('liquidity')}</th>
@@ -3470,6 +3482,36 @@ async function flagLotAsBulk(lotId, btn) {
   }
 }
 
+async function gptEvaluateLot(lotId, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Evaluating…'; }
+  try {
+    const r = await api('POST', `/api/auction/capture/lots/${lotId}/gpt-evaluate`);
+    const lot = auctionLotsCache.find(l => l.id === lotId);
+    if (lot) lot.gpt_resale_evaluation = r.gpt_resale_evaluation;
+    renderAuctionTable();
+  } catch(e) {
+    toast('GPT evaluate failed: ' + e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '🧠 GPT Evaluate'; }
+  }
+}
+
+async function gptEvaluateSelectedLots() {
+  if (!selectedLotIds.size) { toast('Nothing selected', 'error'); return; }
+  const n = selectedLotIds.size;
+  try {
+    const r = await api('POST', '/api/auction/capture/lots/gpt-evaluate-bulk', {lot_ids: Array.from(selectedLotIds)});
+    let ok = 0;
+    for (const item of r.results) {
+      if (item.status === 'ok') {
+        const lot = auctionLotsCache.find(l => l.id === item.lot_id);
+        if (lot) { lot.gpt_resale_evaluation = item.gpt_resale_evaluation; ok++; }
+      }
+    }
+    toast(`GPT-evaluated ${ok}/${n} lot(s)`);
+    renderAuctionTable();
+  } catch(e) { toast('Failed to GPT-evaluate selected lots', 'error'); }
+}
+
 async function flagSelectedLots() {
   if (!selectedLotIds.size) { toast('Nothing selected', 'error'); return; }
   const n = selectedLotIds.size;
@@ -3485,7 +3527,20 @@ async function flagSelectedLots() {
   } catch(e) { toast('Failed to flag selected lots', 'error'); }
 }
 
+const _lotNotesSaveTimers = {};
+function scheduleSaveLotNotes(lotId, textarea) {
+  // Debounced auto-save while typing — the 30s auto-refresh (setInterval below)
+  // re-renders this whole table and would otherwise wipe out anything typed but
+  // not yet blurred. Update the cache immediately (so an in-flight re-render redraws
+  // the current text instead of stale saved text) and debounce the actual network save.
+  const lot = auctionLotsCache.find(l => l.id === lotId);
+  if (lot) lot.notes = textarea.value;
+  clearTimeout(_lotNotesSaveTimers[lotId]);
+  _lotNotesSaveTimers[lotId] = setTimeout(() => saveLotNotes(lotId, textarea), 800);
+}
+
 async function saveLotNotes(lotId, textarea) {
+  clearTimeout(_lotNotesSaveTimers[lotId]);
   const indicator = document.getElementById(`notes-saved-${lotId}`);
   try {
     await api('PATCH', `/api/auction/capture/lots/${lotId}/notes`, {notes: textarea.value});
@@ -3506,6 +3561,7 @@ async function loadSettings() {
   try {
     const s = await api('GET', '/api/settings');
     document.getElementById('set-gemini').value    = s.GEMINI_API_KEY || '';
+    document.getElementById('set-openai').value    = s.OPENAI_API_KEY || '';
     document.getElementById('set-ebay-app').value  = s.EBAY_APP_ID || '';
     document.getElementById('set-ebay-dev').value  = s.EBAY_DEV_ID || '';
     document.getElementById('set-ebay-cert').value = s.EBAY_CERT_ID || '';
@@ -4008,7 +4064,13 @@ loadLotSkus();
 
 // Auto-refresh Intake every 30s when on that tab
 setInterval(() => { if (activeTab === 'intake') { loadListings(); } }, 30000);
-setInterval(() => { if (activeTab === 'auction' && activeSession) loadAuctionItems(activeSession); }, 30000);
+setInterval(() => {
+  // Skip while a notes textarea is focused — content is already safe (debounced
+  // auto-save above), but a mid-typing re-render would still yank the cursor/scroll
+  // position out from under the user, which reads as "it reset" even though nothing's lost.
+  const editingNotes = document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('lot-notes-input');
+  if (activeTab === 'auction' && activeSession && !editingNotes) loadAuctionItems(activeSession);
+}, 30000);
 
 async function rotatePhoto(dir) {
   const img = document.getElementById('modal-img');
