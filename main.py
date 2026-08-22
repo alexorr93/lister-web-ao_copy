@@ -7292,38 +7292,38 @@ def _compute_monthly_trend_payload(business_id: str, start_str: str, end_str: st
 
 @app.get("/api/analytics/business-appreciation-trend")
 async def api_business_appreciation_trend(request: Request):
-    """YTD business appreciation trend computed from raw inputs so it covers
-    the full year — monthly inventory backfill (Jan-May) plus daily snapshots
-    (late Jul+), with cumulative cash yield derived from orders + acquisitions."""
+    """Monthly YTD business appreciation — one data point per month."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
 
-    year = str(datetime.now().year)
+    from collections import defaultdict as _dd
+
+    year = datetime.now().year
+    current_month = datetime.now().month
     jan1 = f"{year}-01-01"
     dec31 = f"{year}-12-31"
 
-    # --- Inventory value timeline (deduped, one value per date) ---
+    # --- Inventory snapshots (non-zero only) ---
     snap_rows = supabase.table("analytics_snapshots") \
         .select("snapshot_date, inventory_snapshot_value") \
         .eq("business_id", business_id) \
-        .gte("snapshot_date", "2025-12-01") \
-        .lte("snapshot_date", dec31) \
+        .gte("snapshot_date", "2025-12-01").lte("snapshot_date", dec31) \
         .gt("inventory_snapshot_value", 0) \
         .order("snapshot_date") \
         .execute().data or []
-    # Keep the max value per date (handles dupe rows)
     inv_by_date = {}
     for r in snap_rows:
-        val = float(r.get("inventory_snapshot_value") or 0)
         d = r["snapshot_date"]
-        inv_by_date[d] = max(inv_by_date.get(d, 0), val)
-
-    # Baseline = Dec 1 prior year (proxy for Jan 1)
+        inv_by_date[d] = max(inv_by_date.get(d, 0), float(r.get("inventory_snapshot_value") or 0))
     baseline = inv_by_date.pop("2025-12-01", 561000.0)
 
-    # --- Cumulative cash yield per date: net_revenue + cash - spend ---
-    # Orders (net after fees, before shipping) — paginated
+    # Collapse to last-known value per month
+    inv_by_month = {}
+    for d in sorted(inv_by_date):
+        inv_by_month[d[:7]] = inv_by_date[d]
+
+    # --- Orders (paginated) ---
     order_rows = []
     start = 0
     while True:
@@ -7335,76 +7335,43 @@ async def api_business_appreciation_trend(request: Request):
         if len(page) < 1000:
             break
         start += 1000
-    # Acquisitions (spend + cash)
+
+    # --- Acquisitions ---
     acq_rows = supabase.table("acquisitions") \
         .select("date, cost, cash, payout_backfill") \
         .eq("business_id", business_id) \
-        .gte("date", jan1) \
-        .lte("date", dec31) \
-        .order("date") \
+        .gte("date", jan1).lte("date", dec31) \
         .execute().data or []
 
-    # Build daily deltas for revenue, spend, cash
-    from collections import defaultdict as _defaultdict
-    rev_by_date = _defaultdict(float)
+    # Bucket by month
+    rev_m = _dd(float)
     for o in order_rows:
-        d = (o.get("order_date") or "")[:10]
-        if d >= jan1:
-            rev_by_date[d] += float(o.get("net") or 0)
-
-    spend_by_date = _defaultdict(float)
-    cash_by_date = _defaultdict(float)
-    backfill_by_date = _defaultdict(float)
+        rev_m[(o.get("order_date") or "")[:7]] += float(o.get("net") or 0)
+    spend_m, cash_m, bf_m = _dd(float), _dd(float), _dd(float)
     for a in acq_rows:
-        d = a.get("date", "")
-        spend_by_date[d] += float(a.get("cost") or 0)
-        cash_by_date[d] += float(a.get("cash") or 0)
-        backfill_by_date[d] += float(a.get("payout_backfill") or 0)
+        m = (a.get("date") or "")[:7]
+        spend_m[m] += float(a.get("cost") or 0)
+        cash_m[m] += float(a.get("cash") or 0)
+        bf_m[m] += float(a.get("payout_backfill") or 0)
 
-    # All dates we have inventory values for (sorted)
-    all_dates = sorted(inv_by_date.keys())
-    if not all_dates:
-        return {"dates": [], "cash_yield": [], "inv_appreciation": [], "biz_appreciation": []}
+    labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    dates_out, cy_out, ia_out, ba_out = [], [], [], []
+    cum_cy = 0.0
+    last_inv = baseline
+    for mi in range(1, current_month + 1):
+        mk = f"{year}-{mi:02d}"
+        cum_cy += rev_m[mk] + cash_m[mk] + bf_m[mk] - spend_m[mk]
+        if mk in inv_by_month:
+            last_inv = inv_by_month[mk]
+        ia = last_inv - baseline
+        dates_out.append(labels[mi - 1])
+        cy_out.append(round(cum_cy, 2))
+        ia_out.append(round(ia, 2))
+        ba_out.append(round(cum_cy + ia, 2))
 
-    # All revenue/spend dates for cumulative calc
-    all_money_dates = sorted(set(list(rev_by_date.keys()) + list(spend_by_date.keys()) + list(cash_by_date.keys()) + list(backfill_by_date.keys())))
-
-    # Precompute cumulative cash yield at each date
-    cum_yield = {}
-    running = 0.0
-    money_idx = 0
-    for d in sorted(set(all_money_dates + all_dates)):
-        running += rev_by_date.get(d, 0) + cash_by_date.get(d, 0) + backfill_by_date.get(d, 0) - spend_by_date.get(d, 0)
-        cum_yield[d] = running
-
-    # Build output series — start with Jan 1 at zero
-    dates_out = [jan1]
-    cash_yield_out = [0.0]
-    inv_app_out = [0.0]
-    biz_app_out = [0.0]
-    # For dates before first money date, interpolate yield = 0
-    last_known_yield = 0.0
-    for d in all_dates:
-        inv_val = inv_by_date[d]
-        # Find cumulative yield at or before this date
-        cy = 0.0
-        for md in sorted(cum_yield.keys()):
-            if md <= d:
-                cy = cum_yield[md]
-            else:
-                break
-        ia = inv_val - baseline
-        dates_out.append(d)
-        cash_yield_out.append(round(cy, 2))
-        inv_app_out.append(round(ia, 2))
-        biz_app_out.append(round(cy + ia, 2))
-
-    return {
-        "dates": dates_out,
-        "cash_yield": cash_yield_out,
-        "inv_appreciation": inv_app_out,
-        "biz_appreciation": biz_app_out,
-    }
+    return {"dates": dates_out, "cash_yield": cy_out,
+            "inv_appreciation": ia_out, "biz_appreciation": ba_out}
 
 @app.get("/archive", response_class=HTMLResponse)
 async def archive_page(request: Request):
