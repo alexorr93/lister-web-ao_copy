@@ -7309,15 +7309,15 @@ async def api_business_appreciation_trend(request: Request):
         .eq("business_id", business_id) \
         .gte("snapshot_date", "2025-12-01") \
         .lte("snapshot_date", dec31) \
+        .gt("inventory_snapshot_value", 0) \
         .order("snapshot_date") \
         .execute().data or []
-    # Keep the max non-zero value per date (handles dupe rows)
+    # Keep the max value per date (handles dupe rows)
     inv_by_date = {}
     for r in snap_rows:
         val = float(r.get("inventory_snapshot_value") or 0)
-        if val > 0:
-            d = r["snapshot_date"]
-            inv_by_date[d] = max(inv_by_date.get(d, 0), val)
+        d = r["snapshot_date"]
+        inv_by_date[d] = max(inv_by_date.get(d, 0), val)
 
     # Baseline = Dec 1 prior year (proxy for Jan 1)
     baseline = inv_by_date.pop("2025-12-01", 561000.0)
