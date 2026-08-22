@@ -7290,6 +7290,35 @@ def _compute_monthly_trend_payload(business_id: str, start_str: str, end_str: st
         "dollar_variance": dollar_variance,
     }
 
+@app.get("/api/analytics/business-appreciation-trend")
+async def api_business_appreciation_trend(request: Request):
+    """Daily YTD business appreciation trend — net cash yield, inventory
+    appreciation, and their sum (net business appreciation)."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    rows = supabase.table("analytics_snapshots") \
+        .select("snapshot_date, ytd_net_cash_yield, ytd_inventory_appreciation, ytd_net_business_appreciation") \
+        .eq("business_id", business_id) \
+        .gt("ytd_net_business_appreciation", 0) \
+        .order("snapshot_date") \
+        .execute().data or []
+    dates = []
+    cash_yield = []
+    inv_appreciation = []
+    biz_appreciation = []
+    for r in rows:
+        dates.append(r["snapshot_date"])
+        cash_yield.append(float(r.get("ytd_net_cash_yield") or 0))
+        inv_appreciation.append(float(r.get("ytd_inventory_appreciation") or 0))
+        biz_appreciation.append(float(r.get("ytd_net_business_appreciation") or 0))
+    return {
+        "dates": dates,
+        "cash_yield": cash_yield,
+        "inv_appreciation": inv_appreciation,
+        "biz_appreciation": biz_appreciation,
+    }
+
 @app.get("/archive", response_class=HTMLResponse)
 async def archive_page(request: Request):
     nav = get_nav_context(request)

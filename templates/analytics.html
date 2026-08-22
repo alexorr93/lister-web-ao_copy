@@ -221,6 +221,12 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
       </div>
     </div>
   </div>
+
+  <h2>YTD Business Appreciation</h2>
+  <div class="sub" style="margin-bottom:10px;">Net Cash Yield + Inventory Appreciation = Total Business Appreciation, tracked daily.</div>
+  <div class="summary-card" style="padding:16px;">
+    <canvas id="biz-appreciation-chart" height="90"></canvas>
+  </div>
 </div>
 
 <script>
@@ -563,6 +569,67 @@ initNetCashYieldYearPicker();
 loadNetCashYield();
 loadMonthlyTrend();
 loadInventoryValueChart();
+
+let bizAppChart = null;
+async function loadBizAppreciationChart() {
+  try {
+    const r = await fetch('/api/analytics/business-appreciation-trend');
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Request failed');
+    if (!data.dates.length) { document.getElementById('biz-appreciation-chart').parentElement.innerHTML = '<div style="color:var(--muted);text-align:center;padding:30px;">Not enough data yet</div>'; return; }
+    const ctx = document.getElementById('biz-appreciation-chart').getContext('2d');
+    if (bizAppChart) bizAppChart.destroy();
+    bizAppChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: data.dates,
+        datasets: [
+          {
+            label: 'Net Business Appreciation',
+            data: data.biz_appreciation,
+            borderColor: '#f59e0b',
+            backgroundColor: 'rgba(245,158,11,0.1)',
+            fill: true,
+            tension: 0.25,
+            borderWidth: 2.5,
+          },
+          {
+            label: 'Inventory Appreciation',
+            data: data.inv_appreciation,
+            borderColor: '#a78bfa',
+            backgroundColor: 'rgba(167,139,250,0.08)',
+            fill: true,
+            tension: 0.25,
+            borderWidth: 2,
+          },
+          {
+            label: 'Net Cash Yield',
+            data: data.cash_yield,
+            borderColor: '#22c55e',
+            backgroundColor: 'rgba(34,197,94,0.08)',
+            fill: true,
+            tension: 0.25,
+            borderWidth: 2,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { labels: { color: '#f1f5f9' } },
+          tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: $${Math.round(ctx.parsed.y).toLocaleString()}` } },
+        },
+        scales: {
+          x: { ticks: { color: '#64748b', maxTicksLimit: 12 }, grid: { color: '#2d3348' } },
+          y: { ticks: { color: '#64748b', callback: v => '$' + Math.round(v/1000) + 'k' }, grid: { color: '#2d3348' } },
+        },
+      },
+    });
+  } catch(e) {
+    document.getElementById('biz-appreciation-chart').parentElement.innerHTML = `<div class="error-banner">❌ ${e.message}</div>`;
+  }
+}
+loadBizAppreciationChart();
 </script>
 </body>
 </html>
