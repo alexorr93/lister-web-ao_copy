@@ -4325,13 +4325,13 @@ def _apply_cash_to_profit(business_id: str):
     alone), just 1 round trip instead of ~160."""
     start = 0
     while True:
-        page = supabase.table("acquisitions").select("id,business_id,sku,cost,cash,total_payouts")\
+        page = supabase.table("acquisitions").select("id,business_id,sku,cost,cash,ebay")\
             .eq("business_id", business_id).range(start, start + 999).execute().data or []
         batch = []
         for row in page:
             cost = row.get("cost") or 0
             cash = row.get("cash") or 0
-            ebay_total_payouts = row.get("total_payouts") or 0
+            ebay_total_payouts = row.get("ebay") or 0
             total_payouts = ebay_total_payouts + cash
             profit = total_payouts - cost
             roi_pct = round(profit / cost * 100, 2) if cost else None
@@ -4362,7 +4362,7 @@ def _apply_shopify_sales_to_profit(business_id: str):
     import datetime as _dt
     start = 0
     while True:
-        page = supabase.table("acquisitions").select("id,business_id,sku,cost,profit,total_payouts,became_green_at")\
+        page = supabase.table("acquisitions").select("id,business_id,sku,cost,ebay,cash,became_green_at")\
             .eq("business_id", business_id).range(start, start + 999).execute().data or []
         acquisitions.extend(page)
         if len(page) < 1000:
@@ -4396,8 +4396,10 @@ def _apply_shopify_sales_to_profit(business_id: str):
     for a in acquisitions:
         sales = shopify_sales_by_prefix.get(a.get("sku")) or 0
         cost = a.get("cost") or 0
-        profit = (a.get("profit") or 0) + sales
-        total_payouts = (a.get("total_payouts") or 0) + sales
+        ebay = a.get("ebay") or 0
+        cash = a.get("cash") or 0
+        total_payouts = ebay + cash + sales
+        profit = total_payouts - cost
         roi_pct = round(profit / cost * 100, 2) if cost else None
 
         # "Green" = profit > 1 (the user's own simple flag). became_green_at marks
