@@ -4299,14 +4299,32 @@ async def saved_searches_delete(request: Request, search_id: int):
 
 @app.get("/api/browse-item/{item_id}")
 async def browse_item_detail(request: Request, item_id: str):
-    """On-demand fetch of a single item's full details (all photos, description,
-    buying options, bid count) via eBay Browse API getItem. Results are NOT stored —
-    they render from eBay's CDN in the browser and are fetched fresh each time."""
+    """On-demand fetch of a single item's full details via eBay Browse API getItem.
+    Stores result in browse_item_details so the data is available outside the app.
+    Returns cached row on repeat views (one eBay API call per item, ever)."""
     import requests as _req
+    import json as _json
 
     business_id = get_business_id(request)
     if not business_id:
         raise HTTPException(401, "Not logged in")
+
+    # Check cache first
+    cached = supabase.table("browse_item_details").select("*") \
+        .eq("business_id", business_id).eq("item_id", item_id).limit(1).execute()
+    if cached.data:
+        row = cached.data[0]
+        return {
+            "item_id": row["item_id"],
+            "title": row.get("title"),
+            "price": str(row["price"]) if row.get("price") else None,
+            "condition": row.get("condition"),
+            "buying_options": (row.get("buying_options") or "").split(","),
+            "bid_count": row.get("bid_count"),
+            "seller": row.get("seller_username"),
+            "description": row.get("description"),
+            "images": row.get("image_urls") or [],
+        }
 
     token = get_ebay_access_token(business_id)
     r = _req.get(
@@ -4327,13 +4345,29 @@ async def browse_item_detail(request: Request, item_id: str):
 
     price_obj = data.get("price") or data.get("currentBidPrice") or {}
     seller = data.get("seller") or {}
+    buying_opts = data.get("buyingOptions", [])
+
+    # Persist to Supabase
+    supabase.table("browse_item_details").upsert({
+        "business_id": business_id,
+        "item_id": item_id,
+        "title": data.get("title"),
+        "price": price_obj.get("value"),
+        "condition": data.get("condition"),
+        "buying_options": ",".join(buying_opts),
+        "bid_count": data.get("bidCount"),
+        "seller_username": seller.get("username"),
+        "description": data.get("description"),
+        "image_urls": all_images,
+        "item_web_url": data.get("itemWebUrl"),
+    }, on_conflict="business_id,item_id").execute()
 
     return {
         "item_id": item_id,
         "title": data.get("title"),
         "price": price_obj.get("value"),
         "condition": data.get("condition"),
-        "buying_options": data.get("buyingOptions", []),
+        "buying_options": buying_opts,
         "bid_count": data.get("bidCount"),
         "seller": seller.get("username"),
         "description": data.get("description"),
