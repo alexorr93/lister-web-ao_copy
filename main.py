@@ -4429,7 +4429,7 @@ VERDICT: BUY at $Y or below | PASS -- <one sentence reasoning vs the asking pric
             content.append({"type": "input_image", "image_url": url})
 
         response = client.responses.create(
-            model="gpt-5.6-terra",
+            model="gpt-5.6",
             reasoning={"effort": "high"},
             tools=[{"type": "web_search", "search_context_size": "medium"}],
             tool_choice="required",
