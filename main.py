@@ -243,6 +243,52 @@ async def start_background_jobs():
     asyncio.create_task(inventory_cache_warm_worker())
     asyncio.create_task(shopify_sync_auto_refresh_worker())
     asyncio.create_task(_oneshot_archive_shopify_duplicates())
+    asyncio.create_task(browse_search_daily_worker())
+
+async def browse_search_daily_worker():
+    """Runs all saved Browse searches once daily at 06:00 UTC (midnight MDT).
+    For each business with saved searches, runs every search with today's date,
+    same as clicking Run All manually."""
+    import asyncio
+    import datetime as _dt
+    import requests as _req
+
+    while True:
+        now = _dt.datetime.now(_dt.timezone.utc)
+        next_run = now.replace(hour=6, minute=0, second=0, microsecond=0)
+        if next_run <= now:
+            next_run += _dt.timedelta(days=1)
+        await asyncio.sleep(max((next_run - now).total_seconds(), 5))
+        try:
+            biz_res = supabase.table("businesses").select("id").execute()
+            for biz in (biz_res.data or []):
+                biz_id = biz["id"]
+                searches_res = supabase.table("saved_searches").select("*") \
+                    .eq("business_id", biz_id).execute()
+                searches = searches_res.data or []
+                if not searches:
+                    continue
+                today = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
+                for s in searches:
+                    try:
+                        # Hit the same endpoint logic as manual Run
+                        _req.post(
+                            "http://localhost:8000/api/saved-searches/run",
+                            json={
+                                "query": s["query"],
+                                "listed_date": today,
+                                "min_price": s.get("min_price"),
+                                "condition_ids": s.get("condition_ids"),
+                            },
+                            headers={"Cookie": f"business_id={biz_id}"},
+                            timeout=60,
+                        )
+                        print(f"browse_search_daily: ran '{s['query']}' for {biz_id}")
+                    except Exception as e:
+                        print(f"browse_search_daily: error running '{s['query']}': {e}")
+                    await asyncio.sleep(2)  # pace eBay calls
+        except Exception as e:
+            print(f"browse_search_daily_worker error: {e}")
 
 async def ebay_analytics_sync_worker():
     """Once-a-day sweep of real view counts via the Sell Analytics API,
