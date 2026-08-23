@@ -72,8 +72,6 @@ td a:hover { text-decoration: underline; }
   <table id="saved-table">
     <tr><th>Search</th><th>Last run</th><th>Listed date used</th><th>Min price</th><th>Results found</th><th>Actions</th></tr>
   </table>
-
-  <div id="results-wrap" class="results-panel"></div>
 </div>
 
 <script>
@@ -95,9 +93,10 @@ async function loadSavedSearches() {
     return;
   }
   const conditionLabels = {'1000':'New','1500':'New Other','1750':'New w/ Defects'};
-  data.searches.forEach(s => {
+  data.searches.forEach((s, idx) => {
     const condStr = s.condition_ids ? s.condition_ids.split(',').map(c => conditionLabels[c.trim()] || c.trim()).join(', ') : '-';
     const tr = document.createElement('tr');
+    tr.id = `search-row-${idx}`;
     tr.innerHTML = `
       <td class="query-cell">${s.query}</td>
       <td class="muted">${s.last_run_at ? new Date(s.last_run_at).toLocaleString() : 'never'}</td>
@@ -107,7 +106,7 @@ async function loadSavedSearches() {
       <td>${s.last_result_count ?? '-'}</td>
       <td class="actions">
         <button class="btn btn-small btn-outline" onclick="rerunSaved('${escapeAttr(s.query)}', ${s.min_price != null ? s.min_price : 'null'}, '${escapeAttr(s.condition_ids || '')}')">Run again</button>
-        <button class="btn btn-small btn-outline" onclick="viewResults('${escapeAttr(s.query)}', '${s.last_run_date || ''}')">View results</button>
+        <button class="btn btn-small btn-outline" onclick="toggleResults(${idx}, '${escapeAttr(s.query)}', '${s.last_run_date || ''}')">${s.last_result_count > 0 ? '▶ Results' : 'View results'}</button>
         <button class="btn btn-small btn-danger" onclick="deleteSaved(${s.id})">Delete</button>
       </td>`;
     table.appendChild(tr);
@@ -198,19 +197,28 @@ async function deleteSaved(id) {
   await loadSavedSearches();
 }
 
-async function viewResults(query, listedDate) {
-  const wrap = document.getElementById('results-wrap');
-  wrap.classList.add('open');
-  wrap.innerHTML = '<div class="status-msg">Loading...</div>';
+async function toggleResults(idx, query, listedDate) {
+  // If already expanded, collapse
+  const existing = document.querySelectorAll(`.inline-result-${idx}`);
+  if (existing.length) {
+    existing.forEach(el => el.remove());
+    return;
+  }
+
+  const parentRow = document.getElementById(`search-row-${idx}`);
   const params = new URLSearchParams({q: query});
   if (listedDate) params.set('listed_date', listedDate);
   const res = await fetch('/api/saved-searches/results?' + params.toString());
   const data = await res.json();
-  if (!data.rows.length) {
-    wrap.innerHTML = '<div class="empty">No stored results for this search/date yet.</div>';
+  if (!data.rows || !data.rows.length) {
+    const emptyRow = document.createElement('tr');
+    emptyRow.className = `inline-result-${idx}`;
+    emptyRow.innerHTML = `<td colspan="7" class="muted" style="text-align:center;padding:12px;">No results stored yet.</td>`;
+    parentRow.after(emptyRow);
     return;
   }
-  let html = `<table><tr><th></th><th>Title</th><th>Price</th><th>Type</th><th>Condition</th><th>Seller</th><th></th></tr>`;
+  // Insert result rows in reverse so they end up in order after the parent
+  const resultRows = [];
   data.rows.forEach(r => {
     const opts = (r.buying_options || '').split(',').map(o => {
       if (o === 'AUCTION') return '🔨 Auction';
@@ -218,18 +226,24 @@ async function viewResults(query, listedDate) {
       if (o === 'BEST_OFFER') return 'Best Offer';
       return o;
     }).join(' + ');
-    html += `<tr>
+    const tr = document.createElement('tr');
+    tr.className = `inline-result-${idx}`;
+    tr.style.background = '#151b2b';
+    tr.innerHTML = `
       <td>${r.image_url ? `<img src="${r.image_url}">` : ''}</td>
-      <td><a href="${r.item_web_url}" target="_blank">${r.title || ''}</a></td>
-      <td>${r.price ? '$' + Number(r.price).toFixed(2) : '<span class="muted">-</span>'}</td>
+      <td colspan="2"><a href="${r.item_web_url}" target="_blank" style="color:#60a5fa;">${r.title || ''}</a></td>
+      <td>$${r.price ? Number(r.price).toFixed(2) : '-'}</td>
       <td class="muted">${opts || '-'}</td>
       <td class="muted">${r.condition || '-'}</td>
-      <td class="muted">${r.seller_username || '-'}</td>
-      <td><button class="btn btn-small btn-outline" onclick="viewItemDetail('${r.item_id}')">Photos</button></td>
-    </tr>`;
+      <td><button class="btn btn-small btn-outline" onclick="viewItemDetail('${r.item_id}')">Photos</button></td>`;
+    resultRows.push(tr);
   });
-  html += '</table>';
-  wrap.innerHTML = html;
+  // Insert after parent row in order
+  let insertAfter = parentRow;
+  resultRows.forEach(tr => {
+    insertAfter.after(tr);
+    insertAfter = tr;
+  });
 }
 
 async function viewItemDetail(itemId) {
