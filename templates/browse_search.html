@@ -243,6 +243,7 @@ async function toggleResults(idx, query, listedDate) {
       <td style="white-space:nowrap;">
         <button onclick="viewItemDetail('${r.item_id}')" style="background:none;border:1px solid #3b82f6;color:#3b82f6;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;font-weight:600;">Details →</button>
         <button id="eval-inline-${r.item_id}" onclick="runEvalInline('${r.item_id}', this)" style="background:#e67e22;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;font-weight:600;margin-left:4px;">⚡ GPT</button>
+        <button onclick="dismissResult(${r.id}, this)" style="background:none;border:none;color:#666;font-size:14px;cursor:pointer;margin-left:4px;" title="Dismiss permanently">✕</button>
         <span id="eval-status-${r.item_id}" style="color:#aaa;font-size:11px;margin-left:4px;"></span>
       </td>`;
     resultRows.push(tr);
@@ -290,6 +291,14 @@ async function viewItemDetail(itemId) {
   } catch (e) {
     modal.innerHTML = `<div style="color:red;text-align:center;padding:4rem;">Error: ${e.message}</div>`;
   }
+}
+
+async function dismissResult(resultId, btn) {
+  const row = btn.closest('tr');
+  try {
+    await fetch(`/api/browse-results/${resultId}/dismiss`, {method: 'POST'});
+    row.remove();
+  } catch (e) { /* silently fail */ }
 }
 
 async function runEvalInline(itemId, btn) {
