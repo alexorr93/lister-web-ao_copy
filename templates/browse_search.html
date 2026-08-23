@@ -128,12 +128,18 @@ async function loadSavedSearches() {
       groups.push({key: gk, items: [{...s, origIdx: idx}]});
     }
   });
+  // Sort: branded groups first, generic (no logo) last
+  groups.sort((a, b) => {
+    const aHas = getBrandLogo(a.items[0].query) ? 0 : 1;
+    const bHas = getBrandLogo(b.items[0].query) ? 0 : 1;
+    return aHas - bHas;
+  });
   groups.forEach((g, gIdx) => {
     const primary = g.items[0];
     const totalResults = g.items.reduce((sum, s) => sum + (s.last_result_count || 0), 0);
     const condStr = primary.condition_ids ? primary.condition_ids.split(',').map(c => conditionLabels[c.trim()] || c.trim()).join(', ') : '-';
     const logo = getBrandLogo(primary.query);
-    const logoHtml = logo ? `<img src="${logo}" style="height:18px;width:18px;border-radius:3px;object-fit:contain;vertical-align:middle;margin-right:6px;" onerror="this.style.display='none'">` : '';
+    const logoHtml = logo ? `<img src="${logo}" style="height:36px;max-width:60px;border-radius:3px;object-fit:contain;vertical-align:middle;margin-right:8px;" onerror="this.style.display='none'">` : '';
     const displayName = g.items.length > 1 ? g.key + ' parts lot' : primary.query;
     const queryList = g.items.map(s => s.query).join('|||');
     const tr = document.createElement('tr');
