@@ -7537,42 +7537,35 @@ def _compute_monthly_trend_payload(business_id: str, start_str: str, end_str: st
     ]
 
     # --- YTD Business Appreciation (current year only) ---
-    # Uses the same sales/inventory_spend already computed above.
+    # Pull directly from analytics_snapshots so chart matches the cards exactly.
     year_str = now.strftime("%Y")
-    ytd_months = [m for m in all_months if m.startswith(year_str)]
-    # Cumulative cash yield month by month
+    month_names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
     biz_labels = []
     biz_cash_yield = []
     biz_inv_app = []
     biz_total = []
-    month_names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-    cum_cy = 0.0
-    # Baseline = first inventory value in current year, or Dec prior year
-    inv_baseline = None
-    for d, v in real_points:
-        if d.startswith(str(int(year_str) - 1) + "-12"):
-            inv_baseline = v
-            break
-    if inv_baseline is None:
-        inv_baseline = 561000.0
-    for m in ytd_months:
-        mi = all_months.index(m)
-        cum_cy += sales[mi] - inventory_spend[mi]
-        # Find inventory value for this month
-        inv_val = None
-        if m in [im[:7] if len(im) > 5 else im for im in inv_months]:
-            # Match this month in inv_months
-            for j, im in enumerate(inv_months):
-                if im == m or im.startswith(m):
-                    v = inventory_value_by_month[j]
-                    if v is not None:
-                        inv_val = v
-        ia = (inv_val - inv_baseline) if inv_val is not None else None
-        month_idx = int(m[5:7]) - 1
-        biz_labels.append(month_names[month_idx])
-        biz_cash_yield.append(round(cum_cy, 2))
+    snap_res = supabase.table("analytics_snapshots").select(
+        "snapshot_date,ytd_net_cash_yield,ytd_inventory_appreciation,ytd_net_business_appreciation"
+    ).eq("business_id", business_id).gte("snapshot_date", f"{year_str}-01-01") \
+     .order("snapshot_date", desc=True).limit(500).execute()
+    # Group by month, take latest snapshot per month
+    monthly_snaps = {}
+    for snap in (snap_res.data or []):
+        m = snap["snapshot_date"][:7]  # "2026-08"
+        if m not in monthly_snaps:
+            monthly_snaps[m] = snap
+    for month_num in range(1, 13):
+        m_key = f"{year_str}-{month_num:02d}"
+        if m_key not in monthly_snaps:
+            continue
+        s = monthly_snaps[m_key]
+        cy = float(s.get("ytd_net_cash_yield") or 0)
+        ia = float(s["ytd_inventory_appreciation"]) if s.get("ytd_inventory_appreciation") is not None else None
+        nba = float(s["ytd_net_business_appreciation"]) if s.get("ytd_net_business_appreciation") is not None else None
+        biz_labels.append(month_names[month_num - 1])
+        biz_cash_yield.append(round(cy, 2))
         biz_inv_app.append(round(ia, 2) if ia is not None else None)
-        biz_total.append(round(cum_cy + ia, 2) if ia is not None else None)
+        biz_total.append(round(nba, 2) if nba is not None else None)
 
     return {
         "start": start_str[:7],
