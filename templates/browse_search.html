@@ -175,18 +175,58 @@ async function viewResults(query, listedDate) {
     wrap.innerHTML = '<div class="empty">No stored results for this search/date yet.</div>';
     return;
   }
-  let html = `<table><tr><th></th><th>Title</th><th>Price</th><th>Condition</th><th>Seller</th></tr>`;
+  let html = `<table><tr><th></th><th>Title</th><th>Price</th><th>Type</th><th>Condition</th><th>Seller</th><th></th></tr>`;
   data.rows.forEach(r => {
+    const opts = (r.buying_options || '').split(',').map(o => {
+      if (o === 'AUCTION') return '🔨 Auction';
+      if (o === 'FIXED_PRICE') return 'BIN';
+      if (o === 'BEST_OFFER') return 'Best Offer';
+      return o;
+    }).join(' + ');
     html += `<tr>
       <td>${r.image_url ? `<img src="${r.image_url}">` : ''}</td>
       <td><a href="${r.item_web_url}" target="_blank">${r.title || ''}</a></td>
       <td>${r.price ? '$' + Number(r.price).toFixed(2) : '<span class="muted">-</span>'}</td>
+      <td class="muted">${opts || '-'}</td>
       <td class="muted">${r.condition || '-'}</td>
       <td class="muted">${r.seller_username || '-'}</td>
+      <td><button class="btn btn-small btn-outline" onclick="viewItemDetail('${r.item_id}')">Photos</button></td>
     </tr>`;
   });
   html += '</table>';
   wrap.innerHTML = html;
+}
+
+async function viewItemDetail(itemId) {
+  const existing = document.getElementById('detail-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'detail-modal';
+  modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:999;overflow-y:auto;padding:2rem;';
+  modal.innerHTML = '<div style="color:#fff;text-align:center;padding:4rem;">Loading item details...</div>';
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+
+  try {
+    const res = await fetch(`/api/browse-item/${encodeURIComponent(itemId)}`);
+    if (!res.ok) throw new Error('Failed to load item');
+    const d = await res.json();
+    const imgs = (d.images || []).map(url =>
+      `<img src="${url}" style="max-width:100%;max-height:400px;margin:0.5rem;border-radius:4px;">`
+    ).join('');
+    modal.innerHTML = `
+      <div style="max-width:900px;margin:0 auto;background:#1a1a2e;border-radius:8px;padding:1.5rem;position:relative;">
+        <button onclick="this.closest('#detail-modal').remove()" style="position:absolute;top:0.5rem;right:0.75rem;background:none;border:none;color:#fff;font-size:1.5rem;cursor:pointer;">✕</button>
+        <h3 style="color:#fff;margin-top:0;">${d.title || ''}</h3>
+        <p style="color:#aaa;">$${d.price || '?'} · ${d.condition || ''} · ${(d.buying_options || []).join(' + ')}</p>
+        <p style="color:#aaa;">Seller: ${d.seller || '?'} · Bids: ${d.bid_count ?? '-'}</p>
+        <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:0.5rem;margin:1rem 0;">${imgs || '<span style="color:#666;">No photos</span>'}</div>
+        <div style="color:#ccc;font-size:0.85rem;max-height:300px;overflow-y:auto;margin-top:1rem;border-top:1px solid #333;padding-top:1rem;">${d.description || ''}</div>
+      </div>`;
+  } catch (e) {
+    modal.innerHTML = `<div style="color:red;text-align:center;padding:4rem;">Error: ${e.message}</div>`;
+  }
 }
 
 loadSavedSearches();

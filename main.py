@@ -4253,6 +4253,7 @@ async def saved_searches_run(request: Request, body: dict = Body(...)):
             "seller_username": seller.get("username"),
             "category_id": categories[0].get("categoryId") if categories else None,
             "item_creation_date": it.get("itemCreationDate"),
+            "buying_options": ",".join(it.get("buyingOptions", [])),
         })
 
     if rows:
@@ -4294,6 +4295,50 @@ async def saved_searches_delete(request: Request, search_id: int):
         raise HTTPException(401, "Not logged in")
     supabase.table("saved_searches").delete().eq("id", search_id).eq("business_id", business_id).execute()
     return {"deleted": search_id}
+
+
+@app.get("/api/browse-item/{item_id}")
+async def browse_item_detail(request: Request, item_id: str):
+    """On-demand fetch of a single item's full details (all photos, description,
+    buying options, bid count) via eBay Browse API getItem. Results are NOT stored —
+    they render from eBay's CDN in the browser and are fetched fresh each time."""
+    import requests as _req
+
+    business_id = get_business_id(request)
+    if not business_id:
+        raise HTTPException(401, "Not logged in")
+
+    token = get_ebay_access_token(business_id)
+    r = _req.get(
+        f"{EBAY_API_BASE}/buy/browse/v1/item/{item_id}",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+        },
+        timeout=15,
+    )
+    if r.status_code != 200:
+        raise HTTPException(502, f"eBay getItem error ({r.status_code}): {r.text[:300]}")
+
+    data = r.json()
+    primary_img = (data.get("image") or {}).get("imageUrl")
+    additional = [img.get("imageUrl") for img in (data.get("additionalImages") or []) if img.get("imageUrl")]
+    all_images = ([primary_img] if primary_img else []) + additional
+
+    price_obj = data.get("price") or data.get("currentBidPrice") or {}
+    seller = data.get("seller") or {}
+
+    return {
+        "item_id": item_id,
+        "title": data.get("title"),
+        "price": price_obj.get("value"),
+        "condition": data.get("condition"),
+        "buying_options": data.get("buyingOptions", []),
+        "bid_count": data.get("bidCount"),
+        "seller": seller.get("username"),
+        "description": data.get("description"),
+        "images": all_images,
+    }
 
 class AcquisitionCreate(BaseModel):
     sku: str
