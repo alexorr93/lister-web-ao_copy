@@ -4377,9 +4377,10 @@ async def browse_item_detail(request: Request, item_id: str):
 
 @app.post("/api/browse-item/{item_id}/evaluate")
 async def browse_item_evaluate(request: Request, item_id: str):
-    """GPT-4o vision evaluation of a browse item's photos + description.
-    Reads from browse_item_details (must be fetched first via the GET endpoint).
-    Stores result back into the same row."""
+    """GPT-4o vision + web search evaluation of a browse item.
+    Uses OpenAI Responses API with web_search tool so GPT can look up
+    real eBay sold prices instead of guessing from training data.
+    Reads from browse_item_details, stores result back into the same row."""
     from openai import OpenAI
     from datetime import datetime, timezone
     import asyncio
@@ -4402,9 +4403,38 @@ async def browse_item_evaluate(request: Request, item_id: str):
     client = OpenAI(api_key=openai_key)
 
     def _do_eval():
-        text = _openai_resale_eval_call(
-            client, item.get("title"), item.get("description"),
-            item.get("image_urls") or [])
+        title = item.get("title") or "(no title)"
+        description = item.get("description") or "(no description)"
+        image_urls = item.get("image_urls") or []
+
+        prompt = f"""You are evaluating a parts lot listed on eBay for a reseller deciding whether to buy it.
+
+Lot title: {title}
+Lot description: {description}
+
+Look at the attached photo(s) and the title/description. Identify every distinct part visible.
+For EACH identifiable part number, SEARCH eBay for its current sold/listed price.
+Do NOT guess prices from memory — use real search results only.
+
+Respond in this plain-text format (no markdown headers):
+
+ITEMS: <comma-separated list of parts identified with brand/part numbers>
+VALUE: <for each part, show the search-verified price and source. Then computed arithmetic:
+qty x per-unit, summed.> Final answer: **$X**
+LIQUIDITY: High|Medium|Low -- <one clause why>
+VERDICT: BUY at $Y or below | PASS -- <one sentence reasoning vs the asking price>"""
+
+        content = [{"type": "input_text", "text": prompt}]
+        for url in image_urls:
+            content.append({"type": "input_image", "image_url": url})
+
+        response = client.responses.create(
+            model="gpt-4o",
+            tools=[{"type": "web_search", "search_context_size": "medium"}],
+            input=[{"role": "user", "content": content}],
+        )
+        text = response.output_text or ""
+
         supabase.table("browse_item_details").update({
             "ai_eval": text,
             "ai_eval_at": datetime.now(timezone.utc).isoformat(),
