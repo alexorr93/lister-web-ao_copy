@@ -4169,8 +4169,8 @@ async def saved_searches_run(request: Request, body: dict = Body(...)):
         except Exception:
             pass  # non-fatal, just skip condition filter
 
-    start_iso = f"{listed_date}T00:00:00Z"
-    end_iso = f"{listed_date}T23:59:59Z"
+    start_iso = f"{listed_date}T00:00:00.000Z"
+    end_iso = f"{listed_date}T23:59:59.000Z"
 
     token = get_ebay_access_token(business_id)
     headers = {
