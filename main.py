@@ -4438,16 +4438,18 @@ Lot title: {title}
 Lot description: {description}
 
 Look at the attached photo(s) and the title/description. Identify every distinct part visible.
-For EACH identifiable part number, SEARCH eBay for its current sold/listed price.
+For EACH identifiable part number, SEARCH for its current sold/listed price.
 Do NOT guess prices from memory — use real search results only.
 
-Respond in this plain-text format (no markdown headers):
+Respond in EXACTLY this format:
 
-ITEMS: <comma-separated list of parts identified with brand/part numbers>
-VALUE: <for each part, show the search-verified price and source. Then computed arithmetic:
-qty x per-unit, summed.> Final answer: **$X**
-LIQUIDITY: High|Medium|Low -- <one clause why>
-VERDICT: BUY at $Y or below | PASS -- <one sentence reasoning vs the asking price>"""
+PARTS TABLE:
+Part # | Qty | Unit Price | Line Total | Source
+(one row per part, source = markdown link like [eBay](url) or [Amazon](url) — just the site name as link text, never the raw URL)
+
+TOTAL: **$X** (sum of all line totals)
+LIQUIDITY: High|Medium|Low — one clause why
+VERDICT: BUY at $Y or below | PASS — one sentence vs the ${item.get('price') or 'unknown'} asking price"""
 
         content = [{"type": "input_text", "text": prompt}]
         for url in image_urls:

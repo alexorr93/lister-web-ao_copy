@@ -406,10 +406,32 @@ function showEvalPopup(itemId, evalText, anchorBtn) {
     try { evalText = decodeURIComponent(escape(atob(anchorBtn.dataset.eval))); } catch(e) {}
   }
 
+  // Convert markdown links [text](url) to HTML <a> tags and pipe tables to HTML tables
+  let html = (evalText || 'No evaluation stored.')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color:#60a5fa;">$1</a>')
+    .replace(/\n/g, '<br>');
+  // Convert pipe-delimited table rows
+  if (html.includes('|')) {
+    html = html.replace(/((?:[^<]*\|[^<]*(?:<br>)?)+)/g, (match) => {
+      const rows = match.split('<br>').filter(r => r.includes('|'));
+      if (rows.length < 2) return match;
+      let table = '<table style="width:100%;border-collapse:collapse;margin:0.5rem 0;font-size:0.85rem;">';
+      rows.forEach((row, i) => {
+        const cells = row.split('|').map(c => c.trim()).filter(c => c && !c.match(/^[-:]+$/));
+        if (!cells.length) return;
+        const tag = i === 0 ? 'th' : 'td';
+        const style = i === 0 ? 'border-bottom:1px solid #444;padding:4px 8px;text-align:left;color:#aaa;font-size:0.8rem;' : 'padding:4px 8px;border-bottom:1px solid #2a2a3e;';
+        table += '<tr>' + cells.map(c => `<${tag} style="${style}">${c}</${tag}>`).join('') + '</tr>';
+      });
+      table += '</table>';
+      return table;
+    });
+  }
+
   const popup = document.createElement('div');
   popup.id = 'eval-popup';
-  popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1a1a2e;border:1px solid #444;border-radius:8px;padding:1.5rem;max-width:700px;width:90%;max-height:70vh;overflow-y:auto;z-index:1000;color:#eee;font-size:0.9rem;white-space:pre-wrap;box-shadow:0 8px 32px rgba(0,0,0,0.6);';
-  popup.innerHTML = `<button onclick="this.parentElement.remove()" style="position:absolute;top:0.5rem;right:0.75rem;background:none;border:none;color:#fff;font-size:1.2rem;cursor:pointer;">✕</button><div style="margin-top:0.5rem;">${evalText || 'No evaluation stored.'}</div>`;
+  popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1a1a2e;border:1px solid #444;border-radius:8px;padding:1.5rem;max-width:750px;width:90%;max-height:70vh;overflow-y:auto;z-index:1000;color:#eee;font-size:0.9rem;box-shadow:0 8px 32px rgba(0,0,0,0.6);';
+  popup.innerHTML = `<button onclick="this.parentElement.remove()" style="position:absolute;top:0.5rem;right:0.75rem;background:none;border:none;color:#fff;font-size:1.2rem;cursor:pointer;">✕</button><div style="margin-top:0.5rem;">${html}</div>`;
   document.body.appendChild(popup);
   // Click outside to close
   setTimeout(() => {
