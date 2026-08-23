@@ -86,14 +86,15 @@ async function loadSavedSearches() {
   const data = await res.json();
   const table = document.getElementById('saved-table');
   table.innerHTML = '<tr><th>Search</th><th>Last run</th><th>Listed from</th><th>Min price</th><th>Condition</th><th>Results found</th><th>Actions</th></tr>';
-  if (!data.searches.length) {
+  const searches = data.searches || [];
+  if (!searches.length) {
     const tr = document.createElement('tr');
     tr.innerHTML = '<td colspan="7" class="empty">No saved searches yet — add one above.</td>';
     table.appendChild(tr);
     return;
   }
   const conditionLabels = {'1000':'New','1500':'New Other','1750':'New w/ Defects'};
-  data.searches.forEach((s, idx) => {
+  searches.forEach((s, idx) => {
     const condStr = s.condition_ids ? s.condition_ids.split(',').map(c => conditionLabels[c.trim()] || c.trim()).join(', ') : '-';
     const tr = document.createElement('tr');
     tr.id = `search-row-${idx}`;
