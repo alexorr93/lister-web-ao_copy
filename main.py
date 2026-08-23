@@ -4374,6 +4374,50 @@ async def browse_item_detail(request: Request, item_id: str):
         "images": all_images,
     }
 
+
+@app.post("/api/browse-item/{item_id}/evaluate")
+async def browse_item_evaluate(request: Request, item_id: str):
+    """GPT-4o vision evaluation of a browse item's photos + description.
+    Reads from browse_item_details (must be fetched first via the GET endpoint).
+    Stores result back into the same row."""
+    from openai import OpenAI
+    from datetime import datetime, timezone
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    business_id = get_business_id(request)
+    if not business_id:
+        raise HTTPException(401, "Not logged in")
+
+    row = supabase.table("browse_item_details").select("*") \
+        .eq("business_id", business_id).eq("item_id", item_id).limit(1).execute()
+    if not row.data:
+        raise HTTPException(404, "Item not fetched yet — click Photos first")
+
+    item = row.data[0]
+    openai_key = get_openai_key(str(business_id))
+    if not openai_key:
+        raise HTTPException(400, "OPENAI_API_KEY not set")
+
+    client = OpenAI(api_key=openai_key)
+
+    def _do_eval():
+        text = _openai_resale_eval_call(
+            client, item.get("title"), item.get("description"),
+            item.get("image_urls") or [])
+        supabase.table("browse_item_details").update({
+            "ai_eval": text,
+            "ai_eval_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("business_id", business_id).eq("item_id", item_id).execute()
+        return text
+
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        eval_text = await loop.run_in_executor(executor, _do_eval)
+
+    return {"item_id": item_id, "evaluation": eval_text}
+
+
 class AcquisitionCreate(BaseModel):
     sku: str
     name: Optional[str] = None
