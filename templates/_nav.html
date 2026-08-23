@@ -27,7 +27,7 @@
      the line below to bring it back any time. #}
   {#- <a class="nav-btn nav-categories{{ ' active' if active_tab == 'categories' else '' }}" href="/categories">📂 Categories</a> -#}
   <a class="nav-btn nav-notes{{ ' active' if active_tab == 'notes' else '' }}" href="/notes">📝 Notes</a>
-  <a class="nav-btn nav-browsesearch{{ ' active' if active_tab == 'browse_search' else '' }}" href="/browse-search">🔎 Browse</a>
+  <a class="nav-btn nav-browsesearch{{ ' active' if active_tab == 'browse_search' else '' }}" href="/browse-search">🔎 Browse <span id="browse-badge" style="display:none;background:#ef4444;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;margin-left:4px;vertical-align:middle;"></span></a>
   <a class="nav-btn nav-offers{{ ' active' if active_tab == 'offers' else '' }}" href="/offers">🏷️ Offers</a>
   {% if is_admin %}
     {% if on_index %}
@@ -49,3 +49,19 @@
   {% if account_label %}<span class="nav-account" title="{{ account_label }}">👤 {{ account_label }}</span>{% endif %}
   <a class="nav-download" href="/logout" style="color:#ef4444;border-color:#7f1d1d;">⏻ Logout</a>
 </nav>
+<script>
+(function(){
+  async function updateBrowseBadge(){
+    try{
+      const r=await fetch('/api/browse-results/unseen-count');
+      if(!r.ok)return;
+      const d=await r.json();
+      const b=document.getElementById('browse-badge');
+      if(b&&d.count>0){b.textContent=d.count;b.style.display='inline';}
+      else if(b){b.style.display='none';}
+    }catch(e){}
+  }
+  updateBrowseBadge();
+  setInterval(updateBrowseBadge,5*60*1000);
+})();
+</script>
