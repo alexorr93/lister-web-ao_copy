@@ -112,6 +112,10 @@ async function loadSavedSearches() {
       </td>`;
     table.appendChild(tr);
   });
+  // Auto-expand results for searches that have any
+  searches.forEach((s, idx) => {
+    if (s.last_result_count > 0) toggleResults(idx, s.query, s.last_run_date || '');
+  });
 }
 
 function escapeAttr(s) { return (s || '').replace(/'/g, "\\'"); }
