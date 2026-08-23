@@ -51,12 +51,12 @@ td a:hover { text-decoration: underline; }
 
 <div class="main">
   <h1>Browse Search</h1>
-  <div class="sub">Set up saved searches for parts you want to watch. Each search only pulls items eBay reports as listed on the date you pick — nothing is fetched in bulk and filtered afterward.</div>
+  <div class="sub">Set up saved searches for parts you want to watch. Select a start date — results include everything listed from that date through today.</div>
 
   <div class="add-bar">
     <input type="text" id="query-input" placeholder="e.g. cummins turbocharger" onkeydown="if(event.key==='Enter') runSearch()">
     <div class="date-field">
-      <span class="field-label">Listed on</span>
+      <span class="field-label">Listed from</span>
       <input type="date" id="date-input">
     </div>
     <div class="date-field">
@@ -86,7 +86,7 @@ async function loadSavedSearches() {
   const res = await fetch('/api/saved-searches');
   const data = await res.json();
   const table = document.getElementById('saved-table');
-  table.innerHTML = '<tr><th>Search</th><th>Last run</th><th>Listed date used</th><th>Min price</th><th>Condition</th><th>Results found</th><th>Actions</th></tr>';
+  table.innerHTML = '<tr><th>Search</th><th>Last run</th><th>Listed from</th><th>Min price</th><th>Condition</th><th>Results found</th><th>Actions</th></tr>';
   if (!data.searches.length) {
     const tr = document.createElement('tr');
     tr.innerHTML = '<td colspan="7" class="empty">No saved searches yet — add one above.</td>';

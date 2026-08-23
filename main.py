@@ -4231,8 +4231,10 @@ async def saved_searches_run(request: Request, body: dict = Body(...)):
     rows = []
     for it in all_items[:max_items]:
         creation_date = it.get("itemCreationDate") or ""
-        if not creation_date.startswith(listed_date):
-            continue  # extra guard: only store items actually listed on the requested date
+        # Range filter: keep items listed on or after the selected date
+        item_date = creation_date[:10]  # "2026-08-19" from ISO
+        if item_date < listed_date:
+            continue
         price = it.get("price", {}) or {}
         price_value = price.get("value")
         if min_price is not None and price_value is not None and float(price_value) < min_price:
