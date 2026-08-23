@@ -108,7 +108,6 @@ async function loadSavedSearches() {
       <td class="actions">
         <button class="btn btn-small btn-outline" onclick="rerunSaved('${escapeAttr(s.query)}', ${s.min_price != null ? s.min_price : 'null'}, '${escapeAttr(s.condition_ids || '')}')">Run again</button>
         <button class="btn btn-small btn-outline" onclick="toggleResults(${idx}, '${escapeAttr(s.query)}', '${s.last_run_date || ''}')">${s.last_result_count > 0 ? '▶ Results' : 'View results'}</button>
-        <button class="btn btn-small btn-danger" onclick="deleteSaved(${s.id})">Delete</button>
       </td>`;
     table.appendChild(tr);
   });
