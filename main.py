@@ -4158,6 +4158,17 @@ async def saved_searches_run(request: Request, body: dict = Body(...)):
         except (TypeError, ValueError):
             raise HTTPException(400, "min_price must be a number")
 
+    # condition_ids: accept from body, fall back to saved_searches row in DB
+    condition_ids = body.get("condition_ids")
+    if not condition_ids:
+        try:
+            saved_row = supabase.table("saved_searches").select("condition_ids") \
+                .eq("business_id", business_id).eq("query", query).limit(1).execute()
+            if saved_row.data and saved_row.data[0].get("condition_ids"):
+                condition_ids = saved_row.data[0]["condition_ids"]
+        except Exception:
+            pass  # non-fatal, just skip condition filter
+
     start_iso = f"{listed_date}T00:00:00Z"
     end_iso = f"{listed_date}T23:59:59Z"
 
@@ -4171,6 +4182,9 @@ async def saved_searches_run(request: Request, body: dict = Body(...)):
     if min_price is not None:
         filter_parts.append(f"price:[{min_price}..]")
         filter_parts.append("priceCurrency:USD")
+    if condition_ids:
+        # condition_ids is a comma-separated string like "1000,1500,1750"
+        filter_parts.append(f"conditionIds:{{{condition_ids}}}")
     filter_str = ",".join(filter_parts)
 
     all_items = []
