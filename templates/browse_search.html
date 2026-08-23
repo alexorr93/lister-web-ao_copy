@@ -64,6 +64,7 @@ td a:hover { text-decoration: underline; }
       <input type="number" id="min-price-input" min="0" step="1" placeholder="0" style="width:100px;">
     </div>
     <button class="btn" id="run-btn" onclick="runSearch()">Save &amp; Run</button>
+    <button class="btn" id="run-all-btn" onclick="runAll()" style="background:#2563eb;border-color:#2563eb;">▶ Run All</button>
   </div>
 
   <div id="status" class="status-msg"></div>
@@ -127,6 +128,40 @@ async function runSearch() {
 async function rerunSaved(query, minPrice, conditionIds) {
   const listedDate = document.getElementById('date-input').value || todayStr();
   await executeRun(query, listedDate, minPrice, conditionIds || null);
+}
+
+async function runAll() {
+  const btn = document.getElementById('run-all-btn');
+  const status = document.getElementById('status');
+  btn.disabled = true;
+  const listedDate = document.getElementById('date-input').value || todayStr();
+
+  // Fetch current saved searches
+  const res = await fetch('/api/saved-searches');
+  const data = await res.json();
+  const searches = data.searches || [];
+  if (!searches.length) { status.textContent = 'No saved searches to run.'; btn.disabled = false; return; }
+
+  let total = 0;
+  for (let i = 0; i < searches.length; i++) {
+    const s = searches[i];
+    status.textContent = `Running ${i+1}/${searches.length}: "${s.query}"...`;
+    try {
+      const payload = {query: s.query, listed_date: listedDate, min_price: s.min_price};
+      if (s.condition_ids) payload.condition_ids = s.condition_ids;
+      const r = await fetch('/api/saved-searches/run', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      if (r.ok) {
+        const d = await r.json();
+        total += d.count;
+      }
+    } catch (e) { /* continue to next */ }
+  }
+  status.textContent = `✓ Ran all ${searches.length} searches — ${total} total results.`;
+  await loadSavedSearches();
+  btn.disabled = false;
 }
 
 async function executeRun(query, listedDate, minPrice, conditionIds) {
