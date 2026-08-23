@@ -4326,6 +4326,7 @@ async def browse_item_detail(request: Request, item_id: str):
             "seller": row.get("seller_username"),
             "description": row.get("description"),
             "images": row.get("image_urls") or [],
+            "ai_eval": row.get("ai_eval"),
         }
 
     token = get_ebay_access_token(business_id)

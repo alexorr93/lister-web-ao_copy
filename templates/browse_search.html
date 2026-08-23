@@ -240,7 +240,11 @@ async function toggleResults(idx, query, listedDate) {
       <td>$${r.price ? Number(r.price).toFixed(2) : '-'}</td>
       <td class="muted">${opts || '-'}</td>
       <td class="muted">${r.condition || '-'}</td>
-      <td><button onclick="viewItemDetail('${r.item_id}')" style="background:none;border:1px solid #3b82f6;color:#3b82f6;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;font-weight:600;">Details →</button></td>`;
+      <td style="white-space:nowrap;">
+        <button onclick="viewItemDetail('${r.item_id}')" style="background:none;border:1px solid #3b82f6;color:#3b82f6;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;font-weight:600;">Details →</button>
+        <button id="eval-inline-${r.item_id}" onclick="runEvalInline('${r.item_id}', this)" style="background:#e67e22;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;font-weight:600;margin-left:4px;">⚡ GPT</button>
+        <span id="eval-status-${r.item_id}" style="color:#aaa;font-size:11px;margin-left:4px;"></span>
+      </td>`;
     resultRows.push(tr);
   });
   // Insert after parent row in order
@@ -279,7 +283,7 @@ async function viewItemDetail(itemId) {
           <button id="eval-btn" class="btn btn-small" onclick="runEval('${itemId}')" style="background:#e67e22;border:none;color:#fff;padding:0.4rem 1rem;border-radius:4px;cursor:pointer;">⚡ GPT Evaluate</button>
           <span id="eval-status" style="color:#aaa;margin-left:0.5rem;font-size:0.85rem;"></span>
         </div>
-        <div id="eval-result" style="display:none;background:#111;border:1px solid #444;border-radius:6px;padding:1rem;margin:0.75rem 0;color:#eee;font-size:0.9rem;white-space:pre-wrap;"></div>
+        <div id="eval-result" style="${d.ai_eval ? '' : 'display:none;'}background:#111;border:1px solid #444;border-radius:6px;padding:1rem;margin:0.75rem 0;color:#eee;font-size:0.9rem;white-space:pre-wrap;">${d.ai_eval || ''}</div>
         <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:0.5rem;margin:1rem 0;">${imgs || '<span style="color:#666;">No photos</span>'}</div>
         <div style="color:#ccc;font-size:0.85rem;max-height:300px;overflow-y:auto;margin-top:1rem;border-top:1px solid #333;padding-top:1rem;">${d.description || ''}</div>
       </div>`;
@@ -288,12 +292,35 @@ async function viewItemDetail(itemId) {
   }
 }
 
+async function runEvalInline(itemId, btn) {
+  const statusEl = document.getElementById(`eval-status-${itemId}`);
+  btn.disabled = true;
+  statusEl.textContent = 'Evaluating...';
+
+  // First ensure item details are fetched (needed by the eval endpoint)
+  try {
+    await fetch(`/api/browse-item/${encodeURIComponent(itemId)}`);
+  } catch (e) { /* already fetched is fine */ }
+
+  try {
+    const res = await fetch(`/api/browse-item/${encodeURIComponent(itemId)}/evaluate`, {method: 'POST'});
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Eval failed');
+    const d = await res.json();
+    btn.style.background = '#16a34a';
+    btn.textContent = '✓ Done';
+    statusEl.textContent = '';
+  } catch (e) {
+    statusEl.textContent = '✗ ' + e.message;
+  }
+  btn.disabled = false;
+}
+
 async function runEval(itemId) {
   const btn = document.getElementById('eval-btn');
   const status = document.getElementById('eval-status');
   const result = document.getElementById('eval-result');
   btn.disabled = true;
-  status.textContent = 'Analyzing photos...';
+  status.textContent = 'Analyzing...';
   try {
     const res = await fetch(`/api/browse-item/${encodeURIComponent(itemId)}/evaluate`, {method: 'POST'});
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Eval failed');
