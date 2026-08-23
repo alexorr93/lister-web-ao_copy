@@ -51,13 +51,15 @@
 </nav>
 <script>
 (function(){
+  const DISMISS_KEY = 'browse_badge_dismissed_' + new Date().toISOString().slice(0,10);
   async function updateBrowseBadge(){
+    if(sessionStorage.getItem(DISMISS_KEY)) return;
     try{
       const r=await fetch('/api/browse-results/unseen-count');
       if(!r.ok)return;
       const d=await r.json();
       const b=document.getElementById('browse-badge');
-      if(b&&d.count>0){b.textContent=d.count;b.style.display='inline';}
+      if(b&&d.count>0){b.textContent=d.count+' ✕';b.style.display='inline';b.style.cursor='pointer';b.onclick=function(e){e.preventDefault();e.stopPropagation();sessionStorage.setItem(DISMISS_KEY,'1');b.style.display='none';};}
       else if(b){b.style.display='none';}
     }catch(e){}
   }

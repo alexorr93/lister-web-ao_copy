@@ -4360,16 +4360,19 @@ async def browse_result_dismiss(request: Request, result_id: int):
 
 @app.get("/api/browse-results/unseen-count")
 async def browse_results_unseen_count(request: Request):
-    """Count of non-dismissed browse results from the last 24 hours — for the nav badge."""
+    """Count of unique non-dismissed browse results from the last 24 hours — deduped by item_id."""
     from datetime import datetime, timezone, timedelta
     business_id = get_business_id(request)
     if not business_id:
         return {"count": 0}
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-    res = supabase.table("browse_search_results").select("id", count="exact") \
+    res = supabase.table("browse_search_results").select("item_id") \
         .eq("business_id", business_id).neq("dismissed", True) \
         .gte("fetched_at", cutoff).execute()
-    return {"count": res.count or 0}
+    unique_count = len(set(r["item_id"] for r in (res.data or []) if r.get("item_id")))
+    return {"count": unique_count}
+
+
 async def saved_searches_delete(request: Request, search_id: int):
     business_id = get_business_id(request)
     if not business_id:
