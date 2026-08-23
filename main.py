@@ -4183,8 +4183,9 @@ async def saved_searches_run(request: Request, body: dict = Body(...)):
         filter_parts.append(f"price:[{min_price}..]")
         filter_parts.append("priceCurrency:USD")
     if condition_ids:
-        # condition_ids is a comma-separated string like "1000,1500,1750"
-        filter_parts.append(f"conditionIds:{{{condition_ids}}}")
+        # condition_ids stored comma-separated; eBay wants pipe-separated inside {}
+        ids_piped = "|".join(c.strip() for c in condition_ids.split(","))
+        filter_parts.append(f"conditionIds:{{{ids_piped}}}")
     filter_str = ",".join(filter_parts)
 
     all_items = []
