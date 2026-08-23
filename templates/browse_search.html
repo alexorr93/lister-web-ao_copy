@@ -94,12 +94,30 @@ async function loadSavedSearches() {
     return;
   }
   const conditionLabels = {'1000':'New','1500':'New Other','1750':'New w/ Defects'};
+  const brandLogos = {
+    'cat': 'https://logo.clearbit.com/caterpillar.com',
+    'caterpillar': 'https://logo.clearbit.com/caterpillar.com',
+    'paccar': 'https://logo.clearbit.com/paccar.com',
+    'cummins': 'https://logo.clearbit.com/cummins.com',
+    'john deere': 'https://logo.clearbit.com/deere.com',
+    'international': 'https://logo.clearbit.com/internationaltrucks.com',
+    'truck': null,
+  };
+  function getBrandLogo(query) {
+    const q = (query || '').toLowerCase();
+    for (const [key, url] of Object.entries(brandLogos)) {
+      if (q.includes(key) && url) return url;
+    }
+    return null;
+  }
   searches.forEach((s, idx) => {
     const condStr = s.condition_ids ? s.condition_ids.split(',').map(c => conditionLabels[c.trim()] || c.trim()).join(', ') : '-';
+    const logo = getBrandLogo(s.query);
+    const logoHtml = logo ? `<img src="${logo}" style="height:18px;width:18px;border-radius:3px;object-fit:contain;vertical-align:middle;margin-right:6px;" onerror="this.style.display='none'">` : '';
     const tr = document.createElement('tr');
     tr.id = `search-row-${idx}`;
     tr.innerHTML = `
-      <td class="query-cell">${s.query}</td>
+      <td class="query-cell">${logoHtml}${s.query}</td>
       <td class="muted">${s.last_run_at ? new Date(s.last_run_at).toLocaleString() : 'never'}</td>
       <td class="muted">${s.last_run_date || '-'}</td>
       <td class="muted">${s.min_price != null ? '$' + Number(s.min_price).toFixed(2) : '-'}</td>
