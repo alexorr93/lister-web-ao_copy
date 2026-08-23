@@ -103,6 +103,12 @@ async function loadSavedSearches() {
     'international': 'https://www.google.com/s2/favicons?domain=internationaltrucks.com&sz=32',
     'truck': null,
   };
+  // Group synonyms: searches sharing a groupKey render as one row
+  const groupKey = q => {
+    const l = (q || '').toLowerCase();
+    if (l.includes('caterpillar') || (l.includes('cat') && l.includes('parts'))) return 'caterpillar';
+    return l;
+  };
   function getBrandLogo(query) {
     const q = (query || '').toLowerCase();
     for (const [key, url] of Object.entries(brandLogos)) {
@@ -110,28 +116,46 @@ async function loadSavedSearches() {
     }
     return null;
   }
+  // Group searches
+  const groups = [];
+  const seen = {};
   searches.forEach((s, idx) => {
-    const condStr = s.condition_ids ? s.condition_ids.split(',').map(c => conditionLabels[c.trim()] || c.trim()).join(', ') : '-';
-    const logo = getBrandLogo(s.query);
+    const gk = groupKey(s.query);
+    if (seen[gk] !== undefined) {
+      groups[seen[gk]].items.push({...s, origIdx: idx});
+    } else {
+      seen[gk] = groups.length;
+      groups.push({key: gk, items: [{...s, origIdx: idx}]});
+    }
+  });
+  groups.forEach((g, gIdx) => {
+    const primary = g.items[0];
+    const totalResults = g.items.reduce((sum, s) => sum + (s.last_result_count || 0), 0);
+    const condStr = primary.condition_ids ? primary.condition_ids.split(',').map(c => conditionLabels[c.trim()] || c.trim()).join(', ') : '-';
+    const logo = getBrandLogo(primary.query);
     const logoHtml = logo ? `<img src="${logo}" style="height:18px;width:18px;border-radius:3px;object-fit:contain;vertical-align:middle;margin-right:6px;" onerror="this.style.display='none'">` : '';
+    const displayName = g.items.length > 1 ? g.key + ' parts lot' : primary.query;
+    const queryList = g.items.map(s => s.query).join('|||');
     const tr = document.createElement('tr');
-    tr.id = `search-row-${idx}`;
+    tr.id = `search-row-${gIdx}`;
     tr.innerHTML = `
-      <td class="query-cell">${logoHtml}${s.query}</td>
-      <td class="muted">${s.last_run_at ? new Date(s.last_run_at).toLocaleString() : 'never'}</td>
-      <td class="muted">${s.last_run_date || '-'}</td>
-      <td class="muted">${s.min_price != null ? '$' + Number(s.min_price).toFixed(2) : '-'}</td>
+      <td class="query-cell">${logoHtml}${displayName}</td>
+      <td class="muted">${primary.last_run_at ? new Date(primary.last_run_at).toLocaleString() : 'never'}</td>
+      <td class="muted">${primary.last_run_date || '-'}</td>
+      <td class="muted">${primary.min_price != null ? '$' + Number(primary.min_price).toFixed(2) : '-'}</td>
       <td class="muted">${condStr}</td>
-      <td>${s.last_result_count ?? '-'}</td>
+      <td>${totalResults}</td>
       <td class="actions">
-        <button class="btn btn-small btn-outline" onclick="rerunSaved('${escapeAttr(s.query)}', ${s.min_price != null ? s.min_price : 'null'}, '${escapeAttr(s.condition_ids || '')}')">Run again</button>
-        <button class="btn btn-small btn-outline" onclick="toggleResults(${idx}, '${escapeAttr(s.query)}', '${s.last_run_date || ''}')">${s.last_result_count > 0 ? '▶ Results' : 'View results'}</button>
+        <button class="btn btn-small btn-outline" onclick="rerunGroup('${escapeAttr(queryList)}')">Run again</button>
+        <button class="btn btn-small btn-outline" onclick="toggleGroupResults(${gIdx}, '${escapeAttr(queryList)}', '${primary.last_run_date || ''}')">${totalResults > 0 ? '▶ Results' : 'View results'}</button>
       </td>`;
     table.appendChild(tr);
   });
-  // Auto-expand results for searches that have any
-  searches.forEach((s, idx) => {
-    if (s.last_result_count > 0) toggleResults(idx, s.query, s.last_run_date || '');
+  // Auto-expand groups with results
+  groups.forEach((g, gIdx) => {
+    const totalResults = g.items.reduce((sum, s) => sum + (s.last_result_count || 0), 0);
+    const queryList = g.items.map(s => s.query).join('|||');
+    if (totalResults > 0) toggleGroupResults(gIdx, queryList, g.items[0].last_run_date || '');
   });
 }
 
@@ -149,6 +173,80 @@ async function runSearch() {
 async function rerunSaved(query, minPrice, conditionIds) {
   const listedDate = document.getElementById('date-input').value || todayStr();
   await executeRun(query, listedDate, minPrice, conditionIds || null);
+}
+
+async function rerunGroup(queryList) {
+  const queries = queryList.split('|||');
+  const listedDate = document.getElementById('date-input').value || todayStr();
+  const status = document.getElementById('status');
+  for (const q of queries) {
+    status.textContent = `Running "${q}"...`;
+    try {
+      const payload = {query: q, listed_date: listedDate};
+      await fetch('/api/saved-searches/run', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+    } catch(e) {}
+  }
+  status.textContent = '✓ Done';
+  await loadSavedSearches();
+}
+
+async function toggleGroupResults(gIdx, queryList, listedDate) {
+  // If already expanded, collapse
+  const existing = document.querySelectorAll(`.inline-result-${gIdx}`);
+  if (existing.length) { existing.forEach(el => el.remove()); return; }
+
+  const parentRow = document.getElementById(`search-row-${gIdx}`);
+  const queries = queryList.split('|||');
+
+  // Fetch results for all queries in group, merge and dedupe by item_id
+  let allRows = [];
+  const seenIds = new Set();
+  for (const q of queries) {
+    const params = new URLSearchParams({q});
+    if (listedDate) params.set('listed_date', listedDate);
+    try {
+      const res = await fetch('/api/saved-searches/results?' + params.toString());
+      const data = await res.json();
+      for (const r of (data.rows || [])) {
+        if (!seenIds.has(r.item_id)) { seenIds.add(r.item_id); allRows.push(r); }
+      }
+    } catch(e) {}
+  }
+
+  if (!allRows.length) {
+    const emptyRow = document.createElement('tr');
+    emptyRow.className = `inline-result-${gIdx}`;
+    emptyRow.innerHTML = `<td colspan="7" class="muted" style="text-align:center;padding:12px;">No results stored yet.</td>`;
+    parentRow.after(emptyRow);
+    return;
+  }
+
+  let insertAfter = parentRow;
+  allRows.forEach(r => {
+    const opts = (r.buying_options || '').split(',').map(o => {
+      if (o === 'AUCTION') return '🔨 Auction';
+      if (o === 'FIXED_PRICE') return 'BIN';
+      if (o === 'BEST_OFFER') return 'Best Offer';
+      return o;
+    }).join(' + ');
+    const tr = document.createElement('tr');
+    tr.className = `inline-result-${gIdx}`;
+    tr.style.background = '#151b2b';
+    tr.innerHTML = `
+      <td>${r.image_url ? `<img src="${r.image_url}">` : ''}</td>
+      <td colspan="2"><a href="${r.item_web_url}" target="_blank" style="color:#60a5fa;">${r.title || ''}</a></td>
+      <td>$${r.price ? Number(r.price).toFixed(2) : '-'}</td>
+      <td class="muted">${opts || '-'}</td>
+      <td class="muted">${r.condition || '-'}</td>
+      <td style="white-space:nowrap;">
+        <button onclick="viewItemDetail('${r.item_id}')" style="background:none;border:1px solid #3b82f6;color:#3b82f6;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;font-weight:600;">Details →</button>
+        <button id="eval-inline-${r.item_id}" onclick="runEvalInline('${r.item_id}', this)" style="background:#e67e22;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;font-weight:600;margin-left:4px;">⚡ GPT</button>
+        <button onclick="dismissResult(${r.id}, this)" style="background:none;border:none;color:#666;font-size:14px;cursor:pointer;margin-left:4px;" title="Dismiss permanently">✕</button>
+        <span id="eval-status-${r.item_id}" style="color:#aaa;font-size:11px;margin-left:4px;"></span>
+      </td>`;
+    insertAfter.after(tr);
+    insertAfter = tr;
+  });
 }
 
 async function runAll() {
@@ -217,60 +315,6 @@ async function deleteSaved(id) {
   if (!confirm('Delete this saved search?')) return;
   await fetch(`/api/saved-searches/${id}`, {method: 'DELETE'});
   await loadSavedSearches();
-}
-
-async function toggleResults(idx, query, listedDate) {
-  // If already expanded, collapse
-  const existing = document.querySelectorAll(`.inline-result-${idx}`);
-  if (existing.length) {
-    existing.forEach(el => el.remove());
-    return;
-  }
-
-  const parentRow = document.getElementById(`search-row-${idx}`);
-  const params = new URLSearchParams({q: query});
-  if (listedDate) params.set('listed_date', listedDate);
-  const res = await fetch('/api/saved-searches/results?' + params.toString());
-  const data = await res.json();
-  if (!data.rows || !data.rows.length) {
-    const emptyRow = document.createElement('tr');
-    emptyRow.className = `inline-result-${idx}`;
-    emptyRow.innerHTML = `<td colspan="7" class="muted" style="text-align:center;padding:12px;">No results stored yet.</td>`;
-    parentRow.after(emptyRow);
-    return;
-  }
-  // Insert result rows in reverse so they end up in order after the parent
-  const resultRows = [];
-  data.rows.forEach(r => {
-    const opts = (r.buying_options || '').split(',').map(o => {
-      if (o === 'AUCTION') return '🔨 Auction';
-      if (o === 'FIXED_PRICE') return 'BIN';
-      if (o === 'BEST_OFFER') return 'Best Offer';
-      return o;
-    }).join(' + ');
-    const tr = document.createElement('tr');
-    tr.className = `inline-result-${idx}`;
-    tr.style.background = '#151b2b';
-    tr.innerHTML = `
-      <td>${r.image_url ? `<img src="${r.image_url}">` : ''}</td>
-      <td colspan="2"><a href="${r.item_web_url}" target="_blank" style="color:#60a5fa;">${r.title || ''}</a></td>
-      <td>$${r.price ? Number(r.price).toFixed(2) : '-'}</td>
-      <td class="muted">${opts || '-'}</td>
-      <td class="muted">${r.condition || '-'}</td>
-      <td style="white-space:nowrap;">
-        <button onclick="viewItemDetail('${r.item_id}')" style="background:none;border:1px solid #3b82f6;color:#3b82f6;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;font-weight:600;">Details →</button>
-        <button id="eval-inline-${r.item_id}" onclick="runEvalInline('${r.item_id}', this)" style="background:#e67e22;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;font-weight:600;margin-left:4px;">⚡ GPT</button>
-        <button onclick="dismissResult(${r.id}, this)" style="background:none;border:none;color:#666;font-size:14px;cursor:pointer;margin-left:4px;" title="Dismiss permanently">✕</button>
-        <span id="eval-status-${r.item_id}" style="color:#aaa;font-size:11px;margin-left:4px;"></span>
-      </td>`;
-    resultRows.push(tr);
-  });
-  // Insert after parent row in order
-  let insertAfter = parentRow;
-  resultRows.forEach(tr => {
-    insertAfter.after(tr);
-    insertAfter = tr;
-  });
 }
 
 async function viewItemDetail(itemId) {
