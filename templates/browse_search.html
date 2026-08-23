@@ -333,12 +333,31 @@ async function runEvalInline(itemId, btn) {
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Eval failed');
     const d = await res.json();
     btn.style.background = '#16a34a';
-    btn.textContent = '✓ Done';
+    btn.style.border = '1px solid #16a34a';
+    btn.textContent = '📋 View Eval';
+    btn.onclick = () => showEvalPopup(itemId, d.evaluation, btn);
     statusEl.textContent = '';
   } catch (e) {
     statusEl.textContent = '✗ ' + e.message;
   }
   btn.disabled = false;
+}
+
+function showEvalPopup(itemId, evalText, anchorBtn) {
+  // Remove any existing popup
+  const old = document.getElementById('eval-popup');
+  if (old) { old.remove(); return; }
+
+  const popup = document.createElement('div');
+  popup.id = 'eval-popup';
+  popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1a1a2e;border:1px solid #444;border-radius:8px;padding:1.5rem;max-width:700px;width:90%;max-height:70vh;overflow-y:auto;z-index:1000;color:#eee;font-size:0.9rem;white-space:pre-wrap;box-shadow:0 8px 32px rgba(0,0,0,0.6);';
+  popup.innerHTML = `<button onclick="this.parentElement.remove()" style="position:absolute;top:0.5rem;right:0.75rem;background:none;border:none;color:#fff;font-size:1.2rem;cursor:pointer;">✕</button><div style="margin-top:0.5rem;">${evalText || 'No evaluation stored.'}</div>`;
+  document.body.appendChild(popup);
+  // Click outside to close
+  setTimeout(() => {
+    const handler = (e) => { if (!popup.contains(e.target) && e.target !== anchorBtn) { popup.remove(); document.removeEventListener('click', handler); } };
+    document.addEventListener('click', handler);
+  }, 100);
 }
 
 async function runEval(itemId) {
