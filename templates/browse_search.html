@@ -246,7 +246,10 @@ async function toggleGroupResults(gIdx, queryList, listedDate) {
       <td class="muted">${r.condition || '-'}</td>
       <td style="white-space:nowrap;">
         <button onclick="viewItemDetail('${r.item_id}')" style="background:none;border:1px solid #3b82f6;color:#3b82f6;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;font-weight:600;">Details →</button>
-        <button id="eval-inline-${r.item_id}" onclick="runEvalInline('${r.item_id}', this)" style="background:#e67e22;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;font-weight:600;margin-left:4px;">⚡ GPT</button>
+        ${r.ai_eval
+          ? `<button onclick="showEvalPopup('${r.item_id}', null, this)" data-eval="${btoa(unescape(encodeURIComponent(r.ai_eval)))}" style="background:#16a34a;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;font-weight:600;margin-left:4px;">📋 View Eval</button>`
+          : `<button id="eval-inline-${r.item_id}" onclick="runEvalInline('${r.item_id}', this)" style="background:#e67e22;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;font-weight:600;margin-left:4px;">⚡ GPT</button>`
+        }
         <button onclick="dismissResult(${r.id}, this)" style="background:none;border:none;color:#666;font-size:14px;cursor:pointer;margin-left:4px;" title="Dismiss permanently">✕</button>
         <span id="eval-status-${r.item_id}" style="color:#aaa;font-size:11px;margin-left:4px;"></span>
       </td>`;
@@ -397,6 +400,11 @@ function showEvalPopup(itemId, evalText, anchorBtn) {
   // Remove any existing popup
   const old = document.getElementById('eval-popup');
   if (old) { old.remove(); return; }
+
+  // Read from data attribute if no text passed directly
+  if (!evalText && anchorBtn && anchorBtn.dataset.eval) {
+    try { evalText = decodeURIComponent(escape(atob(anchorBtn.dataset.eval))); } catch(e) {}
+  }
 
   const popup = document.createElement('div');
   popup.id = 'eval-popup';

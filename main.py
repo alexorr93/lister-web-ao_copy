@@ -4284,10 +4284,21 @@ async def saved_searches_results(request: Request, response: Response, q: str, l
     query_builder = supabase.table("browse_search_results").select("*") \
         .eq("business_id", business_id).eq("query", q).neq("dismissed", True)
     if listed_date:
-        # Show everything from the selected date onward (matches the range search behavior)
         query_builder = query_builder.gte("item_creation_date", f"{listed_date}T00:00:00.000Z")
     res = query_builder.order("item_creation_date", desc=True).limit(500).execute()
-    return {"rows": res.data}
+
+    # Enrich with eval status from browse_item_details
+    rows = res.data or []
+    if rows:
+        item_ids = [r["item_id"] for r in rows if r.get("item_id")]
+        if item_ids:
+            details = supabase.table("browse_item_details").select("item_id,ai_eval") \
+                .eq("business_id", business_id).in_("item_id", item_ids).execute()
+            eval_map = {d["item_id"]: d.get("ai_eval") for d in (details.data or [])}
+            for r in rows:
+                r["ai_eval"] = eval_map.get(r.get("item_id"))
+
+    return {"rows": rows}
 
 
 @app.post("/api/browse-results/{result_id}/dismiss")
