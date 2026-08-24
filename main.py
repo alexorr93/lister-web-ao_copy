@@ -2037,6 +2037,15 @@ def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None,
         ]
         if alnum_tokens:
             mpn = max(alnum_tokens, key=len)
+        else:
+            # Numeric-only part numbers (Cummins, PACCAR, etc.): accept a pure-digit
+            # token of 6+ digits — long enough to be a part number, not a qty/size/year.
+            num_tokens = [
+                w.strip(",.;:-") for w in title.split()
+                if w.strip(",.;:-").isdigit() and len(w.strip(",.;:-")) >= 6
+            ]
+            if num_tokens:
+                mpn = max(num_tokens, key=len)
     if not mpn:
         mpn = "Does Not Apply"
         mpn_is_fallback = True
@@ -2199,6 +2208,15 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
         ]
         if alnum_tokens:
             mpn = max(alnum_tokens, key=len)
+        else:
+            # Numeric-only part numbers (Cummins, PACCAR, etc.): accept a pure-digit
+            # token of 6+ digits — long enough to be a part number, not a qty/size/year.
+            num_tokens = [
+                w.strip(",.;:-") for w in title.split()
+                if w.strip(",.;:-").isdigit() and len(w.strip(",.;:-")) >= 6
+            ]
+            if num_tokens:
+                mpn = max(num_tokens, key=len)
     if not mpn:
         mpn = "Does Not Apply"
         mpn_is_fallback = True
