@@ -273,7 +273,7 @@ async def browse_search_daily_worker():
                     try:
                         # Hit the same endpoint logic as manual Run
                         _req.post(
-                            "http://localhost:8000/api/saved-searches/run",
+                            f"http://localhost:{os.environ.get('PORT', '8000')}/api/saved-searches/run",
                             json={
                                 "query": s["query"],
                                 "listed_date": today,
@@ -4171,7 +4171,25 @@ async def saved_searches_list(request: Request, response: Response):
         raise HTTPException(401, "Not logged in")
     res = supabase.table("saved_searches").select("*").eq("business_id", business_id) \
         .order("created_at", desc=True).execute()
-    return {"searches": res.data}
+    searches = res.data or []
+    # Live result counts: non-dismissed stored results from the last 24h per query,
+    # so dismissing a row genuinely lowers the displayed Results Found number.
+    from datetime import datetime, timezone, timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    live = supabase.table("browse_search_results").select("query,item_id") \
+        .eq("business_id", business_id).neq("dismissed", True) \
+        .gte("fetched_at", cutoff).execute()
+    counts = {}
+    seen_pairs = set()
+    for r in (live.data or []):
+        key = (r.get("query"), r.get("item_id"))
+        if key in seen_pairs:
+            continue
+        seen_pairs.add(key)
+        counts[r.get("query")] = counts.get(r.get("query"), 0) + 1
+    for s in searches:
+        s["live_result_count"] = counts.get(s.get("query"), 0)
+    return {"searches": searches}
 
 
 @app.post("/api/saved-searches/run")
@@ -4367,10 +4385,25 @@ async def browse_results_unseen_count(request: Request):
         return {"count": 0}
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
     res = supabase.table("browse_search_results").select("item_id") \
-        .eq("business_id", business_id).neq("dismissed", True) \
+        .eq("business_id", business_id).neq("dismissed", True).neq("seen", True) \
         .gte("fetched_at", cutoff).execute()
     unique_count = len(set(r["item_id"] for r in (res.data or []) if r.get("item_id")))
     return {"count": unique_count}
+
+
+@app.post("/api/browse-results/mark-seen")
+async def browse_results_mark_seen(request: Request):
+    """Clear the Browse notification badge: mark all recent non-dismissed results seen.
+    Only callable from the Browse page's own Clear button — nav click never triggers this."""
+    from datetime import datetime, timezone, timedelta
+    business_id = get_business_id(request)
+    if not business_id:
+        raise HTTPException(401, "Not logged in")
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+    supabase.table("browse_search_results").update({"seen": True}) \
+        .eq("business_id", business_id).neq("seen", True) \
+        .gte("fetched_at", cutoff).execute()
+    return {"cleared": True}
 
 
 async def saved_searches_delete(request: Request, search_id: int):

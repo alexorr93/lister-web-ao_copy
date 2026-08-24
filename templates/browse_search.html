@@ -65,6 +65,7 @@ td a:hover { text-decoration: underline; }
     </div>
     <button class="btn" id="run-btn" onclick="runSearch()">Save &amp; Run</button>
     <button class="btn" id="run-all-btn" onclick="runAll()" style="background:#2563eb;border-color:#2563eb;">▶ Run All</button>
+    <button class="btn" id="clear-notif-btn" onclick="clearNotifications(this)" style="background:#374151;border-color:#4b5563;">🔔 Clear notifications</button>
   </div>
 
   <div id="status" class="status-msg"></div>
@@ -136,7 +137,7 @@ async function loadSavedSearches() {
   });
   groups.forEach((g, gIdx) => {
     const primary = g.items[0];
-    const totalResults = g.items.reduce((sum, s) => sum + (s.last_result_count || 0), 0);
+    const totalResults = g.items.reduce((sum, s) => sum + ((s.live_result_count !== undefined ? s.live_result_count : s.last_result_count) || 0), 0);
     const condStr = primary.condition_ids ? primary.condition_ids.split(',').map(c => conditionLabels[c.trim()] || c.trim()).join(', ') : '-';
     const logo = getBrandLogo(primary.query);
     const logoHtml = logo ? `<img src="${logo}" style="height:36px;max-width:60px;border-radius:3px;object-fit:contain;vertical-align:middle;margin-right:8px;" onerror="this.style.display='none'">` : '';
@@ -159,7 +160,7 @@ async function loadSavedSearches() {
   });
   // Auto-expand groups with results
   groups.forEach((g, gIdx) => {
-    const totalResults = g.items.reduce((sum, s) => sum + (s.last_result_count || 0), 0);
+    const totalResults = g.items.reduce((sum, s) => sum + ((s.live_result_count !== undefined ? s.live_result_count : s.last_result_count) || 0), 0);
     const queryList = g.items.map(s => s.query).join('|||');
     if (totalResults > 0) toggleGroupResults(gIdx, queryList, g.items[0].last_run_date || '');
   });
@@ -368,7 +369,19 @@ async function dismissResult(resultId, btn) {
   try {
     await fetch(`/api/browse-results/${resultId}/dismiss`, {method: 'POST'});
     row.remove();
+    if (typeof loadSavedSearches === 'function') loadSavedSearches();  // refresh live Results Found counts
   } catch (e) { /* silently fail */ }
+}
+
+async function clearNotifications(btn) {
+  btn.disabled = true;
+  try {
+    await fetch('/api/browse-results/mark-seen', {method: 'POST'});
+    const b = document.getElementById('browse-badge');
+    if (b) b.style.display = 'none';
+    btn.textContent = '✓ Cleared';
+    setTimeout(() => { btn.textContent = '🔔 Clear notifications'; btn.disabled = false; }, 2000);
+  } catch (e) { btn.disabled = false; }
 }
 
 async function runEvalInline(itemId, btn) {
