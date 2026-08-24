@@ -7957,7 +7957,7 @@ async def deep_research_full(request: Request):
         pdf_bytes = await pdf_file.read()
 
     genai.configure(api_key=gemini_key)
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    model = genai.GenerativeModel("gemini-2.5-flash-lite")
     loop = asyncio.get_event_loop()
     executor = ThreadPoolExecutor(max_workers=1)
 
@@ -8315,7 +8315,7 @@ weight fields: use null if truly unknown"""
                 max_output_tokens=1500
             )
             _resp = _client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-2.5-flash-lite",
                 contents=_parts,
                 config=_cfg
             )
@@ -8413,7 +8413,7 @@ weight fields: use null if truly unknown"""
                 data["pricing_flag"] = "No verified data sources available - estimate may not reflect actual market"
 
         # --- Hybrid Escalation: call gemini-2.5-pro for hard items ---
-        escalate_tiers = {"NO_DATA", "COMPARABLE_ITEMS", "MSRP_ONLY"}
+        escalate_tiers = set()  # Pro escalation disabled — cost
         if data.get("pricing_tier") in escalate_tiers and gemini_key:
             print(f"   Escalating lot {lot} to gemini-2.5-pro (tier={data.get('pricing_tier')})")
             try:
