@@ -5365,6 +5365,10 @@ async def api_uncategorized_listings_only(request: Request):
         needs_review = needs_sku or is_locked_unverified
         if sku and not needs_review and prefix in known_lot_skus:
             continue
+        # Non-active listings (Ended, Sold, Unsold, etc.) don't belong in the
+        # working queue — if it's off eBay there's nothing to act on.
+        if not is_active:
+            continue
         uncategorized_value += value
         uncategorized_count += 1
         uncategorized_items.append({
