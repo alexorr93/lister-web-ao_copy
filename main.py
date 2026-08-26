@@ -663,14 +663,17 @@ def _check_new_shopify_sales_for_ebay_sync(business_id: str) -> dict:
 
     queued = 0
     for row in found["rows"]:
-        existing = (supabase.table("ebay_sync_queue").select("id,qty_sold")
+        existing = (supabase.table("ebay_sync_queue").select("id,qty_sold,status")
                     .eq("business_id", business_id).eq("shopify_variant_id", row["shopify_variant_id"])
-                    .eq("status", "pending").execute()).data
+                    .in_("status", ["pending", "ignored", "pushed"]).execute()).data
         if existing:
-            supabase.table("ebay_sync_queue").update({
-                "qty_sold": existing[0]["qty_sold"] + row["qty_sold"],
-                "discovered_at": now.isoformat(),
-            }).eq("id", existing[0]["id"]).execute()
+            if existing[0]["status"] == "pending":
+                supabase.table("ebay_sync_queue").update({
+                    "qty_sold": existing[0]["qty_sold"] + row["qty_sold"],
+                    "discovered_at": now.isoformat(),
+                }).eq("id", existing[0]["id"]).execute()
+                queued += 1
+            # else: already ignored/pushed -- don't resurrect it
         else:
             live_status = _live_check_ebay_listing_status(business_id, row["ebay_item_id"])
             supabase.table("ebay_sync_queue").insert({
@@ -678,20 +681,23 @@ def _check_new_shopify_sales_for_ebay_sync(business_id: str) -> dict:
                 "ebay_item_id": row["ebay_item_id"], "title": row["title"], "sku": row["sku"],
                 "qty_sold": row["qty_sold"], "status": "pending", "live_listing_status": live_status,
             }).execute()
-        queued += 1
+            queued += 1
 
     # Unmatched Shopify sales: queue them too, as status 'unmatched', so they
     # show in the panel with an explanation instead of disappearing. Push is
     # still manual; a row with a title-fallback eBay id can be pushed like any
     # other, one with none just says so and can be dismissed.
     for row in found.get("unmatched_rows") or []:
-        existing = (supabase.table("ebay_sync_queue").select("id,qty_sold")
+        existing = (supabase.table("ebay_sync_queue").select("id,qty_sold,status")
                     .eq("business_id", business_id).eq("shopify_variant_id", row["shopify_variant_id"])
-                    .in_("status", ["pending", "unmatched"]).execute()).data
+                    .in_("status", ["pending", "unmatched", "ignored", "pushed"]).execute()).data
         if existing:
-            supabase.table("ebay_sync_queue").update({
-                "qty_sold": existing[0]["qty_sold"] + row["qty_sold"], "discovered_at": now.isoformat(),
-            }).eq("id", existing[0]["id"]).execute()
+            if existing[0]["status"] in ("pending", "unmatched"):
+                supabase.table("ebay_sync_queue").update({
+                    "qty_sold": existing[0]["qty_sold"] + row["qty_sold"], "discovered_at": now.isoformat(),
+                }).eq("id", existing[0]["id"]).execute()
+                queued += 1
+            # else: already ignored/pushed -- don't resurrect it
         else:
             live_status = row.get("fallback_status")
             if row.get("ebay_item_id"):
@@ -704,7 +710,7 @@ def _check_new_shopify_sales_for_ebay_sync(business_id: str) -> dict:
                 "ebay_item_id": row.get("ebay_item_id"), "title": row["title"], "sku": row["sku"],
                 "qty_sold": row["qty_sold"], "status": "unmatched", "live_listing_status": live_status,
             }).execute()
-        queued += 1
+            queued += 1
 
     save_ebay_setting(business_id, "EBAY_SYNC_QUEUE_LAST_CHECKED_AT", now.isoformat())
     return {"queued": queued, "unmatched_no_hdid": found["unmatched_no_hdid"], "checked_at": now.isoformat()}
