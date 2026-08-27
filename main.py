@@ -3579,7 +3579,6 @@ def suggest_ebay_category(title: str, business_id: str, restrict: bool = True,
         # model/part numbers. eBay's suggestion engine chokes on long alphanumeric
         # strings like "T306-60015-01L-7" and returns zero hits. Stripping those
         # and retrying with just the descriptive words often lands a real category.
-        import re
         simplified = re.sub(r'\b[A-Z0-9]{2,}-[\w-]+\b', '', title)       # dash-joined part numbers
         simplified = re.sub(r'\b\d+:\d+\b', '', simplified)               # ratios like 9:1
         simplified = re.sub(r'\b[A-Z0-9]*\d[A-Z0-9]*\b', '', simplified)  # any token mixing letters+digits
@@ -3621,7 +3620,6 @@ def suggest_ebay_category(title: str, business_id: str, restrict: bool = True,
                    if (x["path"] or "").split(" > ")[0].strip() == "Business & Industrial"]
         if not results:
             # eBay returned suggestions but none under B&I — retry with simplified title
-            import re
             simplified = re.sub(r'\b[A-Z0-9]{2,}-[\w-]+\b', '', title)
             simplified = re.sub(r'\b\d+:\d+\b', '', simplified)
             simplified = re.sub(r'\b[A-Z0-9]*\d[A-Z0-9]*\b', '', simplified)
