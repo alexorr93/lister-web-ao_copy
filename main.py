@@ -3575,13 +3575,37 @@ def suggest_ebay_category(title: str, business_id: str, restrict: bool = True,
                          "path": full_path, "tree_id": tree_id, "is_fallback": False})
 
     if not results:
-        # REAL GAP FIXED: eBay's own suggestion API returned zero candidates for this
-        # title/tree, with no error and no bad status code -- previously fell straight
-        # through to _fallback() with NOTHING printed, indistinguishable in the logs
-        # from a request that never ran at all. This was the actual, currently-live
-        # cause of repeated tile BI/AP recalc presses looking like no-ops: pressing
-        # the button genuinely re-queried eBay every time and eBay genuinely had no
-        # suggestion for that exact title text, but nothing said so anywhere.
+        # Full title got nothing — retry with a simplified version that strips
+        # model/part numbers. eBay's suggestion engine chokes on long alphanumeric
+        # strings like "T306-60015-01L-7" and returns zero hits. Stripping those
+        # and retrying with just the descriptive words often lands a real category.
+        import re
+        simplified = re.sub(r'\b[A-Z0-9]{2,}-[\w-]+\b', '', title)       # dash-joined part numbers
+        simplified = re.sub(r'\b\d+:\d+\b', '', simplified)               # ratios like 9:1
+        simplified = re.sub(r'\b\d{4,}\b', '', simplified)                # long numeric strings
+        simplified = re.sub(r'\s+', ' ', simplified).strip()
+        if simplified and simplified != title.strip():
+            print(f"suggest_ebay_category: full title got 0 results, retrying with simplified: '{simplified}'")
+            try:
+                r2 = _req.get(
+                    f"https://api.ebay.com/commerce/taxonomy/v1/category_tree/{tree_id}/get_category_suggestions",
+                    headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                    params={"q": simplified}, timeout=15
+                )
+                if r2.status_code == 200:
+                    for s in r2.json().get("categorySuggestions", []):
+                        cat = s.get("category", {})
+                        ancestors = s.get("categoryTreeNodeAncestors", [])
+                        path = " > ".join(a.get("categoryName", "") for a in ancestors[::-1])
+                        full_path = f"{path} > {cat.get('categoryName','')}" if path else cat.get("categoryName", "")
+                        results.append({"category_id": cat.get("categoryId"), "name": cat.get("categoryName"),
+                                         "path": full_path, "tree_id": tree_id, "is_fallback": False})
+                    if results:
+                        print(f"suggest_ebay_category: simplified retry got {len(results)} result(s)")
+            except Exception as e:
+                print(f"suggest_ebay_category: simplified retry failed: {e}")
+
+    if not results:
         print(f"suggest_ebay_category: eBay returned ZERO suggestions for '{title}' in tree {tree_id} "
               f"-- falling back (not a bug, eBay's own suggestion engine had nothing for this title text; "
               f"try a more category-like phrase, e.g. paste a category breadcrumb into the category field instead)")
