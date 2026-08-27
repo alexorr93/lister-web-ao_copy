@@ -3620,16 +3620,38 @@ def suggest_ebay_category(title: str, business_id: str, restrict: bool = True,
         results = [x for x in results
                    if (x["path"] or "").split(" > ")[0].strip() == "Business & Industrial"]
         if not results:
-            # Same class of silent gap as above, one step later: eBay DID suggest
-            # something for this title, just nothing rooted under literal
-            # "Business & Industrial" -- e.g. everything it offered landed under a
-            # different top-level eBay tree-0 category instead. Also previously
-            # silent. Logging eBay's actual top suggestions here is the fastest way
-            # to tell a real taxonomy gap apart from a filter bug next time this
-            # is reported.
-            print(f"suggest_ebay_category: eBay suggested categories for '{title}' but none rooted under "
-                  f"'Business & Industrial' -- top raw suggestion(s): {pre_restrict_paths} -- falling back")
-            return _fallback()
+            # eBay returned suggestions but none under B&I — retry with simplified title
+            import re
+            simplified = re.sub(r'\b[A-Z0-9]{2,}-[\w-]+\b', '', title)
+            simplified = re.sub(r'\b\d+:\d+\b', '', simplified)
+            simplified = re.sub(r'\b[A-Z0-9]*\d[A-Z0-9]*\b', '', simplified)
+            simplified = re.sub(r'\b[A-Z]{1,3}\b', '', simplified)
+            simplified = re.sub(r'\s+', ' ', simplified).strip()
+            if simplified and simplified != title.strip():
+                print(f"suggest_ebay_category: no B&I results for full title, retrying with: '{simplified}'")
+                try:
+                    r2 = _req.get(
+                        f"https://api.ebay.com/commerce/taxonomy/v1/category_tree/{tree_id}/get_category_suggestions",
+                        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                        params={"q": simplified}, timeout=15
+                    )
+                    if r2.status_code == 200:
+                        for s in r2.json().get("categorySuggestions", []):
+                            cat = s.get("category", {})
+                            ancestors = s.get("categoryTreeNodeAncestors", [])
+                            path = " > ".join(a.get("categoryName", "") for a in ancestors[::-1])
+                            full_path = f"{path} > {cat.get('categoryName','')}" if path else cat.get("categoryName", "")
+                            if full_path.split(" > ")[0].strip() == "Business & Industrial":
+                                results.append({"category_id": cat.get("categoryId"), "name": cat.get("categoryName"),
+                                                 "path": full_path, "tree_id": tree_id, "is_fallback": False})
+                        if results:
+                            print(f"suggest_ebay_category: simplified retry got {len(results)} B&I result(s)")
+                except Exception as e:
+                    print(f"suggest_ebay_category: simplified retry failed: {e}")
+            if not results:
+                print(f"suggest_ebay_category: eBay suggested categories for '{title}' but none rooted under "
+                      f"'Business & Industrial' -- top raw suggestion(s): {pre_restrict_paths} -- falling back")
+                return _fallback()
     # mode == "motors" needs no filter: tree 100 IS eBay Motors by definition.
 
     if exclude_ids:
