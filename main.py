@@ -3582,7 +3582,8 @@ def suggest_ebay_category(title: str, business_id: str, restrict: bool = True,
         import re
         simplified = re.sub(r'\b[A-Z0-9]{2,}-[\w-]+\b', '', title)       # dash-joined part numbers
         simplified = re.sub(r'\b\d+:\d+\b', '', simplified)               # ratios like 9:1
-        simplified = re.sub(r'\b\d{4,}\b', '', simplified)                # long numeric strings
+        simplified = re.sub(r'\b[A-Z0-9]*\d[A-Z0-9]*\b', '', simplified)  # any token mixing letters+digits
+        simplified = re.sub(r'\b[A-Z]{1,3}\b', '', simplified)            # short all-caps codes (LH, TDI, NEW)
         simplified = re.sub(r'\s+', ' ', simplified).strip()
         if simplified and simplified != title.strip():
             print(f"suggest_ebay_category: full title got 0 results, retrying with simplified: '{simplified}'")
