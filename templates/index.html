@@ -829,10 +829,10 @@ function isToday(dateStr) {
   if (!dateStr) return false;
   const d = new Date(dateStr);
   const now = new Date();
-  return (now - d) < 24 * 60 * 60 * 1000;
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
 }
 function visibleListings() {
-  return todayOnly ? listings.filter(l => isToday(l.created_at)) : listings;
+  return todayOnly ? listings.filter(l => isToday(l.uploaded_at || l.created_at)) : listings;
 }
 function toggleTodayFilter() {
   todayOnly = !todayOnly;

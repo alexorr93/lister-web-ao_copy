@@ -2727,6 +2727,13 @@ def _build_listings_payload(business_id: str, archived: bool = False) -> list:
 
         listings.sort(key=lambda l: group_created_at.get(str(l.get("photo_id") or ""), l.get("created_at") or ""), reverse=True)
 
+        # Stamp each listing with the upload/scan time so the frontend "Today
+        # Only" filter can use it instead of the listing row's own created_at.
+        for l in listings:
+            gca = group_created_at.get(str(l.get("photo_id") or ""))
+            if gca:
+                l["uploaded_at"] = gca
+
         # Batch fetch all group photos for these listings
         primary_pids = [str(l.get("photo_id") or "") for l in listings if l.get("photo_id")]
         group_photo_map = {}  # photo_id -> [all photo_ids in same group]
