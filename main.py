@@ -246,49 +246,71 @@ async def start_background_jobs():
     asyncio.create_task(browse_search_daily_worker())
 
 async def browse_search_daily_worker():
-    """Runs all saved Browse searches once daily at 06:00 UTC (midnight MDT).
-    For each business with saved searches, runs every search with today's date,
-    same as clicking Run All manually."""
+    """Runs all saved Browse searches once daily. For each business with saved
+    searches, runs every search with today's date, same as clicking Run All
+    manually.
+
+    Rewritten 8/27: the original version slept in-memory until the next 06:00
+    UTC. That sleep resets on every process restart, and this app gets
+    redeployed often (sometimes many times in a single day) -- so the daily
+    run could go days without ever actually firing, silently starving Browse
+    notifications with no error anywhere. Now checks every 15 min and only
+    actually runs a business once its last run is >= 20 hours old (persisted
+    in app_settings, same pattern as ebay_analytics_sync_worker/
+    inventory_value_sync_worker), so a restart just resumes the wait instead
+    of restarting the clock."""
     import asyncio
     import datetime as _dt
     import requests as _req
 
     while True:
-        now = _dt.datetime.now(_dt.timezone.utc)
-        next_run = now.replace(hour=6, minute=0, second=0, microsecond=0)
-        if next_run <= now:
-            next_run += _dt.timedelta(days=1)
-        await asyncio.sleep(max((next_run - now).total_seconds(), 5))
         try:
             biz_res = supabase.table("businesses").select("id").execute()
             for biz in (biz_res.data or []):
                 biz_id = biz["id"]
-                searches_res = supabase.table("saved_searches").select("*") \
-                    .eq("business_id", biz_id).execute()
-                searches = searches_res.data or []
-                if not searches:
-                    continue
-                today = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
-                for s in searches:
-                    try:
-                        # Hit the same endpoint logic as manual Run
-                        _req.post(
-                            f"http://localhost:{os.environ.get('PORT', '8000')}/api/saved-searches/run",
-                            json={
-                                "query": s["query"],
-                                "listed_date": today,
-                                "min_price": s.get("min_price"),
-                                "condition_ids": s.get("condition_ids"),
-                            },
-                            headers={"Cookie": f"business_id={biz_id}"},
-                            timeout=60,
-                        )
-                        print(f"browse_search_daily: ran '{s['query']}' for {biz_id}")
-                    except Exception as e:
-                        print(f"browse_search_daily: error running '{s['query']}': {e}")
-                    await asyncio.sleep(2)  # pace eBay calls
+                try:
+                    searches_res = supabase.table("saved_searches").select("*") \
+                        .eq("business_id", biz_id).execute()
+                    searches = searches_res.data or []
+                    if not searches:
+                        continue
+
+                    settings = get_ebay_settings(biz_id)
+                    last_run = settings.get("BROWSE_DAILY_LAST_RUN_AT")
+                    needs_run = True
+                    if last_run:
+                        age = _dt.datetime.now(_dt.timezone.utc) - _dt.datetime.fromisoformat(
+                            last_run.replace("Z", "+00:00"))
+                        needs_run = age >= _dt.timedelta(hours=20)
+                    if not needs_run:
+                        continue
+
+                    today = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
+                    for s in searches:
+                        try:
+                            _req.post(
+                                f"http://localhost:{os.environ.get('PORT', '8000')}/api/saved-searches/run",
+                                json={
+                                    "query": s["query"],
+                                    "listed_date": today,
+                                    "min_price": s.get("min_price"),
+                                    "condition_ids": s.get("condition_ids"),
+                                },
+                                headers={"Cookie": f"business_id={biz_id}"},
+                                timeout=60,
+                            )
+                            print(f"browse_search_daily: ran '{s['query']}' for {biz_id}")
+                        except Exception as e:
+                            print(f"browse_search_daily: error running '{s['query']}': {e}")
+                        await asyncio.sleep(2)  # pace eBay calls
+
+                    save_ebay_setting(biz_id, "BROWSE_DAILY_LAST_RUN_AT", _dt.datetime.now(_dt.timezone.utc).isoformat())
+                    print(f"browse_search_daily: completed run for {biz_id}, {len(searches)} search(es)")
+                except Exception as e:
+                    print(f"browse_search_daily_worker: business {biz_id} failed: {e}")
         except Exception as e:
             print(f"browse_search_daily_worker error: {e}")
+        await asyncio.sleep(900)  # check every 15 min; actual run per business gated to ~daily above
 
 async def ebay_analytics_sync_worker():
     """Once-a-day sweep of real view counts via the Sell Analytics API,
