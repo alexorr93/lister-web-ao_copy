@@ -366,7 +366,8 @@ select.field-input { background: #fff; color: #0f172a; }
         <button class="btn" id="bulk-shipping-btn" style="font-size:12px;color:#38bdf8;border-color:#0284c7;" onclick="applyBulkShipping()">🚚 Apply Shipping</button>
       </div>
       <div class="spacer"></div>
-      <button class="btn" style="color:#dc2626;border-color:#dc2626;" onclick="archiveBothPublished()">🗄️ Archive Published</button>
+      <button class="btn" style="color:#dc2626;border-color:#dc2626;" onclick="archiveEbayPublished()" title="Archives every item currently published/scheduled on eBay, regardless of Shopify status">🗄️ Archive Published on eBay</button>
+      <button class="btn" style="color:#dc2626;border-color:#dc2626;" onclick="archiveBothPublished()" title="Archives only items live on BOTH eBay and Shopify">🗄️ Archive Published (Both)</button>
     </div>
     </div>
     <div id="batch-submit-progress" style="display:none;margin-bottom:10px;">
@@ -1970,6 +1971,25 @@ async function archiveSelected() {
     } catch(e) { failed++; }
   }
   selected.clear();
+  renderTiles();
+  toast(`Archived ${success} item(s)${failed ? ', ' + failed + ' failed' : ''} ✓`);
+}
+
+async function archiveEbayPublished() {
+  const targets = listings.filter(l =>
+    (l.ebay_status === 'published' || l.ebay_status === 'scheduled') && l.ebay_item_id
+  );
+  if (!targets.length) { toast('No items are published on eBay right now'); return; }
+  if (!confirm(`Archive ${targets.length} item(s) that are published on eBay?`)) return;
+  let success = 0, failed = 0;
+  for (const l of targets) {
+    try {
+      await api('PATCH', '/api/listings/' + l.id, {field: 'status', value: 'archived'});
+      listings = listings.filter(x => x.id !== l.id);
+      selected.delete(String(l.id));
+      success++;
+    } catch(e) { failed++; }
+  }
   renderTiles();
   toast(`Archived ${success} item(s)${failed ? ', ' + failed + ' failed' : ''} ✓`);
 }
