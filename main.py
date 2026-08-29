@@ -4675,6 +4675,7 @@ class AcquisitionCreate(BaseModel):
     date: Optional[str] = None
     cost: Optional[float] = None
     cash: Optional[float] = None
+    freight_other: Optional[float] = None
     notes: Optional[str] = None
 
 def apply_acquisition_profits(business_id: str) -> dict:
@@ -4720,11 +4721,11 @@ def _apply_cash_to_profit(business_id: str):
     alone), just 1 round trip instead of ~160."""
     start = 0
     while True:
-        page = supabase.table("acquisitions").select("id,business_id,sku,cost,cash,ebay,payout_backfill")\
+        page = supabase.table("acquisitions").select("id,business_id,sku,cost,cash,ebay,payout_backfill,freight_other")\
             .eq("business_id", business_id).range(start, start + 999).execute().data or []
         batch = []
         for row in page:
-            cost = row.get("cost") or 0
+            cost = (row.get("cost") or 0) + (row.get("freight_other") or 0)  # landed cost: purchase + freight/other
             cash = row.get("cash") or 0
             ebay_total_payouts = row.get("ebay") or 0
             backfill = float(row.get("payout_backfill") or 0)
@@ -4758,7 +4759,7 @@ def _apply_shopify_sales_to_profit(business_id: str):
     import datetime as _dt
     start = 0
     while True:
-        page = supabase.table("acquisitions").select("id,business_id,sku,cost,ebay,cash,payout_backfill,became_green_at")\
+        page = supabase.table("acquisitions").select("id,business_id,sku,cost,ebay,cash,payout_backfill,became_green_at,freight_other")\
             .eq("business_id", business_id).range(start, start + 999).execute().data or []
         acquisitions.extend(page)
         if len(page) < 1000:
@@ -4791,7 +4792,7 @@ def _apply_shopify_sales_to_profit(business_id: str):
     batch = []
     for a in acquisitions:
         sales = shopify_sales_by_prefix.get(a.get("sku")) or 0
-        cost = a.get("cost") or 0
+        cost = (a.get("cost") or 0) + (a.get("freight_other") or 0)  # landed cost: purchase + freight/other
         ebay = a.get("ebay") or 0
         cash = a.get("cash") or 0
         backfill = float(a.get("payout_backfill") or 0)
@@ -5075,8 +5076,9 @@ class AcquisitionEdit(BaseModel):
     date: Optional[str] = None
     cost: Optional[float] = None
     cash: Optional[float] = None
+    freight_other: Optional[float] = None
 
-ALLOWED_ACQ_EDIT_FIELDS = {"sku", "name", "payment_method", "date", "cost", "cash"}
+ALLOWED_ACQ_EDIT_FIELDS = {"sku", "name", "payment_method", "date", "cost", "cash", "freight_other"}
 
 class AcquisitionSingleEdit(BaseModel):
     id: str
@@ -5103,12 +5105,13 @@ async def edit_acquisition_single(request: Request, body: AcquisitionSingleEdit)
             "business_id": business_id, "acquisition_id": body.id, "batch_id": batch_id,
             "sku": cur.get("sku"), "name": cur.get("name"), "payment_method": cur.get("payment_method"),
             "date": cur.get("date"), "cost": cur.get("cost"), "cash": cur.get("cash"),
+            "freight_other": cur.get("freight_other"),
         }).execute()
     except Exception as e:
         raise HTTPException(500, f"Could not save undo history, aborting to be safe: {e}")
 
     value = body.value
-    if body.field in ("cost", "cash"):
+    if body.field in ("cost", "cash", "freight_other"):
         try:
             value = float(value) if value not in (None, "") else None
         except (TypeError, ValueError):
@@ -5267,6 +5270,7 @@ async def undo_acquisitions_edit(request: Request):
             supabase.table("acquisitions").update({
                 "sku": h.get("sku"), "name": h.get("name"), "payment_method": h.get("payment_method"),
                 "date": h.get("date"), "cost": h.get("cost"), "cash": h.get("cash"),
+                "freight_other": h.get("freight_other"),
             }).eq("id", h["acquisition_id"]).execute()
             restored += 1
         except Exception as e:
