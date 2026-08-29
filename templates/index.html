@@ -359,6 +359,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <button class="btn btn-primary" id="publish-now-v2-btn" style="display:none;background:#ea580c;border-color:#ea580c;" onclick="submitSelectedNowV2()" title="SKU stays editable after publishing">📤 Publish to eBay</button>
       <button class="btn btn-primary" id="submit-shopify-btn" style="display:none;background:#95bf47;border-color:#95bf47;" onclick="submitSelectedToShopify()">🛍️ Publish to Shopify</button>
       <button class="btn" id="archive-selected-btn" style="display:none;color:var(--red);border-color:#991b1b;" onclick="archiveSelected()">🗄️ Archive Selected</button>
+      <button class="btn" id="ready-selected-btn" style="display:none;color:#16a34a;border-color:#15803d;" onclick="sendSelectedToReady()" title="Fully prepped but saving for later — clears selected items out of this queue into the Ready folder">✅ Send to Ready</button>
       <div style="display:none;align-items:center;gap:4px;" id="bulk-shipping-wrap" title="Applies a shipping policy to every currently selected item">
         <select class="field-input" id="bulk-shipping-select" style="font-size:12px;padding:5px 8px;width:170px;">
           <option value="">Select shipping policy...</option>
@@ -1953,6 +1954,9 @@ function updateSubmitBtn() {
   const archBtn = document.getElementById('archive-selected-btn');
   archBtn.style.display = selected.size > 0 ? 'inline-block' : 'none';
   archBtn.textContent = `🗄️ Archive ${selected.size} Selected`;
+  const readyBtn = document.getElementById('ready-selected-btn');
+  readyBtn.style.display = selected.size > 0 ? 'inline-block' : 'none';
+  readyBtn.textContent = `✅ Send ${selected.size} to Ready`;
   const bulkShipWrap = document.getElementById('bulk-shipping-wrap');
   bulkShipWrap.style.display = selected.size > 0 ? 'flex' : 'none';
   document.getElementById('bulk-shipping-btn').textContent = `🚚 Apply Shipping to ${selected.size}`;
@@ -1973,6 +1977,23 @@ async function archiveSelected() {
   selected.clear();
   renderTiles();
   toast(`Archived ${success} item(s)${failed ? ', ' + failed + ' failed' : ''} ✓`);
+}
+
+async function sendSelectedToReady() {
+  if (!selected.size) return;
+  const ids = Array.from(selected);
+  if (!confirm(`Send ${ids.length} selected item(s) to the Ready folder? They'll clear out of this queue -- find them anytime on the Ready page.`)) return;
+  let success = 0, failed = 0;
+  for (const id of ids) {
+    try {
+      await api('PATCH', '/api/listings/' + id, {field: 'status', value: 'ready'});
+      listings = listings.filter(l => String(l.id) !== id);
+      success++;
+    } catch(e) { failed++; }
+  }
+  selected.clear();
+  renderTiles();
+  toast(`Sent ${success} item(s) to Ready${failed ? ', ' + failed + ' failed' : ''} ✓`);
 }
 
 async function archiveEbayPublished() {

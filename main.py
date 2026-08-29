@@ -2706,7 +2706,7 @@ async def get_shipping_policy_options(request: Request):
         "options": EBAY_SHIPPING_POLICY_OPTIONS,
     }
 
-def _build_listings_payload(business_id: str, archived: bool = False) -> list:
+def _build_listings_payload(business_id: str, archived: bool = False, ready: bool = False) -> list:
     """Everything GET /api/listings returns, as plain data. Split out (8/21) so
     the Intake page route can build it server-side and INLINE it into the HTML
     -- same pre-built pattern as Inventory -- instead of the browser fetching
@@ -2714,7 +2714,12 @@ def _build_listings_payload(business_id: str, archived: bool = False) -> list:
     (measured ~5s on desktop). Raises on error; callers decide how to report."""
     if True:
         q = supabase.table("listings").select("*").eq("business_id", business_id)
-        q = q.eq("status", "archived") if archived else q.neq("status", "archived")
+        if archived:
+            q = q.eq("status", "archived")
+        elif ready:
+            q = q.eq("status", "ready")
+        else:
+            q = q.not_.in_("status", ["archived", "ready"])
         res = q.order("created_at", desc=True).execute()
         listings = res.data or []
 
@@ -2822,13 +2827,13 @@ def _build_listings_payload(business_id: str, archived: bool = False) -> list:
         return listings
 
 @app.get("/api/listings")
-async def get_listings(request: Request, archived: bool = False):
+async def get_listings(request: Request, archived: bool = False, ready: bool = False):
     business_id = require_auth(request)
     if not business_id:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     try:
         import asyncio
-        listings = await asyncio.to_thread(_build_listings_payload, business_id, archived)
+        listings = await asyncio.to_thread(_build_listings_payload, business_id, archived, ready)
         return JSONResponse(listings)
     except Exception as e:
         import traceback; traceback.print_exc()
@@ -4189,15 +4194,18 @@ async def rescan_listing(item_id: str, request: Request):
         raise HTTPException(500, str(e))
 
 class RestoreItems(BaseModel):
-    ids: Optional[list] = None  # None/omitted = restore ALL archived items
+    ids: Optional[list] = None  # None/omitted = restore ALL matching items
+    from_status: str = "archived"  # "archived" or "ready" -- which folder to restore from
 
 @app.post("/api/listings/restore")
 async def restore_listings(request: Request, body: RestoreItems):
     business_id = require_auth(request)
     if not business_id:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if body.from_status not in ("archived", "ready"):
+        raise HTTPException(400, "from_status must be 'archived' or 'ready'")
     try:
-        q = supabase.table("listings").update({"status": "pending"}).eq("business_id", business_id).eq("status", "archived")
+        q = supabase.table("listings").update({"status": "pending"}).eq("business_id", business_id).eq("status", body.from_status)
         if body.ids:
             q = q.in_("id", [str(i) for i in body.ids])
         res = q.execute()
@@ -7814,6 +7822,14 @@ async def archive_page(request: Request):
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/login", status_code=302)
     return templates.TemplateResponse("archive.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "archive"})
+
+@app.get("/ready", response_class=HTMLResponse)
+async def ready_page(request: Request):
+    nav = get_nav_context(request)
+    if nav is None:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("ready.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "ready"})
 
 @app.post("/api/listings/archive-batch")
 async def archive_batch(request: Request):
