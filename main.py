@@ -231,6 +231,7 @@ async def start_background_jobs():
     asyncio.create_task(shopify_sync_worker())
     asyncio.create_task(analytics_snapshot_worker())
     asyncio.create_task(analytics_cache_refresh_worker())
+    asyncio.create_task(backfill_ytd_history_worker())
     asyncio.create_task(auction_archive_worker())
     asyncio.create_task(active_listings_sync_worker())
     asyncio.create_task(post_publish_sync_worker())
@@ -1611,6 +1612,94 @@ async def analytics_snapshot_worker():
                     print(f"analytics_snapshot_worker: business {biz_id} failed: {e}")
         except Exception as e:
             print(f"analytics_snapshot_worker error: {e}")
+
+async def backfill_ytd_history_worker():
+    """One-time (idempotent) backfill, runs once at startup. The YTD Net Cash
+    Yield / Inventory Appreciation / Net Business Appreciation columns on
+    analytics_snapshots didn't exist when the earliest daily rows were
+    written, so those old rows have them NULL -- even though every underlying
+    source number (orders, acquisitions, cash payments, that day's real
+    inventory snapshot) still exists and a correct historical value CAN be
+    reconstructed for them, point-in-time, rather than leaving a permanent
+    gap on the YTD Business Appreciation chart.
+
+    Point-in-time matters here specifically because of cash spreading: a
+    spread payment vests gradually and CASH_SPREAD_CUTOFF_DATE (2026-06-30)
+    falls INSIDE the range being backfilled -- so a January row must be
+    computed using January's vesting state, not today's, or it overcounts
+    cash that hadn't vested yet as of that date. This mirrors
+    _compute_cash_in_range's own internal cutoff logic exactly, just with the
+    historical snapshot_date substituted for \"today\".
+
+    Only touches rows where a real inventory_snapshot_value already exists
+    (so nothing is fabricated for a genuine gap month like one with no
+    snapshot at all) and where ytd_net_cash_yield is still NULL, so it's
+    idempotent -- once a row is filled, it's never touched again."""
+    import asyncio, datetime as _dt5
+    await asyncio.sleep(15)
+    try:
+        rows = supabase.table("analytics_snapshots").select(
+            "id,business_id,snapshot_date,inventory_snapshot_value"
+        ).not_.is_("inventory_snapshot_value", "null").is_("ytd_net_cash_yield", "null").execute().data or []
+        print(f"backfill_ytd_history_worker: {len(rows)} historical row(s) need YTD backfill")
+        cash_rows_cache = {}
+        for row in rows:
+            try:
+                business_id = row["business_id"]
+                snap_date = row["snapshot_date"]
+                year_start = f"{snap_date[:4]}-01-01"
+                inventory_value = row["inventory_snapshot_value"]
+
+                ytd_order_rows = _fetch_all_for_business(business_id, "orders", "final_net,order_date")
+                ytd_order_rows = [r for r in ytd_order_rows if year_start <= (r.get("order_date") or "") <= snap_date]
+                ytd_net_revenue = round(sum(r.get("final_net") or 0 for r in ytd_order_rows), 2)
+
+                ytd_acq_rows = _fetch_all_for_business(business_id, "acquisitions", "cost,date")
+                ytd_acq_rows = [r for r in ytd_acq_rows if year_start <= (r.get("date") or "") <= snap_date]
+                ytd_inventory_spend = round(sum(r.get("cost") or 0 for r in ytd_acq_rows), 2)
+
+                # Point-in-time cash: same math as _compute_cash_in_range/
+                # _cash_contribution_in_range, but "today" is THIS historical
+                # date (capped at the real cutoff, same as the live version).
+                if business_id not in cash_rows_cache:
+                    cash_rows_cache[business_id] = _fetch_all_for_business(business_id, "cash_payments", "amount,payment_date,spread_start_date")
+                today_str = min(snap_date, CASH_SPREAD_CUTOFF_DATE)
+                ytd_cash = 0.0
+                for r in cash_rows_cache[business_id]:
+                    amount = r.get("amount") or 0
+                    if r.get("payment_date"):
+                        if year_start <= r["payment_date"] <= snap_date:
+                            ytd_cash += amount
+                    elif r.get("spread_start_date"):
+                        ytd_cash += _cash_contribution_in_range(amount, r["spread_start_date"], year_start, snap_date, today_str)
+                ytd_cash = round(ytd_cash, 2)
+
+                ytd_net_cash_yield = round(ytd_net_revenue + ytd_cash - ytd_inventory_spend, 2)
+
+                jan1_value, _ = _nearest_inventory_snapshot(business_id, year_start)
+                ytd_inventory_appreciation = round(inventory_value - jan1_value, 2) if jan1_value is not None else None
+                ytd_net_business_appreciation = (
+                    round(ytd_net_cash_yield + ytd_inventory_appreciation, 2)
+                    if ytd_inventory_appreciation is not None else None
+                )
+
+                supabase.table("analytics_snapshots").update({
+                    "ytd_net_revenue": ytd_net_revenue,
+                    "ytd_inventory_spend": ytd_inventory_spend,
+                    "ytd_cash": ytd_cash,
+                    "ytd_net_cash_yield": ytd_net_cash_yield,
+                    "ytd_inventory_appreciation": ytd_inventory_appreciation,
+                    "ytd_net_business_appreciation": ytd_net_business_appreciation,
+                }).eq("id", row["id"]).execute()
+            except Exception as e:
+                import traceback
+                print(f"backfill_ytd_history_worker: row {row.get('id')} failed: {e}")
+                traceback.print_exc()
+        print(f"backfill_ytd_history_worker: done, {len(rows)} row(s) processed")
+    except Exception as e:
+        import traceback
+        print(f"backfill_ytd_history_worker error: {e}")
+        traceback.print_exc()
 
 async def analytics_cache_refresh_worker():
     """Runs every 2 hours, for every business, proactively recomputing the
