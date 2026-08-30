@@ -7691,28 +7691,34 @@ def _compute_monthly_trend_payload(business_id: str, start_str: str, end_str: st
     biz_cash_yield = []
     biz_inv_app = []
     biz_total = []
-    snap_res = supabase.table("analytics_snapshots").select(
-        "snapshot_date,ytd_net_cash_yield,ytd_inventory_appreciation,ytd_net_business_appreciation"
-    ).eq("business_id", business_id).gte("snapshot_date", f"{year_str}-01-01") \
-     .order("snapshot_date", desc=True).limit(500).execute()
-    # Group by month, take latest snapshot per month
-    monthly_snaps = {}
-    for snap in (snap_res.data or []):
-        m = snap["snapshot_date"][:7]  # "2026-08"
-        if m not in monthly_snaps:
-            monthly_snaps[m] = snap
-    for month_num in range(1, 13):
-        m_key = f"{year_str}-{month_num:02d}"
-        if m_key not in monthly_snaps:
-            continue
-        s = monthly_snaps[m_key]
-        cy = float(s.get("ytd_net_cash_yield") or 0)
-        ia = float(s["ytd_inventory_appreciation"]) if s.get("ytd_inventory_appreciation") is not None else None
-        nba = float(s["ytd_net_business_appreciation"]) if s.get("ytd_net_business_appreciation") is not None else None
-        biz_labels.append(month_names[month_num - 1])
-        biz_cash_yield.append(round(cy, 2))
-        biz_inv_app.append(round(ia, 2) if ia is not None else None)
-        biz_total.append(round(nba, 2) if nba is not None else None)
+    try:
+        snap_res = supabase.table("analytics_snapshots").select(
+            "snapshot_date,ytd_net_cash_yield,ytd_inventory_appreciation,ytd_net_business_appreciation"
+        ).eq("business_id", business_id).gte("snapshot_date", f"{year_str}-01-01") \
+         .order("snapshot_date", desc=True).limit(500).execute()
+        # Group by month, take latest snapshot per month
+        monthly_snaps = {}
+        for snap in (snap_res.data or []):
+            m = snap["snapshot_date"][:7]  # "2026-08"
+            if m not in monthly_snaps:
+                monthly_snaps[m] = snap
+        for month_num in range(1, 13):
+            m_key = f"{year_str}-{month_num:02d}"
+            if m_key not in monthly_snaps:
+                continue
+            s = monthly_snaps[m_key]
+            cy = float(s.get("ytd_net_cash_yield") or 0)
+            ia = float(s["ytd_inventory_appreciation"]) if s.get("ytd_inventory_appreciation") is not None else None
+            nba = float(s["ytd_net_business_appreciation"]) if s.get("ytd_net_business_appreciation") is not None else None
+            biz_labels.append(month_names[month_num - 1])
+            biz_cash_yield.append(round(cy, 2))
+            biz_inv_app.append(round(ia, 2) if ia is not None else None)
+            biz_total.append(round(nba, 2) if nba is not None else None)
+    except Exception as e:
+        import traceback
+        print(f"_compute_monthly_trend_payload: biz-app section failed for business {business_id}: {e}")
+        traceback.print_exc()
+        biz_labels, biz_cash_yield, biz_inv_app, biz_total = [], [], [], []
 
     return {
         "start": start_str[:7],
