@@ -2434,14 +2434,27 @@ function guessBrand(title) {
 }
 
 function guessMpn(title, brand) {
-  // Mirrors the server's guess: longest alphanumeric (letters+digits) token that isn't the brand.
+  // Mirrors the server's guess (push_listing_to_ebay/_v2 in main.py) exactly,
+  // including the numeric-only fallback added there 8/24 for parts like
+  // Cummins/PACCAR whose MPN is pure digits with no letters -- that fix had
+  // only ever landed server-side (used at publish), never here (used for
+  // what's actually shown on screen), so a pure-digit MPN already sitting in
+  // the title silently never appeared pre-filled until someone typed it in
+  // by hand. Confirmed real case: Volvo 21714847 belt tensioner.
   const words = (title || '').trim().split(/\s+/);
   const brandLower = (brand || '').toLowerCase();
-  const candidates = words
-    .map(w => w.replace(/[,.;:\-]+$/, '').replace(/^[,.;:\-]+/, ''))
+  const strip = w => w.replace(/[,.;:\-]+$/, '').replace(/^[,.;:\-]+/, '');
+  const alnumCandidates = words
+    .map(strip)
     .filter(w => w.toLowerCase() !== brandLower && /[0-9]/.test(w) && /[a-zA-Z]/.test(w));
-  if (!candidates.length) return '';
-  return candidates.reduce((a, b) => b.length > a.length ? b : a, '');
+  if (alnumCandidates.length) {
+    return alnumCandidates.reduce((a, b) => b.length > a.length ? b : a, '');
+  }
+  const numCandidates = words.map(strip).filter(w => /^[0-9]+$/.test(w) && w.length >= 6);
+  if (numCandidates.length) {
+    return numCandidates.reduce((a, b) => b.length > a.length ? b : a, '');
+  }
+  return '';
 }
 
 async function findMpnsForSelected() {
