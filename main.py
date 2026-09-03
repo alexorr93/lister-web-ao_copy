@@ -1755,9 +1755,19 @@ def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
     inventory_value = _compute_inventory_snapshot_value(business_id)
     green_revenue = _compute_green_revenue(business_id, mt_today, mt_today)
 
-    order_rows = _fetch_all_for_business(business_id, "orders", "gross_revenue,quantity,order_date")
+    order_rows = _fetch_all_for_business(business_id, "orders", "gross_revenue,refund,quantity,order_date")
     order_rows = [r for r in order_rows if r.get("order_date") == mt_today]
-    total_revenue = sum(r.get("gross_revenue") or 0 for r in order_rows)
+    # REAL BUG FIXED: this summed gross_revenue alone, never subtracting refund
+    # -- every refunded order overstated Revenue by its full refunded amount.
+    # Confirmed against eBay's own Aug 2026 Seller Hub report: $1,715.14 in
+    # refunds that month were never coming off any Revenue-shaped total on
+    # this page, accounting for most of a real, verified $2,058.71 gap vs
+    # eBay's authoritative numbers. Net Sales (final_net-based) was already
+    # correct -- final_net subtracts refund at sync time -- only the
+    # gross-revenue-based totals had this gap. Same fix applied at every
+    # other gross_revenue sum site in this file (Green Revenue, monthly
+    # trend chart, the main Analytics cards, this daily snapshot).
+    total_revenue = sum((r.get("gross_revenue") or 0) - (r.get("refund") or 0) for r in order_rows)
     total_qty_sold = sum(r.get("quantity") or 0 for r in order_rows)
     avg_sale_price_day = round(total_revenue / total_qty_sold, 2) if total_qty_sold else 0
 
@@ -7245,7 +7255,10 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
         "totals": {
             "orders": len(rows),
             "quantity": sum(r["quantity"] for r in rows),
-            "revenue": round(sum(r["gross_revenue"] for r in rows), 2),
+            # REAL BUG FIXED: same refund-not-subtracted gap as every other
+            # gross_revenue sum in this file (see the Analytics fixes) --
+            # Financials' own Revenue total had it too.
+            "revenue": round(sum((r["gross_revenue"] or 0) - (r.get("refund") or 0) for r in rows), 2),
             "net": round(sum(r["final_net"] for r in rows), 2),
         },
         "uncategorized": {
@@ -7393,7 +7406,7 @@ def _compute_green_revenue(business_id: str, start_date_str: str, end_date_str: 
     if not green_lots:
         return 0.0
 
-    order_rows = _fetch_all_for_business(business_id, "orders", "sku,gross_revenue,order_date")
+    order_rows = _fetch_all_for_business(business_id, "orders", "sku,gross_revenue,refund,order_date")
     order_rows = [r for r in order_rows if start_date_str <= (r.get("order_date") or "") <= end_date_str]
     total = 0.0
     for r in order_rows:
@@ -7406,7 +7419,10 @@ def _compute_green_revenue(business_id: str, start_date_str: str, end_date_str: 
         # became_green_at is a full timestamp, order_date is just a date -- compare
         # on date portion only, so the transition day itself still counts
         if order_date >= became_green_at[:10]:
-            total += float(r.get("gross_revenue") or 0)
+            # REAL BUG FIXED: same refund-not-subtracted gap as the other
+            # gross_revenue sums in this file -- a refunded order on a green
+            # lot was counting its full pre-refund amount as Green Revenue.
+            total += (float(r.get("gross_revenue") or 0) - float(r.get("refund") or 0))
 
     min_date_by_sku = {sku: ts[:10] for sku, ts in green_lots.items()}
     total += _compute_cash_in_range(business_id, start_date_str, end_date_str, only_skus=set(green_lots.keys()), min_date_by_sku=min_date_by_sku)
@@ -7425,7 +7441,7 @@ async def api_green_revenue_breakdown(request: Request, start: str, end: str):
     lot_rows = _fetch_all_for_business(business_id, "acquisitions", "sku,profit,became_green_at")
     green_lots = {r["sku"]: r["became_green_at"] for r in lot_rows if r.get("sku") and (r.get("profit") or 0) > 1 and r.get("became_green_at")}
 
-    order_rows = _fetch_all_for_business(business_id, "orders", "sku,gross_revenue,order_date")
+    order_rows = _fetch_all_for_business(business_id, "orders", "sku,gross_revenue,refund,order_date")
     order_rows = [r for r in order_rows if start <= (r.get("order_date") or "") <= end]
 
     by_lot = {}
@@ -7438,7 +7454,10 @@ async def api_green_revenue_breakdown(request: Request, start: str, end: str):
         order_date = r.get("order_date") or ""
         if order_date >= became_green_at[:10]:
             entry = by_lot.setdefault(prefix, {"sku": prefix, "became_green_at": became_green_at, "revenue": 0.0, "order_count": 0})
-            entry["revenue"] += float(r.get("gross_revenue") or 0)
+            # REAL BUG FIXED: matches the fix in _compute_green_revenue -- this
+            # breakdown was summing pre-refund gross_revenue, which wouldn't
+            # even have added up to the (correctly refund-netted) total above.
+            entry["revenue"] += (float(r.get("gross_revenue") or 0) - float(r.get("refund") or 0))
             entry["order_count"] += 1
 
     rows = sorted(by_lot.values(), key=lambda x: x["revenue"], reverse=True)
@@ -7486,9 +7505,15 @@ def _compute_analytics_payload(business_id: str, start_date_str: str, end_date_s
     green_revenue = _compute_green_revenue(business_id, start_date_str, end_date_str)
 
     # --- Order-level figures (within the selected date range) ---
-    order_rows = _fetch_all_for_business(business_id, "orders", "gross_revenue,final_net,quantity,order_date")
+    order_rows = _fetch_all_for_business(business_id, "orders", "gross_revenue,refund,final_net,quantity,order_date")
     order_rows = [r for r in order_rows if start_date_str <= (r.get("order_date") or "") <= end_date_str]
-    total_order_revenue = sum(r.get("gross_revenue") or 0 for r in order_rows)
+    # REAL BUG FIXED, confirmed against eBay's own Aug 2026 report (see
+    # daily-snapshot fix above for the full writeup): gross_revenue sums
+    # need refund subtracted or Revenue overstates by every refund's full
+    # amount. final_net already correctly nets refund out at sync time, so
+    # Net Sales below was unaffected -- only Revenue (and anything else
+    # built from a raw gross_revenue sum) had this gap.
+    total_order_revenue = sum((r.get("gross_revenue") or 0) - (r.get("refund") or 0) for r in order_rows)
     total_net_revenue = sum(r.get("final_net") or 0 for r in order_rows)
     total_qty_sold = sum(r.get("quantity") or 0 for r in order_rows)
     avg_sales_per_day = round(len(order_rows) / num_days, 2)
@@ -7733,7 +7758,7 @@ def _compute_monthly_trend_payload(business_id: str, start_str: str, end_str: st
             y += 1
 
     acq_rows = _fetch_all_for_business(business_id, "acquisitions", "cost,date")
-    order_rows = _fetch_all_for_business(business_id, "orders", "gross_revenue,order_date")
+    order_rows = _fetch_all_for_business(business_id, "orders", "gross_revenue,refund,order_date")
     snapshot_rows = _fetch_all_for_business(business_id, "analytics_snapshots", "snapshot_date,inventory_snapshot_value")
 
     spend_by_month, sales_by_month = {}, {}
@@ -7744,7 +7769,12 @@ def _compute_monthly_trend_payload(business_id: str, start_str: str, end_str: st
     for r in order_rows:
         d = (r.get("order_date") or "")[:7]
         if d in all_months:
-            sales_by_month[d] = sales_by_month.get(d, 0) + (r.get("gross_revenue") or 0)
+            # REAL BUG FIXED: refund wasn't being subtracted here either -- this
+            # chart's Sales line was overstated by the same refund-not-netted
+            # gap as the main Analytics cards. See the writeup on the daily-
+            # snapshot fix above for how this was actually found/confirmed
+            # (eBay's own Aug 2026 report, $1,715.14 in refunds that month).
+            sales_by_month[d] = sales_by_month.get(d, 0) + (r.get("gross_revenue") or 0) - (r.get("refund") or 0)
 
     inventory_spend = [round(spend_by_month.get(m, 0), 2) for m in all_months]
 
