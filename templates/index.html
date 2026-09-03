@@ -860,6 +860,7 @@ function toggleTodayFilter() {
 let selected      = new Set();
 let quantities    = {};
 let dirtyTitles   = {}; // id -> unsaved title text, so background refreshes don't clobber in-progress edits
+let tilePhotoIdx  = {}; // id -> which photo index the user last navigated to, so a re-render (tab switch, poll, any field save) doesn't silently snap back to photo 0
 let dirtyPrices   = {}; // id -> unsaved price text
 let dirtyCats     = {}; // id -> unsaved category text
 let dirtyBrands   = {}; // id -> unsaved brand text
@@ -1438,19 +1439,21 @@ function renderTiles() {
       : fallback ? `<span style="background:rgba(245,158,11,0.8);color:#fff;border-radius:5px;font-size:9px;font-weight:700;padding:2px 5px;">⚠</span>` : '';
     const photos = l.all_photos || (l.thumb_url ? [{thumb: l.thumb_url, full: l.full_url}] : []);
     const photoCount = photos.length;
-    const firstThumb = photos[0]?.thumb || '';
+    let startIdx = tilePhotoIdx[l.id] || 0;
+    if (startIdx >= photoCount) startIdx = 0;  // photo count shrank (e.g. one got deleted) — don't point past the end
+    const firstThumb = photos[startIdx]?.thumb || '';
     const photoHtml = firstThumb
       ? `<img src="${firstThumb}" alt="" loading="lazy" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;image-orientation:from-image;" id="photo-img-${l.id}"/>`
       : `<div class="tile-photo-placeholder">📷</div>`;
     const photoNavHtml = photoCount > 1
       ? `<button class="photo-nav photo-nav-prev" onclick="event.stopPropagation();cyclePhoto('${l.id}',-1)">‹</button>
          <button class="photo-nav photo-nav-next" onclick="event.stopPropagation();cyclePhoto('${l.id}',1)">›</button>
-         <div class="photo-counter" id="photo-counter-${l.id}">1/${photoCount}</div>
-         <button class="make-main-btn" id="make-main-${l.id}" style="display:none;" onclick="event.stopPropagation();makeMainPhoto('${l.id}')">⭐ Make Main Photo</button>
+         <div class="photo-counter" id="photo-counter-${l.id}">${startIdx + 1}/${photoCount}</div>
+         <button class="make-main-btn" id="make-main-${l.id}" style="display:${startIdx === 0 ? 'none' : 'block'};" onclick="event.stopPropagation();makeMainPhoto('${l.id}')">⭐ Make Main Photo</button>
          <button class="delete-photo-btn" onclick="event.stopPropagation();deletePhotoFromTile('${l.id}')" title="Delete this photo">✕</button>`
       : '';
 
-    return `<div class="tile${isSel?' selected':''}${ebayDraft?' ebay-draft':''}${ebayFailed?' ebay-failed':''}" id="tile-${l.id}" data-photos='${JSON.stringify(photos)}' data-photo-idx="0" onclick="handleTileClick(event,'${l.id}')">
+    return `<div class="tile${isSel?' selected':''}${ebayDraft?' ebay-draft':''}${ebayFailed?' ebay-failed':''}" id="tile-${l.id}" data-photos='${JSON.stringify(photos)}' data-photo-idx="${startIdx}" onclick="handleTileClick(event,'${l.id}')">
       <div class="tile-photo" onclick="handlePhotoClick('${l.id}')">
         ${photoHtml}
         ${photoNavHtml}
@@ -1581,34 +1584,41 @@ function initTileListeners() {
     var el = e.target;
     if (el.classList.contains('tile-title-input')) {
       var titleId = el.dataset.id, titleVal = el.value;
-      var titleL = listings.find(function(x) { return String(x.id) === titleId; });
       updateField(titleId, 'title', titleVal).then(function(ok) {
-        // REAL BUG FIXED, per direct instruction: title/price/brand all used
-        // to only delete their dirty-flag on a successful save and stop
-        // there -- never actually writing the new value into the in-memory
-        // listings array. That leaves a real window: the flag says "not
-        // dirty anymore" but l.title/l.price/l.brand still holds the OLD
-        // value, so ANY re-render landing in that gap (another tile's
-        // action, a category recalc, etc.) before the next full 30s
-        // refresh paints the old value again -- looks exactly like the
-        // edit reverted, then "catches up" once a fresh fetch finally
-        // lands. lotsku/mpn already did this correctly; title/price/brand
-        // now match that same pattern.
-        if (ok) { delete dirtyTitles[titleId]; if (titleL) titleL.title = titleVal; }
+        // REAL BUG FIXED: this used to capture the listing object BEFORE
+        // the save started and mutate that same (possibly now-stale)
+        // reference afterward. If a background refresh (loadListings,
+        // e.g. on tab switch) reassigned `listings = fresh` while the save
+        // was in flight, that captured reference pointed at a detached
+        // object no longer part of the live array -- the mutation had zero
+        // visible effect, looking exactly like the edit had reverted.
+        // Fix: look the listing up fresh, by id, only after the save
+        // resolves -- same pattern the category re-match already used.
+        if (ok) {
+          delete dirtyTitles[titleId];
+          var titleL = listings.find(function(x) { return String(x.id) === titleId; });
+          if (titleL) titleL.title = titleVal;
+        }
       });
     }
     if (el.classList.contains('tile-price-input')) {
       var priceId = el.dataset.id, priceVal = parseFloat(el.value);
-      var priceL = listings.find(function(x) { return String(x.id) === priceId; });
       updateField(priceId, 'price', priceVal).then(function(ok) {
-        if (ok) { delete dirtyPrices[priceId]; if (priceL) priceL.price = priceVal; }
+        if (ok) {
+          delete dirtyPrices[priceId];
+          var priceL = listings.find(function(x) { return String(x.id) === priceId; });
+          if (priceL) priceL.price = priceVal;
+        }
       });
     }
     if (el.classList.contains('tile-brand-input')) {
       var brandId = el.dataset.id, brandVal = el.value;
-      var brandL = listings.find(function(x) { return String(x.id) === brandId; });
       updateField(brandId, 'brand', brandVal).then(function(ok) {
-        if (ok) { delete dirtyBrands[brandId]; if (brandL) brandL.brand = brandVal; }
+        if (ok) {
+          delete dirtyBrands[brandId];
+          var brandL = listings.find(function(x) { return String(x.id) === brandId; });
+          if (brandL) brandL.brand = brandVal;
+        }
       });
     }
     if (el.classList.contains('tile-lotsku-input')) {
@@ -1634,7 +1644,8 @@ function initTileListeners() {
       if (valSuffix) assignBody.suffix = valSuffix;
       api('POST', '/api/listings/' + id + '/assign-lot', assignBody).then(function(r) {
         delete dirtyLotSkus[id];
-        if (l) l.ebay_sku = r.ebay_sku;
+        var freshL = listings.find(function(x) { return String(x.id) === id; });
+        if (freshL) freshL.ebay_sku = r.ebay_sku;
         toast('Lot SKU set to ' + val + ' ✓');
       }).catch(function() {
         toast('Failed to save Lot SKU', 'error');
@@ -1642,7 +1653,6 @@ function initTileListeners() {
     }
     if (el.classList.contains('tile-mpn-input')) {
       var id = el.dataset.id, val = el.value.trim();
-      var l = listings.find(function(x) { return String(x.id) === id; });
       if (!val) { delete dirtyMpns[id]; return; }
       updateField(id, 'ebay_mpn', val).then(function(ok) {
         if (!ok) { toast('Failed to save MPN', 'error'); return; }
@@ -1653,6 +1663,7 @@ function initTileListeners() {
         // poll -- updateField() itself never touches the listings array, and
         // that exact staleness was already a real, confirmed bug in the
         // modal's version of this same warning.
+        var l = listings.find(function(x) { return String(x.id) === id; });
         if (l) { l.ebay_mpn = val; l.ebay_mpn_is_fallback = false; }
         renderTiles();
       });
@@ -1785,6 +1796,7 @@ function cyclePhoto(id, dir) {
   if (idx < 0) idx = photos.length - 1;
   if (idx >= photos.length) idx = 0;
   tile.dataset.photoIdx = idx;
+  tilePhotoIdx[id] = idx;
   const img = document.getElementById('photo-img-' + id);
   if (img) img.src = photos[idx].thumb;
   const counter = document.getElementById('photo-counter-' + id);
@@ -1810,6 +1822,7 @@ async function makeMainPhoto(id) {
       const reordered = [chosen, ...photos.filter((p, i) => i !== idx)];
       l.all_photos = reordered;
     }
+    tilePhotoIdx[id] = 0;  // the photo we were looking at is now first, not wherever it used to sit
     toast('Main photo updated ✓');
     renderTiles();
   } catch(e) {
@@ -1834,6 +1847,7 @@ async function deletePhotoFromTile(id) {
       l.all_photos = photos.filter((p, i) => i !== idx);
       if (r.photo_id) l.photo_id = r.photo_id;
     }
+    delete tilePhotoIdx[id];  // indices shifted after removal — safest to just fall back to 0 (the current/new main photo)
     toast('Photo deleted ✓');
     renderTiles();
   } catch(e) {
