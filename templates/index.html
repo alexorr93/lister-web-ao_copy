@@ -767,6 +767,10 @@ select.field-input { background: #fff; color: #0f172a; }
           <div style="display:flex;gap:6px;align-items:flex-start;">
             <input type="text" class="field-input" id="modal-mpn-input" placeholder="e.g. 2CDS271337R0217 — leave blank to auto-guess" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="modal-mpn-nofill" style="flex:1;" oninput="modalDirty=true;document.getElementById('modal-mpn-warn').style.display=this.value.trim()?'none':'block';"/>
             <button class="btn" id="modal-find-mpn-btn" onclick="findMpn()" title="Reads the part number off the actual photos" style="display:none;white-space:nowrap;">🔍 Find MPN</button>
+            <select id="mpn-provider-select" onchange="saveMpnProvider(this.value)" title="Which model reads the part number — sticks permanently until changed" style="display:none;font-size:11px;padding:2px 4px;">
+              <option value="gemini">Gemini</option>
+              <option value="openai">ChatGPT</option>
+            </select>
           </div>
           <div id="modal-find-mpn-status" style="display:none;font-size:11px;color:var(--muted);margin-top:4px;"></div>
           <div id="modal-mpn-warn" style="display:none;font-size:11px;color:var(--red,#dc2626);margin-top:4px;">⚠️ No confirmed MPN on file — will publish/republish as "Does Not Apply" unless fixed here first</div>
@@ -2246,6 +2250,8 @@ function openModal(id) {
   document.getElementById('modal-mpn-warn').style.display = needsMpnAttention(l) ? 'block' : 'none';
   document.getElementById('modal-mpn-flag').style.display = needsMpnAttention(l) ? 'block' : 'none';
   document.getElementById('modal-find-mpn-btn').style.display = (l.category_mode === 'motors') ? '' : 'none';
+  document.getElementById('mpn-provider-select').style.display = (l.category_mode === 'motors') ? '' : 'none';
+  loadMpnProviderSetting();
   document.getElementById('modal-find-mpn-status').style.display = 'none';
   document.getElementById('modal-ask-gemini-status').style.display = 'none';
   document.getElementById('modal-ask-gemini-result').style.display = 'none';
@@ -2428,6 +2434,28 @@ async function findMpnsForSelected() {
   btn.textContent = orig;
   renderListings();
   alert(`MPN assignment done: ${found} found from photos` + (failed ? `, ${failed} failed` : '') + `. Values are in each item's MPN box — check/correct before publishing.`);
+}
+
+let _mpnProviderLoaded = false;
+async function loadMpnProviderSetting() {
+  // Loads the permanent per-business Find MPN provider toggle (defaults to
+  // Gemini, matching backend get_mpn_provider) so the dropdown always shows
+  // what's actually stored, not just whatever it last happened to say.
+  try {
+    const s = await api('GET', '/api/settings');
+    document.getElementById('mpn-provider-select').value = (s.MPN_PROVIDER === 'openai') ? 'openai' : 'gemini';
+    _mpnProviderLoaded = true;
+  } catch (e) { /* leave dropdown at its default (gemini) if this fails */ }
+}
+async function saveMpnProvider(value) {
+  // Sticks forever until changed again — same generic settings store every
+  // other persistent toggle in this app uses, nothing session-local.
+  try {
+    await api('POST', '/api/settings', {key: 'MPN_PROVIDER', value});
+    toast(`Find MPN now using ${value === 'openai' ? 'ChatGPT' : 'Gemini'} ✓`);
+  } catch (e) {
+    alert('Could not save Find MPN provider — try again.');
+  }
 }
 
 async function findMpn() {

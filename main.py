@@ -3221,6 +3221,56 @@ class EbaySubmit(BaseModel):
     mpn: Optional[str] = None
 
 
+def _find_mpn_openai(title: str, photo_ids: list, business_id: str) -> dict:
+    """OpenAI side of the Find MPN provider toggle (see get_mpn_provider) --
+    same job, same input, same return shape as the Gemini path in find_mpn,
+    just a different model/vendor. Uses public photo URLs (photo_url) rather
+    than downloading bytes, since OpenAI's Responses API takes image_url
+    directly and part-photos is already a public bucket."""
+    from openai import OpenAI
+    openai_key = get_openai_key(business_id)
+    if not openai_key:
+        raise HTTPException(400, "OPENAI_API_KEY not set")
+    client = OpenAI(api_key=openai_key)
+
+    prompt = f"""This is an auto part being listed for sale on eBay. Its listing title is: "{title}"
+
+Look carefully at the photos for a manufacturer part number physically marked on the
+part or its packaging -- stamped, etched, printed, or on a label/tag/sticker. Auto
+parts almost always have this marked somewhere directly on the item. This is
+different from a generic model or product name -- it's usually a specific
+alphanumeric code unique to this exact part.
+
+Return ONLY a JSON object, no other text, in this exact shape:
+{{"mpn": "the part number you found" or null if you genuinely cannot find one, "confidence": "high", "medium", or "low"}}
+
+Only return a real value if you can actually see it in the photos or are highly
+confident from context -- never guess or make one up."""
+
+    content = [{"type": "input_text", "text": prompt}]
+    for photo_id in photo_ids[:4]:
+        content.append({"type": "input_image", "image_url": photo_url(photo_id)})
+
+    try:
+        response = client.responses.create(
+            model="gpt-5.4",
+            input=[{"role": "user", "content": content}],
+        )
+        text = (response.output_text or "").strip()
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        import json as _json
+        parsed = _json.loads(text.strip())
+        mpn = (parsed.get("mpn") or "").strip()
+        if not mpn:
+            return {"ok": True, "found": False}
+        return {"ok": True, "found": True, "mpn": mpn, "confidence": parsed.get("confidence", "low")}
+    except Exception as e:
+        raise HTTPException(500, f"Find MPN (ChatGPT) failed: {e}")
+
+
 @app.post("/api/listings/{item_id}/find-mpn")
 async def find_mpn(item_id: str, request: Request):
     """Auto parts specifically: looks at the item's actual photos for a real
@@ -3229,7 +3279,12 @@ async def find_mpn(item_id: str, request: Request):
     the value to fill into the MPN field, which then gets sent to eBay as
     BOTH the 'MPN' and 'Manufacturer Part Number' aspects at publish time
     (see push_listing_to_ebay_v2) -- two genuinely separate fields in eBay's
-    item specifics for this category, both need the same value."""
+    item specifics for this category, both need the same value.
+
+    Provider (Gemini vs ChatGPT) is a permanent per-business toggle, see
+    get_mpn_provider -- defaults to Gemini, so this function's original path
+    below is completely unchanged unless a business has explicitly flipped
+    it to OpenAI via the Intake toggle."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
@@ -3243,6 +3298,9 @@ async def find_mpn(item_id: str, request: Request):
     photo_ids = get_all_photo_ids(pid) if pid else []
     if not photo_ids:
         raise HTTPException(400, "No photos available for this item")
+
+    if get_mpn_provider(business_id) == "openai":
+        return _find_mpn_openai(title, photo_ids, business_id)
 
     import os, json
     import google.generativeai as genai
@@ -3538,6 +3596,18 @@ def get_gemini_key(business_id: str) -> str:
 def get_openai_key(business_id: str) -> str:
     settings = get_ebay_settings(business_id)
     return settings.get("OPENAI_API_KEY", "") or os.getenv("OPENAI_API_KEY", "")
+
+def get_mpn_provider(business_id: str) -> str:
+    """Persistent per-business toggle for which model powers Find MPN (Intake's
+    photo-based part-number reader). Stored in app_settings like every other
+    setting (via the existing generic /api/settings GET/POST), so it survives
+    forever until explicitly changed -- never a session/tab-local value.
+    Defaults to 'gemini' (the original, still-default behavior) when unset,
+    so nothing about the existing Gemini path changes unless a business has
+    actually flipped this."""
+    settings = get_ebay_settings(business_id)
+    provider = (settings.get("MPN_PROVIDER") or "gemini").strip().lower()
+    return provider if provider in ("gemini", "openai") else "gemini"
 
 def sync_ebay_categories(token: str) -> dict:
     """Download eBay's full category tree(s) and save them locally — EVERY node, not
