@@ -3609,6 +3609,19 @@ def get_mpn_provider(business_id: str) -> str:
     provider = (settings.get("MPN_PROVIDER") or "gemini").strip().lower()
     return provider if provider in ("gemini", "openai") else "gemini"
 
+def get_scan_provider(business_id: str) -> str:
+    """Same idea as get_mpn_provider but for the Batch Upload / Fast Scan
+    'Scan Provider' toggle -- which model does mantle-scanner's photo ->
+    title/brand/part-number pass (STEP 1 of process_group) for this business.
+    Stored key SCAN_PROVIDER in app_settings, permanent until changed,
+    defaults to 'gemini'. This is looked up server-side (not trusted from
+    the request body) so it's a true single source of truth regardless of
+    which tab/device the batch was started from -- matches the 'permanent,
+    not per-batch' toggle the user asked for."""
+    settings = get_ebay_settings(business_id)
+    provider = (settings.get("SCAN_PROVIDER") or "gemini").strip().lower()
+    return provider if provider in ("gemini", "openai") else "gemini"
+
 def sync_ebay_categories(token: str) -> dict:
     """Download eBay's full category tree(s) and save them locally — EVERY node, not
     just leaves, so parent/grouping categories show their real IDs too. is_leaf marks
@@ -8018,6 +8031,7 @@ class CreateGroup(BaseModel):
     condition:     str
     category_mode: str = "industrial"
     pricing_mode:  str = "always_search"
+    extraction_provider: str = "gemini"  # ignored server-side; see get_scan_provider
     lot_sku:       str = ""
     lot_suffix:    str = ""
 
@@ -8036,6 +8050,12 @@ async def create_group(body: CreateGroup, request: Request):
             supabase.table("businesses").update({"scan_count": scan_count + 1}).eq("id", business_id).execute()
         category_mode = body.category_mode if body.category_mode in ("industrial", "motors") else "industrial"
         pricing_mode = body.pricing_mode if body.pricing_mode in ("always_search", "api_first") else "always_search"
+        # Authoritative lookup, not the request body -- see get_scan_provider.
+        # The frontend also sends extraction_provider (kept in the request
+        # model above), but that's just so the toggle's own save round-trip
+        # has completed before Start Batch is clickable; this is the value
+        # that actually gets stored and used.
+        extraction_provider = get_scan_provider(business_id)
         res = supabase.table("listing_groups").insert({
             "session_id": body.session_id,
             "status":     "waiting",
@@ -8043,6 +8063,7 @@ async def create_group(body: CreateGroup, request: Request):
             "condition":  body.condition,
             "category_mode": category_mode,
             "pricing_mode": pricing_mode,
+            "extraction_provider": extraction_provider,
             "lot_sku":    (body.lot_sku or "").strip(),
             "lot_suffix": (body.lot_suffix or "").strip(),
             "business_id": business_id,
