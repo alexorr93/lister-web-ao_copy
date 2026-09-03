@@ -6719,6 +6719,16 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
                 "business_id": business_id, "platform": "Shopify", "order_id": row["order_id"],
                 "sku": final_sku, "title": row["title"], "quantity": row["quantity"],
                 "order_date": row["order_date"], "gross_revenue": _safe2(row["revenue"]),
+                # REAL BUG FIXED: refund_amt was computed correctly above (line ~6201,
+                # used correctly to compute net/final_net) but never actually written
+                # to this record -- orders.refund was 0/null for EVERY Shopify order
+                # (confirmed: 85/85). Found via 5 fully-refunded Shopify orders still
+                # counting their full original amount ($1,268.11 total) toward Revenue/
+                # Green Revenue/the monthly chart/Financials, all of which subtract
+                # orders.refund but had nothing there to subtract. final_net itself was
+                # always correct (it used refund_amt directly, not this column), so Net
+                # Sales was never affected -- only the gross-revenue-based totals were.
+                "refund": _safe2(row.get("refund", 0)),
                 "fee": _safe2(row.get("fee", 0)), "net": net,
                 "tracking_number": ",".join(trackings) if trackings else None,
                 "shipping_cost": shipping_share,
