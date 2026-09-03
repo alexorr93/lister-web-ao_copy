@@ -3249,11 +3249,11 @@ confident from context -- never guess or make one up."""
 
     content = [{"type": "input_text", "text": prompt}]
     for photo_id in photo_ids[:4]:
-        content.append({"type": "input_image", "image_url": photo_url(photo_id)})
+        content.append({"type": "input_image", "image_url": photo_url(photo_id), "detail": "high"})
 
     try:
         response = client.responses.create(
-            model="gpt-5.4",
+            model="gpt-5.5",
             input=[{"role": "user", "content": content}],
         )
         text = (response.output_text or "").strip()
