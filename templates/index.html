@@ -1584,29 +1584,18 @@ function initTileListeners() {
     var el = e.target;
     if (el.classList.contains('tile-title-input')) {
       var titleId = el.dataset.id, titleVal = el.value;
-      // REAL BUG FIXED (urgent, reported repeatedly -- "12th time"): this saved
-      // on EVERY blur, even when nothing was actually typed -- it just wrote
-      // whatever text happened to be sitting in the box back to the DB. If a
-      // second window/tab had this same tile loaded with older data (hadn't
-      // polled recently, or was open to a different page), merely clicking
-      // into and back out of that field -- no typing at all -- would silently
-      // overwrite a genuinely newer edit made elsewhere with that stale text.
-      // dirtyTitles only gets a key for an id when a real 'input' event fired
-      // (see the input listener above) and gets deleted the moment a save
-      // succeeds, so its presence is a reliable "was anything actually typed,
-      // and is it still unsaved" check -- skip entirely if not.
-      if (!(titleId in dirtyTitles)) return;
       updateField(titleId, 'title', titleVal).then(function(ok) {
-        // REAL BUG FIXED (this just made things worse, caught immediately):
-        // deleting dirtyTitles[titleId] unconditionally on success meant that
-        // if the user typed MORE into this field while the save was still in
-        // flight, that newer edit's dirty flag got wiped out the instant the
-        // OLDER save landed -- the next blur's guard then saw "nothing dirty"
-        // and skipped saving the newer text entirely. Only clear the flag if
-        // it still holds exactly what was just saved; if it's moved on, leave
-        // it dirty so the next blur correctly saves the real current value.
+        // REAL BUG FIXED: this used to capture the listing object BEFORE
+        // the save started and mutate that same (possibly now-stale)
+        // reference afterward. If a background refresh (loadListings,
+        // e.g. on tab switch) reassigned `listings = fresh` while the save
+        // was in flight, that captured reference pointed at a detached
+        // object no longer part of the live array -- the mutation had zero
+        // visible effect, looking exactly like the edit had reverted.
+        // Fix: look the listing up fresh, by id, only after the save
+        // resolves -- same pattern the category re-match already used.
         if (ok) {
-          if (dirtyTitles[titleId] === titleVal) delete dirtyTitles[titleId];
+          delete dirtyTitles[titleId];
           var titleL = listings.find(function(x) { return String(x.id) === titleId; });
           if (titleL) titleL.title = titleVal;
         }
@@ -1614,10 +1603,9 @@ function initTileListeners() {
     }
     if (el.classList.contains('tile-price-input')) {
       var priceId = el.dataset.id, priceVal = parseFloat(el.value);
-      if (!(priceId in dirtyPrices)) return;  // same guard as title -- see above
       updateField(priceId, 'price', priceVal).then(function(ok) {
         if (ok) {
-          if (parseFloat(dirtyPrices[priceId]) === priceVal) delete dirtyPrices[priceId];  // same race fix as title
+          delete dirtyPrices[priceId];
           var priceL = listings.find(function(x) { return String(x.id) === priceId; });
           if (priceL) priceL.price = priceVal;
         }
@@ -1625,10 +1613,9 @@ function initTileListeners() {
     }
     if (el.classList.contains('tile-brand-input')) {
       var brandId = el.dataset.id, brandVal = el.value;
-      if (!(brandId in dirtyBrands)) return;  // same guard as title -- see above
       updateField(brandId, 'brand', brandVal).then(function(ok) {
         if (ok) {
-          if (dirtyBrands[brandId] === brandVal) delete dirtyBrands[brandId];  // same race fix as title
+          delete dirtyBrands[brandId];
           var brandL = listings.find(function(x) { return String(x.id) === brandId; });
           if (brandL) brandL.brand = brandVal;
         }
@@ -1639,7 +1626,6 @@ function initTileListeners() {
       var id = el.dataset.id, val = el.value.trim();
       var l = listings.find(function(x) { return String(x.id) === id; });
       if (!val) { el.classList.add('missing'); el.classList.remove('invalid'); delete dirtyLotSkus[id]; return; }
-      if (!(id in dirtyLotSkus)) return;  // same stale-second-window guard as title/price/brand -- see above
       // Only the prefix (before the first '-') has to match a real Lot SKU from
       // the Lots page — the 2nd half can be anything, same rule the Autofill
       // button's backend already follows. Was previously requiring an EXACT full
@@ -1657,7 +1643,7 @@ function initTileListeners() {
       var assignBody = {lot_sku: valPrefix};
       if (valSuffix) assignBody.suffix = valSuffix;
       api('POST', '/api/listings/' + id + '/assign-lot', assignBody).then(function(r) {
-        if (dirtyLotSkus[id] === val) delete dirtyLotSkus[id];  // same race fix as title -- don't wipe a newer unsaved edit
+        delete dirtyLotSkus[id];
         var freshL = listings.find(function(x) { return String(x.id) === id; });
         if (freshL) freshL.ebay_sku = r.ebay_sku;
         toast('Lot SKU set to ' + val + ' ✓');
@@ -1668,11 +1654,10 @@ function initTileListeners() {
     if (el.classList.contains('tile-mpn-input')) {
       var id = el.dataset.id, val = el.value.trim();
       if (!val) { delete dirtyMpns[id]; return; }
-      if (!(id in dirtyMpns)) return;  // same stale-second-window guard as title/price/brand/lotsku -- see above
       updateField(id, 'ebay_mpn', val).then(function(ok) {
         if (!ok) { toast('Failed to save MPN', 'error'); return; }
         updateField(id, 'ebay_mpn_is_fallback', false);
-        if (dirtyMpns[id] === val) delete dirtyMpns[id];  // same race fix as title -- don't wipe a newer unsaved edit
+        delete dirtyMpns[id];
         // Update local state and re-render so the tile's own red-dot warning
         // reacts immediately instead of staying stuck until the next 30s
         // poll -- updateField() itself never touches the listings array, and
