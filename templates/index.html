@@ -1597,13 +1597,16 @@ function initTileListeners() {
       // and is it still unsaved" check -- skip entirely if not.
       if (!(titleId in dirtyTitles)) return;
       updateField(titleId, 'title', titleVal).then(function(ok) {
-        // was in flight, that captured reference pointed at a detached
-        // object no longer part of the live array -- the mutation had zero
-        // visible effect, looking exactly like the edit had reverted.
-        // Fix: look the listing up fresh, by id, only after the save
-        // resolves -- same pattern the category re-match already used.
+        // REAL BUG FIXED (this just made things worse, caught immediately):
+        // deleting dirtyTitles[titleId] unconditionally on success meant that
+        // if the user typed MORE into this field while the save was still in
+        // flight, that newer edit's dirty flag got wiped out the instant the
+        // OLDER save landed -- the next blur's guard then saw "nothing dirty"
+        // and skipped saving the newer text entirely. Only clear the flag if
+        // it still holds exactly what was just saved; if it's moved on, leave
+        // it dirty so the next blur correctly saves the real current value.
         if (ok) {
-          delete dirtyTitles[titleId];
+          if (dirtyTitles[titleId] === titleVal) delete dirtyTitles[titleId];
           var titleL = listings.find(function(x) { return String(x.id) === titleId; });
           if (titleL) titleL.title = titleVal;
         }
@@ -1614,7 +1617,7 @@ function initTileListeners() {
       if (!(priceId in dirtyPrices)) return;  // same guard as title -- see above
       updateField(priceId, 'price', priceVal).then(function(ok) {
         if (ok) {
-          delete dirtyPrices[priceId];
+          if (parseFloat(dirtyPrices[priceId]) === priceVal) delete dirtyPrices[priceId];  // same race fix as title
           var priceL = listings.find(function(x) { return String(x.id) === priceId; });
           if (priceL) priceL.price = priceVal;
         }
@@ -1625,7 +1628,7 @@ function initTileListeners() {
       if (!(brandId in dirtyBrands)) return;  // same guard as title -- see above
       updateField(brandId, 'brand', brandVal).then(function(ok) {
         if (ok) {
-          delete dirtyBrands[brandId];
+          if (dirtyBrands[brandId] === brandVal) delete dirtyBrands[brandId];  // same race fix as title
           var brandL = listings.find(function(x) { return String(x.id) === brandId; });
           if (brandL) brandL.brand = brandVal;
         }
@@ -1654,7 +1657,7 @@ function initTileListeners() {
       var assignBody = {lot_sku: valPrefix};
       if (valSuffix) assignBody.suffix = valSuffix;
       api('POST', '/api/listings/' + id + '/assign-lot', assignBody).then(function(r) {
-        delete dirtyLotSkus[id];
+        if (dirtyLotSkus[id] === val) delete dirtyLotSkus[id];  // same race fix as title -- don't wipe a newer unsaved edit
         var freshL = listings.find(function(x) { return String(x.id) === id; });
         if (freshL) freshL.ebay_sku = r.ebay_sku;
         toast('Lot SKU set to ' + val + ' ✓');
@@ -1669,7 +1672,7 @@ function initTileListeners() {
       updateField(id, 'ebay_mpn', val).then(function(ok) {
         if (!ok) { toast('Failed to save MPN', 'error'); return; }
         updateField(id, 'ebay_mpn_is_fallback', false);
-        delete dirtyMpns[id];
+        if (dirtyMpns[id] === val) delete dirtyMpns[id];  // same race fix as title -- don't wipe a newer unsaved edit
         // Update local state and re-render so the tile's own red-dot warning
         // reacts immediately instead of staying stuck until the next 30s
         // poll -- updateField() itself never touches the listings array, and
