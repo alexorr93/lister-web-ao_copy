@@ -3441,7 +3441,7 @@ no markdown."""
 
     return {"ok": True, "identification": identification, "market_context": market_context, "sources": sources}
 
-def _ask_chatgpt_sync(item_id: str, business_id: str) -> dict:
+def _ask_chatgpt_sync(item_id: str, business_id: str, hint: str = "") -> dict:
     """Sync body of the Ask ChatGPT call -- runs in a threadpool (see the route
     below) precisely because it isn't fast: two sequential GPT-5.6-sol calls at
     high reasoning effort, one with live web search. Running that directly in
@@ -3449,7 +3449,12 @@ def _ask_chatgpt_sync(item_id: str, business_id: str) -> dict:
     entire duration -- confirmed for real via Railway logs (a concurrent
     /api/stats call stalled 102s while one of these was in flight). Moving the
     blocking work here and calling it via run_in_threadpool lets other requests
-    (including a second person's Ask ChatGPT click) proceed concurrently."""
+    (including a second person's Ask ChatGPT click) proceed concurrently.
+
+    hint: optional free-text clue from the user (right-click on the button),
+    e.g. "this is off a Freightliner, not a Volvo" or "the sticker under the
+    flap says Parker" -- injected into both the ID prompt and, once resolved,
+    used to steer the pricing lookup too."""
     res = supabase.table("listings").select("title,photo_id").eq("id", item_id).eq("business_id", business_id).execute()
     if not res.data:
         raise HTTPException(404, "Listing not found")
@@ -3466,12 +3471,14 @@ def _ask_chatgpt_sync(item_id: str, business_id: str) -> dict:
     import json as _json
     client = OpenAI(api_key=openai_key)
 
+    hint = (hint or "").strip()[:500]
     gpt_title = ""
     gpt_mpn = ""
     gpt_brand = ""
     id_error = ""
     if photo_ids:
         id_prompt = f"""This item is listed for sale with the current title: "{current_title}"
+{f'The seller gave this clue to help identify it: "{hint}" -- weigh this seriously, it likely corrects something a generic photo read would get wrong.' if hint else ''}
 
 Look at the photos and identify it as precisely as you can. Read any part number,
 model number, or brand physically marked on the item (stamped, etched, printed, or
@@ -3557,12 +3564,19 @@ async def ask_chatgpt_about_item(item_id: str, request: Request):
     """Modal/tile 'Ask ChatGPT' button route -- auth check stays on the event
     loop (fast), then the actual slow work runs in _ask_chatgpt_sync via
     run_in_threadpool so it no longer blocks other requests. See that
-    function's docstring for why this split exists."""
+    function's docstring for why this split exists. Optional JSON body
+    {"hint": "..."} lets the user (right-click on the button) supply a clue
+    the vision pass should weigh -- see _ask_chatgpt_sync's docstring."""
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    hint = (body or {}).get("hint", "") if isinstance(body, dict) else ""
     from starlette.concurrency import run_in_threadpool
-    return await run_in_threadpool(_ask_chatgpt_sync, item_id, business_id)
+    return await run_in_threadpool(_ask_chatgpt_sync, item_id, business_id, hint)
 
 @app.post("/api/listings/{item_id}/rematch-category")
 async def rematch_category(item_id: str, request: Request, mode: str = "industrial", exclude_ids: str = ""):

@@ -734,7 +734,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <div class="modal-meta" id="modal-meta"></div>
       <div class="modal-price" id="modal-price"></div>
       <div class="modal-refs" id="modal-refs"></div>
-      <button class="btn" id="modal-ask-chatgpt-btn" onclick="askChatGpt()" title="Sends this item's photos and title to ChatGPT: reads title/MPN off the photos, then searches the live market for a price" style="width:100%;margin-bottom:10px;color:#6ee7b7;border-color:#059669;">💬 Ask ChatGPT</button>
+      <button class="btn" id="modal-ask-chatgpt-btn" onclick="askChatGpt()" oncontextmenu="event.preventDefault();askChatGpt(true)" title="Sends this item's photos and title to ChatGPT: reads title/MPN off the photos, then searches the live market for a price. Right-click to give it a clue first." style="width:100%;margin-bottom:10px;color:#6ee7b7;border-color:#059669;">💬 Ask ChatGPT</button>
       <div id="modal-ask-chatgpt-status" style="display:none;font-size:12px;color:var(--muted);margin-bottom:10px;"></div>
       <div id="modal-ask-chatgpt-result" style="display:none;font-size:12px;line-height:1.5;color:var(--text);background:#161925;border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:14px;"></div>
       <div class="modal-fields">
@@ -1498,7 +1498,7 @@ function renderTiles() {
           <div class="qty-num" id="qty-${l.id}">${qty}</div>
           <button class="qty-btn plus" onclick="changeQty('${l.id}',1)">+</button>
         </div>
-        <button class="tile-rescan" id="tile-chatgpt-${l.id}" style="color:#6ee7b7;border-color:#059669;" title="Ask ChatGPT: reads title/MPN off the photos and fills in a market price" onclick="event.stopPropagation();askChatGptTile('${l.id}')">💬</button>
+        <button class="tile-rescan" id="tile-chatgpt-${l.id}" style="color:#6ee7b7;border-color:#059669;" title="Ask ChatGPT: reads title/MPN off the photos and fills in a market price. Right-click to give it a clue first." onclick="event.stopPropagation();askChatGptTile('${l.id}')" oncontextmenu="event.preventDefault();event.stopPropagation();askChatGptTile('${l.id}',true)">💬</button>
         <button class="tile-rescan" onclick="rescanItem('${l.id}')">🔄</button>
         <button class="tile-rescan" style="color:var(--red);border-color:#991b1b;" onclick="deleteItem('${l.id}')">✕</button>
       </div>
@@ -2568,8 +2568,13 @@ function escapeHtml(s) {
   return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-async function askChatGpt() {
+async function askChatGpt(withHint) {
   if (!modalItemId) return;
+  let hint = '';
+  if (withHint) {
+    hint = window.prompt('Give ChatGPT a clue about this item (e.g. brand, what it fits, a label you can read):', '');
+    if (hint === null) return; // cancelled
+  }
   const btn = document.getElementById('modal-ask-chatgpt-btn');
   const statusEl = document.getElementById('modal-ask-chatgpt-status');
   const resultEl = document.getElementById('modal-ask-chatgpt-result');
@@ -2579,7 +2584,7 @@ async function askChatGpt() {
   statusEl.style.display = 'block';
   statusEl.textContent = 'Reading the photos and searching current sold/asking prices...';
   try {
-    const r = await api('POST', `/api/listings/${modalItemId}/ask-chatgpt`, {});
+    const r = await api('POST', `/api/listings/${modalItemId}/ask-chatgpt`, {hint: hint});
     statusEl.style.display = 'none';
     let filled = [];
     if (r.title) {
@@ -2619,11 +2624,16 @@ async function askChatGpt() {
   }
 }
 
-async function askChatGptTile(id) {
+async function askChatGptTile(id, withHint) {
+  let hint = '';
+  if (withHint) {
+    hint = window.prompt('Give ChatGPT a clue about this item (e.g. brand, what it fits, a label you can read):', '');
+    if (hint === null) return; // cancelled
+  }
   const btn = document.getElementById('tile-chatgpt-' + id);
   if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
   try {
-    const r = await api('POST', `/api/listings/${id}/ask-chatgpt`, {});
+    const r = await api('POST', `/api/listings/${id}/ask-chatgpt`, {hint: hint});
     const l = listings.find(function(x) { return String(x.id) === String(id); });
 
     if (r.title) {
