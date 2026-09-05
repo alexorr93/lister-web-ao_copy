@@ -737,6 +737,9 @@ select.field-input { background: #fff; color: #0f172a; }
       <button class="btn" id="modal-ask-gemini-btn" onclick="askGemini()" title="Sends this item's photos and title to Gemini: identifies the item from the photos, and separately searches the live market for sold/asking prices" style="width:100%;margin-bottom:10px;color:#c084fc;border-color:#7e22ce;">🤖 Ask Gemini</button>
       <div id="modal-ask-gemini-status" style="display:none;font-size:12px;color:var(--muted);margin-bottom:10px;"></div>
       <div id="modal-ask-gemini-result" style="display:none;font-size:12px;line-height:1.5;color:var(--text);background:#161925;border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:14px;"></div>
+      <button class="btn" id="modal-ask-chatgpt-btn" onclick="askChatGpt()" title="Sends this item's photos and title to ChatGPT: reads title/MPN off the photos, then searches the live market for a price" style="width:100%;margin-bottom:10px;color:#6ee7b7;border-color:#059669;">💬 Ask ChatGPT</button>
+      <div id="modal-ask-chatgpt-status" style="display:none;font-size:12px;color:var(--muted);margin-bottom:10px;"></div>
+      <div id="modal-ask-chatgpt-result" style="display:none;font-size:12px;line-height:1.5;color:var(--text);background:#161925;border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:14px;"></div>
       <div class="modal-fields">
         <div>
           <div class="field-label">Title</div>
@@ -2594,6 +2597,40 @@ async function askGemini() {
   } finally {
     btn.disabled = false;
     btn.textContent = '🤖 Ask Gemini';
+  }
+}
+
+async function askChatGpt() {
+  if (!modalItemId) return;
+  const btn = document.getElementById('modal-ask-chatgpt-btn');
+  const statusEl = document.getElementById('modal-ask-chatgpt-status');
+  const resultEl = document.getElementById('modal-ask-chatgpt-result');
+  btn.disabled = true;
+  btn.textContent = '💬 Asking...';
+  resultEl.style.display = 'none';
+  statusEl.style.display = 'block';
+  statusEl.textContent = 'Reading the photos and searching current sold/asking prices...';
+  try {
+    const r = await api('POST', `/api/listings/${modalItemId}/ask-chatgpt`, {});
+    statusEl.style.display = 'none';
+    let html = '';
+    if (r.title) html += `<div style="margin-bottom:6px;"><b>Title:</b> ${escapeHtml(r.title)} <a href="#" onclick="event.preventDefault();document.getElementById('modal-title-input').value=${JSON.stringify(r.title)};modalDirty=true;" style="color:#38bdf8;font-size:11px;">use</a></div>`;
+    if (r.mpn) html += `<div style="margin-bottom:6px;"><b>MPN:</b> ${escapeHtml(r.mpn)}</div>`;
+    if (r.brand) html += `<div style="margin-bottom:6px;"><b>Brand:</b> ${escapeHtml(r.brand)}</div>`;
+    if (r.id_error) html += `<div style="margin-bottom:6px;color:#f87171;">Photo ID: ${escapeHtml(r.id_error)}</div>`;
+    html += `<div style="margin-top:8px;"><b>Market/price:</b><br>${escapeHtml(r.price_text || r.price_error || 'No live pricing found.')}</div>`;
+    if (r.sources && r.sources.length) {
+      html += '<div style="margin-top:8px;">' + r.sources.map(s =>
+        `<a href="${s.url}" target="_blank" rel="noopener" style="color:#38bdf8;display:block;font-size:11px;">${escapeHtml(s.title || s.url)}</a>`
+      ).join('') + '</div>';
+    }
+    resultEl.innerHTML = html;
+    resultEl.style.display = 'block';
+  } catch(e) {
+    statusEl.textContent = `Failed: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💬 Ask ChatGPT';
   }
 }
 

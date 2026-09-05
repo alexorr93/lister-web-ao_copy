@@ -3441,6 +3441,111 @@ no markdown."""
 
     return {"ok": True, "identification": identification, "market_context": market_context, "sources": sources}
 
+@app.post("/api/listings/{item_id}/ask-chatgpt")
+async def ask_chatgpt_about_item(item_id: str, request: Request):
+    """Modal 'Ask ChatGPT' button: GPT counterpart to ask_gemini_about_item above,
+    added because Gemini's photo reading has been unreliable enough that the user
+    now screenshots items into chatgpt.com by hand most of the time. Two GPT-5.5
+    calls: (1) vision pass over the item's actual photos returning a structured
+    title/MPN/brand guess, same job as _find_mpn_openai's pattern but title+MPN
+    together; (2) a web-search-grounded pricing pass (Responses API web_search
+    tool) for a real market price estimate, mirroring ask-gemini's Google Search
+    pricing pass but on OpenAI's own search tool instead of a second vendor call.
+    Uses public photo_url() same as _find_mpn_openai, not raw bytes."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+
+    res = supabase.table("listings").select("title,photo_id").eq("id", item_id).eq("business_id", business_id).execute()
+    if not res.data:
+        raise HTTPException(404, "Listing not found")
+    listing = res.data[0]
+    current_title = listing.get("title") or ""
+    pid = str(listing.get("photo_id") or "")
+    photo_ids = get_all_photo_ids(pid) if pid else []
+
+    openai_key = get_openai_key(business_id)
+    if not openai_key:
+        raise HTTPException(400, "OPENAI_API_KEY not set")
+
+    from openai import OpenAI
+    import json as _json
+    client = OpenAI(api_key=openai_key)
+
+    gpt_title = ""
+    gpt_mpn = ""
+    gpt_brand = ""
+    id_error = ""
+    if photo_ids:
+        id_prompt = f"""This item is listed for sale with the current title: "{current_title}"
+
+Look at the photos and identify it as precisely as you can. Read any part number,
+model number, or brand physically marked on the item (stamped, etched, printed, or
+on a label/tag/sticker) -- never guess a brand or number that isn't actually visible.
+
+Return ONLY a JSON object, no other text, in this exact shape:
+{{"title": "a clean eBay-ready title for this item, <=80 chars", "mpn": "the manufacturer part number you found, or null if none visible", "brand": "the brand you found, or null if none visible"}}"""
+        content = [{"type": "input_text", "text": id_prompt}]
+        for photo_id in photo_ids[:4]:
+            content.append({"type": "input_image", "image_url": photo_url(photo_id), "detail": "high"})
+        try:
+            id_resp = client.responses.create(
+                model="gpt-5.5",
+                input=[{"role": "user", "content": content}],
+            )
+            text = (id_resp.output_text or "").strip()
+            if text.startswith("```"):
+                text = text.split("```")[1]
+                if text.startswith("json"):
+                    text = text[4:]
+            parsed = _json.loads(text.strip())
+            gpt_title = (parsed.get("title") or "").strip()
+            gpt_mpn = (parsed.get("mpn") or "").strip()
+            gpt_brand = (parsed.get("brand") or "").strip()
+        except Exception as e:
+            id_error = str(e)
+    else:
+        id_error = "no photos available for this item"
+
+    price_text = ""
+    sources = []
+    price_error = ""
+    lookup_title = gpt_title or current_title
+    if lookup_title:
+        try:
+            price_resp = client.responses.create(
+                model="gpt-5.5",
+                tools=[{"type": "web_search"}],
+                input=[{"role": "user", "content": [{"type": "input_text", "text": (
+                    f"Find the resale market value of: {lookup_title}. Search in this priority "
+                    f"order: 1) eBay COMPLETED/SOLD listings -- most accurate real prices paid, "
+                    f"2) eBay active BUY IT NOW listings currently for sale, 3) industrial surplus "
+                    f"dealer prices (Radwell, Surplus Record, LabX) only as last resort. Give "
+                    f"specific dollar amounts, sold prices first, then a one-line recommended "
+                    f"asking price at the end prefixed 'PRICE: $'."
+                )}]}],
+            )
+            price_text = (price_resp.output_text or "").strip()
+            for block in getattr(price_resp, "output", []) or []:
+                for item in getattr(block, "content", []) or []:
+                    for ann in getattr(item, "annotations", []) or []:
+                        url = getattr(ann, "url", None)
+                        if url:
+                            sources.append({"url": url, "title": getattr(ann, "title", "") or ""})
+        except Exception as e:
+            price_error = str(e)
+
+    return {
+        "ok": True,
+        "title": gpt_title,
+        "mpn": gpt_mpn,
+        "brand": gpt_brand,
+        "id_error": id_error,
+        "price_text": price_text,
+        "price_error": price_error,
+        "sources": sources,
+    }
+
 @app.post("/api/listings/{item_id}/rematch-category")
 async def rematch_category(item_id: str, request: Request, mode: str = "industrial", exclude_ids: str = ""):
     """Re-runs category matching for one listing in the given lane (from the Intake
