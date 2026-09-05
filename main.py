@@ -3478,14 +3478,15 @@ def _ask_chatgpt_sync(item_id: str, business_id: str, hint: str = "") -> dict:
     id_error = ""
     if photo_ids:
         id_prompt = f"""This item is listed for sale with the current title: "{current_title}"
-{f'The seller gave this clue to help identify it: "{hint}" -- weigh this seriously, it likely corrects something a generic photo read would get wrong.' if hint else ''}
+{f'The seller gave this clue to help identify it: "{hint}" -- trust this over a generic photo read (it likely names the correct brand or what the part actually is), and if it names a brand, that brand MUST appear in the title you return, not just the brand field.' if hint else ''}
 
 Look at the photos and identify it as precisely as you can. Read any part number,
 model number, or brand physically marked on the item (stamped, etched, printed, or
-on a label/tag/sticker) -- never guess a brand or number that isn't actually visible.
+on a label/tag/sticker) -- never guess a brand or number that isn't actually visible
+unless the seller's clue above already named it.
 
 Return ONLY a JSON object, no other text, in this exact shape:
-{{"title": "a clean eBay-ready title for this item, <=80 chars", "mpn": "the manufacturer part number you found, or null if none visible", "brand": "the brand you found, or null if none visible"}}"""
+{{"title": "a clean eBay-ready title for this item, <=80 chars, including the brand if known", "mpn": "the manufacturer part number you found, or null if none visible", "brand": "the brand you found, or null if none visible"}}"""
         content = [{"type": "input_text", "text": id_prompt}]
         for photo_id in photo_ids[:4]:
             content.append({"type": "input_image", "image_url": photo_url(photo_id), "detail": "high"})

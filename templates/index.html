@@ -2654,13 +2654,19 @@ async function askChatGptTile(id, withHint) {
       const ok = await updateField(id, 'mpn', r.mpn);
       if (ok) { delete dirtyMpns[id]; if (l) l.ebay_mpn = r.mpn; }
     }
+    if (r.brand) {
+      const brandEl = document.querySelector('.tile-brand-input[data-id="' + id + '"]');
+      if (brandEl) brandEl.value = r.brand;
+      const ok = await updateField(id, 'brand', r.brand);
+      if (ok) { delete dirtyBrands[id]; if (l) l.brand = r.brand; }
+    }
     if (r.price_value != null) {
       const priceEl = document.querySelector('.tile-price-input[data-id="' + id + '"]');
       if (priceEl) priceEl.value = r.price_value;
       const ok = await updateField(id, 'price', r.price_value);
       if (ok) { delete dirtyPrices[id]; if (l) l.price = r.price_value; }
     }
-    if (!r.title && !r.mpn && r.price_value == null) {
+    if (!r.title && !r.mpn && !r.brand && r.price_value == null) {
       alert('Ask ChatGPT: ' + (r.id_error || r.price_error || 'nothing usable came back'));
     }
   } catch(e) {
