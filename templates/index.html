@@ -234,12 +234,12 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tile-check { width: 26px; height: 26px; border-radius: 6px; border: 1.5px solid var(--border); cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
 .tile-check.checked { background: var(--accent); border-color: var(--accent); }
 .tile-check.checked::after { content: '✓'; color: #fff; font-size: 15px; font-weight: 900; }
-.qty-row { display: flex; align-items: center; background: #161925; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; flex: 1; }
-.qty-btn { width: 28px; height: 26px; background: none; border: none; cursor: pointer; font-size: 15px; font-weight: 900; display: flex; align-items: center; justify-content: center; }
+.qty-row { display: flex; align-items: center; background: #161925; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; flex-shrink: 0; }
+.qty-btn { width: 20px; height: 20px; background: none; border: none; cursor: pointer; font-size: 12px; font-weight: 900; display: flex; align-items: center; justify-content: center; }
 .qty-btn.minus { color: var(--red); }
 .qty-btn.plus  { color: var(--green); }
 .qty-btn:hover { background: var(--border); }
-.qty-num { flex: 1; text-align: center; font-size: 12px; font-weight: 700; color: var(--text); border-left: 1px solid var(--border); border-right: 1px solid var(--border); height: 26px; line-height: 26px; }
+.qty-num { min-width: 16px; text-align: center; font-size: 11px; font-weight: 700; color: var(--text); border-left: 1px solid var(--border); border-right: 1px solid var(--border); height: 20px; line-height: 20px; padding: 0 4px; }
 .tile-rescan { padding: 4px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--muted); font-size: 10px; font-weight: 600; cursor: pointer; white-space: nowrap; }
 .tile-rescan:hover { color: var(--text); background: var(--border); }
 
@@ -734,9 +734,6 @@ select.field-input { background: #fff; color: #0f172a; }
       <div class="modal-meta" id="modal-meta"></div>
       <div class="modal-price" id="modal-price"></div>
       <div class="modal-refs" id="modal-refs"></div>
-      <button class="btn" id="modal-ask-gemini-btn" onclick="askGemini()" title="Sends this item's photos and title to Gemini: identifies the item from the photos, and separately searches the live market for sold/asking prices" style="width:100%;margin-bottom:10px;color:#c084fc;border-color:#7e22ce;">🤖 Ask Gemini</button>
-      <div id="modal-ask-gemini-status" style="display:none;font-size:12px;color:var(--muted);margin-bottom:10px;"></div>
-      <div id="modal-ask-gemini-result" style="display:none;font-size:12px;line-height:1.5;color:var(--text);background:#161925;border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:14px;"></div>
       <button class="btn" id="modal-ask-chatgpt-btn" onclick="askChatGpt()" title="Sends this item's photos and title to ChatGPT: reads title/MPN off the photos, then searches the live market for a price" style="width:100%;margin-bottom:10px;color:#6ee7b7;border-color:#059669;">💬 Ask ChatGPT</button>
       <div id="modal-ask-chatgpt-status" style="display:none;font-size:12px;color:var(--muted);margin-bottom:10px;"></div>
       <div id="modal-ask-chatgpt-result" style="display:none;font-size:12px;line-height:1.5;color:var(--text);background:#161925;border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:14px;"></div>
@@ -1501,6 +1498,7 @@ function renderTiles() {
           <div class="qty-num" id="qty-${l.id}">${qty}</div>
           <button class="qty-btn plus" onclick="changeQty('${l.id}',1)">+</button>
         </div>
+        <button class="tile-rescan" id="tile-chatgpt-${l.id}" style="color:#6ee7b7;border-color:#059669;" title="Ask ChatGPT: reads title/MPN off the photos and fills in a market price" onclick="event.stopPropagation();askChatGptTile('${l.id}')">💬</button>
         <button class="tile-rescan" onclick="rescanItem('${l.id}')">🔄</button>
         <button class="tile-rescan" style="color:var(--red);border-color:#991b1b;" onclick="deleteItem('${l.id}')">✕</button>
       </div>
@@ -2310,8 +2308,8 @@ function openModal(id) {
   document.getElementById('mpn-provider-select').style.display = (l.category_mode === 'motors') ? '' : 'none';
   loadMpnProviderSetting();
   document.getElementById('modal-find-mpn-status').style.display = 'none';
-  document.getElementById('modal-ask-gemini-status').style.display = 'none';
-  document.getElementById('modal-ask-gemini-result').style.display = 'none';
+  document.getElementById('modal-ask-chatgpt-status').style.display = 'none';
+  document.getElementById('modal-ask-chatgpt-result').style.display = 'none';
   document.getElementById('modal-shipping-policy-select').value = l.ebay_fulfillment_policy_id || '';
   document.getElementById('modal-price-input').value = l.price.toFixed(2);
   document.getElementById('modal-cond-input').value  = l.condition || 'used';
@@ -2570,36 +2568,6 @@ function escapeHtml(s) {
   return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-async function askGemini() {
-  if (!modalItemId) return;
-  const btn = document.getElementById('modal-ask-gemini-btn');
-  const statusEl = document.getElementById('modal-ask-gemini-status');
-  const resultEl = document.getElementById('modal-ask-gemini-result');
-  btn.disabled = true;
-  btn.textContent = '🤖 Asking...';
-  resultEl.style.display = 'none';
-  statusEl.style.display = 'block';
-  statusEl.textContent = 'Reading the photos and searching current sold/asking prices...';
-  try {
-    const r = await api('POST', `/api/listings/${modalItemId}/ask-gemini`, {});
-    statusEl.style.display = 'none';
-    let html = `<div style="margin-bottom:8px;"><b>What Gemini sees:</b><br>${escapeHtml(r.identification)}</div>`;
-    html += `<div><b>Market context:</b><br>${escapeHtml(r.market_context || 'No live pricing found.')}</div>`;
-    if (r.sources && r.sources.length) {
-      html += '<div style="margin-top:8px;">' + r.sources.map(s =>
-        `<a href="${s.url}" target="_blank" rel="noopener" style="color:#38bdf8;display:block;font-size:11px;">${escapeHtml(s.title || s.url)}</a>`
-      ).join('') + '</div>';
-    }
-    resultEl.innerHTML = html;
-    resultEl.style.display = 'block';
-  } catch(e) {
-    statusEl.textContent = `Failed: ${e.message}`;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '🤖 Ask Gemini';
-  }
-}
-
 async function askChatGpt() {
   if (!modalItemId) return;
   const btn = document.getElementById('modal-ask-chatgpt-btn');
@@ -2648,6 +2616,45 @@ async function askChatGpt() {
   } finally {
     btn.disabled = false;
     btn.textContent = '💬 Ask ChatGPT';
+  }
+}
+
+async function askChatGptTile(id) {
+  const btn = document.getElementById('tile-chatgpt-' + id);
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  try {
+    const r = await api('POST', `/api/listings/${id}/ask-chatgpt`, {});
+    const l = listings.find(function(x) { return String(x.id) === String(id); });
+
+    if (r.title) {
+      const titleEl = document.querySelector('.tile-title-input[data-id="' + id + '"]');
+      if (titleEl) {
+        titleEl.value = r.title;
+        titleEl.style.height = 'auto';
+        titleEl.style.height = titleEl.scrollHeight + 'px';
+      }
+      const ok = await updateField(id, 'title', r.title);
+      if (ok) { delete dirtyTitles[id]; if (l) l.title = r.title; }
+    }
+    if (r.mpn) {
+      const mpnEl = document.querySelector('.tile-mpn-input[data-id="' + id + '"]');
+      if (mpnEl) mpnEl.value = r.mpn;
+      const ok = await updateField(id, 'mpn', r.mpn);
+      if (ok) { delete dirtyMpns[id]; if (l) l.ebay_mpn = r.mpn; }
+    }
+    if (r.price_value != null) {
+      const priceEl = document.querySelector('.tile-price-input[data-id="' + id + '"]');
+      if (priceEl) priceEl.value = r.price_value;
+      const ok = await updateField(id, 'price', r.price_value);
+      if (ok) { delete dirtyPrices[id]; if (l) l.price = r.price_value; }
+    }
+    if (!r.title && !r.mpn && r.price_value == null) {
+      alert('Ask ChatGPT: ' + (r.id_error || r.price_error || 'nothing usable came back'));
+    }
+  } catch(e) {
+    alert('Ask ChatGPT failed: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '💬'; }
   }
 }
 
