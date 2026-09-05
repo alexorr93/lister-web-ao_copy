@@ -2613,8 +2613,25 @@ async function askChatGpt() {
   try {
     const r = await api('POST', `/api/listings/${modalItemId}/ask-chatgpt`, {});
     statusEl.style.display = 'none';
+    let filled = [];
+    if (r.title) {
+      document.getElementById('modal-title-input').value = r.title;
+      filled.push('title');
+    }
+    if (r.mpn) {
+      document.getElementById('modal-mpn-input').value = r.mpn;
+      const warnEl = document.getElementById('modal-mpn-warn');
+      if (warnEl) warnEl.style.display = 'none';
+      filled.push('MPN');
+    }
+    if (r.price_value != null) {
+      document.getElementById('modal-price-input').value = r.price_value;
+      filled.push('price');
+    }
+    if (filled.length) modalDirty = true;
     let html = '';
-    if (r.title) html += `<div style="margin-bottom:6px;"><b>Title:</b> ${escapeHtml(r.title)} <a href="#" onclick="event.preventDefault();document.getElementById('modal-title-input').value=${JSON.stringify(r.title)};modalDirty=true;" style="color:#38bdf8;font-size:11px;">use</a></div>`;
+    if (filled.length) html += `<div style="margin-bottom:6px;color:#6ee7b7;">Filled in: ${filled.join(', ')}</div>`;
+    if (r.title) html += `<div style="margin-bottom:6px;"><b>Title:</b> ${escapeHtml(r.title)}</div>`;
     if (r.mpn) html += `<div style="margin-bottom:6px;"><b>MPN:</b> ${escapeHtml(r.mpn)}</div>`;
     if (r.brand) html += `<div style="margin-bottom:6px;"><b>Brand:</b> ${escapeHtml(r.brand)}</div>`;
     if (r.id_error) html += `<div style="margin-bottom:6px;color:#f87171;">Photo ID: ${escapeHtml(r.id_error)}</div>`;

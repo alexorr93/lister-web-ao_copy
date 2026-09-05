@@ -3537,6 +3537,15 @@ Return ONLY a JSON object, no other text, in this exact shape:
         except Exception as e:
             price_error = str(e)
 
+    price_value = None
+    if price_text:
+        _m = re.search(r"PRICE:\s*\$?\s*([\d,]+(?:\.\d+)?)", price_text, re.IGNORECASE)
+        if _m:
+            try:
+                price_value = float(_m.group(1).replace(",", ""))
+            except ValueError:
+                price_value = None
+
     return {
         "ok": True,
         "title": gpt_title,
@@ -3544,6 +3553,7 @@ Return ONLY a JSON object, no other text, in this exact shape:
         "brand": gpt_brand,
         "id_error": id_error,
         "price_text": price_text,
+        "price_value": price_value,
         "price_error": price_error,
         "sources": sources,
     }
