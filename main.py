@@ -6406,6 +6406,13 @@ async def upload_shipping_labels(request: Request, file: UploadFile = File(...))
         # of an older export can't resurrect the original cost either.
         if str(row.get("Status") or "").strip().lower() == "refunded":
             cost = 0
+        # Pirate Ship CSV has two status fields:
+        #   "Status" = label lifecycle (Purchased, Refunded, etc.)
+        #   "Tracking Status" = delivery status (Delivered, In Transit, etc.)
+        # We store Tracking Status for delivery tracking; fall back to Status
+        # (for Refunded detection) if Tracking Status isn't present.
+        tracking_status = str(row.get("Tracking Status") or "").strip() or None
+        label_status = str(row.get("Status") or "").strip() or None
         records.append({
             "tracking_number": tracking,
             "business_id": business_id,
@@ -6414,7 +6421,7 @@ async def upload_shipping_labels(request: Request, file: UploadFile = File(...))
             "created_date": str(row.get("Created Date") or ""),
             "ship_from": str(row.get("Ship From") or ""),
             "source": str(row.get("Source") or ""),
-            "status": str(row.get("Status") or "").strip() or None,
+            "status": tracking_status or label_status,
         })
 
     inserted = 0
