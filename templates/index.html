@@ -866,6 +866,7 @@ let dirtyCats     = {}; // id -> unsaved category text
 let dirtyBrands   = {}; // id -> unsaved brand text
 let dirtyLotSkus  = {}; // id -> unsaved (possibly invalid, not-yet-saved) lot SKU text
 let dirtyMpns     = {}; // id -> unsaved MPN text (motors items only)
+let askChatGptInFlight = new Set(); // id -> Ask ChatGPT request currently running, so the ~10s background poll re-render doesn't clobber the ⏳ state mid-request (same class of bug as the mutation-epoch guard elsewhere)
 let knownLotSkus  = new Set(); // real Lot SKUs from the Lots page — publishing requires a match
 let lotSkusByRecency = []; // same SKUs, most-recently-created lot first — feeds the Fast Scan / Batch Upload lot picker
 // Unified color-state system for ALL editable fields (title/price/brand/category):
@@ -1498,7 +1499,7 @@ function renderTiles() {
           <div class="qty-num" id="qty-${l.id}">${qty}</div>
           <button class="qty-btn plus" onclick="changeQty('${l.id}',1)">+</button>
         </div>
-        <button class="tile-rescan" id="tile-chatgpt-${l.id}" style="color:#6ee7b7;border-color:#059669;" title="Ask ChatGPT: reads title/MPN off the photos and fills in a market price. Right-click to give it a clue first." onclick="event.stopPropagation();askChatGptTile('${l.id}')" oncontextmenu="event.preventDefault();event.stopPropagation();askChatGptTile('${l.id}',true)">💬</button>
+        <button class="tile-rescan" id="tile-chatgpt-${l.id}" style="color:#6ee7b7;border-color:#059669;" title="Ask ChatGPT: reads title/MPN off the photos and fills in a market price. Right-click to give it a clue first." ${askChatGptInFlight.has(String(l.id)) ? 'disabled' : ''} onclick="event.stopPropagation();askChatGptTile('${l.id}')" oncontextmenu="event.preventDefault();event.stopPropagation();askChatGptTile('${l.id}',true)">${askChatGptInFlight.has(String(l.id)) ? '⏳' : '💬'}</button>
         <button class="tile-rescan" onclick="rescanItem('${l.id}')">🔄</button>
         <button class="tile-rescan" style="color:var(--red);border-color:#991b1b;" onclick="deleteItem('${l.id}')">✕</button>
       </div>
@@ -2630,6 +2631,7 @@ async function askChatGptTile(id, withHint) {
     hint = window.prompt('Give ChatGPT a clue about this item (e.g. brand, what it fits, a label you can read):', '');
     if (hint === null) return; // cancelled
   }
+  askChatGptInFlight.add(String(id));
   const btn = document.getElementById('tile-chatgpt-' + id);
   if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
   try {
@@ -2664,6 +2666,7 @@ async function askChatGptTile(id, withHint) {
   } catch(e) {
     alert('Ask ChatGPT failed: ' + e.message);
   } finally {
+    askChatGptInFlight.delete(String(id));
     if (btn) { btn.disabled = false; btn.textContent = '💬'; }
   }
 }
