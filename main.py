@@ -6444,24 +6444,18 @@ async def get_undelivered_shipments(request: Request):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
-    # Fetch all labels with a known status that isn't Delivered or Refunded
+    # Filter server-side: only rows with a status that isn't Delivered/Refunded
+    # This avoids the Supabase row-limit cap on the full 4700+ table
     res = supabase.table("shipping_labels")\
         .select("tracking_number,recipient,cost,created_date,ship_from,source,status")\
         .eq("business_id", business_id)\
+        .not_.is_("status", "null")\
+        .not_.in_("status", ["Delivered", "Refunded"])\
         .execute()
     rows = res.data or []
-    # Keep rows where status exists AND is not delivered/refunded
-    undelivered = []
-    for r in rows:
-        s = (r.get("status") or "").strip().lower()
-        if not s:
-            continue  # no status data yet — skip (pre-status-column imports)
-        if s in ("delivered", "refunded"):
-            continue
-        undelivered.append(r)
     # Sort by created_date descending (newest first)
-    undelivered.sort(key=lambda x: x.get("created_date") or "", reverse=True)
-    return {"ok": True, "rows": undelivered, "count": len(undelivered)}
+    rows.sort(key=lambda x: x.get("created_date") or "", reverse=True)
+    return {"ok": True, "rows": rows, "count": len(rows)}
 
 @app.post("/api/financials/match-shipping")
 async def match_shipping_costs(request: Request, body: dict = Body(...)):
