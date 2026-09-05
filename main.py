@@ -6414,6 +6414,7 @@ async def upload_shipping_labels(request: Request, file: UploadFile = File(...))
             "created_date": str(row.get("Created Date") or ""),
             "ship_from": str(row.get("Ship From") or ""),
             "source": str(row.get("Source") or ""),
+            "status": str(row.get("Status") or "").strip() or None,
         })
 
     inserted = 0
@@ -6429,6 +6430,31 @@ async def upload_shipping_labels(request: Request, file: UploadFile = File(...))
     match_result = apply_shipping_matches(business_id)
 
     return {"ok": True, "inserted": inserted, "skipped": skipped, "total_rows": len(rows), "matched": match_result.get("updated", 0)}
+
+@app.get("/api/financials/undelivered")
+async def get_undelivered_shipments(request: Request):
+    """Returns shipping labels that are NOT in a terminal delivered/refunded state."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    # Fetch all labels with a known status that isn't Delivered or Refunded
+    res = supabase.table("shipping_labels")\
+        .select("tracking_number,recipient,cost,created_date,ship_from,source,status")\
+        .eq("business_id", business_id)\
+        .execute()
+    rows = res.data or []
+    # Keep rows where status exists AND is not delivered/refunded
+    undelivered = []
+    for r in rows:
+        s = (r.get("status") or "").strip().lower()
+        if not s:
+            continue  # no status data yet — skip (pre-status-column imports)
+        if s in ("delivered", "refunded"):
+            continue
+        undelivered.append(r)
+    # Sort by created_date descending (newest first)
+    undelivered.sort(key=lambda x: x.get("created_date") or "", reverse=True)
+    return {"ok": True, "rows": undelivered, "count": len(undelivered)}
 
 @app.post("/api/financials/match-shipping")
 async def match_shipping_costs(request: Request, body: dict = Body(...)):

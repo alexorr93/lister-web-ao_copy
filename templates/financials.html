@@ -145,6 +145,13 @@ tr:last-child td { border-bottom: none; }
   </div>
 
   <div id="table-area"><div class="empty">Pick a date range and click Apply.</div></div>
+
+  <!-- Undelivered Shipments -->
+  <div style="margin-top:32px;">
+    <h2 style="font-size:17px;margin-bottom:4px;">📦 Undelivered Shipments</h2>
+    <div class="sub">Pirate Ship labels not yet marked Delivered. Auto-loads on page open.</div>
+    <div id="undelivered-area"><div class="empty">Loading...</div></div>
+  </div>
 </div>
 
 <script>
@@ -492,6 +499,35 @@ async function loadFinancials() {
 
 // Default to last 30 days on load
 setRange(30);
+
+// --- Undelivered Shipments ---
+async function loadUndelivered() {
+  const area = document.getElementById('undelivered-area');
+  try {
+    const res = await fetch('/api/financials/undelivered');
+    const data = await res.json();
+    if (!data.ok) { area.innerHTML = '<div class="empty">Error loading.</div>'; return; }
+    const rows = data.rows || [];
+    if (!rows.length) { area.innerHTML = '<div class="empty">All shipments delivered! 🎉</div>'; return; }
+    let html = `<div style="margin-bottom:8px;font-size:13px;color:var(--muted);">${rows.length} label${rows.length===1?'':'s'} not delivered</div>`;
+    html += '<table><thead><tr><th>Status</th><th>Tracking</th><th>Recipient</th><th>Shipped</th><th>Cost</th><th>Source</th></tr></thead><tbody>';
+    for (const r of rows) {
+      const s = (r.status||'').toLowerCase();
+      const color = s.includes('transit') ? '#f59e0b' : s.includes('pre') ? '#94a3b8' : '#ef4444';
+      html += `<tr>
+        <td><span style="color:${color};font-weight:700;">${escapeHtml(r.status||'Unknown')}</span></td>
+        <td style="font-family:monospace;font-size:12px;">${escapeHtml(r.tracking_number||'')}</td>
+        <td>${escapeHtml(r.recipient||'')}</td>
+        <td>${escapeHtml(r.created_date||'')}</td>
+        <td>$${parseFloat(r.cost||0).toFixed(2)}</td>
+        <td>${escapeHtml(r.source||'')}</td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    area.innerHTML = html;
+  } catch(e) { area.innerHTML = `<div class="empty">Error: ${escapeHtml(e.message)}</div>`; }
+}
+loadUndelivered();
 </script>
 </body>
 </html>
