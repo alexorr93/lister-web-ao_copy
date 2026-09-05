@@ -3441,21 +3441,15 @@ no markdown."""
 
     return {"ok": True, "identification": identification, "market_context": market_context, "sources": sources}
 
-@app.post("/api/listings/{item_id}/ask-chatgpt")
-async def ask_chatgpt_about_item(item_id: str, request: Request):
-    """Modal 'Ask ChatGPT' button: GPT counterpart to ask_gemini_about_item above,
-    added because Gemini's photo reading has been unreliable enough that the user
-    now screenshots items into chatgpt.com by hand most of the time. Two GPT-5.5
-    calls: (1) vision pass over the item's actual photos returning a structured
-    title/MPN/brand guess, same job as _find_mpn_openai's pattern but title+MPN
-    together; (2) a web-search-grounded pricing pass (Responses API web_search
-    tool) for a real market price estimate, mirroring ask-gemini's Google Search
-    pricing pass but on OpenAI's own search tool instead of a second vendor call.
-    Uses public photo_url() same as _find_mpn_openai, not raw bytes."""
-    business_id = require_auth(request)
-    if not business_id:
-        raise HTTPException(401, "Unauthorized")
-
+def _ask_chatgpt_sync(item_id: str, business_id: str) -> dict:
+    """Sync body of the Ask ChatGPT call -- runs in a threadpool (see the route
+    below) precisely because it isn't fast: two sequential GPT-5.6-sol calls at
+    high reasoning effort, one with live web search. Running that directly in
+    an async route blocks this single-process app's one event loop for its
+    entire duration -- confirmed for real via Railway logs (a concurrent
+    /api/stats call stalled 102s while one of these was in flight). Moving the
+    blocking work here and calling it via run_in_threadpool lets other requests
+    (including a second person's Ask ChatGPT click) proceed concurrently."""
     res = supabase.table("listings").select("title,photo_id").eq("id", item_id).eq("business_id", business_id).execute()
     if not res.data:
         raise HTTPException(404, "Listing not found")
@@ -3557,6 +3551,18 @@ Return ONLY a JSON object, no other text, in this exact shape:
         "price_error": price_error,
         "sources": sources,
     }
+
+@app.post("/api/listings/{item_id}/ask-chatgpt")
+async def ask_chatgpt_about_item(item_id: str, request: Request):
+    """Modal/tile 'Ask ChatGPT' button route -- auth check stays on the event
+    loop (fast), then the actual slow work runs in _ask_chatgpt_sync via
+    run_in_threadpool so it no longer blocks other requests. See that
+    function's docstring for why this split exists."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    from starlette.concurrency import run_in_threadpool
+    return await run_in_threadpool(_ask_chatgpt_sync, item_id, business_id)
 
 @app.post("/api/listings/{item_id}/rematch-category")
 async def rematch_category(item_id: str, request: Request, mode: str = "industrial", exclude_ids: str = ""):
