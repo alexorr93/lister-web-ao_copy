@@ -3490,7 +3490,8 @@ Return ONLY a JSON object, no other text, in this exact shape:
             content.append({"type": "input_image", "image_url": photo_url(photo_id), "detail": "high"})
         try:
             id_resp = client.responses.create(
-                model="gpt-5.5",
+                model="gpt-5.6-sol",
+                reasoning={"effort": "high"},
                 input=[{"role": "user", "content": content}],
             )
             text = (id_resp.output_text or "").strip()
@@ -3514,7 +3515,8 @@ Return ONLY a JSON object, no other text, in this exact shape:
     if lookup_title:
         try:
             price_resp = client.responses.create(
-                model="gpt-5.5",
+                model="gpt-5.6-sol",
+                reasoning={"effort": "high"},
                 tools=[{"type": "web_search"}],
                 input=[{"role": "user", "content": [{"type": "input_text", "text": (
                     f"Find the resale market value of: {lookup_title}. Search in this priority "
