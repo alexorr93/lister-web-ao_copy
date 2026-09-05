@@ -3472,6 +3472,7 @@ def _ask_chatgpt_sync(item_id: str, business_id: str, hint: str = "") -> dict:
     client = OpenAI(api_key=openai_key)
 
     hint = (hint or "").strip()[:500]
+    print(f"ask-chatgpt[{item_id}]: starting, current_title={current_title!r} photo_count={len(photo_ids)} hint={hint!r}")
     gpt_title = ""
     gpt_mpn = ""
     gpt_brand = ""
@@ -3505,8 +3506,10 @@ Return ONLY a JSON object, no other text, in this exact shape:
             gpt_title = (parsed.get("title") or "").strip()
             gpt_mpn = (parsed.get("mpn") or "").strip()
             gpt_brand = (parsed.get("brand") or "").strip()
+            print(f"ask-chatgpt[{item_id}]: hint={hint!r} raw_id_output={text!r} -> title={gpt_title!r} mpn={gpt_mpn!r} brand={gpt_brand!r}")
         except Exception as e:
             id_error = str(e)
+            print(f"ask-chatgpt[{item_id}]: ID pass failed: {e}")
     else:
         id_error = "no photos available for this item"
 
@@ -3536,8 +3539,10 @@ Return ONLY a JSON object, no other text, in this exact shape:
                         url = getattr(ann, "url", None)
                         if url:
                             sources.append({"url": url, "title": getattr(ann, "title", "") or ""})
+            print(f"ask-chatgpt[{item_id}]: price lookup_title={lookup_title!r} raw_price_output={price_text!r}")
         except Exception as e:
             price_error = str(e)
+            print(f"ask-chatgpt[{item_id}]: price pass failed: {e}")
 
     price_value = None
     if price_text:
