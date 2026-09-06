@@ -1577,6 +1577,18 @@ function initTileListeners() {
   document.getElementById('tile-grid').addEventListener('keydown', function(e) {
     var el = e.target;
     if (e.key === 'Enter' && fieldNameFor(el)) {
+      // REAL BUG FIXED: for the Lot SKU field, the dropdown highlights its
+      // top match as you type, but Enter used to ignore that entirely and
+      // commit the raw, still-partial characters you'd typed so far --
+      // which then failed validation against knownLotSkus. Enter should
+      // apply the highlighted suggestion, same as clicking it does.
+      if (el.classList.contains('tile-lotsku-input')) {
+        var panel = document.getElementById('lotsku-dropdown');
+        if (panel && panel.style.display !== 'none') {
+          var hl = panel.querySelector('.lotsku-option.hl') || panel.querySelector('.lotsku-option');
+          if (hl) el.value = hl.dataset.val;
+        }
+      }
       e.preventDefault();
       el.blur();
     }
