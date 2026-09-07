@@ -1598,6 +1598,7 @@ function initTileListeners() {
     var el = e.target;
     if (el.classList.contains('tile-title-input')) {
       var titleId = el.dataset.id, titleVal = el.value;
+      listingsMutationEpoch++; // guard against an in-flight ~10s poll clobbering this edit (same fix already used for photo delete)
       updateField(titleId, 'title', titleVal).then(function(ok) {
         // REAL BUG FIXED: this used to capture the listing object BEFORE
         // the save started and mutate that same (possibly now-stale)
@@ -1617,6 +1618,7 @@ function initTileListeners() {
     }
     if (el.classList.contains('tile-price-input')) {
       var priceId = el.dataset.id, priceVal = parseFloat(el.value);
+      listingsMutationEpoch++;
       updateField(priceId, 'price', priceVal).then(function(ok) {
         if (ok) {
           delete dirtyPrices[priceId];
@@ -1627,6 +1629,7 @@ function initTileListeners() {
     }
     if (el.classList.contains('tile-brand-input')) {
       var brandId = el.dataset.id, brandVal = el.value;
+      listingsMutationEpoch++;
       updateField(brandId, 'brand', brandVal).then(function(ok) {
         if (ok) {
           delete dirtyBrands[brandId];
@@ -1653,6 +1656,7 @@ function initTileListeners() {
         return;
       }
       el.classList.remove('invalid', 'missing');
+      listingsMutationEpoch++; // REAL BUG FIXED: this field never guarded against the ~10s poll -- editing SKU then quickly editing another field (e.g. title) before this assign-lot call resolved let a poll response that started before either edit land in between, reverting the other field via a stale re-render
       var valSuffix = val.includes('-') ? val.split('-').slice(1).join('-') : '';
       var assignBody = {lot_sku: valPrefix};
       if (valSuffix) assignBody.suffix = valSuffix;
@@ -1668,6 +1672,7 @@ function initTileListeners() {
     if (el.classList.contains('tile-mpn-input')) {
       var id = el.dataset.id, val = el.value.trim();
       if (!val) { delete dirtyMpns[id]; return; }
+      listingsMutationEpoch++;
       updateField(id, 'ebay_mpn', val).then(function(ok) {
         if (!ok) { toast('Failed to save MPN', 'error'); return; }
         updateField(id, 'ebay_mpn_is_fallback', false);
@@ -1685,6 +1690,7 @@ function initTileListeners() {
     if (el.classList.contains('tile-cat-input')) {
       var id = el.dataset.id, val = el.value.trim();
       if (!val || val === 'No category yet') return;
+      listingsMutationEpoch++;
       if (/^\d+$/.test(val)) {
         // Pure number typed — treat as a direct category ID override, no lookup needed
         updateField(id, 'ebay_category_id', val).then(function(ok) {
