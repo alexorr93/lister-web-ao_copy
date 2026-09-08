@@ -8267,7 +8267,7 @@ async def create_group(body: CreateGroup, request: Request):
             # Increment scan count
             supabase.table("businesses").update({"scan_count": scan_count + 1}).eq("id", business_id).execute()
         category_mode = body.category_mode if body.category_mode in ("industrial", "motors") else "industrial"
-        pricing_mode = body.pricing_mode if body.pricing_mode in ("always_search", "api_first") else "always_search"
+        pricing_mode = body.pricing_mode if body.pricing_mode in ("always_search", "api_first", "api_only") else "always_search"
         # Authoritative lookup, not the request body -- see get_scan_provider.
         # The frontend also sends extraction_provider (kept in the request
         # model above), but that's just so the toggle's own save round-trip

@@ -424,9 +424,10 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
       <div style="margin-bottom:16px;">
         <div class="field-label">Pricing Mode</div>
-        <div style="display:flex;gap:10px;margin-top:6px;" title="Always Search: Gemini always verifies via live web search on top of the eBay API. API First: skip that search when the eBay API already returns real data — faster, but skips the cross-market (Amazon/Reverb/etc.) check. Stays where you set it until you change it.">
+        <div style="display:flex;gap:10px;margin-top:6px;" title="Always Search: Gemini always verifies via live web search on top of the eBay API. API First: skip that search when the eBay API already returns real data. API Only: NEVER search the web, even when eBay has zero comps — cheapest, but weaker pricing on unique/niche parts with no eBay history. Stays where you set it until you change it.">
           <button class="btn pricemode-btn" data-pricemode="always_search" onclick="setPricingMode('always_search')" style="flex:1;">Always Search</button>
           <button class="btn pricemode-btn" data-pricemode="api_first" onclick="setPricingMode('api_first')" style="flex:1;">API First</button>
+          <button class="btn pricemode-btn" data-pricemode="api_only" onclick="setPricingMode('api_only')" style="flex:1;">API Only</button>
         </div>
       </div>
       <div style="margin-bottom:16px;">
@@ -1058,7 +1059,7 @@ function syncCategoryModeUI() {
 // Sticky the same way, so batches can be run side by side to compare.
 let pricingMode = localStorage.getItem('lister_pricing_mode') || 'always_search';
 function setPricingMode(m) {
-  if (m !== 'always_search' && m !== 'api_first') m = 'always_search';
+  if (m !== 'always_search' && m !== 'api_first' && m !== 'api_only') m = 'always_search';
   pricingMode = m;
   localStorage.setItem('lister_pricing_mode', m);
   syncPricingModeUI();
