@@ -2865,15 +2865,23 @@ def _build_listings_payload(business_id: str, archived: bool = False, ready: boo
         group_photo_map = {}  # photo_id -> [all photo_ids in same group]
         if primary_pids:
             try:
-                gp_res = supabase.table("group_photos")                    .select("group_id, photo_id")                    .in_("photo_id", primary_pids[:100])                    .execute()
-                # Map primary photo -> group_id
-                pid_to_gid = {row["photo_id"]: row["group_id"] for row in (gp_res.data or [])}
+                # Chunk instead of truncating — a hard [:100] slice here silently
+                # dropped multi-photo data (fell back to single-photo) for any
+                # listing past the 100th once a page ever had >100 items.
+                pid_to_gid = {}
+                for i in range(0, len(primary_pids), 100):
+                    chunk = primary_pids[i:i+100]
+                    gp_res = supabase.table("group_photos")                        .select("group_id, photo_id")                        .in_("photo_id", chunk)                        .execute()
+                    pid_to_gid.update({row["photo_id"]: row["group_id"] for row in (gp_res.data or [])})
                 group_ids = list(set(pid_to_gid.values()))
                 if group_ids:
-                    all_gp = supabase.table("group_photos")                        .select("group_id, photo_id")                        .in_("group_id", group_ids)                        .execute()
+                    all_gp_data = []
+                    for i in range(0, len(group_ids), 100):
+                        gid_chunk = group_ids[i:i+100]
+                        all_gp_data.extend(supabase.table("group_photos")                            .select("group_id, photo_id")                            .in_("group_id", gid_chunk)                            .execute().data or [])
                     # Build group_id -> [photo_ids]
                     gid_to_photos = {}
-                    for row in (all_gp.data or []):
+                    for row in all_gp_data:
                         gid_to_photos.setdefault(row["group_id"], []).append(row["photo_id"])
                     # Map primary photo_id -> all photos in its group
                     for pid, gid in pid_to_gid.items():
