@@ -7391,12 +7391,22 @@ async def api_financials(request: Request, start: str = None, end: str = None, i
     # Financials reads straight from the local `orders` table — shipping_cost and final_net
     # are already-computed, stored columns (written by apply_shipping_matches whenever a
     # Pirate Ship CSV is uploaded, and by the sync jobs). No computation happens here.
-    query = supabase.table("orders").select("*").eq("business_id", business_id)\
-        .gte("order_date", start_date_str).lte("order_date", end_date_str)
-    if not include_shopify:
-        query = query.eq("platform", "eBay")
-    res = query.execute()
-    rows = res.data or []
+    # REAL BUG FIXED: this used to be a single .execute() call, which PostgREST
+    # silently caps at 1000 rows -- any date range with more orders than that
+    # (confirmed: 2,234 orders in a routine 4-month window) had every row past
+    # the cutoff quietly vanish from the page, with no error anywhere. Paginated
+    # the same way _fetch_all_for_business does everywhere else in this file.
+    rows, start_i, page_size = [], 0, 1000
+    while True:
+        query = supabase.table("orders").select("*").eq("business_id", business_id)\
+            .gte("order_date", start_date_str).lte("order_date", end_date_str)
+        if not include_shopify:
+            query = query.eq("platform", "eBay")
+        page = query.range(start_i, start_i + page_size - 1).execute().data or []
+        rows.extend(page)
+        if len(page) < page_size:
+            break
+        start_i += page_size
     rows.sort(key=lambda r: r.get("order_date", ""), reverse=True)
 
     order_lines = [{
