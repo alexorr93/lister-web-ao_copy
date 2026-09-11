@@ -1983,7 +1983,19 @@ async function recalcTileCategory(id, mode, btn) {
       l.ebay_category_is_default = !!r.is_fallback;
       if (r.category_path) l.ebay_category_path = r.category_path;
       else if (r.name) l.ebay_category_path = r.name;  // fallback only if the path lookup itself came up empty
-      toast(r.is_fallback ? `No real ${mode === 'motors' ? 'Auto Parts' : 'B&I'} match — eBay's own suggestion engine has nothing for this exact title. Try typing a category name/breadcrumb directly into the category box below instead.` : `Category updated ✓`);
+      // REAL BUG FIXED: this used to say a generic "Category updated ✓" on a
+      // genuine match, indistinguishable from a no-op -- with no way to tell
+      // whether a press found something real, users kept re-pressing, and
+      // exclude_ids (categoryHistory) permanently excludes whatever a press
+      // just returned, so repeated presses actively walked AWAY from a
+      // correct match toward increasingly irrelevant ones (confirmed real
+      // case: a correct "Individual Gauges" match got excluded by later
+      // presses and degraded all the way to "Aviation Parts & Accessories").
+      // Now shows the actual matched path so a real hit is unmistakable, and
+      // warns explicitly that pressing again will exclude this one.
+      toast(r.is_fallback
+        ? `No real ${mode === 'motors' ? 'Auto Parts' : 'B&I'} match — eBay's own suggestion engine has nothing for this exact title. Try typing a category name/breadcrumb directly into the category box below instead.`
+        : `Matched: ${r.category_path || r.name || r.category_id} ✓ (pressing again will exclude this and search for something else — only press again if this one is wrong)`);
     } else {
       toast(`No ${mode === 'motors' ? 'Auto Parts' : 'B&I'} match found`, 'error');
     }
