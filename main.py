@@ -4560,7 +4560,27 @@ async def analytics_page(request: Request):
     if nav is None:
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/login", status_code=302)
-    return templates.TemplateResponse("analytics.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "analytics"})
+    # INLINE 1m/3m data at render time -- same "pre-built + inlined, no
+    # fetch-on-click" fix already applied to Inventory after it was reported
+    # slow. The buttons were correct but each press did a live round trip
+    # (Supabase query + cache check) before the chart could redraw, which
+    # read as "doesn't even change" under any real latency. Both ranges are
+    # cheap (<=90 daily rows) so computing both up front costs nothing
+    # noticeable on page load, and button clicks become instant, in-memory
+    # chart re-renders with zero network wait.
+    import json as _json
+    business_id = nav.get("business_id")
+    inline_biz_app_1m, inline_biz_app_3m = {}, {}
+    try:
+        inline_biz_app_1m = _compute_biz_app_daily_payload(business_id, 30)
+        inline_biz_app_3m = _compute_biz_app_daily_payload(business_id, 90)
+    except Exception as e:
+        print(f"analytics_page: failed to inline biz-app daily data: {e}")
+    return templates.TemplateResponse("analytics.html", {
+        "request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "analytics",
+        "inline_biz_app_1m_json": _json.dumps(inline_biz_app_1m),
+        "inline_biz_app_3m_json": _json.dumps(inline_biz_app_3m),
+    })
 
 @app.get("/acquisitions", response_class=HTMLResponse)
 async def acquisitions_page(request: Request):
@@ -8138,21 +8158,8 @@ def _compute_monthly_trend_payload(business_id: str, start_str: str, end_str: st
         "biz_app_total": biz_total,
     }
 
-@app.get("/api/analytics/business-appreciation-daily")
-async def api_business_appreciation_daily(request: Request, days: int = 30):
-    """Real day-by-day granularity for the Net Business Appreciation chart --
-    the existing chart on analytics.html only ever showed one point per
-    calendar month (collapsed from analytics_snapshots, which is actually
-    written daily), so a real move mid-month was invisible and the whole
-    chart looked flatter/smoother than what's actually happening. This reads
-    the same analytics_snapshots table with no monthly collapsing, filtered
-    to the last N days, so the '1 Month'/'3 Month' zoom views on the frontend
-    show every real daily data point instead of one per month."""
-    business_id = require_auth(request)
-    if not business_id:
-        raise HTTPException(401, "Unauthorized")
+def _compute_biz_app_daily_payload(business_id: str, days: int) -> dict:
     days = max(1, min(days, 366))  # sane bounds -- this table only goes back to 2025-12-01 anyway
-
     cache_key_start, cache_key_end = f"days:{days}", ""
     cached = _get_analytics_cache(business_id, "biz_app_daily", cache_key_start, cache_key_end)
     if cached is not None:
@@ -8189,6 +8196,23 @@ async def api_business_appreciation_daily(request: Request, days: int = 30):
     }
     _set_analytics_cache(business_id, "biz_app_daily", cache_key_start, cache_key_end, payload)
     return payload
+
+@app.get("/api/analytics/business-appreciation-daily")
+async def api_business_appreciation_daily(request: Request, days: int = 30):
+    """Real day-by-day granularity for the Net Business Appreciation chart --
+    the existing chart on analytics.html only ever showed one point per
+    calendar month (collapsed from analytics_snapshots, which is actually
+    written daily), so a real move mid-month was invisible and the whole
+    chart looked flatter/smoother than what's actually happening. This reads
+    the same analytics_snapshots table with no monthly collapsing, filtered
+    to the last N days. Kept as a live endpoint for any future range the page
+    doesn't pre-inline, but the 1m/3m buttons no longer call this -- see
+    analytics_page, which inlines both at page load per the standing
+    "pre-built + inlined" rule for any page a button click felt slow on."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    return _compute_biz_app_daily_payload(business_id, days)
 
 @app.get("/api/analytics/business-appreciation-trend")
 async def api_business_appreciation_trend(request: Request):

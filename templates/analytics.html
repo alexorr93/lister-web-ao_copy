@@ -675,9 +675,22 @@ function renderBizAppChart(data, zoomed) {
   });
 }
 
+// Inlined server-side at page render (see analytics_page) so the 1m/3m
+// buttons are instant in-memory chart redraws with zero network round trip.
+const INLINE_BIZ_APP_1M = {{ inline_biz_app_1m_json | safe }};
+const INLINE_BIZ_APP_3M = {{ inline_biz_app_3m_json | safe }};
+
 async function loadBizAppDaily(days) {
   const container = document.getElementById('biz-appreciation-chart').parentElement;
   try {
+    const inline = days === 30 ? INLINE_BIZ_APP_1M : days === 90 ? INLINE_BIZ_APP_3M : null;
+    if (inline && inline.biz_app_labels && inline.biz_app_labels.length) {
+      renderBizAppChart(inline, /*zoomed=*/true);
+      return;
+    }
+    // Fallback for any range not pre-inlined (shouldn't normally hit this
+    // for the 1m/3m buttons -- kept so the chart never just breaks if the
+    // inline data failed to build for some reason).
     const r = await fetch('/api/analytics/business-appreciation-daily?days=' + days);
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Request failed');
