@@ -592,16 +592,28 @@ function renderBizAppChart(data, zoomed) {
   // range instead of forcing it down to zero, so day-to-day movement is
   // actually visible. The YTD monthly view keeps the original zero-based
   // axis since that one's meant to show overall scale, not daily wiggle.
-  let yMin, yMax;
-  if (zoomed) {
-    const all = [...data.biz_app_total, ...data.biz_app_inv_appreciation, ...data.biz_app_cash_yield]
-      .filter(v => v !== null && v !== undefined);
-    if (all.length) {
-      const lo = Math.min(...all), hi = Math.max(...all);
-      const pad = Math.max((hi - lo) * 0.1, 500);
-      yMin = lo - pad; yMax = hi + pad;
-    }
+  // ZOOM FIX v2: v1 computed one shared min/max across ALL THREE series
+  // pooled together (NBA ~$850k-1100k, Inventory ~$550k-700k, Cash Yield
+  // ~$280k-390k) -- pooling them means the axis still has to span roughly
+  // $200k-$1180k to fit all three, so each line's own real day-to-day
+  // wiggle (tens of thousands) is still squashed flat against that ~$1M
+  // span. Confirmed too flat on the actual 3-month chart. Real fix: give
+  // each series its OWN y-axis, independently tight-scaled to its own
+  // min/max -- so a series with a $300k range and one with a $1.1M range
+  // both fill the full chart height with their own real movement, instead
+  // of the small ones getting crushed by the big one's scale. Only the NBA
+  // axis is drawn/labeled (left side) to avoid clutter; the other two still
+  // use their own hidden scales so their lines render at true zoomed scale.
+  function tightRange(arr) {
+    const vals = (arr || []).filter(v => v !== null && v !== undefined);
+    if (!vals.length) return { min: undefined, max: undefined };
+    const lo = Math.min(...vals), hi = Math.max(...vals);
+    const pad = Math.max((hi - lo) * 0.15, 250);
+    return { min: lo - pad, max: hi + pad };
   }
+  const nbaRange = zoomed ? tightRange(data.biz_app_total) : { min: undefined, max: undefined };
+  const invRange = zoomed ? tightRange(data.biz_app_inv_appreciation) : { min: undefined, max: undefined };
+  const cashRange = zoomed ? tightRange(data.biz_app_cash_yield) : { min: undefined, max: undefined };
 
   bizAppChart = new Chart(ctx, {
     type: 'line',
@@ -615,22 +627,25 @@ function renderBizAppChart(data, zoomed) {
           backgroundColor: 'rgba(245,158,11,0.1)',
           fill: true, tension: 0.25, borderWidth: 2.5,
           pointRadius: zoomed ? 3 : 2,
+          yAxisID: 'y',
         },
         {
           label: 'Inventory Appreciation',
           data: data.biz_app_inv_appreciation,
           borderColor: '#a78bfa',
           backgroundColor: 'rgba(167,139,250,0.08)',
-          fill: true, tension: 0.25, borderWidth: 2,
+          fill: zoomed ? false : true, tension: 0.25, borderWidth: 2,
           pointRadius: zoomed ? 3 : 2,
+          yAxisID: zoomed ? 'y1' : 'y',
         },
         {
           label: 'Net Cash Yield',
           data: data.biz_app_cash_yield,
           borderColor: '#22c55e',
           backgroundColor: 'rgba(34,197,94,0.08)',
-          fill: true, tension: 0.25, borderWidth: 2,
+          fill: zoomed ? false : true, tension: 0.25, borderWidth: 2,
           pointRadius: zoomed ? 3 : 2,
+          yAxisID: zoomed ? 'y2' : 'y',
         },
       ],
     },
@@ -644,8 +659,16 @@ function renderBizAppChart(data, zoomed) {
       scales: {
         x: { ticks: { color: '#64748b' }, grid: { color: '#2d3348' } },
         y: {
-          min: yMin, max: yMax,
+          min: nbaRange.min, max: nbaRange.max,
           ticks: { color: '#64748b', callback: v => '$' + Math.round(v/1000) + 'k' }, grid: { color: '#2d3348' },
+        },
+        y1: {
+          display: false,
+          min: invRange.min, max: invRange.max,
+        },
+        y2: {
+          display: false,
+          min: cashRange.min, max: cashRange.max,
         },
       },
     },
