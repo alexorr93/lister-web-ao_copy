@@ -8138,6 +8138,58 @@ def _compute_monthly_trend_payload(business_id: str, start_str: str, end_str: st
         "biz_app_total": biz_total,
     }
 
+@app.get("/api/analytics/business-appreciation-daily")
+async def api_business_appreciation_daily(request: Request, days: int = 30):
+    """Real day-by-day granularity for the Net Business Appreciation chart --
+    the existing chart on analytics.html only ever showed one point per
+    calendar month (collapsed from analytics_snapshots, which is actually
+    written daily), so a real move mid-month was invisible and the whole
+    chart looked flatter/smoother than what's actually happening. This reads
+    the same analytics_snapshots table with no monthly collapsing, filtered
+    to the last N days, so the '1 Month'/'3 Month' zoom views on the frontend
+    show every real daily data point instead of one per month."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    days = max(1, min(days, 366))  # sane bounds -- this table only goes back to 2025-12-01 anyway
+
+    cache_key_start, cache_key_end = f"days:{days}", ""
+    cached = _get_analytics_cache(business_id, "biz_app_daily", cache_key_start, cache_key_end)
+    if cached is not None:
+        return cached
+
+    import datetime as _dt
+    end_date = _dt.datetime.utcnow().date()
+    start_date = end_date - _dt.timedelta(days=days - 1)
+
+    snap_res = supabase.table("analytics_snapshots").select(
+        "snapshot_date,ytd_net_cash_yield,ytd_inventory_appreciation,ytd_net_business_appreciation"
+    ).eq("business_id", business_id) \
+     .gte("snapshot_date", start_date.isoformat()).lte("snapshot_date", end_date.isoformat()) \
+     .order("snapshot_date").execute()
+
+    labels, cash_yield, inv_app, total = [], [], [], []
+    for s in (snap_res.data or []):
+        cy = float(s["ytd_net_cash_yield"]) if s.get("ytd_net_cash_yield") is not None else None
+        ia = float(s["ytd_inventory_appreciation"]) if s.get("ytd_inventory_appreciation") is not None else None
+        nba = float(s["ytd_net_business_appreciation"]) if s.get("ytd_net_business_appreciation") is not None else None
+        labels.append(s["snapshot_date"])
+        cash_yield.append(round(cy, 2) if cy is not None else None)
+        inv_app.append(round(ia, 2) if ia is not None else None)
+        total.append(round(nba, 2) if nba is not None else None)
+
+    payload = {
+        "days": days,
+        "start": start_date.isoformat(),
+        "end": end_date.isoformat(),
+        "biz_app_labels": labels,
+        "biz_app_cash_yield": cash_yield,
+        "biz_app_inv_appreciation": inv_app,
+        "biz_app_total": total,
+    }
+    _set_analytics_cache(business_id, "biz_app_daily", cache_key_start, cache_key_end, payload)
+    return payload
+
 @app.get("/api/analytics/business-appreciation-trend")
 async def api_business_appreciation_trend(request: Request):
     """Monthly YTD business appreciation — one data point per month."""

@@ -222,8 +222,13 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
     </div>
   </div>
 
-  <h2>YTD Business Appreciation</h2>
-  <div class="sub" style="margin-bottom:10px;">Net Cash Yield + Inventory Appreciation = Total Business Appreciation, tracked daily.</div>
+  <h2>Net Business Appreciation</h2>
+  <div class="sub" style="margin-bottom:10px;">Net Cash Yield + Inventory Appreciation = Total Business Appreciation. Month/YTD views collapse to one point per month; the zoom views below pull every real daily snapshot so day-to-day moves actually show up.</div>
+  <div style="display:flex;gap:6px;margin-bottom:10px;">
+    <button class="btn" id="biz-app-range-1m" onclick="setBizAppRange('1m')">1 Month</button>
+    <button class="btn" id="biz-app-range-3m" onclick="setBizAppRange('3m')">3 Months</button>
+    <button class="btn btn-primary" id="biz-app-range-ytd" onclick="setBizAppRange('ytd')">YTD (monthly)</button>
+  </div>
   <div class="summary-card" style="padding:16px;">
     <canvas id="biz-appreciation-chart" height="90"></canvas>
   </div>
@@ -471,13 +476,17 @@ function renderInventoryValueChart(data) {
 // always shows its own full available range (from the earliest real snapshot
 // through today) and is only loaded once, on page load, never re-fetched by
 // the Apply button.
+let lastMonthlyTrendData = null;
+let bizAppChart = null;
+let bizAppRange = 'ytd';  // 'ytd' = existing one-point-per-month view; '1m'/'3m' = real daily zoom
 async function loadInventoryValueChart() {
   try {
     const r = await fetch('/api/analytics/monthly-trend');
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Request failed');
     renderInventoryValueChart(data);
-    if (data.biz_app_labels && data.biz_app_labels.length) renderBizAppChart(data);
+    lastMonthlyTrendData = data;
+    if (bizAppRange === 'ytd' && data.biz_app_labels && data.biz_app_labels.length) renderBizAppChart(data, /*zoomed=*/false);
   } catch(e) {
     document.getElementById('inventory-value-chart').parentElement.innerHTML = `<div class="error-banner">❌ ${e.message}</div>`;
   }
@@ -571,10 +580,29 @@ loadNetCashYield();
 loadMonthlyTrend();
 loadInventoryValueChart();
 
-let bizAppChart = null;
-function renderBizAppChart(data) {
+function renderBizAppChart(data, zoomed) {
   const ctx = document.getElementById('biz-appreciation-chart').getContext('2d');
   if (bizAppChart) bizAppChart.destroy();
+
+  // ZOOM FIX: a line chart with fill:true defaults its y-axis to start at 0,
+  // which is exactly why "the graph doesn't show what's really going on" --
+  // over a month the total might move from $1.05M to $1.07M, a real ~2%
+  // move that's completely flattened when the axis spans $0-$1.1M. On the
+  // zoomed (1m/3m) views, scale the axis tightly around the actual data
+  // range instead of forcing it down to zero, so day-to-day movement is
+  // actually visible. The YTD monthly view keeps the original zero-based
+  // axis since that one's meant to show overall scale, not daily wiggle.
+  let yMin, yMax;
+  if (zoomed) {
+    const all = [...data.biz_app_total, ...data.biz_app_inv_appreciation, ...data.biz_app_cash_yield]
+      .filter(v => v !== null && v !== undefined);
+    if (all.length) {
+      const lo = Math.min(...all), hi = Math.max(...all);
+      const pad = Math.max((hi - lo) * 0.1, 500);
+      yMin = lo - pad; yMax = hi + pad;
+    }
+  }
+
   bizAppChart = new Chart(ctx, {
     type: 'line',
     data: {
@@ -586,6 +614,7 @@ function renderBizAppChart(data) {
           borderColor: '#f59e0b',
           backgroundColor: 'rgba(245,158,11,0.1)',
           fill: true, tension: 0.25, borderWidth: 2.5,
+          pointRadius: zoomed ? 3 : 2,
         },
         {
           label: 'Inventory Appreciation',
@@ -593,6 +622,7 @@ function renderBizAppChart(data) {
           borderColor: '#a78bfa',
           backgroundColor: 'rgba(167,139,250,0.08)',
           fill: true, tension: 0.25, borderWidth: 2,
+          pointRadius: zoomed ? 3 : 2,
         },
         {
           label: 'Net Cash Yield',
@@ -600,21 +630,49 @@ function renderBizAppChart(data) {
           borderColor: '#22c55e',
           backgroundColor: 'rgba(34,197,94,0.08)',
           fill: true, tension: 0.25, borderWidth: 2,
+          pointRadius: zoomed ? 3 : 2,
         },
       ],
     },
     options: {
       responsive: true,
+      interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { labels: { color: '#f1f5f9' } },
         tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: $${Math.round(ctx.parsed.y).toLocaleString()}` } },
       },
       scales: {
         x: { ticks: { color: '#64748b' }, grid: { color: '#2d3348' } },
-        y: { ticks: { color: '#64748b', callback: v => '$' + Math.round(v/1000) + 'k' }, grid: { color: '#2d3348' } },
+        y: {
+          min: yMin, max: yMax,
+          ticks: { color: '#64748b', callback: v => '$' + Math.round(v/1000) + 'k' }, grid: { color: '#2d3348' },
+        },
       },
     },
   });
+}
+
+async function loadBizAppDaily(days) {
+  const container = document.getElementById('biz-appreciation-chart').parentElement;
+  try {
+    const r = await fetch('/api/analytics/business-appreciation-daily?days=' + days);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Request failed');
+    renderBizAppChart(data, /*zoomed=*/true);
+  } catch(e) {
+    container.innerHTML = `<div class="error-banner">❌ ${e.message}</div>`;
+  }
+}
+
+function setBizAppRange(range) {
+  bizAppRange = range;
+  ['1m','3m','ytd'].forEach(r => {
+    const btn = document.getElementById('biz-app-range-' + r);
+    btn.className = r === range ? 'btn btn-primary' : 'btn';
+  });
+  if (range === '1m') loadBizAppDaily(30);
+  else if (range === '3m') loadBizAppDaily(90);
+  else if (lastMonthlyTrendData) renderBizAppChart(lastMonthlyTrendData, /*zoomed=*/false);
 }
 </script>
 </body>
