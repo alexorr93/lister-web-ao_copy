@@ -1527,21 +1527,29 @@ function renderTiles() {
     </div>`;
   }).join('');
 
-  // Restore focus/cursor into the input the user was actively typing in, if it still exists
+  // Restore focus/cursor into the input the user was actively typing in, if it still exists.
+  // preventScroll:true so the browser's own "scroll focused element into view"
+  // behavior can't fight the scroll-anchor correction below -- exactly one
+  // thing is allowed to move the page (the anchor correction), full stop.
   if (focusInfo) {
     const selector = focusInfo.field === 'title' ? '.tile-title-input' : '.tile-price-input';
     const el = grid.querySelector(selector + '[data-id="' + focusInfo.id + '"]');
     if (el) {
-      el.focus();
+      el.focus({preventScroll: true});
       try { el.setSelectionRange(focusInfo.selStart, focusInfo.selEnd); } catch(e) {}
     }
   }
 
   // Re-align scroll to the same tile that was at the top before the rebuild
-  // (see scrollAnchor comment above) -- skip this when we just restored
-  // focus into an input, since focusing an element already scrolls it into
-  // view on its own and doing both would fight each other.
-  if (scrollAnchor && !focusInfo) {
+  // (see scrollAnchor comment above). REAL BUG FIXED: this used to skip
+  // whenever focus was being restored, on the theory that focusing an
+  // element scrolls it into view on its own -- but that native scroll is
+  // exactly what was still causing jumps while actively typing (a
+  // background poll re-render mid-edit could shift the whole page, then
+  // refocusing the input silently permitted its own separate scroll on top
+  // of that). Now unconditional -- this is the only thing allowed to move
+  // the page, ever, regardless of what else changed.
+  if (scrollAnchor) {
     const el = document.getElementById(scrollAnchor.id);
     if (el) {
       const newRect = el.getBoundingClientRect();
