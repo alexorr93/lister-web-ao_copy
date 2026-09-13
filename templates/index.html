@@ -1445,7 +1445,7 @@ function renderTiles() {
     if (startIdx >= photoCount) startIdx = 0;  // photo count shrank (e.g. one got deleted) — don't point past the end
     const firstThumb = photos[startIdx]?.thumb || '';
     const photoHtml = firstThumb
-      ? `<img src="${firstThumb}" alt="" loading="lazy" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;image-orientation:from-image;" id="photo-img-${l.id}"/>`
+      ? `<img src="${firstThumb}" alt="" loading="lazy" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;image-orientation:from-image;" id="photo-img-${l.id}"/>`
       : `<div class="tile-photo-placeholder">📷</div>`;
     const photoNavHtml = photoCount > 1
       ? `<button class="photo-nav photo-nav-prev" onclick="event.stopPropagation();cyclePhoto('${l.id}',-1)">‹</button>
