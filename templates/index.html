@@ -1401,6 +1401,26 @@ function renderTiles() {
     };
   }
 
+  // SCROLL-JUMP FIX: grid.innerHTML below rebuilds EVERY tile on any single-
+  // item update (e.g. one category recalc), not just the changed one. If
+  // that tile's content changes height (a longer/shorter matched category
+  // path is a common case), every tile below it shifts -- but scrollY is
+  // just a raw pixel number, so after the rebuild it now points at
+  // completely different content than what was on screen a moment ago,
+  // which is exactly the "screen jumps and I lose my place" bug. Fix:
+  // remember which tile currently sits at the top of the viewport and its
+  // exact pixel offset, then re-align scroll to that same tile after the
+  // rebuild regardless of how much height changed elsewhere.
+  let scrollAnchor = null;
+  const existingTiles = grid.querySelectorAll('.tile');
+  for (const t of existingTiles) {
+    const rect = t.getBoundingClientRect();
+    if (rect.bottom > 0) {  // first tile still at least partly below the top of the viewport
+      scrollAnchor = { id: t.id, offsetFromViewportTop: rect.top };
+      break;
+    }
+  }
+
   const visible = visibleListings();
   if (!visible.length) {
     grid.innerHTML = '';
@@ -1514,6 +1534,19 @@ function renderTiles() {
     if (el) {
       el.focus();
       try { el.setSelectionRange(focusInfo.selStart, focusInfo.selEnd); } catch(e) {}
+    }
+  }
+
+  // Re-align scroll to the same tile that was at the top before the rebuild
+  // (see scrollAnchor comment above) -- skip this when we just restored
+  // focus into an input, since focusing an element already scrolls it into
+  // view on its own and doing both would fight each other.
+  if (scrollAnchor && !focusInfo) {
+    const el = document.getElementById(scrollAnchor.id);
+    if (el) {
+      const newRect = el.getBoundingClientRect();
+      const delta = newRect.top - scrollAnchor.offsetFromViewportTop;
+      if (delta !== 0) window.scrollBy(0, delta);
     }
   }
 
