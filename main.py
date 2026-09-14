@@ -1845,7 +1845,7 @@ def photo_url(photo_id: str, thumb: bool = False) -> str:
     if not photo_id or photo_id in ("", "nan", "0"):
         return ""
     if thumb:
-        return f"{SUPABASE_URL}/storage/v1/render/image/public/part-photos/{photo_id}?width=500&height=500&resize=cover&quality=80"
+        return f"{SUPABASE_URL}/storage/v1/render/image/public/part-photos/{photo_id}?width=500&height=500&resize=contain&quality=80"
     return f"{SUPABASE_URL}/storage/v1/object/public/part-photos/{photo_id}"
 
 def _photo_seq(photo_id: str):
