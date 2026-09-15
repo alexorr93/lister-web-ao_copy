@@ -2152,6 +2152,7 @@ async function sendSelectedToReady() {
   if (!selected.size) return;
   const ids = Array.from(selected);
   if (!confirm(`Send ${ids.length} selected item(s) to the Ready folder? They'll clear out of this queue -- find them anytime on the Ready page.`)) return;
+  listingsMutationEpoch++; // guard against an in-flight ~10s poll clobbering this bulk op with partial server state (same fix already used for photo delete / SKU edits)
   let success = 0, failed = 0;
   for (const id of ids) {
     try {
@@ -2160,6 +2161,7 @@ async function sendSelectedToReady() {
       success++;
     } catch(e) { failed++; }
   }
+  listingsMutationEpoch++; // and again after -- a poll that started mid-loop (fetched before the last item finished) must also be discarded and retried
   selected.clear();
   renderTiles();
   toast(`Sent ${success} item(s) to Ready${failed ? ', ' + failed + ' failed' : ''} ✓`);
@@ -2171,6 +2173,7 @@ async function archiveEbayPublished() {
   );
   if (!targets.length) { toast('No items are published on eBay right now'); return; }
   if (!confirm(`Archive ${targets.length} item(s) that are published on eBay?`)) return;
+  listingsMutationEpoch++; // guard against an in-flight ~10s poll clobbering this bulk op with partial server state
   let success = 0, failed = 0;
   for (const l of targets) {
     try {
@@ -2180,6 +2183,7 @@ async function archiveEbayPublished() {
       success++;
     } catch(e) { failed++; }
   }
+  listingsMutationEpoch++;
   renderTiles();
   toast(`Archived ${success} item(s)${failed ? ', ' + failed + ' failed' : ''} ✓`);
 }
@@ -2191,6 +2195,7 @@ async function archiveBothPublished() {
   );
   if (!targets.length) { toast('No items are live on both eBay and Shopify right now'); return; }
   if (!confirm(`Archive ${targets.length} item(s) that are live on BOTH eBay and Shopify?`)) return;
+  listingsMutationEpoch++; // guard against an in-flight ~10s poll clobbering this bulk op with partial server state
   let success = 0, failed = 0;
   for (const l of targets) {
     try {
@@ -2200,6 +2205,7 @@ async function archiveBothPublished() {
       success++;
     } catch(e) { failed++; }
   }
+  listingsMutationEpoch++;
   renderTiles();
   toast(`Archived ${success} item(s)${failed ? ', ' + failed + ' failed' : ''} ✓`);
 }
