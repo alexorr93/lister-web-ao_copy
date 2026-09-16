@@ -4055,6 +4055,74 @@ def suggest_ebay_category(title: str, business_id: str, restrict: bool = True,
                       f"If ebay_categories hasn't been re-synced recently, run Sync Categories.")
                 results = []
 
+    # REAL MECHANISM FIX (not a one-off item patch): the exclude-and-take-next
+    # loop above just walks eBay's OWN suggestion order -- it has no concept of
+    # "closer" vs "further" from the actual title, so repeated presses can
+    # churn through several loosely-related categories while a genuinely
+    # on-topic one sits further down eBay's ranking (or isn't in eBay's
+    # suggestion list at all, only in our own already-synced tree). Confirmed
+    # real case: "...Coolant Level Sensor Wiring Harness..." cycled through
+    # Other Commercial Truck Parts / Other Car & Truck Parts / etc. across 6+
+    # presses while "Commercial Truck Parts > Lighting > Wiring & Fuses" --
+    # which DOES exist in our synced tree -- was never surfaced.
+    #
+    # Fix: pull real keywords out of the title (strip brand/part-number/noise
+    # tokens) and prefer whichever candidate's name/path actually contains one,
+    # over eBay's raw ranking. If nothing eBay suggested matches, run one
+    # extra keyword search against our own synced ebay_categories tree
+    # (already paid for -- no extra eBay API call) before giving up on a
+    # topical match.
+    _noise_words = {
+        "the","and","for","with","new","used","genuine","oem","part","parts",
+        "assembly","kit","set","replacement","fits","fit","fitting","aftermarket",
+        "original","factory","complete","unit","piece"
+    }
+    def _title_keywords(t: str) -> set:
+        words = re.findall(r"[a-zA-Z]+", t.lower())
+        return {w for w in words
+                if len(w) >= 4 and w not in _noise_words
+                and not re.search(r"\d", w)}
+
+    keywords = _title_keywords(title)
+
+    def _keyword_hit(cand: dict) -> bool:
+        hay = f"{cand.get('name') or ''} {cand.get('path') or ''}".lower()
+        return any(kw in hay for kw in keywords)
+
+    if results and keywords:
+        matched = [x for x in results if _keyword_hit(x)]
+        if matched:
+            if str(matched[0]["category_id"]) != str(results[0]["category_id"]):
+                print(f"suggest_ebay_category: '{title}' -- re-ranked to keyword-matching "
+                      f"candidate {matched[0]['category_id']} ({matched[0]['path']}) "
+                      f"ahead of eBay's top pick {results[0]['category_id']} ({results[0]['path']})")
+            results = matched + [x for x in results if x not in matched]
+        else:
+            # Nothing eBay suggested shares a real keyword with the title --
+            # search our own already-synced tree directly instead of trusting
+            # eBay's ranking blind. Same restriction rules as above (right
+            # tree, right root for industrial mode, leaf only, not excluded).
+            try:
+                or_clause = ",".join(f"name.ilike.%{kw}%" for kw in list(keywords)[:8])
+                local_hits = (supabase.table("ebay_categories")
+                              .select("category_id,name,path")
+                              .eq("tree_id", tree_id).eq("is_leaf", True)
+                              .or_(or_clause).limit(25).execute().data or [])
+                if restrict and mode == "industrial":
+                    local_hits = [h for h in local_hits
+                                  if (h.get("path") or "").split(" > ")[0].strip() == "Business & Industrial"]
+                if exclude_ids:
+                    exclude_set = {str(x) for x in exclude_ids if x}
+                    local_hits = [h for h in local_hits if str(h["category_id"]) not in exclude_set]
+                if local_hits:
+                    best = local_hits[0]
+                    print(f"suggest_ebay_category: '{title}' -- eBay's suggestions had no keyword match, "
+                          f"found one directly in our synced tree instead: {best['category_id']} ({best['path']})")
+                    results = [{"category_id": best["category_id"], "name": best["name"],
+                                "path": best["path"], "tree_id": tree_id, "is_fallback": False}] + results
+            except Exception as e:
+                print(f"suggest_ebay_category: local keyword search failed, keeping eBay's ranking: {e}")
+
     return results[0] if results else _fallback()
 
 _category_sync_job_status = {}  # business_id -> {"running": bool, "result": dict|None, "started_at": iso, "finished_at": iso|None}
