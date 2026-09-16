@@ -2782,7 +2782,12 @@ async function askChatGptTile(id, withHint) {
     if (r.mpn) {
       const mpnEl = document.querySelector('.tile-mpn-input[data-id="' + id + '"]');
       if (mpnEl) mpnEl.value = r.mpn;
-      const ok = await updateField(id, 'mpn', r.mpn);
+      // BUG FIX: this was PATCHing the 'mpn' column, but the tile's MPN field
+      // (and everything downstream: publish, needsMpnAttention, etc.) reads
+      // ebay_mpn -- same column the tile's own blur handler saves to. The
+      // fill looked like it worked (value appeared, save returned 200) but
+      // was invisible on next load and never actually usable.
+      const ok = await updateField(id, 'ebay_mpn', r.mpn);
       if (ok) { delete dirtyMpns[id]; if (l) l.ebay_mpn = r.mpn; filled.push('MPN'); }
       else failed.push('MPN');
     }
