@@ -2752,8 +2752,23 @@ async function askChatGptTile(id, withHint) {
   try {
     const r = await api('POST', `/api/listings/${id}/ask-chatgpt`, {hint: hint});
     const l = listings.find(function(x) { return String(x.id) === String(id); });
+    const currentTitle = (l && l.title) || '';
 
-    if (r.title) {
+    // BUG FIX: a wrong photo-ID guess (e.g. calling a confirmed Peterbilt/PACCAR
+    // part "Ford") used to overwrite a correct existing title with zero warning
+    // or confirmation. Now: if there's already a real title on this item and
+    // ChatGPT's guess actually differs from it, ask before replacing it.
+    let applyTitle = true;
+    if (r.title && currentTitle && currentTitle !== r.title) {
+      applyTitle = confirm(
+        `ChatGPT suggests replacing the title:\n\n"${currentTitle}"\n\nwith:\n\n"${r.title}"\n\nApply this?`
+      );
+    }
+
+    const failed = [];
+    let filled = [];
+
+    if (r.title && applyTitle) {
       const titleEl = document.querySelector('.tile-title-input[data-id="' + id + '"]');
       if (titleEl) {
         titleEl.value = r.title;
@@ -2761,28 +2776,41 @@ async function askChatGptTile(id, withHint) {
         titleEl.style.height = titleEl.scrollHeight + 'px';
       }
       const ok = await updateField(id, 'title', r.title);
-      if (ok) { delete dirtyTitles[id]; if (l) l.title = r.title; }
+      if (ok) { delete dirtyTitles[id]; if (l) l.title = r.title; filled.push('title'); }
+      else failed.push('title');
     }
     if (r.mpn) {
       const mpnEl = document.querySelector('.tile-mpn-input[data-id="' + id + '"]');
       if (mpnEl) mpnEl.value = r.mpn;
       const ok = await updateField(id, 'mpn', r.mpn);
-      if (ok) { delete dirtyMpns[id]; if (l) l.ebay_mpn = r.mpn; }
+      if (ok) { delete dirtyMpns[id]; if (l) l.ebay_mpn = r.mpn; filled.push('MPN'); }
+      else failed.push('MPN');
     }
     if (r.brand) {
       const brandEl = document.querySelector('.tile-brand-input[data-id="' + id + '"]');
       if (brandEl) brandEl.value = r.brand;
       const ok = await updateField(id, 'brand', r.brand);
-      if (ok) { delete dirtyBrands[id]; if (l) l.brand = r.brand; }
+      if (ok) { delete dirtyBrands[id]; if (l) l.brand = r.brand; filled.push('brand'); }
+      else failed.push('brand');
     }
     if (r.price_value != null) {
       const priceEl = document.querySelector('.tile-price-input[data-id="' + id + '"]');
       if (priceEl) priceEl.value = r.price_value;
       const ok = await updateField(id, 'price', r.price_value);
-      if (ok) { delete dirtyPrices[id]; if (l) l.price = r.price_value; }
+      if (ok) { delete dirtyPrices[id]; if (l) l.price = r.price_value; filled.push('price'); }
+      else failed.push('price');
     }
-    if (!r.title && !r.mpn && !r.brand && r.price_value == null) {
+
+    // BUG FIX: previously ONLY alerted when literally nothing usable came back
+    // at all -- a save that ran, returned 200, but silently failed to persist
+    // (or a title the user declined via the new confirm above) looked
+    // identical to the button doing nothing. Now every outcome is visible.
+    if (failed.length) {
+      alert('Ask ChatGPT: got a result but failed to save: ' + failed.join(', ') + '. Try again.');
+    } else if (!filled.length) {
       alert('Ask ChatGPT: ' + (r.id_error || r.price_error || 'nothing usable came back'));
+    } else {
+      toast('💬 Ask ChatGPT updated: ' + filled.join(', '));
     }
   } catch(e) {
     alert('Ask ChatGPT failed: ' + e.message);
