@@ -253,7 +253,8 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 200; display: none; align-items: center; justify-content: center; padding: 16px; }
 .modal-overlay.open { display: flex; }
 .modal { background: var(--card); border: 1px solid var(--border); border-radius: 18px; max-width: 420px; width: 100%; max-height: 90vh; overflow-y: auto; }
-.modal-img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 14px 14px 0 0; background: #161925; }
+.modal-img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 14px 14px 0 0; background: #161925; cursor: zoom-in; transition: transform 0.25s ease; }
+.modal-img.zoomed { transform: scale(2.2); cursor: zoom-out; }
 .modal-body { padding: 16px; }
 .modal-title { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
 .modal-meta { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
@@ -731,8 +732,8 @@ select.field-input { background: #fff; color: #0f172a; }
 <div class="modal-overlay" id="modal" onclick="closeModal(event)">
   <button onclick="closeModal()" title="Close" style="position:absolute;top:14px;right:14px;width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,0.7);border:none;color:#fff;font-size:20px;line-height:1;cursor:pointer;z-index:50;display:flex;align-items:center;justify-content:center;">✕</button>
   <div class="modal" onclick="event.stopPropagation()">
-    <div style="position:relative;z-index:5;">
-      <img class="modal-img" id="modal-img" src="" alt="" style="pointer-events:none;"/>
+    <div style="position:relative;z-index:5;overflow:hidden;border-radius:14px 14px 0 0;">
+      <img class="modal-img" id="modal-img" src="" alt="" style="pointer-events:none;" onclick="event.stopPropagation();toggleModalImgZoom(event)"/>
       <div id="modal-mpn-flag" class="tile-mpn-flag" style="display:none;" title="eBay MPN set to &quot;Does Not Apply&quot; — fix before publishing or eBay may reject/flag this listing" onclick="event.stopPropagation();document.getElementById('modal-mpn-input').scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('modal-mpn-input').focus();"></div>
       <button id="rotate-ccw-btn" onclick="event.stopPropagation();rotatePhoto('ccw')" title="Rotate left" style="position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,0.6);border:none;color:#fff;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;z-index:10;">↺</button><button id="rotate-cw-btn" onclick="event.stopPropagation();rotatePhoto('cw')" title="Rotate right" style="position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,0.6);border:none;color:#fff;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;z-index:10;">↻</button>
     </div>
@@ -2408,7 +2409,8 @@ function openModal(id) {
   img.src = curPhotoUrl;
   // Use the photo actually being displayed (not always the item's first/primary photo) so rotate affects the right image
   img.dataset.photoId = extractPhotoId(curPhotoUrl) || l.photo_id || '';
-  img.style.cssText = 'width:100%;aspect-ratio:1;object-fit:cover;border-radius:14px 14px 0 0;image-orientation:from-image;pointer-events:none;display:' + (img.src ? 'block' : 'none') + ';';
+  img.style.cssText = 'width:100%;aspect-ratio:1;object-fit:cover;border-radius:14px 14px 0 0;image-orientation:from-image;cursor:zoom-in;transition:transform 0.25s ease;display:' + (img.src ? 'block' : 'none') + ';';
+  img.classList.remove('zoomed');
   document.getElementById('modal-title').textContent = l.title || 'Unknown Item';
   document.getElementById('modal-meta').textContent  = `${l.ebay_category || ''} · ${(l.condition||'used').toUpperCase()}`;
   window._modalListing = l;
@@ -4456,6 +4458,23 @@ setInterval(() => {
   const editingNotes = document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('lot-notes-input');
   if (activeTab === 'auction' && activeSession && !editingNotes) loadAuctionItems(activeSession);
 }, 30000);
+
+function toggleModalImgZoom(event) {
+  const img = document.getElementById('modal-img');
+  if (!img) return;
+  if (img.classList.contains('zoomed')) {
+    img.classList.remove('zoomed');
+    return;
+  }
+  // Zoom in centered on wherever the user actually clicked, not always the
+  // image's middle -- e.g. clicking a stamped part number in a corner should
+  // bring that corner into view, not the empty center of the photo.
+  const rect = img.getBoundingClientRect();
+  const xPct = ((event.clientX - rect.left) / rect.width) * 100;
+  const yPct = ((event.clientY - rect.top) / rect.height) * 100;
+  img.style.transformOrigin = `${xPct}% ${yPct}%`;
+  img.classList.add('zoomed');
+}
 
 async function rotatePhoto(dir) {
   const img = document.getElementById('modal-img');
