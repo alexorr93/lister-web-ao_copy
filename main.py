@@ -231,6 +231,7 @@ async def start_background_jobs():
     asyncio.create_task(shopify_sync_worker())
     asyncio.create_task(analytics_snapshot_worker())
     asyncio.create_task(analytics_cache_refresh_worker())
+    asyncio.create_task(weekly_sales_refresh_worker())
     asyncio.create_task(backfill_ytd_history_worker())
     asyncio.create_task(auction_archive_worker())
     asyncio.create_task(active_listings_sync_worker())
@@ -1735,6 +1736,63 @@ async def analytics_cache_refresh_worker():
                     print(f"analytics_cache_refresh_worker: business {biz_id} failed: {e}")
         except Exception as e:
             print(f"analytics_cache_refresh_worker error: {e}")
+
+# ---------------------------------------------------------------------------
+# Weekly sales chart (Analytics page, bottom). Sunday-Saturday weeks, all-time.
+# Precomputed in the Supabase table weekly_sales (refreshed by the
+# refresh_weekly_sales_rpc() SQL function, ~160ms) and held in an in-process
+# cache so /analytics inlines it with zero queries -- same "pre-built +
+# inlined" rule as Inventory. Worker warms it ~15s after boot and re-warms
+# every 10 min, so the chart is always ready before the page is opened.
+# ---------------------------------------------------------------------------
+_WEEKLY_SALES_CACHE = {}  # business_id (str) -> payload dict
+
+def _build_weekly_sales_payload(business_id) -> dict:
+    import datetime as _dt
+    rows, offset = [], 0
+    while True:
+        res = supabase.table("weekly_sales").select(
+            "week_start,week_end,orders,gross_revenue,refunds,sales_after_refunds,net_after_fees,is_complete"
+        ).eq("business_id", str(business_id)).order("week_start").range(offset, offset + 999).execute()
+        batch = res.data or []
+        rows.extend(batch)
+        if len(batch) < 1000:
+            break
+        offset += 1000
+    r2 = lambda v: round(float(v or 0), 2)
+    return {
+        "labels": [r["week_start"] for r in rows],
+        "week_end": [r["week_end"] for r in rows],
+        "orders": [int(r.get("orders") or 0) for r in rows],
+        "gross": [r2(r.get("gross_revenue")) for r in rows],
+        "refunds": [r2(r.get("refunds")) for r in rows],
+        "sales": [r2(r.get("sales_after_refunds")) for r in rows],
+        "net": [r2(r.get("net_after_fees")) for r in rows],
+        "complete": [bool(r.get("is_complete")) for r in rows],
+        "built_at": _dt.datetime.utcnow().isoformat() + "Z",
+    }
+
+def _refresh_weekly_sales_all():
+    supabase.rpc("refresh_weekly_sales_rpc").execute()
+    biz_res = supabase.table("businesses").select("id").execute()
+    for b in (biz_res.data or []):
+        try:
+            payload = _build_weekly_sales_payload(b["id"])
+            if payload["labels"]:
+                _WEEKLY_SALES_CACHE[str(b["id"])] = payload
+        except Exception as e:
+            print(f"weekly_sales cache: business {b['id']} failed: {e}")
+
+async def weekly_sales_refresh_worker():
+    import asyncio
+    await asyncio.sleep(15)
+    while True:
+        try:
+            await asyncio.to_thread(_refresh_weekly_sales_all)
+            print("weekly_sales_refresh_worker: refreshed")
+        except Exception as e:
+            print(f"weekly_sales_refresh_worker error: {e}")
+        await asyncio.sleep(10 * 60)
 
 def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
     """One row per business per day in analytics_snapshots -- inventory value
@@ -4644,11 +4702,36 @@ async def analytics_page(request: Request):
         inline_biz_app_3m = _compute_biz_app_daily_payload(business_id, 90)
     except Exception as e:
         print(f"analytics_page: failed to inline biz-app daily data: {e}")
+    # Weekly sales chart: served from the warm in-process cache (built by
+    # weekly_sales_refresh_worker); only a cold cache falls back to one tiny
+    # SELECT (~113 rows) so the chart is still inlined, never fetch-on-load.
+    weekly_sales = _WEEKLY_SALES_CACHE.get(str(business_id))
+    if weekly_sales is None:
+        try:
+            import asyncio as _asyncio
+            weekly_sales = await _asyncio.to_thread(_build_weekly_sales_payload, business_id)
+        except Exception as e:
+            print(f"analytics_page: failed to inline weekly sales: {e}")
+            weekly_sales = {}
     return templates.TemplateResponse("analytics.html", {
         "request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "analytics",
         "inline_biz_app_1m_json": _json.dumps(inline_biz_app_1m),
         "inline_biz_app_3m_json": _json.dumps(inline_biz_app_3m),
+        "inline_weekly_sales_json": _json.dumps(weekly_sales),
     })
+
+@app.get("/api/analytics/weekly-sales")
+async def api_weekly_sales(request: Request):
+    """Cache-only read of the precomputed weekly sales series (used by the
+    page's 20-min / on-focus background swap). Cheap by design."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    payload = _WEEKLY_SALES_CACHE.get(str(business_id))
+    if payload is None:
+        import asyncio as _asyncio
+        payload = await _asyncio.to_thread(_build_weekly_sales_payload, business_id)
+    return payload
 
 @app.get("/acquisitions", response_class=HTMLResponse)
 async def acquisitions_page(request: Request):
