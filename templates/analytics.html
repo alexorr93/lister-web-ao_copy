@@ -233,8 +233,14 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
     <canvas id="biz-appreciation-chart" height="90"></canvas>
   </div>
 
-  <h2 style="margin-top:28px;">Weekly Sales</h2>
-  <div class="sub" style="margin-bottom:10px;">Sunday–Saturday weeks, every week we have data. Sales are after refunds; Net is after refunds and selling fees. The current week is dashed until it closes.</div>
+  <h2 style="margin-top:28px;">Weekly Net Sales</h2>
+  <div class="sub" style="margin-bottom:10px;">Net after refunds and selling fees, Sunday–Saturday weeks. The current week is dashed until it closes.</div>
+  <div style="display:flex;gap:6px;margin-bottom:10px;">
+    <button class="btn" id="ws-range-1m" onclick="setWeeklyRange('1m')">1 Month</button>
+    <button class="btn" id="ws-range-3m" onclick="setWeeklyRange('3m')">3 Months</button>
+    <button class="btn" id="ws-range-ytd" onclick="setWeeklyRange('ytd')">YTD</button>
+    <button class="btn btn-primary" id="ws-range-all" onclick="setWeeklyRange('all')">All Time</button>
+  </div>
   <div class="summary-card" style="padding:16px;">
     <canvas id="weekly-sales-chart" height="90"></canvas>
     <div class="note" id="weekly-sales-note" style="font-size:10px;color:var(--muted);margin-top:8px;"></div>
@@ -718,26 +724,55 @@ function setBizAppRange(range) {
   else if (lastMonthlyTrendData) renderBizAppChart(lastMonthlyTrendData, /*zoomed=*/false);
 }
 
-// ---- Weekly Sales (Sun-Sat, all time) ----
+// ---- Weekly Net Sales (Sun-Sat) ----
 // Inlined server-side from the precomputed weekly_sales table (warm cache,
-// see weekly_sales_refresh_worker) so the chart paints with the page. Swaps
-// in fresh data every 20 min and on tab focus, never while the tab is hidden.
+// see weekly_sales_refresh_worker) so the chart paints with the page. Range
+// buttons (1M / 3M / YTD / All) just re-slice the inlined data in memory --
+// no network. Fresh data swaps in every 20 min and on tab focus, never while
+// the tab is hidden.
 let weeklySalesData = {{ inline_weekly_sales_json | safe }};
 let weeklySalesChart = null;
+let weeklyRange = 'all';
 
 function fmtWeekDay(iso) {
   const d = new Date(iso + 'T00:00:00');
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function renderWeeklySalesChart(data) {
+function weeklyCutoffISO(range) {
+  const now = new Date();
+  let d = null;
+  if (range === '1m') { d = new Date(now); d.setDate(d.getDate() - 30); }
+  else if (range === '3m') { d = new Date(now); d.setDate(d.getDate() - 90); }
+  else if (range === 'ytd') { d = new Date(now.getFullYear(), 0, 1); }
+  if (!d) return null;
+  const pad = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+}
+
+function sliceWeekly(data, range) {
+  const cut = weeklyCutoffISO(range);
+  let start = 0;
+  if (cut) {
+    start = data.week_end.findIndex(we => we >= cut);
+    if (start < 0) start = Math.max(0, data.labels.length - 1);
+  }
+  const cutArr = a => a.slice(start);
+  return {
+    labels: cutArr(data.labels), week_end: cutArr(data.week_end), orders: cutArr(data.orders),
+    refunds: cutArr(data.refunds), net: cutArr(data.net), complete: cutArr(data.complete),
+  };
+}
+
+function renderWeeklySalesChart(full) {
   const canvas = document.getElementById('weekly-sales-chart');
   const note = document.getElementById('weekly-sales-note');
   if (!canvas) return;
-  if (!data || !data.labels || !data.labels.length) {
+  if (!full || !full.labels || !full.labels.length) {
     if (note) note.textContent = 'No weekly sales data yet.';
     return;
   }
+  const data = sliceWeekly(full, weeklyRange);
   if (weeklySalesChart) weeklySalesChart.destroy();
   const n = data.labels.length;
   const lastIdx = n - 1;
@@ -749,22 +784,21 @@ function renderWeeklySalesChart(data) {
     data: {
       labels: data.labels.map(short),
       datasets: [
-        { label: 'Sales (after refunds)', data: data.sales, borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.08)', tension: 0.2, pointRadius: 0, pointHoverRadius: 4, borderWidth: 2, segment: { borderDash: dash } },
-        { label: 'Net (after refunds & fees)', data: data.net, borderColor: '#60a5fa', backgroundColor: 'rgba(96,165,250,0.08)', tension: 0.2, pointRadius: 0, pointHoverRadius: 4, borderWidth: 2, segment: { borderDash: dash } },
+        { label: 'Net (after refunds & fees)', data: data.net, borderColor: '#60a5fa', backgroundColor: 'rgba(96,165,250,0.08)', fill: true, tension: 0.2, pointRadius: n <= 20 ? 3 : 0, pointHoverRadius: 4, borderWidth: 2, segment: { borderDash: dash } },
       ],
     },
     options: {
       responsive: true,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { labels: { color: '#f1f5f9' } },
+        legend: { display: false },
         tooltip: {
           callbacks: {
             title: items => {
               const i = items[0].dataIndex;
               return 'Week of ' + fmtWeekDay(data.labels[i]) + ' – ' + fmtWeekDay(data.week_end[i]) + (data.complete[i] ? '' : ' (in progress)');
             },
-            label: c => `${c.dataset.label}: $${Math.round(c.parsed.y).toLocaleString()}`,
+            label: c => `Net: $${Math.round(c.parsed.y).toLocaleString()}`,
             afterBody: items => {
               const i = items[0].dataIndex;
               return [`Orders: ${data.orders[i]}`, `Refunds: $${Math.round(data.refunds[i]).toLocaleString()}`];
@@ -780,10 +814,18 @@ function renderWeeklySalesChart(data) {
   });
   if (note) {
     const done = data.complete.reduce((a, c) => a + (c ? 1 : 0), 0);
-    const tot = data.sales.reduce((a, b) => a + b, 0);
-    const totNet = data.net.reduce((a, b) => a + b, 0);
-    note.textContent = `${n} weeks (${fmtWeekDay(data.labels[0])} → ${fmtWeekDay(data.week_end[lastIdx])}) · ${done} complete · all-time sales after refunds $${Math.round(tot).toLocaleString()} · net $${Math.round(totNet).toLocaleString()}`;
+    const tot = data.net.reduce((a, b) => a + b, 0);
+    note.textContent = `${n} weeks (${fmtWeekDay(data.labels[0])} → ${fmtWeekDay(data.week_end[lastIdx])}) · ${done} complete · net in view $${Math.round(tot).toLocaleString()}`;
   }
+}
+
+function setWeeklyRange(range) {
+  weeklyRange = range;
+  ['1m', '3m', 'ytd', 'all'].forEach(r => {
+    const btn = document.getElementById('ws-range-' + r);
+    if (btn) btn.className = r === range ? 'btn btn-primary' : 'btn';
+  });
+  renderWeeklySalesChart(weeklySalesData);
 }
 
 async function refreshWeeklySales() {
