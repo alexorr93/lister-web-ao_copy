@@ -1773,7 +1773,7 @@ def _build_weekly_sales_payload(business_id) -> dict:
     }
 
 def _refresh_weekly_sales_all():
-    supabase.rpc("refresh_weekly_sales_rpc").execute()
+    supabase.rpc("refresh_weekly_sales_rpc", {}).execute()
     biz_res = supabase.table("businesses").select("id").execute()
     for b in (biz_res.data or []):
         try:
