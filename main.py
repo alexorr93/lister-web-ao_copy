@@ -2212,7 +2212,7 @@ def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None,
     # eBay requires SOME MPN value in many categories — if we can't guess one, send their
     # standard "Does Not Apply" placeholder rather than omitting the aspect entirely, since
     # a missing BrandMPN aspect makes publishOffer fail outright in those categories.
-    mpn = (mpn_override or "").strip() or None
+    mpn = (mpn_override or "").strip() or (listing.get("ebay_mpn") or "").strip() or (listing.get("mpn") or "").strip() or None
     mpn_is_fallback = False
     if not mpn:
         alnum_tokens = [
@@ -2383,7 +2383,7 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
         first_word = title.split()[0].strip(",.;:-") if title else ""
         brand = first_word if first_word else "Unbranded"
 
-    mpn = (mpn_override or "").strip() or None
+    mpn = (mpn_override or "").strip() or (listing.get("ebay_mpn") or "").strip() or (listing.get("mpn") or "").strip() or None
     mpn_is_fallback = False
     if not mpn:
         alnum_tokens = [

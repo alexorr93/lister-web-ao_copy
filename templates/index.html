@@ -1505,7 +1505,7 @@ function renderTiles() {
         <div class="tile-price-cond-row">
           <span style="color:var(--muted);font-size:11px;">$</span>
           <input class="tile-price-input${fieldClassFor(l.id,'price')}" type="number" step="0.01" value="${dirtyPrices[l.id] ?? l.price.toFixed(2)}" data-id="${l.id}" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="price-${l.id}">
-          ${l.category_mode === 'motors' ? `<input class="tile-mpn-input${fieldClassFor(l.id,'mpn')}${needsMpnAttention(l) ? ' missing' : ''}" type="text" value="${(dirtyMpns[l.id] ?? (l.ebay_mpn_is_fallback ? '' : (l.ebay_mpn || guessMpn(l.title || '', l.brand || guessBrand(l.title || ''))))).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="MPN" title="Manufacturer Part Number — required before this item can publish. Same field as the modal's MPN box." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" name="mpn-${l.id}">` : ''}
+          ${l.category_mode === 'motors' ? `<input class="tile-mpn-input${fieldClassFor(l.id,'mpn')}${needsMpnAttention(l) ? ' missing' : ''}" type="text" value="${(dirtyMpns[l.id] ?? (l.ebay_mpn_is_fallback ? '' : (l.ebay_mpn || l.mpn || guessMpn(l.title || '', l.brand || guessBrand(l.title || ''))))).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="MPN" title="Manufacturer Part Number — required before this item can publish. Same field as the modal's MPN box." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" name="mpn-${l.id}">` : ''}
           <div class="tile-cond-toggle">
             <button class="tile-cond-btn${isNew?'' :' active'}" data-id="${l.id}" data-cond="used">Used</button>
             <button class="tile-cond-btn${isNew?' active':''}" data-id="${l.id}" data-cond="new">New</button>
@@ -1658,6 +1658,21 @@ function initTileListeners() {
     if (el.classList.contains('tile-title-input')) {
       var titleId = el.dataset.id, titleVal = el.value;
       listingsMutationEpoch++; // guard against an in-flight ~10s poll clobbering this edit (same fix already used for photo delete)
+      // MPN must never change on a title edit: if the MPN box is showing an
+      // unsaved value (typed, scanner, or title-guess), persist exactly what is
+      // visible BEFORE the title changes so it can't re-derive from the new title.
+      (function() {
+        var fl = listings.find(function(x) { return String(x.id) === titleId; });
+        if (fl && fl.category_mode === 'motors' && !fl.ebay_mpn && !fl.ebay_mpn_is_fallback) {
+          var mEl = document.querySelector('.tile-mpn-input[data-id="' + titleId + '"]');
+          var visible = ((mEl && mEl.value) || dirtyMpns[titleId] || fl.mpn || guessMpn(fl.title || '', fl.brand || guessBrand(fl.title || '')) || '').trim();
+          if (visible) {
+            updateField(titleId, 'ebay_mpn', visible).then(function(ok2) {
+              if (ok2) { var fl2 = listings.find(function(x) { return String(x.id) === titleId; }); if (fl2) fl2.ebay_mpn = visible; delete dirtyMpns[titleId]; }
+            });
+          }
+        }
+      })();
       updateField(titleId, 'title', titleVal).then(function(ok) {
         // REAL BUG FIXED: this used to capture the listing object BEFORE
         // the save started and mutate that same (possibly now-stale)
@@ -2419,7 +2434,7 @@ function openModal(id) {
   document.getElementById('modal-refs').textContent  = refs;
   document.getElementById('modal-title-input').value = l.title || '';
   document.getElementById('modal-brand-input').value = l.brand || guessBrand(l.title || '');
-  document.getElementById('modal-mpn-input').value = (l.ebay_mpn_is_fallback ? '' : (l.ebay_mpn || guessMpn(l.title || '', l.brand || guessBrand(l.title || ''))));
+  document.getElementById('modal-mpn-input').value = (l.ebay_mpn_is_fallback ? '' : (l.ebay_mpn || l.mpn || guessMpn(l.title || '', l.brand || guessBrand(l.title || ''))));
   document.getElementById('modal-mpn-warn').style.display = needsMpnAttention(l) ? 'block' : 'none';
   document.getElementById('modal-mpn-flag').style.display = needsMpnAttention(l) ? 'block' : 'none';
   document.getElementById('modal-find-mpn-btn').style.display = (l.category_mode === 'motors') ? '' : 'none';
