@@ -15378,7 +15378,9 @@ def _kick_inventory_rebuild(business_id: str) -> None:
 # ---------------------------------------------------------------------------
 EBAY_BACKUP_BUCKET = "ebay-listing-backup"
 EBAY_BACKUP_REFRESH_DAYS = 30
-EBAY_BACKUP_BATCH_ITEMS = 120       # per cycle
+EBAY_BACKUP_BATCH_ITEMS = 40        # per cycle (~1,900/day max; eBay Trading API default is 5,000 calls/day SHARED with all the app's other Trading calls)
+EBAY_BACKUP_DAILY_CAP = 2000        # hard cap of GetItem calls per UTC day from this worker
+_ebay_backup_calls_today = {"day": None, "n": 0}
 EBAY_BACKUP_BATCH_SECONDS = 15 * 60  # hard stop per cycle
 EBAY_BACKUP_CYCLE_SLEEP = 30 * 60    # between cycles
 _ebay_backup_skip_until = {}         # item_id -> epoch; failed items retried after 24h, not every cycle
@@ -15414,7 +15416,7 @@ def _ebay_backup_parse_item(data: dict) -> dict:
         errs = errs if isinstance(errs, list) else [errs]
         msg = "; ".join(f"{(e or {}).get('ErrorCode')}: {(e or {}).get('ShortMessage')}" for e in errs)
         low = msg.lower()
-        if any(k in low for k in ("call limit", "usage limit", "exceeded", "too many")):
+        if any(k in low for k in ("518", "call limit", "usage limit", "exceeded", "too many")):
             raise ValueError("RATE_LIMIT " + msg)
         raise ValueError(msg or "GetItem failure")
     item = data.get("Item") or {}
@@ -15529,6 +15531,13 @@ def _ebay_listing_backup_work(business_id: str, max_items: int = None, max_secon
     for iid in todo[:max_items]:
         if _t.time() - started > max_seconds:
             break
+        _today = _dt.datetime.utcnow().date().isoformat()
+        if _ebay_backup_calls_today["day"] != _today:
+            _ebay_backup_calls_today.update({"day": _today, "n": 0})
+        if _ebay_backup_calls_today["n"] >= EBAY_BACKUP_DAILY_CAP:
+            print("ebay backup: daily GetItem cap reached, resuming tomorrow")
+            break
+        _ebay_backup_calls_today["n"] += 1
         try:
             parsed = _ebay_backup_parse_item(_ebay_get_item_full(token, iid))
             stored, ok = _ebay_backup_store_photos(business_id, iid, parsed["picture_urls"])
@@ -15565,8 +15574,8 @@ def _ebay_listing_backup_work(business_id: str, max_items: int = None, max_secon
     return summary
 
 async def ebay_listing_backup_worker():
-    """Runs forever: one small batch per business every 30 min (~240 items/hr max);
-    the full ~5.4k backfill completes on its own in about a day, after which it just
+    """Runs forever: one small batch per business every 30 min (~80 items/hr max);
+    the full ~5.4k backfill completes on its own in about 3 days, after which it just
     keeps up with new listings and re-copies anything older than 30 days."""
     import asyncio
     await asyncio.sleep(120)  # let boot settle
