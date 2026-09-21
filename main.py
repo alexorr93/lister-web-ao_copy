@@ -13193,6 +13193,7 @@ async def shopify_sync_auto_refresh_worker():
                         okc = sum(1 for r in (mm_res.get("results") or []) if r.get("status") == "success")
                         print(f"auto qty-mismatch push: business {bid} -> {okc}/{len(mm_rows)} set to eBay qty")
                     else:
+                        import time as _time
                         _qty_mismatch_cache[bid] = (_time.time(), [])
                 except StopIteration:
                     pass  # auto-push disabled for this business
