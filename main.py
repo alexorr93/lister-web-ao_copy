@@ -246,6 +246,7 @@ async def start_background_jobs():
     asyncio.create_task(shopify_sync_auto_refresh_worker())
     asyncio.create_task(_oneshot_archive_shopify_duplicates())
     asyncio.create_task(browse_search_daily_worker())
+    asyncio.create_task(ebay_listing_backup_worker())
 
 async def browse_search_daily_worker():
     """Runs all saved Browse searches once daily. For each business with saved
@@ -15363,6 +15364,245 @@ def _kick_inventory_rebuild(business_id: str) -> None:
         finally:
             _inventory_page_cache.pop(f"{business_id}:rebuilding", None)
     _th.Thread(target=_run, daemon=True).start()
+
+# ---------------------------------------------------------------------------
+# eBay listing BACKUP: permanent, organized copy of every active eBay listing
+# (full description HTML, brand, MPN, all item specifics, every photo, plus the
+# complete raw GetItem payload) in table ebay_listing_backup + private storage
+# bucket 'ebay-listing-backup' (path: <business_id>/<item_id>/NN.jpg).
+# Fully automatic: new active listings are picked up, never-backed-up first,
+# then incomplete-photo rows, then anything older than BACKUP_REFRESH_DAYS.
+# Rows are NEVER deleted -- an ended listing keeps its backup forever.
+# Paced (small batches) so it can't stall the single-process app or blow the
+# Trading API daily call quota; stops and backs off on any rate-limit error.
+# ---------------------------------------------------------------------------
+EBAY_BACKUP_BUCKET = "ebay-listing-backup"
+EBAY_BACKUP_REFRESH_DAYS = 30
+EBAY_BACKUP_BATCH_ITEMS = 120       # per cycle
+EBAY_BACKUP_BATCH_SECONDS = 15 * 60  # hard stop per cycle
+EBAY_BACKUP_CYCLE_SLEEP = 30 * 60    # between cycles
+_ebay_backup_skip_until = {}         # item_id -> epoch; failed items retried after 24h, not every cycle
+_ebay_backup_status = {}             # business_id -> last cycle summary
+
+def _ebay_get_item_full(token: str, item_id: str) -> dict:
+    """Trading GetItem with EVERYTHING: full description + item specifics."""
+    import requests as _req
+    import xml.etree.ElementTree as ET
+    xml_body = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+        f'<RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>'
+        f'<ItemID>{item_id}</ItemID>'
+        '<DetailLevel>ReturnAll</DetailLevel>'
+        '<IncludeItemSpecifics>true</IncludeItemSpecifics>'
+        '</GetItemRequest>'
+    )
+    headers = {
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "1193",
+        "X-EBAY-API-CALL-NAME": "GetItem",
+        "X-EBAY-API-SITEID": "0",
+        "Content-Type": "text/xml",
+    }
+    r = _req.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_body.encode("utf-8"), timeout=30)
+    return _ebay_xml_to_dict(ET.fromstring(r.content))
+
+def _ebay_backup_parse_item(data: dict) -> dict:
+    """Pulls the organized columns out of a GetItem response. Raises ValueError
+    with 'RATE_LIMIT' in the message for quota errors, plain ValueError otherwise."""
+    if str(data.get("Ack", "")).lower() == "failure":
+        errs = data.get("Errors") or []
+        errs = errs if isinstance(errs, list) else [errs]
+        msg = "; ".join(f"{(e or {}).get('ErrorCode')}: {(e or {}).get('ShortMessage')}" for e in errs)
+        low = msg.lower()
+        if any(k in low for k in ("call limit", "usage limit", "exceeded", "too many")):
+            raise ValueError("RATE_LIMIT " + msg)
+        raise ValueError(msg or "GetItem failure")
+    item = data.get("Item") or {}
+    if not item:
+        raise ValueError("empty Item")
+    specifics = {}
+    nvl = (item.get("ItemSpecifics") or {}).get("NameValueList") or []
+    nvl = nvl if isinstance(nvl, list) else [nvl]
+    for nv in nvl:
+        if not isinstance(nv, dict):
+            continue
+        name = nv.get("Name")
+        val = nv.get("Value")
+        if name:
+            specifics[name] = val
+    def _spec(*names):
+        for n in names:
+            v = specifics.get(n)
+            if isinstance(v, list):
+                v = ", ".join(str(x) for x in v if x)
+            if v and str(v).strip():
+                return str(v).strip()
+        return None
+    pics = (item.get("PictureDetails") or {}).get("PictureURL") or []
+    pics = pics if isinstance(pics, list) else [pics]
+    selling = (item.get("SellingStatus") or {})
+    price = None
+    try:
+        cp = selling.get("CurrentPrice")
+        price = float(cp) if not isinstance(cp, dict) else float(cp.get("#text") or 0) or None
+    except Exception:
+        price = None
+    cat = item.get("PrimaryCategory") or {}
+    qty = None
+    try:
+        qty = int(item.get("Quantity")) - int(selling.get("QuantitySold") or 0)
+    except Exception:
+        pass
+    return {
+        "sku": item.get("SKU"),
+        "title": item.get("Title"),
+        "brand": _spec("Brand"),
+        "mpn": _spec("Manufacturer Part Number", "MPN"),
+        "description_html": item.get("Description"),
+        "item_specifics": specifics or None,
+        "category_id": cat.get("CategoryID"),
+        "category_name": cat.get("CategoryName"),
+        "condition_display_name": item.get("ConditionDisplayName"),
+        "price": price,
+        "quantity": qty,
+        "listing_status": selling.get("ListingStatus"),
+        "picture_urls": [p for p in pics if p],
+        "raw_item": item,
+    }
+
+def _ebay_backup_store_photos(business_id: str, item_id: str, urls: list) -> tuple:
+    """Downloads EVERY photo (full size as served by eBay) into the private backup
+    bucket. Returns (stored_paths, all_ok)."""
+    import requests as _req
+    stored, all_ok = [], True
+    for i, url in enumerate(urls):
+        path = f"{business_id}/{item_id}/{i+1:02d}.jpg"
+        try:
+            resp = _req.get(url, timeout=30)
+            resp.raise_for_status()
+            supabase.storage.from_(EBAY_BACKUP_BUCKET).upload(
+                path, resp.content, {"content-type": resp.headers.get("content-type", "image/jpeg"), "upsert": "true"})
+            stored.append(path)
+        except Exception as e:
+            all_ok = False
+            print(f"ebay backup: photo {i+1} of {item_id} failed: {e}")
+    return stored, all_ok
+
+def _ebay_listing_backup_work(business_id: str, max_items: int = None, max_seconds: int = None) -> dict:
+    import time as _t, datetime as _dt
+    max_items = max_items or EBAY_BACKUP_BATCH_ITEMS
+    max_seconds = max_seconds or EBAY_BACKUP_BATCH_SECONDS
+    started = _t.time()
+
+    def _paged(table, cols, **eq):
+        out, start = [], 0
+        while True:
+            q = supabase.table(table).select(cols).eq("business_id", business_id)
+            for k, v in eq.items():
+                q = q.eq(k, v)
+            page = q.range(start, start + 999).execute().data or []
+            out.extend(page)
+            if len(page) < 1000:
+                break
+            start += 1000
+        return out
+
+    active = [str(r["item_id"]) for r in _paged("ebay_listing_status", "item_id", listing_status="Active") if r.get("item_id")]
+    have = {str(r["item_id"]): r for r in _paged("ebay_listing_backup", "item_id,photos_complete,backed_up_at")}
+    cutoff = (_dt.datetime.utcnow() - _dt.timedelta(days=EBAY_BACKUP_REFRESH_DAYS)).isoformat()
+    never, incomplete, stale = [], [], []
+    for iid in dict.fromkeys(active):
+        row = have.get(iid)
+        if not row:
+            never.append(iid)
+        elif not row.get("photos_complete"):
+            incomplete.append(iid)
+        elif (row.get("backed_up_at") or "") < cutoff:
+            stale.append(iid)
+    todo = never + incomplete + stale
+    now = _t.time()
+    todo = [i for i in todo if _ebay_backup_skip_until.get(i, 0) < now]
+
+    token = get_ebay_access_token(business_id)
+    done = failed = photos = 0
+    rate_limited = False
+    for iid in todo[:max_items]:
+        if _t.time() - started > max_seconds:
+            break
+        try:
+            parsed = _ebay_backup_parse_item(_ebay_get_item_full(token, iid))
+            stored, ok = _ebay_backup_store_photos(business_id, iid, parsed["picture_urls"])
+            row = dict(parsed)
+            row.update({
+                "business_id": business_id, "item_id": iid,
+                "photo_paths": stored,
+                "photos_complete": bool(ok and len(stored) == len(parsed["picture_urls"])),
+                "backed_up_at": _dt.datetime.utcnow().isoformat(),
+            })
+            supabase.table("ebay_listing_backup").upsert(row, on_conflict="business_id,item_id").execute()
+            done += 1
+            photos += len(stored)
+        except ValueError as e:
+            failed += 1
+            if "RATE_LIMIT" in str(e):
+                rate_limited = True
+                print(f"ebay backup: rate limited, stopping cycle: {e}")
+                break
+            _ebay_backup_skip_until[iid] = _t.time() + 86400
+            print(f"ebay backup: item {iid} skipped 24h: {e}")
+        except Exception as e:
+            failed += 1
+            _ebay_backup_skip_until[iid] = _t.time() + 86400
+            print(f"ebay backup: item {iid} failed: {e}")
+        _t.sleep(0.4)
+    summary = {
+        "active": len(set(active)), "already_backed_up": len(have),
+        "queue_never": len(never), "queue_incomplete": len(incomplete), "queue_stale": len(stale),
+        "done_this_cycle": done, "failed_this_cycle": failed, "photos_this_cycle": photos,
+        "rate_limited": rate_limited, "at": _dt.datetime.utcnow().isoformat(),
+    }
+    _ebay_backup_status[business_id] = summary
+    return summary
+
+async def ebay_listing_backup_worker():
+    """Runs forever: one small batch per business every 30 min (~240 items/hr max);
+    the full ~5.4k backfill completes on its own in about a day, after which it just
+    keeps up with new listings and re-copies anything older than 30 days."""
+    import asyncio
+    await asyncio.sleep(120)  # let boot settle
+    while True:
+        backoff = EBAY_BACKUP_CYCLE_SLEEP
+        try:
+            res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
+            for biz_id in list(set(r["business_id"] for r in (res.data or []))):
+                try:
+                    summary = await asyncio.to_thread(_ebay_listing_backup_work, biz_id)
+                    print(f"ebay_listing_backup_worker: {summary}")
+                    if summary.get("rate_limited"):
+                        backoff = 6 * 3600
+                except Exception as e:
+                    print(f"ebay_listing_backup_worker: business {biz_id} failed: {e}")
+        except Exception as e:
+            print(f"ebay_listing_backup_worker error: {e}")
+        await asyncio.sleep(backoff)
+
+@app.get("/api/backup/ebay-listings/status")
+async def ebay_listing_backup_status(request: Request, response: Response):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    response.headers["Cache-Control"] = "no-store"
+    def _count(table, **eq):
+        q = supabase.table(table).select("item_id", count="exact", head=True).eq("business_id", business_id)
+        for k, v in eq.items():
+            q = q.eq(k, v)
+        return q.execute().count or 0
+    return {
+        "active_listings": _count("ebay_listing_status", listing_status="Active"),
+        "backed_up": _count("ebay_listing_backup"),
+        "photos_complete": _count("ebay_listing_backup", photos_complete=True),
+        "last_cycle": _ebay_backup_status.get(business_id),
+    }
 
 async def inventory_cache_warm_worker():
     """Keeps /api/inventory warm so a human never waits on the 10s build:
