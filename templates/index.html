@@ -1673,6 +1673,20 @@ function initTileListeners() {
           }
         }
       })();
+      // Same rule for Brand: freeze whatever the Brand box currently shows
+      // (typed, saved, or first-word guess) before the title changes.
+      (function() {
+        var bl = listings.find(function(x) { return String(x.id) === titleId; });
+        if (bl && !bl.brand) {
+          var bEl = document.querySelector('.tile-brand-input[data-id="' + titleId + '"]');
+          var bVis = ((bEl && bEl.value) || dirtyBrands[titleId] || guessBrand(bl.title || '') || '').trim();
+          if (bVis) {
+            updateField(titleId, 'brand', bVis).then(function(okB) {
+              if (okB) { var bl2 = listings.find(function(x) { return String(x.id) === titleId; }); if (bl2) bl2.brand = bVis; delete dirtyBrands[titleId]; }
+            });
+          }
+        }
+      })();
       updateField(titleId, 'title', titleVal).then(function(ok) {
         // REAL BUG FIXED: this used to capture the listing object BEFORE
         // the save started and mutate that same (possibly now-stale)
