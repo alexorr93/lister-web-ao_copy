@@ -1512,7 +1512,7 @@ function renderTiles() {
           </div>
           <input class="tile-lotsku-input${fieldClassFor(l.id,'lotsku')}${lotSkuFor(l) ? '' : ' missing'}" type="text" value="${(dirtyLotSkus[l.id] ?? lotSkuFor(l)).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Lot SKU" title="Must match a real Lot SKU from the Lots page — required before this item can publish to eBay or Shopify" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" name="lot-sku-${l.id}">
         </div>
-        <textarea class="tile-cat-input${fieldClassFor(l.id,'category')}${l.ebay_category_is_default ? ' default-warn' : ''}" rows="2" data-id="${l.id}" data-catid="${l.ebay_category_id||''}" placeholder="eBay category" autocomplete="off" spellcheck="false" title="Click to edit — type a phrase to re-match, or a number to set the ID directly. Double-click to open full editor." ondblclick="openModal('${l.id}')">${(dirtyCats[l.id] ?? (l.ebay_category_path||'No category yet')).replace(/</g,'&lt;')}</textarea>
+        <textarea class="tile-cat-input${fieldClassFor(l.id,'category')}${l.ebay_category_is_default ? ' default-warn' : ''}" rows="2" data-id="${l.id}" data-catid="${l.ebay_category_id||''}" placeholder="eBay category" autocomplete="off" spellcheck="false" title="Right-click to search &amp; pick a category. Or type a phrase to re-match / a number to set the ID. Double-click for full editor." ondblclick="openModal('${l.id}')">${(dirtyCats[l.id] ?? (l.ebay_category_path||'No category yet')).replace(/</g,'&lt;')}</textarea>
         ${l.ebay_category_is_default ? '<div class="tile-cat-warn-label">⚠️ Generic fallback — needs a real match</div>' : ''}
         <div style="display:flex;gap:4px;align-items:center;">
           <input class="tile-brand-input${fieldClassFor(l.id,'brand')}" type="text" value="${(dirtyBrands[l.id] ?? (l.brand || guessBrand(l.title||''))).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Brand" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="brand-${l.id}" style="flex:1;">
@@ -1777,6 +1777,10 @@ function initTileListeners() {
     }
     if (el.classList.contains('tile-cat-input')) {
       var id = el.dataset.id, val = el.value.trim();
+      // Only act on a real edit. Previously ANY click-in/click-out re-ran
+      // auto-category using the displayed path as the query, silently
+      // re-matching (and possibly changing) an already-correct category.
+      if (!(id in dirtyCats)) return;
       if (!val || val === 'No category yet') return;
       listingsMutationEpoch++;
       if (/^\d+$/.test(val)) {
@@ -1803,6 +1807,13 @@ function initTileListeners() {
       }
     }
   }, true);
+  // Right-click the category field -> searchable category picker
+  document.getElementById('tile-grid').addEventListener('contextmenu', function(e) {
+    var el = e.target;
+    if (!el.classList || !el.classList.contains('tile-cat-input')) return;
+    e.preventDefault();
+    openCatPicker(el.dataset.id, el, e.clientX, e.clientY);
+  });
   document.getElementById('tile-grid').addEventListener('click', function(e) {
     var el = e.target;
     if (el.classList.contains('tile-cond-btn')) {
@@ -4552,6 +4563,120 @@ function updatePriceByCondition() {
     document.getElementById('modal-price').textContent = '$' + p.toFixed(2);
   }
 }
+</script>
+
+<style>
+#cat-picker{position:fixed;z-index:10000;width:520px;max-width:calc(100vw - 16px);background:#111827;border:1px solid #374151;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.6);padding:8px;display:none;}
+#cat-picker input{width:100%;box-sizing:border-box;padding:7px 9px;background:#0b1220;color:#e5e7eb;border:1px solid #4b5563;border-radius:6px;font-size:13px;outline:none;}
+#cat-picker .cp-list{max-height:340px;overflow-y:auto;margin-top:6px;}
+#cat-picker .cp-row{padding:5px 8px;border-radius:5px;cursor:pointer;font-size:12px;color:#9ca3af;line-height:1.3;}
+#cat-picker .cp-row b{color:#e5e7eb;font-weight:600;}
+#cat-picker .cp-row .cp-tag{float:right;font-size:10px;padding:0 5px;border-radius:4px;margin-left:6px;}
+#cat-picker .cp-row.active{background:#1f2937;}
+#cat-picker .cp-meta{font-size:11px;color:#6b7280;padding:4px 2px 0;}
+</style>
+<div id="cat-picker"><input id="cat-picker-input" type="text" placeholder="Search categories…" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" name="cat-picker-nofill-7q2x"/><div class="cp-list" id="cat-picker-list"></div><div class="cp-meta" id="cat-picker-meta"></div></div>
+<script>
+let catPickerRows = null, catPickerLoading = null;
+let catPickerItem = null, catPickerTextEl = null, catPickerMatches = [], catPickerActive = 0;
+function loadCatPickerRows() {
+  if (catPickerRows) return Promise.resolve(catPickerRows);
+  if (!catPickerLoading) {
+    catPickerLoading = fetch('/api/ebay/category-picker-list').then(r => r.json()).then(d => {
+      catPickerRows = (d.rows || []).map(r => ({id: r[0], path: r[1], tree: r[2],
+        leaf: (r[1].split(' > ').pop() || ''), lc: (r[1] + ' ' + r[0]).toLowerCase()}));
+      return catPickerRows;
+    }).catch(e => { catPickerLoading = null; throw e; });
+  }
+  return catPickerLoading;
+}
+function openCatPicker(itemId, textEl, x, y) {
+  catPickerItem = itemId; catPickerTextEl = textEl;
+  delete dirtyCats[itemId]; // discard any half-typed text so the textarea's focusout doesn't also fire a re-match
+  const box = document.getElementById('cat-picker'), inp = document.getElementById('cat-picker-input');
+  box.style.display = 'block';
+  const w = box.offsetWidth, h = 420;
+  box.style.left = Math.max(8, Math.min(x, window.innerWidth - w - 8)) + 'px';
+  box.style.top = Math.max(8, Math.min(y, window.innerHeight - h - 8)) + 'px';
+  inp.value = ''; inp.focus();
+  document.getElementById('cat-picker-list').innerHTML = '';
+  document.getElementById('cat-picker-meta').textContent = 'Loading categories…';
+  loadCatPickerRows().then(() => filterCatPicker())
+    .catch(() => { document.getElementById('cat-picker-meta').textContent = 'Failed to load categories'; });
+}
+function closeCatPicker() {
+  document.getElementById('cat-picker').style.display = 'none';
+  catPickerItem = null; catPickerTextEl = null;
+}
+function catEsc(t) { return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+function filterCatPicker() {
+  if (!catPickerRows) return;
+  const q = document.getElementById('cat-picker-input').value.trim().toLowerCase();
+  const toks = q.split(/\s+/).filter(Boolean);
+  let m;
+  if (!toks.length) m = catPickerRows.slice();
+  else {
+    m = catPickerRows.filter(r => toks.every(t => r.lc.includes(t)));
+    // rank: all words in the leaf name first, then shorter paths
+    m.sort((a, b) => {
+      const al = a.leaf.toLowerCase(), bl = b.leaf.toLowerCase();
+      const as = toks.every(t => al.includes(t)) ? 0 : 1, bs = toks.every(t => bl.includes(t)) ? 0 : 1;
+      return as - bs || a.path.length - b.path.length;
+    });
+  }
+  catPickerMatches = m; catPickerActive = 0;
+  renderCatPickerList();
+}
+function renderCatPickerList() {
+  const shown = catPickerMatches.slice(0, 150);
+  document.getElementById('cat-picker-list').innerHTML = shown.map((r, i) => {
+    const parent = r.path.slice(0, Math.max(0, r.path.length - r.leaf.length));
+    const tag = r.tree === '100' ? '<span class="cp-tag" style="background:#1e3a8a;color:#bfdbfe">Motors</span>'
+                                 : '<span class="cp-tag" style="background:#374151;color:#d1d5db">B&amp;I</span>';
+    return `<div class="cp-row${i === catPickerActive ? ' active' : ''}" data-i="${i}">${tag}${catEsc(parent)}<b>${catEsc(r.leaf)}</b> <span style="color:#6b7280">#${r.id}</span></div>`;
+  }).join('');
+  const n = catPickerMatches.length;
+  document.getElementById('cat-picker-meta').textContent = n
+    ? (n > 150 ? `${n} matches — showing 150, keep typing` : `${n} match${n === 1 ? '' : 'es'}`) + ' · ↑↓ Enter to pick, Esc to close'
+    : 'No matches';
+  const act = document.querySelector('#cat-picker-list .cp-row.active');
+  if (act) act.scrollIntoView({block: 'nearest'});
+}
+async function pickCatPickerRow(i) {
+  const r = catPickerMatches[i], id = catPickerItem, el = catPickerTextEl;
+  if (!r || !id) return;
+  closeCatPicker();
+  listingsMutationEpoch++;
+  try {
+    const resp = await fetch('/api/listings/' + id + '/set-category', {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({category_id: r.id})});
+    const d = await resp.json();
+    if (!resp.ok || !d.ok) { toast('Category not saved: ' + (d.detail || resp.status), 'error'); return; }
+    delete dirtyCats[id];
+    const l = listings.find(x => String(x.id) === String(id));
+    if (l) { l.ebay_category_id = d.category_id; l.ebay_category_path = d.path; l.ebay_category_is_default = false; l.category_mode = d.category_mode; }
+    markFieldChanged(fieldKey(id, 'category'));
+    if (el && el.isConnected) el.value = d.path;
+    renderTiles();
+    toast('Category set: ' + d.path + ' ✓');
+  } catch (e) { toast('Category save failed', 'error'); }
+}
+document.getElementById('cat-picker-input').addEventListener('input', filterCatPicker);
+document.getElementById('cat-picker-input').addEventListener('keydown', function(e) {
+  const n = Math.min(catPickerMatches.length, 150);
+  if (e.key === 'ArrowDown') { e.preventDefault(); if (n) { catPickerActive = (catPickerActive + 1) % n; renderCatPickerList(); } }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); if (n) { catPickerActive = (catPickerActive - 1 + n) % n; renderCatPickerList(); } }
+  else if (e.key === 'Enter') { e.preventDefault(); if (n) pickCatPickerRow(catPickerActive); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeCatPicker(); }
+});
+document.getElementById('cat-picker-list').addEventListener('mousedown', function(e) {
+  const row = e.target.closest('.cp-row');
+  if (row) { e.preventDefault(); pickCatPickerRow(+row.dataset.i); }
+});
+document.addEventListener('mousedown', function(e) {
+  const box = document.getElementById('cat-picker');
+  if (box.style.display === 'block' && !box.contains(e.target)) closeCatPicker();
+});
 </script>
 </body>
 </html>

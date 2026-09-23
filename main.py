@@ -4280,6 +4280,68 @@ async def api_auto_category(item_id: str, request: Request, broad: bool = False,
     except Exception as e:
         raise HTTPException(500, str(e))
 
+# ---- Right-click category picker (Intake) ---------------------------------
+# Full list of ALLOWED leaf categories (B&I tree 0 + all of eBay Motors tree 100),
+# shipped to the browser once so the picker filters instantly as you type.
+# ~5.7k rows; cached in memory 6h (categories only change on Sync Categories).
+_category_picker_cache = {"at": 0.0, "rows": None}
+
+def _category_picker_rows():
+    import time as _t
+    c = _category_picker_cache
+    if c["rows"] is not None and _t.time() - c["at"] < 6 * 3600:
+        return c["rows"]
+    rows, start = [], 0
+    while True:
+        batch = (supabase.table("ebay_categories").select("category_id,path,tree_id")
+                 .eq("is_leaf", True).order("category_id")
+                 .range(start, start + 999).execute().data or [])
+        for r in batch:
+            tree = str(r.get("tree_id") or "0")
+            path = r.get("path") or ""
+            if tree == "100" or path.startswith("Business & Industrial"):
+                rows.append([str(r["category_id"]), path, tree])
+        if len(batch) < 1000:
+            break
+        start += 1000
+    rows.sort(key=lambda x: x[1])
+    if rows:
+        c["rows"], c["at"] = rows, _t.time()
+    return rows
+
+@app.get("/api/ebay/category-picker-list")
+async def api_category_picker_list(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio
+    rows = await asyncio.to_thread(_category_picker_rows)
+    return {"count": len(rows), "rows": rows}
+
+@app.post("/api/listings/{item_id}/set-category")
+async def api_set_category(item_id: str, request: Request, body: dict = Body(...)):
+    """Sets a category picked by hand. Validates it's an allowed leaf and sets
+    category_mode from its tree (100 -> motors, else industrial) so publish
+    uses the right eBay site -- a bare ebay_category_id edit never did that."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    cat_id = str(body.get("category_id") or "").strip()
+    if not cat_id.isdigit():
+        raise HTTPException(400, "category_id required")
+    import asyncio
+    rows = await asyncio.to_thread(_category_picker_rows)
+    hit = next((r for r in rows if r[0] == cat_id), None)
+    if not hit:
+        raise HTTPException(400, f"{cat_id} is not an allowed leaf category (B&I / eBay Motors)")
+    mode = "motors" if hit[2] == "100" else "industrial"
+    res = (supabase.table("listings")
+           .update({"ebay_category_id": cat_id, "category_mode": mode})
+           .eq("id", item_id).eq("business_id", business_id).execute())
+    if not res.data:
+        raise HTTPException(404, "listing not found")
+    return {"ok": True, "category_id": cat_id, "path": hit[1], "category_mode": mode}
+
 @app.get("/api/ebay/categories-tree")
 async def categories_tree(request: Request, root: str = None):
     """Build a nested tree from the locally synced ebay_categories table, so the
