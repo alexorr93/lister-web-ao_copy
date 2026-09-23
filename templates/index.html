@@ -1635,6 +1635,16 @@ function initTileListeners() {
   // Enter commits immediately instead of waiting for blur
   document.getElementById('tile-grid').addEventListener('keydown', function(e) {
     var el = e.target;
+    // Tab on Lot SKU = same as Enter: take the highlighted suggestion, then let
+    // Tab move focus normally (the focusout handler saves it).
+    if (e.key === 'Tab' && el.classList.contains('tile-lotsku-input')) {
+      var tPanel = document.getElementById('lotsku-dropdown');
+      if (tPanel && tPanel.style.display !== 'none') {
+        var tHl = tPanel.querySelector('.lotsku-option.hl') || tPanel.querySelector('.lotsku-option');
+        if (tHl) el.value = tHl.dataset.val;
+      }
+      return;
+    }
     if (e.key === 'Enter' && fieldNameFor(el)) {
       // REAL BUG FIXED: for the Lot SKU field, the dropdown highlights its
       // top match as you type, but Enter used to ignore that entirely and
