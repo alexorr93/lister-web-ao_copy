@@ -243,6 +243,7 @@ async def start_background_jobs():
     asyncio.create_task(ebay_analytics_sync_worker())
     asyncio.create_task(ebay_sync_check_worker())
     asyncio.create_task(inventory_cache_warm_worker())
+    asyncio.create_task(category_picker_warm_worker())
     asyncio.create_task(shopify_sync_auto_refresh_worker())
     asyncio.create_task(_oneshot_archive_shopify_duplicates())
     asyncio.create_task(browse_search_daily_worker())
@@ -2849,7 +2850,7 @@ async def dashboard(request: Request):
         inline = _json.dumps({"listings": listings, "today_only": (settings or {}).get("INTAKE_TODAY_ONLY_FILTER") == "true"})
     except Exception as e:
         print(f"intake inline build failed, falling back to fetch-on-load: {e}")
-    return templates.TemplateResponse("index.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "intake", "inline_listings_json": inline.replace("</", "<\\/")})
+    return templates.TemplateResponse("index.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "intake", "inline_listings_json": inline.replace("</", "<\\/"), "inline_categories_json": _category_picker_inline_json()})
 
 # ── API: LISTINGS ─────────────────────────────────────────────── #
 
@@ -4190,6 +4191,10 @@ async def _run_category_sync_background(business_id: str, token: str):
     import asyncio, datetime as _dt
     try:
         result = await asyncio.to_thread(sync_ebay_categories, token)
+        try:
+            await asyncio.to_thread(_category_picker_rows, True)
+        except Exception as e:
+            print(f"category picker rebuild after sync failed: {e}")
         _category_sync_job_status[business_id] = {
             "running": False, "result": result,
             "started_at": _category_sync_job_status.get(business_id, {}).get("started_at"),
@@ -4284,12 +4289,18 @@ async def api_auto_category(item_id: str, request: Request, broad: bool = False,
 # Full list of ALLOWED leaf categories (B&I tree 0 + all of eBay Motors tree 100),
 # shipped to the browser once so the picker filters instantly as you type.
 # ~5.7k rows; cached in memory 6h (categories only change on Sync Categories).
-_category_picker_cache = {"at": 0.0, "rows": None}
+_category_picker_cache = {"at": 0.0, "rows": None, "json": None}
 
-def _category_picker_rows():
-    import time as _t
+def _category_picker_inline_json():
+    """Pre-serialized compact list for inlining into the Intake HTML. Never
+    touches the DB -- returns "null" until the warm worker has built it, so the
+    page is never slowed down by this."""
+    return _category_picker_cache.get("json") or "null"
+
+def _category_picker_rows(force: bool = False):
+    import time as _t, json as _json
     c = _category_picker_cache
-    if c["rows"] is not None and _t.time() - c["at"] < 6 * 3600:
+    if not force and c["rows"] is not None and _t.time() - c["at"] < 12 * 3600:
         return c["rows"]
     rows, start = [], 0
     while True:
@@ -4306,8 +4317,29 @@ def _category_picker_rows():
         start += 1000
     rows.sort(key=lambda x: x[1])
     if rows:
+        # compact form: shared parent paths listed once (~240KB vs ~600KB)
+        parents, pidx, packed = [], {}, []
+        for cid, path, tree in rows:
+            parent, _, leaf = path.rpartition(" > ")
+            if parent not in pidx:
+                pidx[parent] = len(parents); parents.append(parent)
+            packed.append([cid, pidx[parent], leaf, tree])
+        c["json"] = _json.dumps({"p": parents, "r": packed}, separators=(",", ":")).replace("</", "<\\/")
         c["rows"], c["at"] = rows, _t.time()
     return rows
+
+async def category_picker_warm_worker():
+    """Builds the category picker list right after boot and rebuilds it every
+    6h, so neither the picker nor the Intake page ever waits on a DB pull."""
+    import asyncio
+    await asyncio.sleep(10)
+    while True:
+        try:
+            rows = await asyncio.to_thread(_category_picker_rows, True)
+            print(f"category_picker_warm_worker: {len(rows)} categories ready")
+        except Exception as e:
+            print(f"category_picker_warm_worker failed: {e}")
+        await asyncio.sleep(6 * 3600)
 
 @app.get("/api/ebay/category-picker-list")
 async def api_category_picker_list(request: Request):

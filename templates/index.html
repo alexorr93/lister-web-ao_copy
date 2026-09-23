@@ -4578,13 +4578,23 @@ function updatePriceByCondition() {
 <div id="cat-picker"><input id="cat-picker-input" type="text" placeholder="Search categories…" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" name="cat-picker-nofill-7q2x"/><div class="cp-list" id="cat-picker-list"></div><div class="cp-meta" id="cat-picker-meta"></div></div>
 <script>
 let catPickerRows = null, catPickerLoading = null;
+// Pre-built on the server and inlined into the page, so the picker is ready
+// instantly. If the server list wasn't warm yet, fetch it in the background
+// right after page load instead of waiting for the first right-click.
+const INLINE_CATEGORIES = {{ inline_categories_json | safe }};
+function catPickerRowFrom(id, path, tree) {
+  return {id: id, path: path, tree: tree, leaf: (path.split(' > ').pop() || ''), lc: (path + ' ' + id).toLowerCase()};
+}
+if (INLINE_CATEGORIES && Array.isArray(INLINE_CATEGORIES.r)) {
+  const P = INLINE_CATEGORIES.p;
+  catPickerRows = INLINE_CATEGORIES.r.map(x => catPickerRowFrom(x[0], (P[x[1]] ? P[x[1]] + ' > ' : '') + x[2], x[3]));
+}
 let catPickerItem = null, catPickerTextEl = null, catPickerMatches = [], catPickerActive = 0;
 function loadCatPickerRows() {
   if (catPickerRows) return Promise.resolve(catPickerRows);
   if (!catPickerLoading) {
     catPickerLoading = fetch('/api/ebay/category-picker-list').then(r => r.json()).then(d => {
-      catPickerRows = (d.rows || []).map(r => ({id: r[0], path: r[1], tree: r[2],
-        leaf: (r[1].split(' > ').pop() || ''), lc: (r[1] + ' ' + r[0]).toLowerCase()}));
+      catPickerRows = (d.rows || []).map(r => catPickerRowFrom(r[0], r[1], r[2]));
       return catPickerRows;
     }).catch(e => { catPickerLoading = null; throw e; });
   }
@@ -4600,6 +4610,7 @@ function openCatPicker(itemId, textEl, x, y) {
   box.style.top = Math.max(8, Math.min(y, window.innerHeight - h - 8)) + 'px';
   inp.value = ''; inp.focus();
   document.getElementById('cat-picker-list').innerHTML = '';
+  if (catPickerRows) { filterCatPicker(); return; }
   document.getElementById('cat-picker-meta').textContent = 'Loading categories…';
   loadCatPickerRows().then(() => filterCatPicker())
     .catch(() => { document.getElementById('cat-picker-meta').textContent = 'Failed to load categories'; });
@@ -4661,6 +4672,7 @@ async function pickCatPickerRow(i) {
     toast('Category set: ' + d.path + ' ✓');
   } catch (e) { toast('Category save failed', 'error'); }
 }
+if (!catPickerRows) setTimeout(() => loadCatPickerRows().catch(() => {}), 1500);
 document.getElementById('cat-picker-input').addEventListener('input', filterCatPicker);
 document.getElementById('cat-picker-input').addEventListener('keydown', function(e) {
   const n = Math.min(catPickerMatches.length, 150);
