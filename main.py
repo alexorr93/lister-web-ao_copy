@@ -247,7 +247,7 @@ async def start_background_jobs():
     asyncio.create_task(shopify_sync_auto_refresh_worker())
     asyncio.create_task(_oneshot_archive_shopify_duplicates())
     asyncio.create_task(browse_search_daily_worker())
-    asyncio.create_task(ebay_listing_backup_worker())
+    # asyncio.create_task(ebay_listing_backup_worker())  # disabled 9/24 per user: stop daily eBay listing backup (eats Trading API quota)
 
 async def browse_search_daily_worker():
     """Runs all saved Browse searches once daily. For each business with saved
