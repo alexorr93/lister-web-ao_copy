@@ -228,7 +228,7 @@ async def start_background_jobs():
     import asyncio
     asyncio.create_task(auto_fill_worker())
     asyncio.create_task(order_sync_worker())
-    asyncio.create_task(shopify_sync_worker())
+    # asyncio.create_task(shopify_sync_worker())  # disabled 9/24 per user: not using Shopify; was eating eBay Trading API quota
     asyncio.create_task(analytics_snapshot_worker())
     asyncio.create_task(analytics_cache_refresh_worker())
     asyncio.create_task(weekly_sales_refresh_worker())
@@ -241,13 +241,13 @@ async def start_background_jobs():
     asyncio.create_task(ebay_best_offers_sync_worker())
     asyncio.create_task(ebay_notification_subscribe_worker())
     asyncio.create_task(ebay_analytics_sync_worker())
-    asyncio.create_task(ebay_sync_check_worker())
+    # asyncio.create_task(ebay_sync_check_worker())  # disabled 9/24 per user: not using Shopify; was eating eBay Trading API quota
     asyncio.create_task(inventory_cache_warm_worker())
     asyncio.create_task(category_picker_warm_worker())
-    asyncio.create_task(shopify_sync_auto_refresh_worker())
+    # asyncio.create_task(shopify_sync_auto_refresh_worker())  # disabled 9/24 per user: not using Shopify; was eating eBay Trading API quota
     asyncio.create_task(_oneshot_archive_shopify_duplicates())
     asyncio.create_task(browse_search_daily_worker())
-    # asyncio.create_task(ebay_listing_backup_worker())  # disabled 9/24 per user: stop daily eBay listing backup (eats Trading API quota)
+    asyncio.create_task(ebay_listing_backup_worker())  # 9/24: ONE-TIME finish of remaining listings, then stops forever (EBAY_BACKUP_DONE)
 
 async def browse_search_daily_worker():
     """Runs all saved Browse searches once daily. For each business with saved
@@ -15616,7 +15616,7 @@ def _ebay_listing_backup_work(business_id: str, max_items: int = None, max_secon
             incomplete.append(iid)
         elif (row.get("backed_up_at") or "") < cutoff:
             stale.append(iid)
-    todo = never + incomplete + stale
+    todo = never + incomplete  # 9/24 per user: one-time copy only, no 30-day re-copy
     now = _t.time()
     todo = [i for i in todo if _ebay_backup_skip_until.get(i, 0) < now]
 
@@ -15678,10 +15678,24 @@ async def ebay_listing_backup_worker():
         backoff = EBAY_BACKUP_CYCLE_SLEEP
         try:
             res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
-            for biz_id in list(set(r["business_id"] for r in (res.data or []))):
+            biz_ids = list(set(r["business_id"] for r in (res.data or [])))
+            # 9/24 per user: one backup copy of every listing, then stop for good.
+            done_res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_BACKUP_DONE").eq("value", "true").execute()
+            done_ids = set(r["business_id"] for r in (done_res.data or []))
+            pending = [b for b in biz_ids if b not in done_ids]
+            if not pending:
+                print("ebay_listing_backup_worker: one-time backup complete for all businesses -- worker stopped")
+                return
+            for biz_id in pending:
                 try:
                     summary = await asyncio.to_thread(_ebay_listing_backup_work, biz_id)
                     print(f"ebay_listing_backup_worker: {summary}")
+                    # queue_* counts are measured at cycle START, so 0 here means the previous
+                    # cycles already copied everything. Incomplete-photo items are retried until
+                    # then but don't block completion (a few have permanently dead photo URLs).
+                    if not summary.get("rate_limited") and summary.get("queue_never", 1) == 0:
+                        save_ebay_setting(biz_id, "EBAY_BACKUP_DONE", "true")
+                        print(f"ebay_listing_backup_worker: business {biz_id} fully backed up -- marked done, no further eBay calls")
                     if summary.get("rate_limited"):
                         backoff = 6 * 3600
                 except Exception as e:
