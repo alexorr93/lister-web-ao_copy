@@ -15473,8 +15473,8 @@ def _kick_inventory_rebuild(business_id: str) -> None:
 # ---------------------------------------------------------------------------
 EBAY_BACKUP_BUCKET = "ebay-listing-backup"
 EBAY_BACKUP_REFRESH_DAYS = 30
-EBAY_BACKUP_BATCH_ITEMS = 40        # per cycle (~1,900/day max; eBay Trading API default is 5,000 calls/day SHARED with all the app's other Trading calls)
-EBAY_BACKUP_DAILY_CAP = 2000        # hard cap of GetItem calls per UTC day from this worker
+EBAY_BACKUP_BATCH_ITEMS = 7         # per cycle; 9/25 per user: slow and steady, ~300/day spread across the day
+EBAY_BACKUP_DAILY_CAP = 300         # 9/25 per user: hard cap of GetItem calls per UTC day (restart-proof, see _ebay_listing_backup_work)
 _ebay_backup_calls_today = {"day": None, "n": 0}
 EBAY_BACKUP_BATCH_SECONDS = 15 * 60  # hard stop per cycle
 EBAY_BACKUP_CYCLE_SLEEP = 30 * 60    # between cycles
@@ -15619,6 +15619,19 @@ def _ebay_listing_backup_work(business_id: str, max_items: int = None, max_secon
     todo = never + incomplete  # 9/24 per user: one-time copy only, no 30-day re-copy
     now = _t.time()
     todo = [i for i in todo if _ebay_backup_skip_until.get(i, 0) < now]
+
+    # Restart-proof daily cap: the in-memory counter resets on every deploy, so also
+    # count items first saved today (UTC) from the DB and take the larger number.
+    _today0 = _dt.datetime.utcnow().date().isoformat()
+    if _ebay_backup_calls_today["day"] != _today0:
+        _ebay_backup_calls_today.update({"day": _today0, "n": 0})
+    try:
+        _saved_today = supabase.table("ebay_listing_backup").select("item_id", count="exact") \
+            .eq("business_id", business_id).gte("first_backed_up_at", _today0 + "T00:00:00+00:00") \
+            .limit(1).execute().count or 0
+        _ebay_backup_calls_today["n"] = max(_ebay_backup_calls_today["n"], _saved_today)
+    except Exception as _e:
+        print(f"ebay backup: could not read today's saved count ({_e}); using in-memory counter")
 
     token = get_ebay_access_token(business_id)
     done = failed = photos = 0
