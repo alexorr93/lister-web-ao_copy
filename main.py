@@ -88,6 +88,22 @@ async def auto_fill_worker():
         # so treat None / "" / "0" all as "not actually categorized yet".
         return cat is None or str(cat).strip() in ("", "0")
 
+    # FIX 9/27: this worker used to (a) run all its blocking Supabase calls directly
+    # on the event loop and (b) call get_ebay_settings() once PER LISTING during the
+    # revalidation sweep (~5,600 DB round trips every ~80s). Together that froze the
+    # entire single-process app for 20-40s every ~2 min, killing phone photo uploads
+    # mid-flight (499s) so items silently never reached the scanner queue. Now: all
+    # work runs in a thread, default category is looked up once per business per
+    # sweep, and items that re-resolve to the same category are not retried again
+    # until their title/mode changes.
+    _no_change_memo: dict = {}  # listing id -> (title, mode, category) it already re-resolved to
+
+    def _defaults_for(biz_id: str, cache: dict) -> tuple:
+        if biz_id not in cache:
+            ind = get_ebay_settings(biz_id).get("EBAY_DEFAULT_CATEGORY_ID", "") or "26261"
+            cache[biz_id] = (str(ind), str(_motors_fallback_id(biz_id)))
+        return cache[biz_id]
+
     def fix_row(row: dict):
         title = row.get("title") or ""
         biz_id = row.get("business_id")
@@ -113,70 +129,83 @@ async def auto_fill_worker():
                 print(f"auto_fill_worker: {row['id']} -> no match in {row_mode} lane, locked to {fallback}")
         except Exception as e:
             print(f"auto_fill_worker category error for {row['id']}: {e}")
+        new_cat = updates.get("ebay_category_id")
+        if new_cat is not None and str(new_cat) == str(row.get("ebay_category_id") or ""):
+            # Re-resolved to what it already had -- remember so the sweep stops
+            # re-running it every cycle forever (4556/4658/5655 were doing this).
+            _no_change_memo[row["id"]] = (title, row.get("category_mode") or "industrial", str(new_cat))
+            updates.pop("ebay_category_id")
         if updates:
             supabase.table("listings").update(updates).eq("id", row["id"]).execute()
 
     cycle = 0
-    while True:
-        try:
-            # REAL BUG FIXED 8/8: 49 orphaned listings rows have business_id IS NULL
-            # and can never be fixed (fix_row always skips them -- no business_id to
-            # look up settings/mode with) but were still being fetched and re-skipped
-            # every single 8s cycle forever, pure waste. Excluded at the query level.
-            res = supabase.table("listings").select("id,title,brand,ebay_category_id,business_id,category_mode")\
-                .neq("status", "archived")\
-                .not_.is_("business_id", "null")\
-                .or_("ebay_category_id.is.null,ebay_category_id.eq.0,ebay_category_id.eq.")\
-                .limit(50).execute()
-            rows = [r for r in (res.data or []) if needs_category(r)]
+
+    def _run_cycle(cycle: int):
+        # REAL BUG FIXED 8/8: 49 orphaned listings rows have business_id IS NULL
+        # and can never be fixed (fix_row always skips them) -- excluded at query level.
+        res = supabase.table("listings").select("id,title,brand,ebay_category_id,business_id,category_mode")\
+            .neq("status", "archived")\
+            .not_.is_("business_id", "null")\
+            .or_("ebay_category_id.is.null,ebay_category_id.eq.0,ebay_category_id.eq.")\
+            .limit(50).execute()
+        rows = [r for r in (res.data or []) if needs_category(r)]
+        if rows:
             print(f"auto_fill_worker: query returned {len(res.data or [])} row(s), {len(rows)} need a category")
-            for row in rows:
-                fix_row(row)
+        for row in rows:
+            fix_row(row)
 
-            # Every ~10th cycle (~80s), also sweep listings that already have SOME
-            # category and re-validate it against Business & Industrial / eBay Motors.
-            cycle += 1
-            if cycle % 10 == 0:
-                all_rows = []
-                start = 0
-                while True:
-                    page = supabase.table("listings").select("id,title,brand,ebay_category_id,business_id,category_mode")\
-                        .neq("status", "archived").not_.is_("business_id", "null")\
-                        .range(start, start + 999).execute().data or []
-                    all_rows.extend(page)
-                    if len(page) < 1000:
-                        break
-                    start += 1000
-                already_categorized = [r for r in all_rows if not needs_category(r)]
-                cat_ids = list({str(r["ebay_category_id"]) for r in already_categorized})
-                path_map = {}
-                for i in range(0, len(cat_ids), 500):
-                    chunk = cat_ids[i:i+500]
-                    pres = supabase.table("ebay_categories").select("category_id,path").in_("category_id", chunk).execute()
-                    for prow in (pres.data or []):
-                        path_map[str(prow["category_id"])] = prow.get("path") or ""
+        # Every ~10th cycle (~80s), also sweep listings that already have SOME
+        # category and re-validate it against Business & Industrial / eBay Motors.
+        if cycle % 10 != 0:
+            return
+        all_rows = []
+        start = 0
+        while True:
+            page = supabase.table("listings").select("id,title,brand,ebay_category_id,business_id,category_mode")\
+                .neq("status", "archived").not_.is_("business_id", "null")\
+                .range(start, start + 999).execute().data or []
+            all_rows.extend(page)
+            if len(page) < 1000:
+                break
+            start += 1000
+        already_categorized = [r for r in all_rows if not needs_category(r)]
+        cat_ids = list({str(r["ebay_category_id"]) for r in already_categorized})
+        path_map = {}
+        for i in range(0, len(cat_ids), 500):
+            chunk = cat_ids[i:i+500]
+            pres = supabase.table("ebay_categories").select("category_id,path").in_("category_id", chunk).execute()
+            for prow in (pres.data or []):
+                path_map[str(prow["category_id"])] = prow.get("path") or ""
 
-                def is_stuck_at_generic_default(row: dict) -> bool:
-                    # The generic fallback (e.g. "Other Business & Industrial") is
-                    # technically INSIDE the allowed root, so _category_is_restricted_ok
-                    # alone will never flag it — meaning an item mantle-scanner (or
-                    # anything else) drops here because no specific match was found
-                    # stays here forever, even after the underlying matching logic
-                    # gets fixed, since nothing ever asks it again. Explicitly retry
-                    # these too, per business, since the fallback ID is configurable.
-                    row_mode = row.get("category_mode") or "industrial"
-                    if row_mode == "motors":
-                        biz_default = _motors_fallback_id(row["business_id"])
-                    else:
-                        biz_default = get_ebay_settings(row["business_id"]).get("EBAY_DEFAULT_CATEGORY_ID", "") or "26261"
-                    return str(row.get("ebay_category_id") or "") == str(biz_default)
+        defaults_cache: dict = {}  # ONE settings lookup per business per sweep, not per row
 
-                misfiled = [r for r in already_categorized
-                            if not _category_is_restricted_ok(r["ebay_category_id"], path_map)
-                            or is_stuck_at_generic_default(r)][:50]
-                print(f"auto_fill_worker: revalidation sweep found {len(misfiled)} listing(s) categorized outside Business & Industrial/eBay Motors, or still stuck at the generic fallback")
-                for row in misfiled:
-                    fix_row(row)
+        def is_stuck_at_generic_default(row: dict) -> bool:
+            # The generic fallback (e.g. "Other Business & Industrial") is inside the
+            # allowed root, so _category_is_restricted_ok alone never flags it --
+            # explicitly retry these too (fallback ID is configurable per business).
+            ind_default, motors_default = _defaults_for(row["business_id"], defaults_cache)
+            biz_default = motors_default if (row.get("category_mode") or "industrial") == "motors" else ind_default
+            return str(row.get("ebay_category_id") or "") == biz_default
+
+        def already_tried(row: dict) -> bool:
+            memo = _no_change_memo.get(row["id"])
+            return memo is not None and memo == (row.get("title") or "",
+                                                 row.get("category_mode") or "industrial",
+                                                 str(row.get("ebay_category_id") or ""))
+
+        misfiled = [r for r in already_categorized
+                    if (not _category_is_restricted_ok(r["ebay_category_id"], path_map)
+                        or is_stuck_at_generic_default(r))
+                    and not already_tried(r)][:50]
+        if misfiled:
+            print(f"auto_fill_worker: revalidation sweep found {len(misfiled)} listing(s) categorized outside Business & Industrial/eBay Motors, or still stuck at the generic fallback")
+        for row in misfiled:
+            fix_row(row)
+
+    while True:
+        cycle += 1
+        try:
+            await asyncio.to_thread(_run_cycle, cycle)
         except Exception as e:
             print(f"auto_fill_worker error: {e}")
         await asyncio.sleep(8)
@@ -8794,6 +8823,7 @@ async def delete_listing_photo(item_id: str, photo_id: str, request: Request):
 
 @app.post("/api/photos/upload")
 async def upload_photo(request: Request):
+    import asyncio
     try:
         form     = await request.form()
         file     = form["file"]
@@ -8814,12 +8844,20 @@ async def upload_photo(request: Request):
         dt = datetime.strptime(batch_ts, "%Y%m%d%H%M%S") if batch_ts else datetime.now()
         fn  = f"{dt.strftime('%d%m%y')}_{dt.strftime('%H%M%S')}_{idx}.jpg"
         print(f"Uploading photo: {fn}, size={len(contents)}, group={gid}")
-        supabase.storage.from_("part-photos").upload(
-            path=fn,
-            file=contents,
-            file_options={"content-type": "image/jpeg", "upsert": "true"}
-        )
-        supabase.table("group_photos").insert({"group_id": gid, "photo_id": fn}).execute()
+        # 9/27: runs off the event loop (was blocking the whole app per photo), and
+        # is idempotent so the Intake page can safely retry a failed/aborted upload
+        # without creating a duplicate group_photos row.
+        def _store():
+            supabase.storage.from_("part-photos").upload(
+                path=fn,
+                file=contents,
+                file_options={"content-type": "image/jpeg", "upsert": "true"}
+            )
+            existing = supabase.table("group_photos").select("id").eq("group_id", gid)\
+                .eq("photo_id", fn).limit(1).execute().data
+            if not existing:
+                supabase.table("group_photos").insert({"group_id": gid, "photo_id": fn}).execute()
+        await asyncio.to_thread(_store)
         return {"ok": True, "photo_id": fn, "url": photo_url(fn, thumb=True)}
     except Exception as e:
         import traceback; traceback.print_exc()

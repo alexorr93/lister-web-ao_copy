@@ -3287,17 +3287,49 @@ let upBackgroundJobs = 0;  // count of item uploads still running in the backgro
 let upBackgroundQueue = [];  // ordered queue -- items process strictly in submission order
 let upQueueRunning = false;
 
+let upFailedJobs = [];  // 9/27: items whose upload/submit failed after retries -- kept (with their photos) for one-tap retry, never silently dropped
+
 function _updateUpBackgroundIndicator() {
   const el = document.getElementById('up-progress-text');
   const prog = document.getElementById('up-progress');
-  if (upBackgroundJobs > 0) {
+  if (upBackgroundJobs > 0 || upFailedJobs.length) {
     prog.style.display = 'block';
     document.getElementById('up-progress-bar').style.width = '100%';
-    el.textContent = `Uploading ${upBackgroundJobs} item(s) in the background — keep scanning, this won't block you`;
+    let html = '';
+    if (upBackgroundJobs > 0) {
+      html += `Uploading ${upBackgroundJobs} item(s) in the background — keep scanning, but <b>don't leave this page</b> until it finishes`;
+    }
+    if (upFailedJobs.length) {
+      html += `${html ? '<br>' : ''}<span style="color:#dc2626;font-weight:700;">⚠️ ${upFailedJobs.length} item(s) failed to upload (item ${upFailedJobs.map(j => j.itemNumber).join(', ')})</span> ` +
+        `<button onclick="retryFailedUploads()" style="margin-left:6px;padding:4px 10px;border-radius:6px;border:none;background:#dc2626;color:#fff;font-weight:700;cursor:pointer;">Retry</button>`;
+    }
+    el.innerHTML = html;
   } else {
     prog.style.display = 'none';
   }
 }
+
+function retryFailedUploads() {
+  const jobs = upFailedJobs;
+  upFailedJobs = [];
+  for (const job of jobs) {
+    upBackgroundQueue.push(job);
+    upBackgroundJobs++;
+  }
+  _updateUpBackgroundIndicator();
+  _runUploadQueue();
+}
+
+// 9/27: warn before leaving/reloading/navigating while an upload is still
+// running or a failed one hasn't been retried -- leaving the page kills the
+// in-browser upload, which is exactly how items used to vanish with no error.
+window.addEventListener('beforeunload', (e) => {
+  if (upBackgroundJobs > 0 || upFailedJobs.length) {
+    e.preventDefault();
+    e.returnValue = 'Photos are still uploading — leaving now will lose them.';
+    return e.returnValue;
+  }
+});
 
 // This is the actual click handler -- it does NOT wait on any network call.
 // It captures this item's photos/settings, immediately clears the screen and
@@ -3339,38 +3371,57 @@ async function _runUploadQueue() {
   upQueueRunning = true;
   while (upBackgroundQueue.length) {
     const job = upBackgroundQueue.shift();
-    await _uploadAndSubmitItemBackground(job.photos, job.groupId, job.condition, job.qty, job.itemNumber);
+    await _uploadAndSubmitItemBackground(job.photos, job.groupId, job.condition, job.qty, job.itemNumber, job.batchTs);
     upBackgroundJobs--;
     _updateUpBackgroundIndicator();
   }
   upQueueRunning = false;
 }
 
-async function _uploadAndSubmitItemBackground(photos, groupId, condition, qty, itemNumber) {
-  try {
-    // Computed once, right as upload actually starts, and shared by every
-    // photo in this batch -- see the matching comment in /api/photos/upload
-    // for why this needs to be shared rather than each request timestamping
-    // itself independently.
+// 9/27: every photo upload and the final submit are retried (with backoff)
+// and must return HTTP OK -- previously a single dropped request (server stall,
+// phone signal blip) aborted the item, and a non-OK response wasn't even checked.
+async function _postWithRetry(doRequest, label, attempts = 4) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const r = await doRequest();
+      if (r && r.ok === false) throw new Error(`${label}: HTTP ${r.status}`);
+      return r;
+    } catch (e) {
+      lastErr = e;
+      if (i < attempts - 1) await new Promise(res => setTimeout(res, [2000, 5000, 10000][i] || 10000));
+    }
+  }
+  throw lastErr;
+}
+
+async function _uploadAndSubmitItemBackground(photos, groupId, condition, qty, itemNumber, batchTs) {
+  // Computed once per item (kept across retries) and shared by every photo --
+  // see the matching comment in /api/photos/upload. Reusing it on retry means a
+  // re-sent photo overwrites the same file instead of creating a duplicate.
+  if (!batchTs) {
     const now = new Date();
     const pad = n => String(n).padStart(2, '0');
-    const batchTs = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-    // Concurrent, not sequential, within THIS item's own photos -- group_id/
-    // submit still correctly wait for every one of these to land before
-    // finalizing the group, so the scanner can never pick it up with photos
-    // still missing.
-    await Promise.all(photos.map((p, i) => {
+    batchTs = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  }
+  try {
+    // Concurrent within this item's photos; submit only after ALL landed.
+    await Promise.all(photos.map((p, i) => _postWithRetry(() => {
       const fd = new FormData();
       fd.append('file', p.file);
       fd.append('group_id', groupId);
       fd.append('index', i);
       fd.append('batch_ts', batchTs);
       return fetch('/api/photos/upload', {method:'POST', body:fd});
-    }));
-    await api('POST', '/api/groups/submit', {group_id: groupId, condition, quantity: qty});
+    }, `photo ${i+1}`)));
+    await _postWithRetry(() => api('POST', '/api/groups/submit', {group_id: groupId, condition, quantity: qty}), 'submit');
     toast(`✅ Item ${itemNumber} sent to scanner`);
+    return true;
   } catch(e) {
-    toast(`❌ Item ${itemNumber} failed to upload: ${e.message}`, 'error');
+    upFailedJobs.push({photos, groupId, condition, qty, itemNumber, batchTs});
+    toast(`❌ Item ${itemNumber} failed to upload — tap Retry above (${e.message})`, 'error');
+    return false;
   }
 }
 
