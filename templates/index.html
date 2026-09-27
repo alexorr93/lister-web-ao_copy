@@ -3286,6 +3286,7 @@ function upQty(d) {
 let upBackgroundJobs = 0;  // count of item uploads still running in the background
 let upBackgroundQueue = [];  // ordered queue -- items process strictly in submission order
 let upQueueRunning = false;
+let _upInFlight = [];  // job currently uploading (so resume never double-queues it)
 
 let upFailedJobs = [];  // 9/27: items whose upload/submit failed after retries -- kept (with their photos) for one-tap retry, never silently dropped
 
@@ -3308,6 +3309,83 @@ function _updateUpBackgroundIndicator() {
     prog.style.display = 'none';
   }
 }
+
+// 9/27 (2): phones (Android Chrome especially) cut off in-flight uploads the
+// moment you switch apps or lock the screen. So every item's photos are saved
+// on the phone (IndexedDB) the instant you tap Done, and only deleted once the
+// server confirms the upload + submit. Anything unfinished resumes on its own
+// when you come back to this tab, reopen the page, or get signal back -- no
+// Retry tap needed, nothing lost even if the tab is killed.
+const _UPDB_NAME = 'lister-pending-uploads';
+function _upDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(_UPDB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('jobs', {keyPath: 'groupId'});
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function _upDbPut(job) {
+  try {
+    const db = await _upDb();
+    await new Promise((res, rej) => {
+      const tx = db.transaction('jobs', 'readwrite');
+      tx.objectStore('jobs').put({
+        groupId: job.groupId, condition: job.condition, qty: job.qty,
+        itemNumber: job.itemNumber, batchTs: job.batchTs || null,
+        files: job.photos.map(p => p.file), savedAt: Date.now(),
+      });
+      tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+    });
+  } catch (e) { console.warn('pending-upload save failed', e); }
+}
+async function _upDbDelete(groupId) {
+  try {
+    const db = await _upDb();
+    await new Promise((res) => {
+      const tx = db.transaction('jobs', 'readwrite');
+      tx.objectStore('jobs').delete(groupId);
+      tx.oncomplete = res; tx.onerror = res;
+    });
+  } catch (e) {}
+}
+async function _upDbAll() {
+  try {
+    const db = await _upDb();
+    return await new Promise((res) => {
+      const tx = db.transaction('jobs', 'readonly');
+      const r = tx.objectStore('jobs').getAll();
+      r.onsuccess = () => res(r.result || []); r.onerror = () => res([]);
+    });
+  } catch (e) { return []; }
+}
+// Picks up items saved by an earlier page load that never finished (tab was
+// killed / page reloaded) and queues them again.
+async function _resumeSavedUploads() {
+  const saved = await _upDbAll();
+  const known = new Set([...upBackgroundQueue, ...upFailedJobs, ..._upInFlight].map(j => j.groupId));
+  let added = 0;
+  for (const j of saved) {
+    if (known.has(j.groupId)) continue;
+    upBackgroundQueue.push({photos: (j.files || []).map(f => ({file: f})), groupId: j.groupId,
+      condition: j.condition, qty: j.qty, itemNumber: j.itemNumber, batchTs: j.batchTs});
+    upBackgroundJobs++; added++;
+  }
+  if (added) {
+    toast(`↻ Resuming ${added} unfinished upload(s)`);
+    _updateUpBackgroundIndicator();
+    _runUploadQueue();
+  }
+}
+function _autoResumeUploads() {
+  if (document.hidden) return;
+  if (upFailedJobs.length) retryFailedUploads();
+  _resumeSavedUploads();
+}
+document.addEventListener('visibilitychange', _autoResumeUploads);
+window.addEventListener('online', _autoResumeUploads);
+window.addEventListener('pageshow', _autoResumeUploads);
+document.addEventListener('DOMContentLoaded', () => setTimeout(_resumeSavedUploads, 1500));
 
 function retryFailedUploads() {
   const jobs = upFailedJobs;
@@ -3354,7 +3432,9 @@ function submitUploadItem() {
   renderUpItems();
   createUpGroup();
 
-  upBackgroundQueue.push({photos: photosForThis, groupId: groupForThis, condition: conditionForThis, qty: qtyForThis, itemNumber});
+  const _job = {photos: photosForThis, groupId: groupForThis, condition: conditionForThis, qty: qtyForThis, itemNumber};
+  upBackgroundQueue.push(_job);
+  _upDbPut(_job);  // saved on the phone until the server confirms it
   upBackgroundJobs++;
   _updateUpBackgroundIndicator();
   _runUploadQueue();
@@ -3371,7 +3451,9 @@ async function _runUploadQueue() {
   upQueueRunning = true;
   while (upBackgroundQueue.length) {
     const job = upBackgroundQueue.shift();
+    _upInFlight = [job];
     await _uploadAndSubmitItemBackground(job.photos, job.groupId, job.condition, job.qty, job.itemNumber, job.batchTs);
+    _upInFlight = [];
     upBackgroundJobs--;
     _updateUpBackgroundIndicator();
   }
@@ -3384,6 +3466,9 @@ async function _runUploadQueue() {
 async function _postWithRetry(doRequest, label, attempts = 4) {
   let lastErr;
   for (let i = 0; i < attempts; i++) {
+    // Don't burn attempts while the page is in the background -- the phone
+    // kills those requests anyway. Wait until you're back on the tab.
+    while (document.hidden) await new Promise(res => setTimeout(res, 1000));
     try {
       const r = await doRequest();
       if (r && r.ok === false) throw new Error(`${label}: HTTP ${r.status}`);
@@ -3404,6 +3489,7 @@ async function _uploadAndSubmitItemBackground(photos, groupId, condition, qty, i
     const now = new Date();
     const pad = n => String(n).padStart(2, '0');
     batchTs = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    _upDbPut({photos, groupId, condition, qty, itemNumber, batchTs});  // pin filenames so a resume overwrites, never duplicates
   }
   try {
     // Concurrent within this item's photos; submit only after ALL landed.
@@ -3416,11 +3502,12 @@ async function _uploadAndSubmitItemBackground(photos, groupId, condition, qty, i
       return fetch('/api/photos/upload', {method:'POST', body:fd});
     }, `photo ${i+1}`)));
     await _postWithRetry(() => api('POST', '/api/groups/submit', {group_id: groupId, condition, quantity: qty}), 'submit');
+    _upDbDelete(groupId);
     toast(`✅ Item ${itemNumber} sent to scanner`);
     return true;
   } catch(e) {
     upFailedJobs.push({photos, groupId, condition, qty, itemNumber, batchTs});
-    toast(`❌ Item ${itemNumber} failed to upload — tap Retry above (${e.message})`, 'error');
+    toast(`❌ Item ${itemNumber} didn't finish — it's saved and will retry automatically (${e.message})`, 'error');
     return false;
   }
 }

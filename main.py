@@ -8724,11 +8724,14 @@ async def submit_group(body: SubmitGroup, request: Request):
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     try:
+        # Only a still-'waiting' group can be submitted -- makes this safe for the
+        # Intake page to repeat (auto-resume after the phone killed an upload)
+        # without ever re-queuing a group that's already pending/scanned.
         supabase.table("listing_groups").update({
             "condition": body.condition,
             "quantity":  body.quantity,
             "status":    "pending",
-        }).eq("id", body.group_id).execute()
+        }).eq("id", body.group_id).eq("status", "waiting").execute()
         return {"ok": True}
     except Exception as e:
         raise HTTPException(500, str(e))
