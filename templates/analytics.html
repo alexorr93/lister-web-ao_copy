@@ -245,6 +245,22 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
     <canvas id="weekly-sales-chart" height="90"></canvas>
     <div class="note" id="weekly-sales-note" style="font-size:10px;color:var(--muted);margin-top:8px;"></div>
   </div>
+
+  <h2 style="margin-top:28px;">Sales by Location</h2>
+  <div class="sub" style="margin-bottom:10px;">Top 10 by gross sales. States shows US states with the Doral, FL freight forwarders broken out as their own line; International shows the real destination country.</div>
+  <div style="display:flex;gap:6px;margin-bottom:10px;">
+    <button class="btn btn-primary" id="geo-view-state" onclick="setGeoView('state')">States</button>
+    <button class="btn" id="geo-view-intl" onclick="setGeoView('intl')">International</button>
+    <span style="width:14px;"></span>
+    <button class="btn" id="geo-range-1m" onclick="setGeoRange('1m')">1 Month</button>
+    <button class="btn" id="geo-range-3m" onclick="setGeoRange('3m')">3 Months</button>
+    <button class="btn" id="geo-range-ytd" onclick="setGeoRange('ytd')">YTD</button>
+    <button class="btn btn-primary" id="geo-range-all" onclick="setGeoRange('all')">All Time</button>
+  </div>
+  <div class="summary-card" style="padding:16px;">
+    <canvas id="geo-sales-chart" height="110"></canvas>
+    <div class="note" id="geo-sales-note" style="font-size:10px;color:var(--muted);margin-top:8px;"></div>
+  </div>
 </div>
 
 <script>
@@ -844,6 +860,81 @@ async function refreshWeeklySales() {
 try { renderWeeklySalesChart(weeklySalesData); } catch (e) { console.error('weekly sales chart failed', e); }
 setInterval(refreshWeeklySales, 20 * 60 * 1000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshWeeklySales(); });
+
+// ---- Sales by Location (top 10 bar chart) ----
+let geoSalesData = {{ inline_geo_sales_json | safe }};
+let geoSalesChart = null;
+let geoView = 'state';
+let geoRange = 'all';
+const GEO_STATES = {AL:'Alabama',AK:'Alaska',AZ:'Arizona',AR:'Arkansas',CA:'California',CO:'Colorado',CT:'Connecticut',DE:'Delaware',DC:'District of Columbia',FL:'Florida',GA:'Georgia',HI:'Hawaii',ID:'Idaho',IL:'Illinois',IN:'Indiana',IA:'Iowa',KS:'Kansas',KY:'Kentucky',LA:'Louisiana',ME:'Maine',MD:'Maryland',MA:'Massachusetts',MI:'Michigan',MN:'Minnesota',MS:'Mississippi',MO:'Missouri',MT:'Montana',NE:'Nebraska',NV:'Nevada',NH:'New Hampshire',NJ:'New Jersey',NM:'New Mexico',NY:'New York',NC:'North Carolina',ND:'North Dakota',OH:'Ohio',OK:'Oklahoma',OR:'Oregon',PA:'Pennsylvania',RI:'Rhode Island',SC:'South Carolina',SD:'South Dakota',TN:'Tennessee',TX:'Texas',UT:'Utah',VT:'Vermont',VA:'Virginia',WA:'Washington',WV:'West Virginia',WI:'Wisconsin',WY:'Wyoming',GU:'Guam',VI:'U.S. Virgin Islands',AA:'Armed Forces (Americas)',AE:'Armed Forces (Europe)',AP:'Armed Forces (Pacific)',DORAL:'South America (Doral, FL forwarders)'};
+let geoRegionNames = null;
+try { geoRegionNames = new Intl.DisplayNames(['en'], { type: 'region' }); } catch (e) {}
+function geoName(view, code) {
+  if (view === 'state') return GEO_STATES[code] || code;
+  try { return (geoRegionNames && geoRegionNames.of(code)) || code; } catch (e) { return code; }
+}
+
+function renderGeoSalesChart() {
+  const canvas = document.getElementById('geo-sales-chart');
+  const note = document.getElementById('geo-sales-note');
+  if (!canvas) return;
+  const cut = weeklyCutoffISO(geoRange);
+  const rows = (geoSalesData && geoSalesData.rows) || [];
+  const tot = {}, cnt = {};
+  let all = 0;
+  rows.forEach(r => {
+    if (r[0] !== geoView) return;
+    if (cut) {
+      const end = new Date(r[2] + 'T00:00:00'); end.setDate(end.getDate() + 6);
+      const pad = n => String(n).padStart(2, '0');
+      const endISO = end.getFullYear() + '-' + pad(end.getMonth() + 1) + '-' + pad(end.getDate());
+      if (endISO < cut) return;
+    }
+    tot[r[1]] = (tot[r[1]] || 0) + r[4];
+    cnt[r[1]] = (cnt[r[1]] || 0) + r[3];
+    all += r[4];
+  });
+  const top = Object.keys(tot).sort((a, b) => tot[b] - tot[a]).slice(0, 10);
+  if (geoSalesChart) geoSalesChart.destroy();
+  geoSalesChart = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: top.map(c => geoName(geoView, c)),
+      datasets: [{ data: top.map(c => Math.round(tot[c])), backgroundColor: '#60a5fa', borderRadius: 3 }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: {
+          label: c => '$' + c.parsed.x.toLocaleString(),
+          afterLabel: c => cnt[top[c.dataIndex]] + ' orders',
+        } },
+      },
+      scales: {
+        x: { beginAtZero: true, ticks: { color: '#64748b', callback: v => '$' + (v >= 1000 ? Math.round(v / 1000) + 'k' : v) }, grid: { color: '#2d3348' } },
+        y: { ticks: { color: '#64748b' }, grid: { display: false } },
+      },
+    },
+  });
+  if (note) {
+    const shown = top.reduce((a, c) => a + tot[c], 0);
+    note.textContent = top.length ? `Top ${top.length} = $${Math.round(shown).toLocaleString()} of $${Math.round(all).toLocaleString()} total in view · eBay orders, gross sales · refreshed weekly` : 'No sales in this range.';
+  }
+}
+
+function setGeoView(v) {
+  geoView = v;
+  ['state', 'intl'].forEach(x => { const b = document.getElementById('geo-view-' + x); if (b) b.className = x === v ? 'btn btn-primary' : 'btn'; });
+  renderGeoSalesChart();
+}
+function setGeoRange(r) {
+  geoRange = r;
+  ['1m', '3m', 'ytd', 'all'].forEach(x => { const b = document.getElementById('geo-range-' + x); if (b) b.className = x === r ? 'btn btn-primary' : 'btn'; });
+  renderGeoSalesChart();
+}
+try { renderGeoSalesChart(); } catch (e) { console.error('geo sales chart failed', e); }
 </script>
 </body>
 </html>

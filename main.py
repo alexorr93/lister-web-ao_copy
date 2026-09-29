@@ -261,6 +261,7 @@ async def start_background_jobs():
     asyncio.create_task(analytics_snapshot_worker())
     asyncio.create_task(analytics_cache_refresh_worker())
     asyncio.create_task(weekly_sales_refresh_worker())
+    asyncio.create_task(geo_sales_refresh_worker())
     asyncio.create_task(backfill_ytd_history_worker())
     asyncio.create_task(auction_archive_worker())
     asyncio.create_task(active_listings_sync_worker())
@@ -1824,6 +1825,64 @@ async def weekly_sales_refresh_worker():
         except Exception as e:
             print(f"weekly_sales_refresh_worker error: {e}")
         await asyncio.sleep(10 * 60)
+
+# ---------------------------------------------------------------------------
+# Geo sales chart (Analytics page, very bottom): top 10 US states / countries.
+# Weekly buckets in Supabase table geo_sales (refresh_geo_sales_rpc()), so the
+# client can apply 1M/3M/YTD/All exactly. Doral forwarder ZIPs are their own
+# "DORAL" line. Recomputed only once a week; on boot we just load the table
+# (recompute only if empty or older than 7 days).
+# ---------------------------------------------------------------------------
+_GEO_SALES_CACHE = {}  # business_id (str) -> payload dict
+
+def _build_geo_sales_payload(business_id) -> dict:
+    import datetime as _dt
+    rows, offset = [], 0
+    while True:
+        res = supabase.table("geo_sales").select(
+            "view,label,week_start,orders,gross,updated_at"
+        ).eq("business_id", str(business_id)).order("week_start").range(offset, offset + 999).execute()
+        batch = res.data or []
+        rows.extend(batch)
+        if len(batch) < 1000:
+            break
+        offset += 1000
+    return {
+        "rows": [[r["view"], r["label"], r["week_start"], int(r.get("orders") or 0), round(float(r.get("gross") or 0), 2)] for r in rows],
+        "built_at": _dt.datetime.utcnow().isoformat() + "Z",
+    }
+
+def _load_geo_sales_all(force: bool = False):
+    import datetime as _dt
+    need = force
+    if not need:
+        res = supabase.table("geo_sales").select("updated_at").order("updated_at", desc=True).limit(1).execute()
+        if not res.data:
+            need = True
+        else:
+            ts = _dt.datetime.fromisoformat(res.data[0]["updated_at"].replace("Z", "+00:00"))
+            need = (_dt.datetime.now(_dt.timezone.utc) - ts) > _dt.timedelta(days=7)
+    if need:
+        supabase.rpc("refresh_geo_sales_rpc", {}).execute()
+    biz_res = supabase.table("businesses").select("id").execute()
+    for b in (biz_res.data or []):
+        try:
+            _GEO_SALES_CACHE[str(b["id"])] = _build_geo_sales_payload(b["id"])
+        except Exception as e:
+            print(f"geo_sales cache: business {b['id']} failed: {e}")
+
+async def geo_sales_refresh_worker():
+    import asyncio
+    await asyncio.sleep(25)
+    first = True
+    while True:
+        try:
+            await asyncio.to_thread(_load_geo_sales_all, not first)
+            print("geo_sales_refresh_worker: ok")
+        except Exception as e:
+            print(f"geo_sales_refresh_worker error: {e}")
+        first = False
+        await asyncio.sleep(7 * 24 * 3600)
 
 def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
     """One row per business per day in analytics_snapshots -- inventory value
@@ -4837,8 +4896,17 @@ async def analytics_page(request: Request):
         except Exception as e:
             print(f"analytics_page: failed to inline weekly sales: {e}")
             weekly_sales = {}
+    geo_sales = _GEO_SALES_CACHE.get(str(business_id))
+    if geo_sales is None:
+        try:
+            import asyncio as _asyncio
+            geo_sales = await _asyncio.to_thread(_build_geo_sales_payload, business_id)
+        except Exception as e:
+            print(f"analytics_page: failed to inline geo sales: {e}")
+            geo_sales = {"rows": []}
     return templates.TemplateResponse("analytics.html", {
         "request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "analytics",
+        "inline_geo_sales_json": _json.dumps(geo_sales),
         "inline_biz_app_1m_json": _json.dumps(inline_biz_app_1m),
         "inline_biz_app_3m_json": _json.dumps(inline_biz_app_3m),
         "inline_weekly_sales_json": _json.dumps(weekly_sales),
@@ -4855,6 +4923,17 @@ async def api_weekly_sales(request: Request):
     if payload is None:
         import asyncio as _asyncio
         payload = await _asyncio.to_thread(_build_weekly_sales_payload, business_id)
+    return payload
+
+@app.get("/api/analytics/geo-sales")
+async def api_geo_sales(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    payload = _GEO_SALES_CACHE.get(str(business_id))
+    if payload is None:
+        import asyncio as _asyncio
+        payload = await _asyncio.to_thread(_build_geo_sales_payload, business_id)
     return payload
 
 @app.get("/acquisitions", response_class=HTMLResponse)
