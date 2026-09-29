@@ -18,3 +18,4 @@ openai>=1.50.0
 Pillow==11.0.0
 resend==2.0.0
 tzdata
+ijson>=3.2

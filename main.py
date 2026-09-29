@@ -4936,6 +4936,139 @@ async def api_geo_sales(request: Request):
         payload = await _asyncio.to_thread(_build_geo_sales_payload, business_id)
     return payload
 
+# ---------------------------------------------------------------------------
+# Google Timeline import (admin only). Streams a Timeline.json export into the
+# private timeline_* tables (RLS on, no policies). Personal data: never render
+# it into any shared page; each row is keyed by the importing business_id.
+# ---------------------------------------------------------------------------
+_TL_STATUS = {}  # business_id -> dict
+
+def _tl_ll(v):
+    import re as _re
+    m = _re.findall(r"-?\d+(?:\.\d+)?", v or "")
+    return (float(m[0]), float(m[1])) if len(m) >= 2 else (None, None)
+
+def _tl_import_worker(business_id: str, path: str):
+    import ijson, os as _os, datetime as _dt
+    st = _TL_STATUS[business_id]
+    bid = str(business_id)
+    def flush(table, rows, conflict):
+        if rows:
+            supabase.table(table).upsert(rows, on_conflict=conflict).execute()
+    try:
+        supabase.table("timeline_import_log").upsert({"business_id": bid, "started_at": _dt.datetime.utcnow().isoformat() + "Z", "finished_at": None, "status": "running"}, on_conflict="business_id").execute()
+        seg_rows, pt_rows = [], []
+        with open(path, "rb") as f:
+            for seq, seg in enumerate(ijson.items(f, "semanticSegments.item", use_float=True)):
+                row = {"business_id": bid, "seq": seq, "start_time": seg.get("startTime"), "end_time": seg.get("endTime")}
+                raw = seg
+                if "visit" in seg:
+                    row["kind"] = "visit"
+                    c = (seg["visit"].get("topCandidate") or {})
+                    row["lat"], row["lng"] = _tl_ll((c.get("placeLocation") or {}).get("latLng"))
+                    row["place_id"] = c.get("placeId"); row["semantic_type"] = c.get("semanticType")
+                elif "activity" in seg:
+                    row["kind"] = "activity"
+                    a = seg["activity"]
+                    row["lat"], row["lng"] = _tl_ll((a.get("start") or {}).get("latLng"))
+                    row["end_lat"], row["end_lng"] = _tl_ll((a.get("end") or {}).get("latLng"))
+                    row["distance_meters"] = a.get("distanceMeters")
+                    row["activity_type"] = (a.get("topCandidate") or {}).get("type")
+                elif "timelinePath" in seg:
+                    row["kind"] = "timelinePath"
+                    for i, p in enumerate(seg["timelinePath"]):
+                        la, lo = _tl_ll(p.get("point"))
+                        if la is None:
+                            continue
+                        pt_rows.append({"business_id": bid, "seg_seq": seq, "idx": i, "time": p.get("time"), "lat": la, "lng": lo})
+                    raw = {k: v for k, v in seg.items() if k != "timelinePath"}
+                    raw["pointCount"] = len(seg["timelinePath"])
+                elif "timelineMemory" in seg:
+                    row["kind"] = "timelineMemory"
+                else:
+                    row["kind"] = "other"
+                row["raw"] = raw
+                seg_rows.append(row)
+                st["segments"] = seq + 1
+                if len(seg_rows) >= 500:
+                    flush("timeline_segments", seg_rows, "business_id,seq"); seg_rows = []
+                if len(pt_rows) >= 1500:
+                    flush("timeline_points", pt_rows, "business_id,seg_seq,idx"); st["points"] += len(pt_rows); pt_rows = []
+            flush("timeline_segments", seg_rows, "business_id,seq")
+            flush("timeline_points", pt_rows, "business_id,seg_seq,idx"); st["points"] += len(pt_rows)
+        raw_rows = []
+        with open(path, "rb") as f:
+            for seq, r in enumerate(ijson.items(f, "rawSignals.item", use_float=True)):
+                kind = next((k for k in ("position", "activityRecord", "wifiScan") if k in r), "other")
+                body = r.get(kind) or {}
+                la, lo = _tl_ll(body.get("LatLng")) if isinstance(body, dict) else (None, None)
+                raw_rows.append({"business_id": bid, "seq": seq, "kind": kind, "time": (body.get("timestamp") or body.get("deliveryTime")) if isinstance(body, dict) else None, "lat": la, "lng": lo, "raw": r})
+                st["raw_signals"] = seq + 1
+                if len(raw_rows) >= 500:
+                    flush("timeline_raw_signals", raw_rows, "business_id,seq"); raw_rows = []
+            flush("timeline_raw_signals", raw_rows, "business_id,seq")
+        with open(path, "rb") as f:
+            for prof in ijson.items(f, "userLocationProfile", use_float=True):
+                supabase.table("timeline_meta").upsert({"business_id": bid, "key": "userLocationProfile", "value": prof}, on_conflict="business_id,key").execute()
+        st["status"] = "done"
+        supabase.table("timeline_import_log").upsert({"business_id": bid, "finished_at": _dt.datetime.utcnow().isoformat() + "Z", "segments": st["segments"], "points": st["points"], "raw_signals": st["raw_signals"], "status": "done"}, on_conflict="business_id").execute()
+    except Exception as e:
+        st["status"] = "error: " + str(e)[:300]
+        print(f"timeline import error: {e}")
+    finally:
+        try:
+            _os.remove(path)
+        except Exception:
+            pass
+
+@app.get("/admin/import-timeline", response_class=HTMLResponse)
+async def import_timeline_page(request: Request):
+    business_id, is_admin = get_business_info(request)
+    if not business_id or not is_admin:
+        raise HTTPException(403, "Admin only")
+    return HTMLResponse("""<!doctype html><meta name=viewport content="width=device-width,initial-scale=1">
+<body style="font-family:system-ui;max-width:560px;margin:40px auto;padding:0 16px;line-height:1.5">
+<h2>Import Google Timeline</h2>
+<p>Pick your Timeline.json export. It is saved to private tables (nobody else can read them) and can be re-run safely.</p>
+<input type=file id=f accept=".json,application/json"> <button id=b>Upload</button>
+<pre id=o style="white-space:pre-wrap"></pre>
+<script>
+const o=document.getElementById('o');
+document.getElementById('b').onclick=async()=>{const f=document.getElementById('f').files[0];if(!f){o.textContent='Choose a file first.';return}
+o.textContent='Uploading '+(f.size/1e6).toFixed(1)+' MB...';const fd=new FormData();fd.append('file',f);
+const r=await fetch('/api/admin/import-timeline',{method:'POST',body:fd});if(!r.ok){o.textContent='Upload failed: '+r.status+' '+await r.text();return}
+const t=setInterval(async()=>{const s=await (await fetch('/api/admin/import-timeline/status')).json();o.textContent=JSON.stringify(s,null,1);if(s.status!=='running')clearInterval(t)},2000)};
+</script></body>""")
+
+@app.post("/api/admin/import-timeline")
+async def import_timeline_upload(request: Request, file: UploadFile = File(...)):
+    business_id, is_admin = get_business_info(request)
+    if not business_id or not is_admin:
+        raise HTTPException(403, "Admin only")
+    import tempfile, threading
+    cur = _TL_STATUS.get(str(business_id))
+    if cur and cur.get("status") == "running":
+        raise HTTPException(409, "An import is already running")
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
+    try:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            tmp.write(chunk)
+    finally:
+        tmp.close()
+    _TL_STATUS[str(business_id)] = {"status": "running", "segments": 0, "points": 0, "raw_signals": 0}
+    threading.Thread(target=_tl_import_worker, args=(str(business_id), tmp.name), daemon=True).start()
+    return {"ok": True}
+
+@app.get("/api/admin/import-timeline/status")
+async def import_timeline_status(request: Request):
+    business_id, is_admin = get_business_info(request)
+    if not business_id or not is_admin:
+        raise HTTPException(403, "Admin only")
+    return _TL_STATUS.get(str(business_id), {"status": "idle"})
+
 @app.get("/acquisitions", response_class=HTMLResponse)
 async def acquisitions_page(request: Request):
     nav = get_nav_context(request)
