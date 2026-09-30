@@ -1,0 +1,32 @@
+name: tmp-fetch-photos
+on:
+  push:
+    branches: [tmp-14r-photos]
+permissions:
+  contents: write
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download photos
+        run: |
+          mkdir -p photos
+          base="https://xpminxpygwlvgybntawo.supabase.co/storage/v1/object/public/part-photos"
+          while read -r p; do
+            [ -z "$p" ] && continue
+            curl -sfL --max-time 60 "$base/$p" -o "photos/$p" || echo "MISS $p"
+          done < photos.txt
+          ls photos | wc -l
+      - name: Shrink
+        run: |
+          pip install -q pillow
+          python3 shrink.py
+          du -sh photos
+      - name: Commit
+        run: |
+          git config user.name "tmp-bot"
+          git config user.email "tmp-bot@users.noreply.github.com"
+          git add photos
+          git commit -m "photos"
+          git push
