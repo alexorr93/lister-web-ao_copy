@@ -3157,6 +3157,201 @@ async def export_ebay_csv(request: Request):
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Lot snapshot PDF — read-only. Builds a shareable PDF of every listing created
+# from one lot code (archived included, nothing is unarchived or changed, and
+# nothing is sent to eBay). Main photo + title + price + short description.
+# ─────────────────────────────────────────────────────────────────────────────
+_PDF_CHAR_MAP = {
+    "‘": "'", "’": "'", "“": '"', "”": '"', "–": "-", "—": "-",
+    "•": "-", " ": " ", "…": "...", "™": "", "®": "", "Ø": "dia.",
+    "″": '"', "′": "'", "°": " deg",
+}
+
+def _pdf_clean(text, limit=None):
+    s = str(text or "")
+    s = re.sub(r"(?is)<(script|style).*?</\1>", " ", s)
+    s = re.sub(r"(?i)<\s*(br|/p|/li|/tr|/h\d|/div)\s*/?>", " ", s)
+    s = re.sub(r"<[^>]+>", " ", s)
+    import html as _html
+    s = _html.unescape(s)
+    for k, v in _PDF_CHAR_MAP.items():
+        s = s.replace(k, v)
+    s = s.encode("latin-1", "ignore").decode("latin-1")
+    s = re.sub(r"\s+", " ", s).strip()
+    if limit and len(s) > limit:
+        s = s[:limit].rsplit(" ", 1)[0].rstrip(",.;: ") + "..."
+    return s
+
+def _pdf_fit_text(page, rect, text, fontname, fontsize, color):
+    """insert_textbox draws nothing if the text overflows, so shrink until it fits."""
+    t = text
+    for _ in range(10):
+        if page.insert_textbox(rect, t, fontsize=fontsize, fontname=fontname, color=color) >= 0:
+            return
+        t = t[: int(len(t) * 0.82)].rsplit(" ", 1)[0].rstrip(",.;: ") + "..."
+        if len(t) < 8:
+            break
+
+def _pdf_thumb(photo_id):
+    """Small JPEG bytes for one photo (public bucket), or None."""
+    import requests
+    from PIL import Image
+    raw = None
+    try:
+        r = requests.get(photo_url(photo_id, thumb=True), timeout=20)
+        if r.status_code == 200 and r.content:
+            raw = r.content
+    except Exception:
+        raw = None
+    if raw is None:
+        try:
+            raw = supabase.storage.from_("part-photos").download(photo_id)
+        except Exception:
+            return None
+    try:
+        im = Image.open(io.BytesIO(raw)).convert("RGB")
+        im.thumbnail((380, 380))
+        out = io.BytesIO()
+        im.save(out, "JPEG", quality=72, optimize=True)
+        return out.getvalue()
+    except Exception:
+        return None
+
+@app.get("/api/export/lot-pdf")
+def export_lot_pdf(request: Request, lot: str, limit: int = 500):
+    import fitz
+    from concurrent.futures import ThreadPoolExecutor
+    business_id = require_auth(request)
+    lot = (lot or "").strip()
+    if not lot:
+        raise HTTPException(400, "lot is required")
+    limit = max(1, min(int(limit or 500), 1500))
+
+    # 1) groups in this lot (archived groups included)
+    group_ids = []
+    off = 0
+    while True:
+        res = (supabase.table("listing_groups").select("id")
+               .eq("business_id", business_id).ilike("lot_sku", lot)
+               .range(off, off + 999).execute())
+        rows = res.data or []
+        group_ids += [r["id"] for r in rows]
+        if len(rows) < 1000:
+            break
+        off += 1000
+    if not group_ids:
+        raise HTTPException(404, f"No lot '{lot}' found for this account")
+
+    # 2) photo ids in those groups
+    photo_ids = []
+    for i in range(0, len(group_ids), 150):
+        chunk = group_ids[i:i + 150]
+        res = supabase.table("group_photos").select("photo_id").in_("group_id", chunk).execute()
+        photo_ids += [r["photo_id"] for r in (res.data or []) if r.get("photo_id")]
+
+    # 3) listings whose main photo is in the lot, any status
+    cols = "id,title,description,price,price_used,quantity,condition,photo_id,status,brand,model,mpn,created_at,ebay_status,ebay_item_id"
+    listings, seen = [], set()
+    for i in range(0, len(photo_ids), 100):
+        chunk = photo_ids[i:i + 100]
+        res = (supabase.table("listings").select(cols)
+               .eq("business_id", business_id).in_("photo_id", chunk).execute())
+        for r in (res.data or []):
+            if r["id"] in seen:
+                continue
+            seen.add(r["id"])
+            # Keep only listings that were actually published (archived after going
+            # live is fine) or are still live in intake/ready. Archived/deleted
+            # drafts that never published are left out.
+            st = str(r.get("status") or "").lower()
+            published = bool(r.get("ebay_item_id")) or str(r.get("ebay_status") or "").lower() == "published"
+            if st in ("archived", "deleted") and not published:
+                continue
+            if st == "deleted":
+                continue
+            listings.append(r)
+    if not listings:
+        raise HTTPException(404, f"Lot '{lot}' has no listings")
+
+    def _price(l):
+        try:
+            return float(l.get("price") or l.get("price_used") or 0)
+        except Exception:
+            return 0.0
+    listings.sort(key=_price, reverse=True)
+    listings = listings[:limit]
+
+    # 4) main photos, in parallel
+    pids = [str(l.get("photo_id") or "") for l in listings]
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        thumbs = list(ex.map(lambda p: _pdf_thumb(p) if p else None, pids))
+
+    # 5) build the PDF
+    doc = fitz.open()
+    W, H, M = 612, 792, 36
+    total_value = sum(_price(l) for l in listings)
+    dates = sorted(str(l.get("created_at") or "")[:10] for l in listings if l.get("created_at"))
+    span = f"{dates[0]} to {dates[-1]}" if dates else ""
+
+    cover = doc.new_page(width=W, height=H)
+    cover.insert_text((M, 250), "Lot " + lot.upper(), fontsize=40, fontname="hebo", color=(0.1, 0.1, 0.1))
+    cover.insert_text((M, 290), "Listings created from one auction lot", fontsize=16, fontname="helv", color=(0.3, 0.3, 0.3))
+    cover.draw_line((M, 312), (W - M, 312), color=(0.8, 0.8, 0.8), width=0.8)
+    cover.insert_text((M, 352), f"{len(listings):,} listings", fontsize=22, fontname="hebo", color=(0.1, 0.1, 0.1))
+    if span:
+        cover.insert_text((M, 382), f"Created {span}", fontsize=14, fontname="helv", color=(0.4, 0.4, 0.4))
+    cover.insert_text((M, H - 60), "Precision Industrial", fontsize=12, fontname="hebo", color=(0.2, 0.2, 0.2))
+    cover.insert_text((M, H - 44), "Snapshot of listing drafts. Photos, titles, and prices as created in Lister.", fontsize=9, fontname="helv", color=(0.5, 0.5, 0.5))
+
+    CARD_H, GAP, PER_PAGE = 168, 8, 4
+    page = None
+    for idx, l in enumerate(listings):
+        slot = idx % PER_PAGE
+        if slot == 0:
+            page = doc.new_page(width=W, height=H)
+        y = M + slot * (CARD_H + GAP)
+        card = fitz.Rect(M, y, W - M, y + CARD_H)
+        page.draw_rect(card, color=(0.86, 0.86, 0.86), width=0.6)
+        img_rect = fitz.Rect(M + 8, y + 9, M + 158, y + 159)
+        if thumbs[idx]:
+            page.insert_image(img_rect, stream=thumbs[idx], keep_proportion=True)
+        else:
+            page.draw_rect(img_rect, color=(0.9, 0.9, 0.9), fill=(0.95, 0.95, 0.95), width=0.4)
+            page.insert_text((img_rect.x0 + 52, img_rect.y0 + 78), "No photo", fontsize=9, fontname="helv", color=(0.5, 0.5, 0.5))
+        tx0, tx1 = M + 172, W - M - 8
+        title = _pdf_clean(l.get("title"), 110) or "(untitled)"
+        _pdf_fit_text(page, fitz.Rect(tx0, y + 8, tx1, y + 48), title, "hebo", 11.5, (0.08, 0.08, 0.08))
+        cond = _pdf_clean(l.get("condition"), 30)
+        qty = int(l.get("quantity") or 1)
+        pr = _price(l)
+        line = (f"${pr:,.2f}" if pr else "Price n/a") + (f"   |   {cond}" if cond else "") + f"   |   Qty {qty}"
+        page.insert_text((tx0, y + 62), line, fontsize=11, fontname="hebo", color=(0.05, 0.4, 0.15))
+        meta = "   ".join(x for x in [
+            ("Brand: " + _pdf_clean(l.get("brand"), 28)) if l.get("brand") else "",
+            ("Model: " + _pdf_clean(l.get("model"), 28)) if l.get("model") else "",
+            ("MPN: " + _pdf_clean(l.get("mpn"), 28)) if l.get("mpn") else "",
+        ] if x)
+        if meta:
+            _pdf_fit_text(page, fitz.Rect(tx0, y + 67, tx1, y + 89), meta, "helv", 8.5, (0.35, 0.35, 0.35))
+        desc = _pdf_clean(l.get("description"), 420)
+        if desc:
+            _pdf_fit_text(page, fitz.Rect(tx0, y + 93, tx1, y + 163), desc, "helv", 8.5, (0.3, 0.3, 0.3))
+
+    n = doc.page_count
+    for i in range(1, n):
+        doc[i].insert_text((M, H - 16), f"Precision Industrial  |  Lot {lot.upper()}", fontsize=8, fontname="helv", color=(0.55, 0.55, 0.55))
+        doc[i].insert_text((W - M - 52, H - 16), f"Page {i} of {n - 1}", fontsize=8, fontname="helv", color=(0.55, 0.55, 0.55))
+
+    pdf_bytes = doc.tobytes(garbage=3, deflate=True)
+    doc.close()
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="lot_{re.sub(r"[^A-Za-z0-9_-]", "", lot)}_listings.pdf"'},
+    )
+
+
 @app.get("/api/photos/view/{photo_id}")
 async def view_photo(photo_id: str, t: str = ""):
     from fastapi.responses import Response
