@@ -3228,76 +3228,58 @@ def export_lot_pdf(request: Request, lot: str, limit: int = 500):
         raise HTTPException(400, "lot is required")
     limit = max(1, min(int(limit or 500), 1500))
 
-    # 1) every listing whose SKU belongs to this lot (e.g. UT1-...), any status.
-    #    SKU is the source of truth for lot membership — photo groups can be shared
-    #    across lots, so they are not used here.
-    cols = ("id,title,description,price,price_used,quantity,condition,photo_id,status,"
-            "brand,model,mpn,created_at,ebay_status,ebay_item_id,ebay_sku,sku")
-    raw, off = [], 0
+    # 1) groups in this lot (archived groups included)
+    group_ids = []
+    off = 0
     while True:
-        res = (supabase.table("listings").select(cols)
-               .eq("business_id", business_id)
-               .ilike("ebay_sku", f"{lot}-%")
+        res = (supabase.table("listing_groups").select("id")
+               .eq("business_id", business_id).ilike("lot_sku", lot)
                .range(off, off + 999).execute())
         rows = res.data or []
-        raw += rows
+        group_ids += [r["id"] for r in rows]
         if len(rows) < 1000:
             break
         off += 1000
+    if not group_ids:
+        raise HTTPException(404, f"No lot '{lot}' found for this account")
 
-    # 2) keep what was actually published (archived after going live is fine) or
-    #    is still sitting in intake/ready. Archived/deleted drafts that never
-    #    published are left out.
-    listings = []
-    for r in raw:
-        st = str(r.get("status") or "").lower()
-        published = bool(r.get("ebay_item_id")) or str(r.get("ebay_status") or "").lower() == "published"
-        if st == "deleted" or (st == "archived" and not published):
-            continue
-        listings.append(r)
+    # 2) photo ids in those groups
+    photo_ids = []
+    for i in range(0, len(group_ids), 150):
+        chunk = group_ids[i:i + 150]
+        res = supabase.table("group_photos").select("photo_id").in_("group_id", chunk).execute()
+        photo_ids += [r["photo_id"] for r in (res.data or []) if r.get("photo_id")]
+
+    # 3) listings whose main photo is in the lot, any status
+    cols = "id,title,description,price,price_used,quantity,condition,photo_id,status,brand,model,mpn,created_at,ebay_status,ebay_item_id"
+    listings, seen = [], set()
+    for i in range(0, len(photo_ids), 100):
+        chunk = photo_ids[i:i + 100]
+        res = (supabase.table("listings").select(cols)
+               .eq("business_id", business_id).in_("photo_id", chunk).execute())
+        for r in (res.data or []):
+            if r["id"] in seen:
+                continue
+            seen.add(r["id"])
+            # Keep only listings that were actually published (archived after going
+            # live is fine) or are still live in intake/ready. Archived/deleted
+            # drafts that never published are left out.
+            st = str(r.get("status") or "").lower()
+            published = bool(r.get("ebay_item_id")) or str(r.get("ebay_status") or "").lower() == "published"
+            if st in ("archived", "deleted") and not published:
+                continue
+            if st == "deleted":
+                continue
+            listings.append(r)
     if not listings:
-        raise HTTPException(404, f"No published or in-progress listings found for lot '{lot}'")
-
-    # 3) sales for this lot, matched by SKU (fallback: eBay item id)
-    sold_by_sku, sold_by_item = {}, {}
-    try:
-        off = 0
-        while True:
-            res = (supabase.table("orders").select("sku,legacy_item_id,quantity,gross_revenue,refund")
-                   .eq("business_id", str(business_id)).ilike("sku", f"{lot}-%")
-                   .range(off, off + 999).execute())
-            rows = res.data or []
-            for o in rows:
-                units = int(o.get("quantity") or 1)
-                gross = float(o.get("gross_revenue") or 0) - float(o.get("refund") or 0)
-                for key, bucket in ((str(o.get("sku") or "").upper(), sold_by_sku),
-                                    (str(o.get("legacy_item_id") or ""), sold_by_item)):
-                    if key:
-                        u, g = bucket.get(key, (0, 0.0))
-                        bucket[key] = (u + units, g + gross)
-            if len(rows) < 1000:
-                break
-            off += 1000
-    except Exception as e:
-        print(f"[lot-pdf] orders lookup failed: {e}")
-
-    def _sold(l):
-        s = sold_by_sku.get(str(l.get("ebay_sku") or "").upper())
-        if not s and l.get("ebay_item_id"):
-            s = sold_by_item.get(str(l.get("ebay_item_id")))
-        return s  # (units, gross) or None
+        raise HTTPException(404, f"Lot '{lot}' has no listings")
 
     def _price(l):
         try:
             return float(l.get("price") or l.get("price_used") or 0)
         except Exception:
             return 0.0
-    def _qty(l):
-        try:
-            return max(int(l.get("quantity") or 1), 1)
-        except Exception:
-            return 1
-    listings.sort(key=lambda l: (_sold(l) is None, -_price(l)))
+    listings.sort(key=_price, reverse=True)
     listings = listings[:limit]
 
     # 4) main photos, in parallel
@@ -3308,26 +3290,19 @@ def export_lot_pdf(request: Request, lot: str, limit: int = 500):
     # 5) build the PDF
     doc = fitz.open()
     W, H, M = 612, 792, 36
-    GREEN = (0.09, 0.55, 0.24)
-    listed_value = sum(_price(l) * _qty(l) for l in listings)
-    sold_rows = [s for s in (_sold(l) for l in listings) if s]
-    sold_count = len(sold_rows)
-    sold_gross = sum(g for _, g in sold_rows)
+    total_value = sum(_price(l) for l in listings)
     dates = sorted(str(l.get("created_at") or "")[:10] for l in listings if l.get("created_at"))
     span = f"{dates[0]} to {dates[-1]}" if dates else ""
 
     cover = doc.new_page(width=W, height=H)
-    cover.insert_text((M, 230), "Lot " + lot.upper(), fontsize=40, fontname="hebo", color=(0.1, 0.1, 0.1))
-    cover.insert_text((M, 270), "Listings created from one auction lot", fontsize=16, fontname="helv", color=(0.3, 0.3, 0.3))
-    cover.draw_line((M, 292), (W - M, 292), color=(0.8, 0.8, 0.8), width=0.8)
-    cover.insert_text((M, 332), f"{len(listings):,} listings", fontsize=22, fontname="hebo", color=(0.1, 0.1, 0.1))
-    cover.insert_text((M, 362), f"${listed_value:,.0f} listed value", fontsize=16, fontname="helv", color=(0.2, 0.2, 0.2))
-    if sold_count:
-        cover.insert_text((M, 390), f"{sold_count:,} sold so far  |  ${sold_gross:,.0f} in sales", fontsize=16, fontname="hebo", color=GREEN)
+    cover.insert_text((M, 250), "Lot " + lot.upper(), fontsize=40, fontname="hebo", color=(0.1, 0.1, 0.1))
+    cover.insert_text((M, 290), "Listings created from one auction lot", fontsize=16, fontname="helv", color=(0.3, 0.3, 0.3))
+    cover.draw_line((M, 312), (W - M, 312), color=(0.8, 0.8, 0.8), width=0.8)
+    cover.insert_text((M, 352), f"{len(listings):,} listings", fontsize=22, fontname="hebo", color=(0.1, 0.1, 0.1))
     if span:
-        cover.insert_text((M, 416), f"Created {span}", fontsize=12, fontname="helv", color=(0.4, 0.4, 0.4))
+        cover.insert_text((M, 382), f"Created {span}", fontsize=14, fontname="helv", color=(0.4, 0.4, 0.4))
     cover.insert_text((M, H - 60), "Precision Industrial", fontsize=12, fontname="hebo", color=(0.2, 0.2, 0.2))
-    cover.insert_text((M, H - 44), "Snapshot of listings as created in Lister. Listed value = asking price x quantity.", fontsize=9, fontname="helv", color=(0.5, 0.5, 0.5))
+    cover.insert_text((M, H - 44), "Snapshot of listing drafts. Photos, titles, and prices as created in Lister.", fontsize=9, fontname="helv", color=(0.5, 0.5, 0.5))
 
     CARD_H, GAP, PER_PAGE = 168, 8, 4
     page = None
@@ -3340,41 +3315,18 @@ def export_lot_pdf(request: Request, lot: str, limit: int = 500):
         page.draw_rect(card, color=(0.86, 0.86, 0.86), width=0.6)
         img_rect = fitz.Rect(M + 8, y + 9, M + 158, y + 159)
         if thumbs[idx]:
-            # fit the photo inside the box ourselves so the SOLD badge can sit on
-            # the photo's real corner instead of floating in the letterbox
-            try:
-                from PIL import Image
-                iw, ih = Image.open(io.BytesIO(thumbs[idx])).size
-                sc = min(img_rect.width / iw, img_rect.height / ih)
-                dw, dh = iw * sc, ih * sc
-                img_rect = fitz.Rect(img_rect.x0 + (img_rect.width - dw) / 2, img_rect.y0 + (img_rect.height - dh) / 2,
-                                     img_rect.x0 + (img_rect.width + dw) / 2, img_rect.y0 + (img_rect.height + dh) / 2)
-            except Exception:
-                pass
             page.insert_image(img_rect, stream=thumbs[idx], keep_proportion=True)
         else:
             page.draw_rect(img_rect, color=(0.9, 0.9, 0.9), fill=(0.95, 0.95, 0.95), width=0.4)
             page.insert_text((img_rect.x0 + 52, img_rect.y0 + 78), "No photo", fontsize=9, fontname="helv", color=(0.5, 0.5, 0.5))
-        sold = _sold(l)
-        if sold:
-            # green "$ SOLD" badge over the photo's top-left corner
-            badge_txt = "$ SOLD"
-            bw = fitz.get_text_length(badge_txt, fontname="hebo", fontsize=11) + 16
-            badge = fitz.Rect(img_rect.x0 + 4, img_rect.y0 + 4, img_rect.x0 + 4 + bw, img_rect.y0 + 24)
-            page.draw_rect(badge, color=GREEN, fill=GREEN, width=0, radius=0.3)
-            page.insert_text((badge.x0 + 8, badge.y0 + 14.5), badge_txt, fontsize=11, fontname="hebo", color=(1, 1, 1))
-            page.draw_rect(card, color=GREEN, width=1.4)
         tx0, tx1 = M + 172, W - M - 8
         title = _pdf_clean(l.get("title"), 110) or "(untitled)"
         _pdf_fit_text(page, fitz.Rect(tx0, y + 8, tx1, y + 48), title, "hebo", 11.5, (0.08, 0.08, 0.08))
         cond = _pdf_clean(l.get("condition"), 30)
-        qty = _qty(l)
+        qty = int(l.get("quantity") or 1)
         pr = _price(l)
         line = (f"${pr:,.2f}" if pr else "Price n/a") + (f"   |   {cond}" if cond else "") + f"   |   Qty {qty}"
-        if sold:
-            units, gross = sold
-            line += f"   |   Sold {units}" + (f" for ${gross:,.2f}" if gross > 0 else "")
-        page.insert_text((tx0, y + 62), line, fontsize=10.5, fontname="hebo", color=GREEN if sold else (0.12, 0.12, 0.12))
+        page.insert_text((tx0, y + 62), line, fontsize=11, fontname="hebo", color=(0.05, 0.4, 0.15))
         meta = "   ".join(x for x in [
             ("Brand: " + _pdf_clean(l.get("brand"), 28)) if l.get("brand") else "",
             ("Model: " + _pdf_clean(l.get("model"), 28)) if l.get("model") else "",
