@@ -8792,6 +8792,373 @@ async def archive_page(request: Request):
         return RedirectResponse("/login", status_code=302)
     return templates.TemplateResponse("archive.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "archive"})
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Archive → Export PDF: a shareable snapshot of everything one lot turned into.
+# Read-only — nothing is unarchived, changed, or sent to eBay.
+#   * Lot membership comes from the listing SKU prefix (UT1-...), never from
+#     photo groups (groups are shared across lots).
+#   * Kept: published listings (even if archived since) + intake/ready items.
+#     Dropped: deleted, and archived drafts that never published.
+#   * Sold = orders matched by eBay item id. SKUs are bin codes shared by many
+#     listings, so matching sales by SKU would mark whole bins as sold.
+# ─────────────────────────────────────────────────────────────────────────────
+_LOTPDF_CHAR_MAP = {
+    "‘": "'", "’": "'", "“": '"', "”": '"', "–": "-", "—": "-",
+    "•": "-", " ": " ", "…": "...", "™": "", "®": "", "″": '"',
+    "′": "'", "°": " deg", "″": '"',
+}
+
+def _lotpdf_clean(text, limit=None):
+    import html as _html
+    s = re.sub(r"<[^>]+>", " ", str(text or ""))
+    s = _html.unescape(s)
+    for k, v in _LOTPDF_CHAR_MAP.items():
+        s = s.replace(k, v)
+    s = s.encode("latin-1", "ignore").decode("latin-1")
+    s = re.sub(r"\s+", " ", s).strip()
+    if limit and len(s) > limit:
+        s = s[:limit].rsplit(" ", 1)[0] + "..."
+    return s
+
+def _lotpdf_fit(page, rect, text, font, size, color):
+    """insert_textbox draws nothing on overflow, so shrink the text until it fits."""
+    t = text
+    for _ in range(10):
+        if page.insert_textbox(rect, t, fontsize=size, fontname=font, color=color) >= 0:
+            return
+        t = t[: int(len(t) * 0.82)].rsplit(" ", 1)[0].rstrip(",.;: ") + "..."
+        if len(t) < 8:
+            return
+
+def _lotpdf_thumb(photo_id):
+    import requests
+    from PIL import Image, ImageOps
+    raw = None
+    try:
+        r = requests.get(photo_url(photo_id, thumb=True), timeout=25)
+        if r.status_code == 200 and r.content:
+            raw = r.content
+    except Exception:
+        raw = None
+    if raw is None:
+        try:
+            raw = supabase.storage.from_("part-photos").download(photo_id)
+        except Exception:
+            return None
+    try:
+        im = ImageOps.exif_transpose(Image.open(io.BytesIO(raw))).convert("RGB")
+        im.thumbnail((520, 520))
+        out = io.BytesIO()
+        im.save(out, "JPEG", quality=74, optimize=True)
+        return out.getvalue()
+    except Exception:
+        return None
+
+def _lotpdf_listing_ok(r):
+    st = str(r.get("status") or "").lower()
+    published = bool(r.get("ebay_item_id")) or str(r.get("ebay_status") or "").lower() == "published"
+    if st == "deleted":
+        return False
+    if st == "archived" and not published:
+        return False
+    return True
+
+def _lotpdf_upload_to_png(data: bytes, name: str):
+    """Uploaded screenshot/PDF → PNG bytes (first page for PDFs)."""
+    import fitz
+    from PIL import Image, ImageOps
+    if name.lower().endswith(".pdf") or data[:4] == b"%PDF":
+        doc = fitz.open(stream=data, filetype="pdf")
+        if doc.page_count == 0:
+            return None
+        png = doc[0].get_pixmap(dpi=110).tobytes("png")
+        doc.close()
+        return png
+    try:
+        im = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
+        im.thumbnail((1400, 1800))
+        out = io.BytesIO()
+        im.save(out, "PNG")
+        return out.getvalue()
+    except Exception:
+        return None
+
+
+@app.get("/api/archive/lot-codes")
+def archive_lot_codes(request: Request):
+    """Lot codes for the Export PDF dropdown: SKU prefixes with eligible
+    listings, newest first, plus price/date from acquisitions when on file."""
+    business_id = require_auth(request)
+    lots, off = {}, 0
+    while True:
+        res = (supabase.table("listings").select("ebay_sku,status,ebay_item_id,ebay_status,created_at")
+               .eq("business_id", business_id).neq("ebay_sku", "")
+               .not_.is_("ebay_sku", "null").range(off, off + 999).execute())
+        rows = res.data or []
+        for r in rows:
+            sku = str(r.get("ebay_sku") or "").strip()
+            if "-" not in sku or not _lotpdf_listing_ok(r):
+                continue
+            code = sku.split("-", 1)[0].strip().upper()
+            if not code:
+                continue
+            d = lots.setdefault(code, {"code": code, "count": 0, "last": ""})
+            d["count"] += 1
+            d["last"] = max(d["last"], str(r.get("created_at") or ""))
+        if len(rows) < 1000:
+            break
+        off += 1000
+    try:
+        acq = supabase.table("acquisitions").select("sku,name,date,cost").eq("business_id", business_id).execute().data or []
+    except Exception:
+        acq = []
+    acq_by = {str(a.get("sku") or "").strip().upper(): a for a in acq if a.get("sku")}
+    out = []
+    for code, d in lots.items():
+        if d["count"] < 2:
+            continue
+        a = acq_by.get(code) or {}
+        out.append({"code": code, "count": d["count"], "last": d["last"][:10],
+                    "name": a.get("name") or "", "date": a.get("date") or "", "cost": a.get("cost")})
+    out.sort(key=lambda x: x["last"], reverse=True)
+    return {"lots": out}
+
+
+@app.post("/api/archive/lot-pdf/extract")
+async def archive_lot_pdf_extract(request: Request, files: List[UploadFile] = File(...)):
+    """Reads the uploaded BidSpotter screenshot(s)/invoice PDF(s) and pulls out
+    what was paid and when, to pre-fill the Export PDF form (user can edit)."""
+    import base64, json as _json
+    business_id = require_auth(request)
+    imgs = []
+    for f in files[:4]:
+        png = _lotpdf_upload_to_png(await f.read(), f.filename or "")
+        if png:
+            imgs.append(png)
+    if not imgs:
+        raise HTTPException(400, "Couldn't read the uploaded file(s)")
+    openai_key = get_openai_key(business_id)
+    if not openai_key:
+        return {"ok": False, "error": "No OpenAI key set — type the price and date in."}
+    from openai import OpenAI
+    client = OpenAI(api_key=openai_key)
+    prompt = """These are screenshots or invoices from an auction (usually BidSpotter) for a lot I won.
+Return ONLY a JSON object, no other text:
+{"total_paid": number or null,   // total I paid incl. buyer's premium/fees/tax if an invoice shows it, otherwise the closing/winning bid
+ "closing_bid": number or null,
+ "date": "YYYY-MM-DD" or null,   // auction close / invoice / purchase date if visible
+ "lot_title": string or null,
+ "auctioneer": string or null,
+ "location": string or null}
+Only use values you can actually see. Never guess a date."""
+    content = [{"type": "input_text", "text": prompt}]
+    for png in imgs:
+        content.append({"type": "input_image", "detail": "high",
+                        "image_url": "data:image/png;base64," + base64.b64encode(png).decode()})
+    try:
+        resp = client.responses.create(model="gpt-5.5", input=[{"role": "user", "content": content}])
+        text = (resp.output_text or "").strip()
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        data = _json.loads(text.strip())
+        return {"ok": True, **{k: data.get(k) for k in ("total_paid", "closing_bid", "date", "lot_title", "auctioneer", "location")}}
+    except Exception as e:
+        return {"ok": False, "error": f"Couldn't read the screenshot ({e}) — type the price and date in."}
+
+
+@app.post("/api/archive/lot-pdf")
+async def archive_lot_pdf(request: Request,
+                          lot: str = Form(...),
+                          price_paid: str = Form(""),
+                          purchase_date: str = Form(""),
+                          unlisted: str = Form(""),
+                          files: Optional[List[UploadFile]] = File(None)):
+    business_id = require_auth(request)
+    cover_png = None
+    for f in (files or [])[:1]:
+        cover_png = _lotpdf_upload_to_png(await f.read(), f.filename or "")
+    import asyncio
+    pdf = await asyncio.to_thread(_build_lot_pdf, business_id, lot, price_paid, purchase_date, unlisted, cover_png)
+    safe = re.sub(r"[^A-Za-z0-9_-]", "", lot.upper()) or "lot"
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="Lot_{safe}_Listings.pdf"'})
+
+
+def _build_lot_pdf(business_id, lot, price_paid, purchase_date, unlisted, cover_png):
+    import fitz
+    from concurrent.futures import ThreadPoolExecutor
+    from PIL import Image
+    lot = (lot or "").strip().upper()
+    if not lot:
+        raise HTTPException(400, "Pick a lot")
+
+    # 1) listings in the lot (by SKU prefix), filtered to published + in-progress
+    cols = ("id,title,price,price_used,quantity,condition,photo_id,status,brand,mpn,"
+            "created_at,ebay_status,ebay_item_id,ebay_sku")
+    raw, off = [], 0
+    while True:
+        res = (supabase.table("listings").select(cols).eq("business_id", business_id)
+               .ilike("ebay_sku", f"{lot}-%").range(off, off + 999).execute())
+        rows = res.data or []
+        raw += rows
+        if len(rows) < 1000:
+            break
+        off += 1000
+    listings = [r for r in raw if _lotpdf_listing_ok(r)]
+    if not listings:
+        raise HTTPException(404, f"No published or in-progress listings for lot {lot}")
+
+    # 2) sales, matched per listing by eBay item id
+    sold = {}
+    item_ids = [str(l["ebay_item_id"]) for l in listings if l.get("ebay_item_id")]
+    for i in range(0, len(item_ids), 150):
+        try:
+            res = (supabase.table("orders").select("legacy_item_id,quantity,gross_revenue,refund")
+                   .eq("business_id", str(business_id)).in_("legacy_item_id", item_ids[i:i + 150]).execute())
+        except Exception as e:
+            print(f"[lot-pdf] orders lookup failed: {e}")
+            continue
+        for o in res.data or []:
+            k = str(o.get("legacy_item_id") or "")
+            u, g = sold.get(k, (0, 0.0))
+            sold[k] = (u + int(o.get("quantity") or 1),
+                       g + float(o.get("gross_revenue") or 0) - float(o.get("refund") or 0))
+
+    def _price(l):
+        try:
+            return float(l.get("price") or l.get("price_used") or 0)
+        except Exception:
+            return 0.0
+    def _qty(l):
+        try:
+            return max(int(l.get("quantity") or 1), 1)
+        except Exception:
+            return 1
+    def _sold(l):
+        return sold.get(str(l.get("ebay_item_id") or "")) if l.get("ebay_item_id") else None
+    listings.sort(key=lambda l: (_sold(l) is None, -_price(l)))
+
+    # 3) main photos
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        thumbs = list(ex.map(lambda p: _lotpdf_thumb(p) if p else None,
+                             [str(l.get("photo_id") or "") for l in listings]))
+
+    # 4) cover
+    GREEN = (0.09, 0.55, 0.24)
+    W, H, M = 612, 792, 36
+    doc = fitz.open()
+    listed = sum(_price(l) * _qty(l) for l in listings)
+    sold_rows = [s for s in (_sold(l) for l in listings) if s]
+    sold_gross = sum(g for _, g in sold_rows)
+    dates = sorted(str(l.get("created_at") or "")[:10] for l in listings if l.get("created_at"))
+
+    c = doc.new_page(width=W, height=H)
+    if cover_png:
+        box = fitz.Rect(W - M - 262, M, W - M, M + 260)
+        try:
+            iw, ih = Image.open(io.BytesIO(cover_png)).size
+            sc = min(box.width / iw, box.height / ih)
+            box = fitz.Rect(box.x1 - iw * sc, box.y0, box.x1, box.y0 + ih * sc)
+        except Exception:
+            pass
+        c.insert_image(box, stream=cover_png, keep_proportion=True)
+        c.draw_rect(box, color=(0.8, 0.8, 0.8), width=0.6)
+    c.insert_text((M, 290), f"Lot {lot}", fontsize=40, fontname="hebo", color=(0.1, 0.1, 0.1))
+    c.insert_text((M, 322), "Listings created from one auction lot", fontsize=16, fontname="helv", color=(0.3, 0.3, 0.3))
+    c.draw_line((M, 342), (W - M, 342), color=(0.8, 0.8, 0.8), width=0.8)
+    y = 382
+    c.insert_text((M, y), f"{len(listings):,} listings", fontsize=22, fontname="hebo", color=(0.1, 0.1, 0.1)); y += 30
+    c.insert_text((M, y), f"${listed:,.0f} listed value", fontsize=16, fontname="helv", color=(0.2, 0.2, 0.2)); y += 28
+    if sold_rows:
+        c.insert_text((M, y), f"{len(sold_rows)} sold so far  |  ${sold_gross:,.0f} in sales", fontsize=16, fontname="hebo", color=GREEN); y += 28
+    un = (unlisted or "").strip()
+    if un:
+        try:
+            un_txt = f"${float(un.replace('$', '').replace(',', '')):,.0f} unlisted"
+        except ValueError:
+            un_txt = _lotpdf_clean(un, 60)
+        c.insert_text((M, y), un_txt, fontsize=16, fontname="helv", color=(0.2, 0.2, 0.2)); y += 26
+    if dates:
+        c.insert_text((M, y), f"Listings created {dates[0]} to {dates[-1]}", fontsize=12, fontname="helv", color=(0.4, 0.4, 0.4))
+
+    pp = (price_paid or "").strip()
+    pd = (purchase_date or "").strip()
+    if pp or pd:
+        rx = W - M - 170
+        c.draw_rect(fitz.Rect(rx - 14, 360, W - M, 478), color=(0.85, 0.85, 0.85), fill=(0.97, 0.97, 0.97), width=0.6)
+        if pp:
+            try:
+                pp_txt = f"${float(pp.replace('$', '').replace(',', '')):,.2f}".replace(".00", "")
+            except ValueError:
+                pp_txt = _lotpdf_clean(pp, 14)
+            c.insert_text((rx, 382), "PRICE PAID", fontsize=9, fontname="hebo", color=(0.45, 0.45, 0.45))
+            c.insert_text((rx, 416), pp_txt, fontsize=30 if len(pp_txt) <= 7 else 22, fontname="hebo", color=(0.1, 0.1, 0.1))
+        if pd:
+            try:
+                pd_txt = datetime.strptime(pd[:10], "%Y-%m-%d").strftime("%b %-d, %Y")
+            except ValueError:
+                pd_txt = _lotpdf_clean(pd, 20)
+            c.insert_text((rx, 444), "PURCHASED", fontsize=9, fontname="hebo", color=(0.45, 0.45, 0.45))
+            c.insert_text((rx, 464), pd_txt, fontsize=15, fontname="helv", color=(0.1, 0.1, 0.1))
+    c.insert_text((M, H - 60), "Precision Industrial", fontsize=12, fontname="hebo", color=(0.2, 0.2, 0.2))
+    c.insert_text((M, H - 44), "Listed value = asking price x quantity. Sales matched to each eBay listing.", fontsize=9, fontname="helv", color=(0.5, 0.5, 0.5))
+
+    # 5) listing cards, 5 per page
+    CH, GAP, PER = 132, 8, 5
+    page = None
+    for i, l in enumerate(listings):
+        s = i % PER
+        if s == 0:
+            page = doc.new_page(width=W, height=H)
+        y = M + s * (CH + GAP)
+        so = _sold(l)
+        page.draw_rect(fitz.Rect(M, y, W - M, y + CH), color=GREEN if so else (0.86, 0.86, 0.86), width=1.4 if so else 0.6)
+        box = fitz.Rect(M + 8, y + 8, M + 124, y + CH - 8)
+        if thumbs[i]:
+            try:
+                iw, ih = Image.open(io.BytesIO(thumbs[i])).size
+                sc = min(box.width / iw, box.height / ih)
+                box = fitz.Rect(box.x0 + (box.width - iw * sc) / 2, box.y0 + (box.height - ih * sc) / 2,
+                                box.x0 + (box.width + iw * sc) / 2, box.y0 + (box.height + ih * sc) / 2)
+            except Exception:
+                pass
+            page.insert_image(box, stream=thumbs[i], keep_proportion=True)
+        else:
+            page.draw_rect(box, color=(0.9, 0.9, 0.9), fill=(0.96, 0.96, 0.96), width=0.4)
+            page.insert_text((box.x0 + 30, box.y0 + 62), "No photo", fontsize=9, fontname="helv", color=(0.6, 0.6, 0.6))
+        if so:
+            bt = "$ SOLD"
+            bw = fitz.get_text_length(bt, fontname="hebo", fontsize=11) + 16
+            b = fitz.Rect(box.x0 + 4, box.y0 + 4, box.x0 + 4 + bw, box.y0 + 24)
+            page.draw_rect(b, color=GREEN, fill=GREEN, width=0, radius=0.3)
+            page.insert_text((b.x0 + 8, b.y0 + 14.5), bt, fontsize=11, fontname="hebo", color=(1, 1, 1))
+        tx0, tx1 = M + 138, W - M - 8
+        _lotpdf_fit(page, fitz.Rect(tx0, y + 8, tx1, y + 48), _lotpdf_clean(l.get("title"), 110) or "(untitled)", "hebo", 11.5, (0.08, 0.08, 0.08))
+        pr = _price(l)
+        cond = _lotpdf_clean(l.get("condition"), 20).title()
+        line = (f"${pr:,.2f}" if pr else "Price n/a") + (f"   |   {cond}" if cond else "") + f"   |   Qty {_qty(l)}"
+        if so:
+            line += f"   |   Sold {so[0]}" + (f" for ${so[1]:,.2f}" if so[1] > 0 else "")
+        page.insert_text((tx0, y + 64), line, fontsize=10.5, fontname="hebo", color=GREEN if so else (0.12, 0.12, 0.12))
+        brand = _lotpdf_clean(l.get("brand"), 30)
+        meta = "   ".join(v for v in [
+            ("Brand: " + brand) if brand and brand.lower() not in ("new", "used", "anti") else "",
+            ("MPN: " + _lotpdf_clean(l.get("mpn"), 30)) if l.get("mpn") else ""] if v)
+        if meta:
+            _lotpdf_fit(page, fitz.Rect(tx0, y + 70, tx1, y + 92), meta, "helv", 9, (0.35, 0.35, 0.35))
+
+    n = doc.page_count
+    for i in range(1, n):
+        doc[i].insert_text((M, H - 16), f"Precision Industrial  |  Lot {lot}", fontsize=8, fontname="helv", color=(0.55, 0.55, 0.55))
+        doc[i].insert_text((W - M - 52, H - 16), f"Page {i} of {n - 1}", fontsize=8, fontname="helv", color=(0.55, 0.55, 0.55))
+    out = doc.tobytes(garbage=3, deflate=True)
+    doc.close()
+    return out
+
+
 @app.get("/ready", response_class=HTMLResponse)
 async def ready_page(request: Request):
     nav = get_nav_context(request)

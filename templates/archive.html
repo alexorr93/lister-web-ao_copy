@@ -87,6 +87,7 @@ h1 { font-size: 20px; margin-bottom: 4px; }
     <div class="spacer"></div>
     <button class="btn btn-green" id="restore-selected-btn" style="display:none;" onclick="restoreSelected()">♻️ Restore Selected</button>
     <button class="btn btn-green" onclick="restoreAll()">♻️ Restore All</button>
+    <button class="btn" onclick="openLotPdf()">📄 Export PDF</button>
   </div>
   <div class="grid" id="grid"></div>
   <div class="empty" id="empty" style="display:none;">
@@ -95,6 +96,115 @@ h1 { font-size: 20px; margin-bottom: 4px; }
   </div>
 </div>
 <div class="toast" id="toast"></div>
+
+<!-- Export PDF: one lot → shareable snapshot of every listing it became -->
+<style>
+.lp-back { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 200; padding: 16px; }
+.lp-back.show { display: flex; }
+.lp-modal { background: var(--card); border: 1px solid var(--border); border-radius: 14px; width: 100%; max-width: 440px; max-height: 92vh; overflow-y: auto; padding: 18px; }
+.lp-modal h2 { font-size: 17px; margin-bottom: 4px; }
+.lp-modal .hint { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+.lp-field { margin-bottom: 12px; }
+.lp-field label { display: block; font-size: 12px; font-weight: 700; color: #cbd5e1; margin-bottom: 5px; }
+.lp-field select, .lp-field input[type=text], .lp-field input[type=date] { width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border); background: #161925; color: var(--text); font-size: 14px; font-family: inherit; }
+.lp-field input[type=file] { width: 100%; font-size: 13px; color: var(--muted); }
+.lp-row { display: flex; gap: 10px; }
+.lp-row .lp-field { flex: 1; }
+.lp-status { font-size: 12px; color: var(--muted); min-height: 16px; margin-bottom: 10px; }
+.lp-status.err { color: #f87171; }
+.lp-actions { display: flex; gap: 8px; justify-content: flex-end; }
+</style>
+<div class="lp-back" id="lp-back" onclick="if(event.target===this)closeLotPdf()">
+  <div class="lp-modal">
+    <h2>📄 Export lot PDF</h2>
+    <p class="hint">Every published listing from one lot, with its main photo and SOLD badges. Read-only — nothing is restored or sent to eBay.</p>
+    <div class="lp-field">
+      <label for="lp-lot">Lot SKU</label>
+      <select id="lp-lot" onchange="lotPicked()"><option value="">Loading lots…</option></select>
+    </div>
+    <div class="lp-field">
+      <label for="lp-files">BidSpotter screenshot or invoice PDF (optional)</label>
+      <input type="file" id="lp-files" accept="image/*,application/pdf" multiple onchange="readScreenshot()">
+    </div>
+    <div class="lp-row">
+      <div class="lp-field"><label for="lp-price">Price paid</label><input type="text" id="lp-price" inputmode="decimal" placeholder="$"></div>
+      <div class="lp-field"><label for="lp-date">Purchased</label><input type="date" id="lp-date"></div>
+    </div>
+    <div class="lp-field"><label for="lp-unlisted">Unlisted value (optional)</label><input type="text" id="lp-unlisted" inputmode="decimal" placeholder="e.g. 4000"></div>
+    <div class="lp-status" id="lp-status"></div>
+    <div class="lp-actions">
+      <button class="btn" onclick="closeLotPdf()">Cancel</button>
+      <button class="btn btn-green" id="lp-go" onclick="buildLotPdf()">Build PDF</button>
+    </div>
+  </div>
+</div>
+<script>
+let lpLots = [];
+function lpStatus(msg, err) { const s = document.getElementById('lp-status'); s.textContent = msg || ''; s.className = 'lp-status' + (err ? ' err' : ''); }
+async function openLotPdf() {
+  document.getElementById('lp-back').classList.add('show');
+  lpStatus('');
+  if (lpLots.length) return;
+  try {
+    const r = await fetch('/api/archive/lot-codes');
+    const d = await r.json();
+    lpLots = d.lots || [];
+    const sel = document.getElementById('lp-lot');
+    sel.innerHTML = '<option value="">Choose a lot…</option>' + lpLots.map(l =>
+      `<option value="${l.code}">${l.code} — ${l.count} listings${l.name ? ' — ' + l.name : ''}</option>`).join('');
+  } catch (e) { lpStatus('Could not load lots: ' + e, true); }
+}
+function closeLotPdf() { document.getElementById('lp-back').classList.remove('show'); }
+function lotPicked() {
+  const l = lpLots.find(x => x.code === document.getElementById('lp-lot').value);
+  if (!l) return;
+  // pre-fill from your Lots record; a screenshot upload overrides these
+  if (l.cost !== null && l.cost !== undefined && l.cost !== '') document.getElementById('lp-price').value = Number(l.cost);
+  if (l.date) document.getElementById('lp-date').value = String(l.date).slice(0, 10);
+}
+async function readScreenshot() {
+  const files = document.getElementById('lp-files').files;
+  if (!files.length) return;
+  lpStatus('Reading screenshot…');
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f);
+  try {
+    const r = await fetch('/api/archive/lot-pdf/extract', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!d.ok) { lpStatus(d.error || 'Could not read it — type the price and date in.', true); return; }
+    const paid = d.total_paid ?? d.closing_bid;
+    if (paid !== null && paid !== undefined) document.getElementById('lp-price').value = paid;
+    if (d.date) document.getElementById('lp-date').value = d.date;
+    lpStatus('Filled from screenshot' + (d.date ? '' : ' (no date on it — kept the date from your Lots record)') + '. Check and edit if needed.');
+  } catch (e) { lpStatus('Could not read it — type the price and date in.', true); }
+}
+async function buildLotPdf() {
+  const lot = document.getElementById('lp-lot').value;
+  if (!lot) { lpStatus('Pick a lot first.', true); return; }
+  const btn = document.getElementById('lp-go');
+  btn.disabled = true; btn.textContent = 'Building…';
+  lpStatus('Building the PDF with photos — bigger lots take up to a minute.');
+  const fd = new FormData();
+  fd.append('lot', lot);
+  fd.append('price_paid', document.getElementById('lp-price').value);
+  fd.append('purchase_date', document.getElementById('lp-date').value);
+  fd.append('unlisted', document.getElementById('lp-unlisted').value);
+  const files = document.getElementById('lp-files').files;
+  if (files.length) fd.append('files', files[0]);
+  try {
+    const r = await fetch('/api/archive/lot-pdf', { method: 'POST', body: fd });
+    if (!r.ok) { const t = await r.text(); throw new Error(t.slice(0, 200)); }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `Lot_${lot}_Listings.pdf`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    lpStatus('Done — check your downloads.');
+  } catch (e) { lpStatus('PDF failed: ' + e.message, true); }
+  btn.disabled = false; btn.textContent = 'Build PDF';
+}
+</script>
 
 <script>
 let items = [];
