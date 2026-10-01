@@ -143,8 +143,8 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
     </div>
     <div class="sub-card">
       <div class="num" id="t-green-revenue" style="color:#22c55e;">—</div>
-      <div class="label">Green Revenue (sales from profitable lots)</div>
-      <div class="note" style="font-size:10px;color:var(--muted);margin-top:4px;" id="t-green-revenue-note">Includes cash from green lots too, from their became-profitable date onward</div>
+      <div class="label">Green Revenue (net, from profitable lots)</div>
+      <div class="note" style="font-size:10px;color:var(--muted);margin-top:4px;" id="t-green-revenue-note">After fees &amp; refunds, plus cash from green lots, from their became-profitable date onward</div>
     </div>
     <div class="sub-card">
       <div class="num" id="t-orders">—</div>
@@ -187,7 +187,7 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
   <div class="sub" style="margin-bottom:10px;">Computed the same way as the live figure above, for each month directly — full historical depth, not limited to daily-tracking history.</div>
   <div class="quick-range" style="margin-bottom:10px;">
     <button class="btn btn-primary" id="green-mode-btn-dollar" onclick="setGreenChartMode('dollar')">$ Green Revenue</button>
-    <button class="btn" id="green-mode-btn-pct" onclick="setGreenChartMode('pct')">% of Revenue</button>
+    <button class="btn" id="green-mode-btn-pct" onclick="setGreenChartMode('pct')">% of Net Sales</button>
   </div>
   <div class="summary-card" style="padding:16px;">
     <canvas id="green-trend-chart" height="90"></canvas>
@@ -325,7 +325,7 @@ async function loadAnalytics() {
     document.getElementById('t-revenue').textContent = fmtMoney(data.totals_in_range.revenue);
     document.getElementById('t-green-revenue').textContent = fmtMoney(data.green_revenue);
     document.getElementById('t-green-revenue-note').textContent =
-      data.green_revenue_pct !== null ? `${Math.round(data.green_revenue_pct)}% of Revenue this period — track this over time, not the dollar figure, to see if your portfolio's actually maturing` : 'Includes cash from green lots too, from their became-profitable date onward';
+      data.green_revenue_pct !== null ? `${Math.round(data.green_revenue_pct)}% of Net Sales this period — track this over time, not the dollar figure, to see if your portfolio's actually maturing` : 'After fees &amp; refunds, plus cash from green lots, from their became-profitable date onward';
     document.getElementById('t-net-sales').textContent = fmtMoney(data.totals_in_range.net_sales);
     document.getElementById('t-net-sales-note').textContent =
       `Post-fee revenue + $${Math.round(data.totals_in_range.cash).toLocaleString()} cash in this range`;
@@ -449,7 +449,7 @@ function renderGreenTrendChart(data) {
     data: {
       labels: data.months,
       datasets: [{
-        label: isPct ? 'Green Revenue (% of Revenue)' : 'Green Revenue',
+        label: isPct ? 'Green Revenue (% of Net Sales)' : 'Green Revenue',
         data: isPct ? data.green_revenue_pct_by_month : data.green_revenue_by_month,
         backgroundColor: 'rgba(34,197,94,0.5)',
         borderColor: '#22c55e',
@@ -460,7 +460,7 @@ function renderGreenTrendChart(data) {
       responsive: true,
       plugins: {
         legend: { labels: { color: '#f1f5f9' } },
-        tooltip: { callbacks: { label: ctx => isPct ? `Green Revenue: ${Math.round(ctx.parsed.y)}% of Revenue` : `Green Revenue: $${Math.round(ctx.parsed.y).toLocaleString()}` } },
+        tooltip: { callbacks: { label: ctx => isPct ? `Green Revenue: ${Math.round(ctx.parsed.y)}% of Net Sales` : `Green Revenue: $${Math.round(ctx.parsed.y).toLocaleString()}` } },
       },
       scales: {
         x: { ticks: { color: '#64748b' }, grid: { color: '#2d3348' } },

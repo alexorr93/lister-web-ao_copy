@@ -8111,7 +8111,7 @@ def _compute_green_revenue(business_id: str, start_date_str: str, end_date_str: 
     if not green_lots:
         return 0.0
 
-    order_rows = _fetch_all_for_business(business_id, "orders", "sku,gross_revenue,refund,order_date")
+    order_rows = _fetch_all_for_business(business_id, "orders", "sku,final_net,order_date")
     order_rows = [r for r in order_rows if start_date_str <= (r.get("order_date") or "") <= end_date_str]
     total = 0.0
     for r in order_rows:
@@ -8127,7 +8127,10 @@ def _compute_green_revenue(business_id: str, start_date_str: str, end_date_str: 
             # REAL BUG FIXED: same refund-not-subtracted gap as the other
             # gross_revenue sums in this file -- a refunded order on a green
             # lot was counting its full pre-refund amount as Green Revenue.
-            total += (float(r.get("gross_revenue") or 0) - float(r.get("refund") or 0))
+            # NET per user's 10/1 instruction: Green Revenue now = final_net (after
+            # eBay/Shopify fees, refunds already netted at sync) -- same basis as
+            # Net Sales, not gross.
+            total += float(r.get("final_net") or 0)
 
     min_date_by_sku = {sku: ts[:10] for sku, ts in green_lots.items()}
     total += _compute_cash_in_range(business_id, start_date_str, end_date_str, only_skus=set(green_lots.keys()), min_date_by_sku=min_date_by_sku)
@@ -8146,7 +8149,7 @@ async def api_green_revenue_breakdown(request: Request, start: str, end: str):
     lot_rows = _fetch_all_for_business(business_id, "acquisitions", "sku,profit,became_green_at")
     green_lots = {r["sku"]: r["became_green_at"] for r in lot_rows if r.get("sku") and (r.get("profit") or 0) > 1 and r.get("became_green_at")}
 
-    order_rows = _fetch_all_for_business(business_id, "orders", "sku,gross_revenue,refund,order_date")
+    order_rows = _fetch_all_for_business(business_id, "orders", "sku,final_net,order_date")
     order_rows = [r for r in order_rows if start <= (r.get("order_date") or "") <= end]
 
     by_lot = {}
@@ -8162,7 +8165,7 @@ async def api_green_revenue_breakdown(request: Request, start: str, end: str):
             # REAL BUG FIXED: matches the fix in _compute_green_revenue -- this
             # breakdown was summing pre-refund gross_revenue, which wouldn't
             # even have added up to the (correctly refund-netted) total above.
-            entry["revenue"] += (float(r.get("gross_revenue") or 0) - float(r.get("refund") or 0))
+            entry["revenue"] += float(r.get("final_net") or 0)
             entry["order_count"] += 1
 
     rows = sorted(by_lot.values(), key=lambda x: x["revenue"], reverse=True)
@@ -8240,7 +8243,6 @@ def _compute_analytics_payload(business_id: str, start_date_str: str, end_date_s
     # the same sales), so it can look like it "just follows Revenue" even when
     # the underlying share of green lots is climbing. This is the number that
     # actually tests that.
-    green_revenue_pct = round(green_revenue / total_revenue * 100, 1) if total_revenue else None
 
     # --- Avg Order Price: renamed from "Average Sale Price" and redefined per
     # explicit request -- Revenue (including cash, same figure as the Revenue
@@ -8258,6 +8260,8 @@ def _compute_analytics_payload(business_id: str, start_date_str: str, end_date_s
     # added, since fees come out first. Now uses final_net (the same authoritative
     # post-fee figure Financials already uses) as the base.
     net_sales = round(total_net_revenue + cash_in_range, 2)
+    # Green Revenue is net-of-fees now, so its share is measured against Net Sales
+    green_revenue_pct = round(green_revenue / net_sales * 100, 1) if net_sales else None
 
     # --- Inventory Growth Multiple: % change in Inventory Snapshot Value across the
     # selected range, using the shared _nearest_inventory_snapshot lookup (the
@@ -8463,10 +8467,10 @@ def _compute_monthly_trend_payload(business_id: str, start_str: str, end_str: st
             y += 1
 
     acq_rows = _fetch_all_for_business(business_id, "acquisitions", "cost,date")
-    order_rows = _fetch_all_for_business(business_id, "orders", "gross_revenue,refund,order_date")
+    order_rows = _fetch_all_for_business(business_id, "orders", "gross_revenue,refund,final_net,order_date")
     snapshot_rows = _fetch_all_for_business(business_id, "analytics_snapshots", "snapshot_date,inventory_snapshot_value")
 
-    spend_by_month, sales_by_month = {}, {}
+    spend_by_month, sales_by_month, net_by_month = {}, {}, {}
     for r in acq_rows:
         d = (r.get("date") or "")[:7]
         if d in all_months:
@@ -8480,6 +8484,7 @@ def _compute_monthly_trend_payload(business_id: str, start_str: str, end_str: st
             # snapshot fix above for how this was actually found/confirmed
             # (eBay's own Aug 2026 report, $1,715.14 in refunds that month).
             sales_by_month[d] = sales_by_month.get(d, 0) + (r.get("gross_revenue") or 0) - (r.get("refund") or 0)
+            net_by_month[d] = net_by_month.get(d, 0) + (r.get("final_net") or 0)
 
     inventory_spend = [round(spend_by_month.get(m, 0), 2) for m in all_months]
 
@@ -8500,12 +8505,13 @@ def _compute_monthly_trend_payload(business_id: str, start_str: str, end_str: st
     # Sales now includes cash in that same month, matching Revenue on the main
     # Analytics view -- both eBay and Shopify order revenue were already
     # captured here (no platform filter anywhere in these queries, confirmed).
-    sales = []
+    sales, net_sales_by_month = [], []
     for month in all_months:
         month_start, month_end = _month_bounds(month)
         order_total = sales_by_month.get(month, 0)
         cash_total = _compute_cash_in_range(business_id, month_start, month_end)
         sales.append(round(order_total + cash_total, 2))
+        net_sales_by_month.append(round(net_by_month.get(month, 0) + cash_total, 2))
 
     # Green Revenue: one real call per month, same math as the live endpoint.
     green_revenue_by_month = []
@@ -8587,7 +8593,7 @@ def _compute_monthly_trend_payload(business_id: str, start_str: str, end_str: st
     # dataset swap.
     green_revenue_pct_by_month = [
         round((g / sa * 100), 1) if sa else None
-        for g, sa in zip(green_revenue_by_month, sales)
+        for g, sa in zip(green_revenue_by_month, net_sales_by_month)
     ]
 
     # --- YTD Business Appreciation (current year only) ---
