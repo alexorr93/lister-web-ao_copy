@@ -3929,7 +3929,7 @@ def get_scan_provider(business_id: str) -> str:
     not per-batch' toggle the user asked for."""
     settings = get_ebay_settings(business_id)
     provider = (settings.get("SCAN_PROVIDER") or "gemini").strip().lower()
-    return provider if provider in ("gemini", "openai") else "gemini"
+    return provider if provider in ("gemini", "openai", "claude") else "gemini"
 
 def sync_ebay_categories(token: str) -> dict:
     """Download eBay's full category tree(s) and save them locally — EVERY node, not

@@ -442,6 +442,7 @@ select.field-input { background: #fff; color: #0f172a; }
         <div style="display:flex;gap:10px;margin-top:6px;" title="Which model reads your photos and writes the listing (title, part #, price). Permanent — stays where you set it until you change it, same as Category/Pricing Mode.">
           <button class="btn scanprovider-btn" data-scanprovider="gemini" onclick="setScanProvider('gemini')" style="flex:1;">Gemini</button>
           <button class="btn scanprovider-btn" data-scanprovider="openai" onclick="setScanProvider('openai')" style="flex:1;">ChatGPT</button>
+          <button class="btn scanprovider-btn" data-scanprovider="claude" onclick="setScanProvider('claude')" style="flex:1;">Claude</button>
         </div>
       </div>
       <button class="btn btn-green" style="width:100%;font-size:16px;padding:14px;" onclick="startUploadBatch()">🚀 Start Batch</button>
@@ -1087,17 +1088,17 @@ let scanProvider = 'gemini';
 async function loadScanProviderSetting() {
   try {
     const s = await api('GET', '/api/settings');
-    scanProvider = (s.SCAN_PROVIDER === 'openai') ? 'openai' : 'gemini';
+    scanProvider = (s.SCAN_PROVIDER === 'openai' || s.SCAN_PROVIDER === 'claude') ? s.SCAN_PROVIDER : 'gemini';
   } catch (e) { scanProvider = 'gemini'; }
   syncScanProviderUI();
 }
 async function setScanProvider(p) {
-  if (p !== 'gemini' && p !== 'openai') p = 'gemini';
+  if (p !== 'gemini' && p !== 'openai' && p !== 'claude') p = 'gemini';
   scanProvider = p;
   syncScanProviderUI();
   try {
     await api('POST', '/api/settings', {key: 'SCAN_PROVIDER', value: p});
-    toast(`Scan Provider now ${p === 'openai' ? 'ChatGPT' : 'Gemini'} ✓`);
+    toast(`Scan Provider now ${p === 'openai' ? 'ChatGPT' : (p === 'claude' ? 'Claude' : 'Gemini')} ✓`);
   } catch (e) {
     alert('Could not save Scan Provider — try again.');
   }
