@@ -2077,6 +2077,24 @@ EBAY_OAUTH_SCOPES = (
     "https://api.ebay.com/oauth/api_scope/sell.analytics.readonly"
 )
 
+def _order_sku_resolver(business_id: str):
+    """One shared rule (10/4, per user: "any correction should be in all places"):
+    an order's effective SKU is the listing's manual sku_override when one exists
+    -- matched by eBay item id, then by alphanumeric-normalized title, same as
+    Financials -- else the order's own sku. Returns fn(order_row) -> sku."""
+    import re as _re
+    norm = lambda t: _re.sub(r'[^a-z0-9]', '', (t or '').lower())
+    rows = _fetch_all_for_business(business_id, "ebay_listing_status", "item_id,title,sku_override")
+    by_id = {str(r["item_id"]): r["sku_override"] for r in rows if r.get("item_id") and r.get("sku_override")}
+    by_title = {norm(r["title"]): r["sku_override"] for r in rows if r.get("title") and r.get("sku_override")}
+    def resolve(o):
+        lid = o.get("legacy_item_id")
+        ov = by_id.get(str(lid)) if lid else None
+        if not ov and o.get("title"):
+            ov = by_title.get(norm(o.get("title")))
+        return ov or (o.get("sku") or "")
+    return resolve
+
 def _lot_prefix(sku: str) -> str:
     """Transposes a SKU to its lot: 'RJ-123' belongs to lot 'RJ' (prefix before the
     first '-'); a bare SKU with no '-' at all belongs to that same lot directly.
@@ -6432,7 +6450,7 @@ async def list_acquisitions(request: Request):
     all_orders = []
     start = 0
     while True:
-        page = supabase.table("orders").select("sku,final_net").eq("business_id", business_id)\
+        page = supabase.table("orders").select("sku,final_net,legacy_item_id,title,platform").eq("business_id", business_id)\
             .range(start, start + 999).execute().data or []
         all_orders.extend(page)
         if len(page) < 1000:
@@ -6440,8 +6458,9 @@ async def list_acquisitions(request: Request):
         start += 1000
 
     uncategorized_sales = 0
+    _resolve_sku = _order_sku_resolver(business_id)
     for o in all_orders:
-        sku = o.get("sku") or ""
+        sku = _resolve_sku(o) if o.get("platform") == "eBay" else (o.get("sku") or "")
         if not sku or sku.lower() in ("(no sku)",) or sku.lower().startswith("lister-"):
             continue
         if _lot_prefix(sku) not in known_lot_skus:
@@ -8121,11 +8140,12 @@ def _compute_green_revenue(business_id: str, start_date_str: str, end_date_str: 
     if not green_lots:
         return 0.0
 
-    order_rows = _fetch_all_for_business(business_id, "orders", "sku,final_net,order_date")
+    order_rows = _fetch_all_for_business(business_id, "orders", "sku,final_net,order_date,legacy_item_id,title,platform")
+    _resolve_sku = _order_sku_resolver(business_id)
     order_rows = [r for r in order_rows if start_date_str <= (r.get("order_date") or "") <= end_date_str]
     total = 0.0
     for r in order_rows:
-        sku = r.get("sku") or ""
+        sku = _resolve_sku(r) if r.get("platform") == "eBay" else (r.get("sku") or "")
         prefix = _lot_prefix(sku) if sku else None
         became_green_at = green_lots.get(prefix)
         if not became_green_at:
@@ -8159,12 +8179,13 @@ async def api_green_revenue_breakdown(request: Request, start: str, end: str):
     lot_rows = _fetch_all_for_business(business_id, "acquisitions", "sku,profit,became_green_at")
     green_lots = {r["sku"]: r["became_green_at"] for r in lot_rows if r.get("sku") and (r.get("profit") or 0) > 1 and r.get("became_green_at")}
 
-    order_rows = _fetch_all_for_business(business_id, "orders", "sku,final_net,order_date")
+    order_rows = _fetch_all_for_business(business_id, "orders", "sku,final_net,order_date,legacy_item_id,title,platform")
+    _resolve_sku = _order_sku_resolver(business_id)
     order_rows = [r for r in order_rows if start <= (r.get("order_date") or "") <= end]
 
     by_lot = {}
     for r in order_rows:
-        sku = r.get("sku") or ""
+        sku = _resolve_sku(r) if r.get("platform") == "eBay" else (r.get("sku") or "")
         prefix = _lot_prefix(sku) if sku else None
         became_green_at = green_lots.get(prefix)
         if not became_green_at:
