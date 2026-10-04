@@ -744,6 +744,9 @@ select.field-input { background: #fff; color: #0f172a; }
       <img class="modal-img" id="modal-img" src="" alt="" style="pointer-events:none;" onclick="event.stopPropagation();toggleModalImgZoom(event)"/>
       <div id="modal-mpn-flag" class="tile-mpn-flag" style="display:none;" title="eBay MPN set to &quot;Does Not Apply&quot; — fix before publishing or eBay may reject/flag this listing" onclick="event.stopPropagation();document.getElementById('modal-mpn-input').scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('modal-mpn-input').focus();"></div>
       <button id="rotate-ccw-btn" onclick="event.stopPropagation();rotatePhoto('ccw')" title="Rotate left" style="position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,0.6);border:none;color:#fff;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;z-index:10;">↺</button><button id="rotate-cw-btn" onclick="event.stopPropagation();rotatePhoto('cw')" title="Rotate right" style="position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,0.6);border:none;color:#fff;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;z-index:10;">↻</button>
+      <button id="modal-photo-prev" onclick="event.stopPropagation();stepModalPhoto(-1)" title="Previous photo" style="display:none;position:absolute;top:50%;left:8px;transform:translateY(-50%);background:rgba(0,0,0,0.6);border:none;color:#fff;border-radius:50%;width:44px;height:44px;font-size:26px;line-height:1;cursor:pointer;z-index:10;">‹</button>
+      <button id="modal-photo-next" onclick="event.stopPropagation();stepModalPhoto(1)" title="Next photo" style="display:none;position:absolute;top:50%;right:8px;transform:translateY(-50%);background:rgba(0,0,0,0.6);border:none;color:#fff;border-radius:50%;width:44px;height:44px;font-size:26px;line-height:1;cursor:pointer;z-index:10;">›</button>
+      <div id="modal-photo-count" style="display:none;position:absolute;top:10px;left:10px;background:rgba(0,0,0,0.6);color:#fff;border-radius:12px;padding:3px 10px;font-size:13px;font-weight:700;z-index:10;"></div>
     </div>
     <div class="modal-body">
       <div class="modal-title" id="modal-title"></div>
@@ -2453,6 +2456,51 @@ function toggleModalDesc() {
   caret.textContent = open ? '▸' : '▾';
 }
 
+// Photo browsing inside the item modal (10/4): arrows + swipe + counter.
+function _updateModalPhotoNav() {
+  const n = (window._modalPhotos || []).length;
+  const show = n > 1 ? 'block' : 'none';
+  document.getElementById('modal-photo-prev').style.display = show;
+  document.getElementById('modal-photo-next').style.display = show;
+  const c = document.getElementById('modal-photo-count');
+  c.style.display = show;
+  c.textContent = `${(window._modalPhotoIdx || 0) + 1} / ${n}`;
+}
+function stepModalPhoto(delta) {
+  const photos = window._modalPhotos || [];
+  if (photos.length < 2) return;
+  const idx = ((window._modalPhotoIdx || 0) + delta + photos.length) % photos.length;
+  window._modalPhotoIdx = idx;
+  const img = document.getElementById('modal-img');
+  const url = photos[idx]?.full || '';
+  img.src = url;
+  img.dataset.photoId = extractPhotoId(url) || '';  // rotate acts on the photo being shown
+  img.classList.remove('zoomed');
+  img.style.transform = '';
+  const tile = document.getElementById('tile-' + modalItemId);
+  if (tile) tile.dataset.photoIdx = String(idx);
+  _updateModalPhotoNav();
+}
+(function () {
+  let x0 = null, y0 = null;
+  document.addEventListener('touchstart', e => {
+    if (!e.target.closest || !e.target.closest('#modal .modal > div:first-child')) { x0 = null; return; }
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
+  }, {passive: true});
+  document.addEventListener('touchend', e => {
+    if (x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0;
+    x0 = null;
+    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) stepModalPhoto(dx < 0 ? 1 : -1);
+  }, {passive: true});
+  document.addEventListener('keydown', e => {
+    if (!document.getElementById('modal')?.classList.contains('open')) return;
+    if (['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)) return;
+    if (e.key === 'ArrowLeft') stepModalPhoto(-1);
+    if (e.key === 'ArrowRight') stepModalPhoto(1);
+  });
+})();
+
 function openModal(id) {
   id = isNaN(id) ? id : Number(id);
   const l = listings.find(x => x.id === id);
@@ -2462,6 +2510,8 @@ function openModal(id) {
   const tile = document.getElementById('tile-' + id);
   const photos = (l.all_photos && l.all_photos.length) ? l.all_photos : (l.full_url ? [{thumb: l.thumb_url, full: l.full_url}] : []);
   const curIdx = parseInt(tile?.dataset?.photoIdx || '0');
+  window._modalPhotos = photos;
+  window._modalPhotoIdx = Math.min(Math.max(curIdx, 0), Math.max(photos.length - 1, 0));
   const img = document.getElementById('modal-img');
   const curPhotoUrl = photos[curIdx]?.full || l.full_url || '';
   img.src = curPhotoUrl;
@@ -2469,6 +2519,7 @@ function openModal(id) {
   img.dataset.photoId = extractPhotoId(curPhotoUrl) || l.photo_id || '';
   img.style.cssText = 'width:100%;aspect-ratio:1;object-fit:cover;border-radius:14px 14px 0 0;image-orientation:from-image;cursor:zoom-in;transition:transform 0.25s ease;display:' + (img.src ? 'block' : 'none') + ';';
   img.classList.remove('zoomed');
+  _updateModalPhotoNav();
   document.getElementById('modal-title').textContent = l.title || 'Unknown Item';
   document.getElementById('modal-meta').textContent  = `${l.ebay_category || ''} · ${(l.condition||'used').toUpperCase()}`;
   window._modalListing = l;
