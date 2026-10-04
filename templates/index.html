@@ -651,6 +651,13 @@ select.field-input { background: #fff; color: #0f172a; }
       <input type="password" class="field-input" id="set-openai" placeholder="sk-..." style="margin-bottom:10px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="set-openai-nofill-setopenai"/>
       <button class="btn btn-primary" style="width:100%;" onclick="saveSetting('OPENAI_API_KEY','set-openai')">Save</button>
     </div>
+    <div class="settings-section" style="border-left:4px solid var(--accent);">
+      <div class="settings-title">✳️ Anthropic (Claude) API</div>
+      <div class="settings-sub">Used when the Scan Provider toggle is set to Claude. Get a key at console.anthropic.com.</div>
+      <div class="field-label">API Key</div>
+      <input type="password" class="field-input" id="set-anthropic" placeholder="sk-ant-..." style="margin-bottom:10px;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="set-anthropic-nofill-setanthropic"/>
+      <button class="btn btn-primary" style="width:100%;" onclick="saveSetting('ANTHROPIC_API_KEY','set-anthropic')">Save</button>
+    </div>
     <div class="settings-section" style="border-left:4px solid var(--orange);">
       <div class="settings-title">🏷️ eBay API Credentials</div>
       <div class="settings-sub">For direct listing submission. Find at developer.ebay.com<br><strong style="color:var(--amber);">⚠️ If these are set as Railway environment variables, that value is used instead — this form is a fallback only. Edit in Railway for security.</strong></div>
@@ -4138,6 +4145,7 @@ async function loadSettings() {
     const s = await api('GET', '/api/settings');
     document.getElementById('set-gemini').value    = s.GEMINI_API_KEY || '';
     document.getElementById('set-openai').value    = s.OPENAI_API_KEY || '';
+    { const _a = document.getElementById('set-anthropic'); if (_a) _a.value = s.ANTHROPIC_API_KEY || ''; }
     document.getElementById('set-ebay-app').value  = s.EBAY_APP_ID || '';
     document.getElementById('set-ebay-dev').value  = s.EBAY_DEV_ID || '';
     document.getElementById('set-ebay-cert').value = s.EBAY_CERT_ID || '';
