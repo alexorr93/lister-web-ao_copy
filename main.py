@@ -6397,15 +6397,25 @@ async def list_acquisitions(request: Request):
         # apply this check when matched_listing actually exists -- i.e. Lister
         # genuinely knows about this item via a real listing row, which is the actual
         # case this was built for.
-        needs_review = needs_sku or (matched_listing is not None and not sku_editable and not override_sku)
+        locked_unverified = matched_listing is not None and not sku_editable and not override_sku
+        needs_review = needs_sku or locked_unverified
 
-        if sku and not needs_review and prefix in known_lot_skus:
+        # Per user 10/4: a bare 'PREFIX-' SKU is only "uncategorized" for STORAGE
+        # LOCATION (still listed below so the box code can be filled in) -- the lot
+        # itself is known, so its value still counts toward that lot's listed total,
+        # same as sold orders already credit the lot by prefix. Only listings whose
+        # lot is genuinely unknown (no prefix match, or locked/unverified v1) stay
+        # out of the lot totals and in the Uncategorized row's value.
+        credit_lot = bool(sku) and prefix in known_lot_skus and not locked_unverified
+        if credit_lot:
             value_by_prefix[prefix] = value_by_prefix.get(prefix, 0) + value
             count_by_prefix[prefix] = count_by_prefix.get(prefix, 0) + 1
-        else:
-            uncategorized_value += value
-            uncategorized_count += 1
+        if needs_review or not credit_lot:
+            if not credit_lot:
+                uncategorized_value += value
+                uncategorized_count += 1
             uncategorized_items.append({
+                "counted_in_lot": credit_lot,
                 "item_id": row.get("item_id"), "sku": sku, "raw_sku": raw_sku, "title": row.get("title"),
                 "price": row.get("price"), "quantity_available": row.get("quantity_available"),
                 "value": round(value, 2), "needs_sku": needs_sku,
