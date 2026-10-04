@@ -2264,7 +2264,12 @@ def get_ebay_item_location_text(token: str, location_key: str) -> str:
     return ", ".join(p for p in (city, state) if p)
 
 def ebay_condition(cond: str) -> str:
-    return "NEW" if (cond or "").lower() == "new" else "USED_EXCELLENT"
+    c = (cond or "").lower()
+    if c == "new":
+        return "NEW"
+    if c == "new_other":
+        return "NEW_OTHER"
+    return "USED_EXCELLENT"
 
 def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None, brand_override: str = None, mpn_override: str = None) -> dict:
     """
@@ -2514,7 +2519,13 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
         mpn = "Does Not Apply"
         mpn_is_fallback = True
 
-    condition_id = "1000" if ebay_condition(listing.get("condition")) == "NEW" else "3000"
+    # 1000 New / 1500 New other / 3000 Used. Condition notes (ConditionDescription)
+    # are only accepted by eBay for non-New conditions.
+    _ec = ebay_condition(listing.get("condition"))
+    condition_id = {"NEW": "1000", "NEW_OTHER": "1500"}.get(_ec, "3000")
+    _cond_desc = (listing.get("condition_description") or "").strip()[:1000]
+    cond_desc_xml = (f'<ConditionDescription>{_xesc(_cond_desc)}</ConditionDescription>'
+                     if _cond_desc and condition_id != "1000" else "")
 
     picture_xml = "".join(f"<PictureURL>{_xesc(u)}</PictureURL>" for u in images[:12])
     item_specifics_xml = (
@@ -2563,6 +2574,7 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
         f'<StartPrice>{price:.2f}</StartPrice>'
         '<CategoryMappingAllowed>true</CategoryMappingAllowed>'
         f'<ConditionID>{condition_id}</ConditionID>'
+        f'{cond_desc_xml}'
         f'<Country>{_xesc(location_country)}</Country><Currency>USD</Currency>'
         f'<PostalCode>{_xesc(location_zip)}</PostalCode>'
         f'<Location>{_xesc(location_city_state)}</Location>'
@@ -3147,7 +3159,7 @@ async def export_ebay_csv(request: Request):
 
     for item in items:
         cond = str(item.get("condition") or "used").strip().lower()
-        cond_id = "NEW" if cond == "new" else "USED"
+        cond_id = {"new": "NEW", "new_other": "NEW_OTHER"}.get(cond, "USED")
         pid = str(item.get("photo_id") or "")
         pic = "|".join(photo_url(p) for p in get_all_photo_ids(pid) if photo_url(p))
         category_id = "12576"

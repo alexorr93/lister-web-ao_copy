@@ -771,8 +771,13 @@ select.field-input { background: #fff; color: #0f172a; }
             <select class="field-input" id="modal-cond-input" onchange="modalDirty=true; updatePriceByCondition()">
               <option value="used">Used</option>
               <option value="new">New</option>
+              <option value="new_other">New (other)</option>
             </select>
           </div>
+        </div>
+        <div id="modal-cond-desc-wrap" style="margin-top:10px;">
+          <div class="field-label">Condition Notes <span style="text-transform:none;font-weight:400;opacity:0.7;">(shown under condition on eBay — not allowed for plain New)</span></div>
+          <textarea class="field-input" id="modal-cond-desc-input" rows="2" maxlength="1000" style="resize:vertical;font-size:12px;line-height:1.4;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="modal-cond-desc-nofill"></textarea>
         </div>
       </div>
       <div>
@@ -1465,7 +1470,7 @@ function renderTiles() {
     const qty = quantities[l.id] ?? l.quantity;
     const isSel = selected.has(String(l.id));
     const cond = (l.condition || 'used').toString().toLowerCase().trim();
-    const isNew = cond === 'new';
+    const isNew = cond === 'new' || cond === 'new_other';
     const condCol = isNew ? '#16a34a' : '#3b82f6';
     const refs = [l.price_used > 0 ? `U:$${l.price_used.toFixed(0)}` : '', l.price_new > 0 ? `N:$${l.price_new.toFixed(0)}` : ''].filter(Boolean).join('  ');
     const ebayDraft = l.ebay_status === 'draft' && l.ebay_item_id;
@@ -1497,7 +1502,7 @@ function renderTiles() {
       <div class="tile-photo" onclick="handlePhotoClick('${l.id}')">
         ${photoHtml}
         ${photoNavHtml}
-        <div class="tile-badge-tl" style="color:${condCol};">${isNew?'NEW':'USED'}</div>
+        <div class="tile-badge-tl" style="color:${condCol};">${cond==='new_other'?'NEW OTHER':(isNew?'NEW':'USED')}</div>
         <div class="tile-badge-tr">${statusBadge}</div>
         ${needsMpnAttention(l) ? `<div class="tile-mpn-flag" title="${l.ebay_mpn_is_fallback ? 'eBay MPN set to &quot;Does Not Apply&quot; — click to fix' : 'No confirmed MPN on file — will publish as &quot;Does Not Apply&quot; unless fixed first'}" onclick="event.stopPropagation();openModal('${l.id}')"></div>` : ''}
         ${(onEbay || onShopify) ? `<div class="tile-platform-badges">${onEbay ? `<div class="tile-platform-badge ebay">${onEbayLabel}</div>` : ''}${onShopify ? '<div class="tile-platform-badge shopify">Shopify</div>' : ''}</div>` : ''}
@@ -2540,6 +2545,7 @@ function openModal(id) {
   document.getElementById('modal-shipping-policy-select').value = l.ebay_fulfillment_policy_id || '';
   document.getElementById('modal-price-input').value = l.price.toFixed(2);
   document.getElementById('modal-cond-input').value  = l.condition || 'used';
+  document.getElementById('modal-cond-desc-input').value = l.condition_description || '';
   document.getElementById('modal-desc-input').value = l.description || window._defaultDesc || '';
   document.getElementById('modal-desc-input').style.display = 'none'; // collapsed by default, expand via toggleModalDesc()
   document.getElementById('modal-desc-caret').textContent = '▸';
@@ -2642,6 +2648,12 @@ async function saveModal() {
       if (cond  !== origCond)  markFieldChanged(modalItemId + '_condition');
       markFieldChanged(modalItemId + '_description'); // no tile-level equivalent field yet, but kept consistent
       toast('Saved ✓');
+    }
+    const condDesc = document.getElementById('modal-cond-desc-input').value.trim();
+    if (condDesc !== ((l && l.condition_description) || '')) {
+      await api('PATCH', `/api/listings/${modalItemId}`, {field:'condition_description', value:condDesc});
+      if (l) l.condition_description = condDesc;
+      markFieldChanged(modalItemId + '_condition');
     }
     if (brand && brand !== (l && l.brand)) {
       await api('PATCH', `/api/listings/${modalItemId}`, {field:'brand', value:brand});
@@ -4765,7 +4777,7 @@ function updatePriceByCondition() {
   var l = window._modalListing;
   if (!l) return;
   var cond = document.getElementById('modal-cond-input').value;
-  var p = cond === 'new' ? (l.price_new || l.price) : (l.price_used || l.price);
+  var p = (cond === 'new' || cond === 'new_other') ? (l.price_new || l.price) : (l.price_used || l.price);
   if (p > 0) {
     document.getElementById('modal-price-input').value = p.toFixed(2);
     document.getElementById('modal-price').textContent = '$' + p.toFixed(2);
