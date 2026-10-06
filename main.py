@@ -3469,6 +3469,7 @@ confident from context -- never guess or make one up."""
 
 @app.post("/api/listings/{item_id}/find-mpn")
 async def find_mpn(item_id: str, request: Request):
+    raise HTTPException(410, "Removed per owner 10/6 -- this feature used Gemini and has been deleted.")
     """Auto parts specifically: looks at the item's actual photos for a real
     manufacturer part number physically marked on the part (stamp, sticker,
     casting, tag) -- auto parts almost always have this somewhere. Returns
@@ -9509,6 +9510,7 @@ async def upload_photo(request: Request):
 
 @app.post("/api/auction/deep-research-full")
 async def deep_research_full(request: Request):
+    raise HTTPException(410, "Removed per owner 10/6 -- this feature used Gemini and has been deleted.")
     import os, json, base64, asyncio, fitz
     from concurrent.futures import ThreadPoolExecutor
     import google.generativeai as genai
@@ -10379,6 +10381,7 @@ class DeepResearch(BaseModel):
 
 @app.post("/api/auction/deep-research")
 async def deep_research(body: DeepResearch):
+    raise HTTPException(410, "Removed per owner 10/6 -- this feature used Gemini and has been deleted.")
     import os, asyncio, json
     from concurrent.futures import ThreadPoolExecutor
     import google.generativeai as genai

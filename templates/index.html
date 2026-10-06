@@ -798,13 +798,7 @@ select.field-input { background: #fff; color: #0f172a; }
           <div class="field-label">MPN (for eBay item specifics)</div>
           <div style="display:flex;gap:6px;align-items:flex-start;">
             <input type="text" class="field-input" id="modal-mpn-input" placeholder="e.g. 2CDS271337R0217 — leave blank to auto-guess" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="modal-mpn-nofill" style="flex:1;" oninput="modalDirty=true;document.getElementById('modal-mpn-warn').style.display=this.value.trim()?'none':'block';"/>
-            <button class="btn" id="modal-find-mpn-btn" onclick="findMpn()" title="Reads the part number off the actual photos" style="display:none;white-space:nowrap;">🔍 Find MPN</button>
-            <select id="mpn-provider-select" onchange="saveMpnProvider(this.value)" title="Which model reads the part number — sticks permanently until changed" style="display:none;font-size:11px;padding:2px 4px;">
-              <option value="gemini">Gemini</option>
-              <option value="openai">ChatGPT</option>
-            </select>
           </div>
-          <div id="modal-find-mpn-status" style="display:none;font-size:11px;color:var(--muted);margin-top:4px;"></div>
           <div id="modal-mpn-warn" style="display:none;font-size:11px;color:var(--red,#dc2626);margin-top:4px;">⚠️ No confirmed MPN on file — will publish/republish as "Does Not Apply" unless fixed here first</div>
         </div>
         <div style="margin-bottom:8px;">
@@ -2536,10 +2530,6 @@ function openModal(id) {
   document.getElementById('modal-mpn-input').value = (l.ebay_mpn_is_fallback ? '' : (l.ebay_mpn || l.mpn || guessMpn(l.title || '', l.brand || guessBrand(l.title || ''))));
   document.getElementById('modal-mpn-warn').style.display = needsMpnAttention(l) ? 'block' : 'none';
   document.getElementById('modal-mpn-flag').style.display = needsMpnAttention(l) ? 'block' : 'none';
-  document.getElementById('modal-find-mpn-btn').style.display = (l.category_mode === 'motors') ? '' : 'none';
-  document.getElementById('mpn-provider-select').style.display = (l.category_mode === 'motors') ? '' : 'none';
-  loadMpnProviderSetting();
-  document.getElementById('modal-find-mpn-status').style.display = 'none';
   document.getElementById('modal-ask-chatgpt-status').style.display = 'none';
   document.getElementById('modal-ask-chatgpt-result').style.display = 'none';
   document.getElementById('modal-shipping-policy-select').value = l.ebay_fulfillment_policy_id || '';
