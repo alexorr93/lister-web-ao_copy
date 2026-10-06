@@ -78,6 +78,7 @@ _EDITOR_ALLOW = [
     ("GET",    r"^/api/ebay/(category-picker-list|shipping-policy-options|sync-categories-status)$"),
     ("PATCH",  r"^/api/listings/\d+$"),
     ("POST",   r"^/api/listings/\d+/field-mark$"),
+    ("POST",   r"^/api/listings/\d+/grok-state$"),
 ]
 _EDITOR_ALLOW = [(m, re.compile(rx)) for m, rx in _EDITOR_ALLOW]
 
@@ -3598,6 +3599,28 @@ async def update_listing(item_id: str, body: UpdateField, request: Request):
         raise
     except Exception as e:
         raise HTTPException(500, str(e))
+
+@app.post("/api/listings/{item_id}/grok-state")
+async def set_grok_state(item_id: str, body: dict = Body(...), request: Request = None):
+    """Grok tag on Intake tiles (10/6). States: None (off) / 'tagged' (purple:
+    owner wants Grok to edit it) / 'actioned' (yellow: Grok says it's done).
+    Owner can set anything. Editor login can only flip tagged <-> actioned."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    state = body.get("state")
+    if state not in (None, "tagged", "actioned"):
+        raise HTTPException(400, "state must be null, 'tagged' or 'actioned'")
+    cur = (supabase.table("listings").select("grok_state").eq("id", item_id)
+           .eq("business_id", business_id).limit(1).execute().data or [])
+    if not cur:
+        raise HTTPException(404, "listing not found")
+    if get_session_role(request) == "editor":
+        allowed = {("tagged", "actioned"), ("actioned", "tagged")}
+        if (cur[0].get("grok_state"), state) not in allowed:
+            raise HTTPException(403, "Editor can only mark a Grok-tagged item as actioned (or undo that)")
+    supabase.table("listings").update({"grok_state": state}).eq("id", item_id).eq("business_id", business_id).execute()
+    return {"ok": True, "grok_state": state}
 
 @app.post("/api/listings/{item_id}/field-mark")
 async def set_field_mark(item_id: str, body: dict = Body(...), request: Request = None):
