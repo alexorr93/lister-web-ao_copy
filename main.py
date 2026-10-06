@@ -37,6 +37,78 @@ async def _no_stale_html(request, call_next):
         response.headers["Pragma"] = "no-cache"
     return response
 
+# ------------------------------------------------------------------ #
+#  EDITOR ROLE (added 10/6 per owner): a second login (business_editors
+#  table) that lands in the owner's own business but can ONLY view and
+#  edit drafts on the Lister page. Enforced here, server-side, on every
+#  request -- hiding buttons in the UI is just cosmetic on top of this.
+#  Owner sessions are completely unaffected.
+# ------------------------------------------------------------------ #
+import time as _ed_time
+_SESSION_ROLE_CACHE: dict = {}   # token -> (role, fetched_at)
+
+def get_session_role(request) -> str:
+    token = request.cookies.get("session_id")
+    if not token:
+        return "anon"
+    hit = _SESSION_ROLE_CACHE.get(token)
+    if hit and _ed_time.time() - hit[1] < 300:
+        return hit[0]
+    try:
+        res = supabase.table("sessions").select("role").eq("token", token).limit(1).execute()
+        role = (res.data[0].get("role") or "owner") if res.data else "anon"
+    except Exception:
+        role = "editor"   # fail CLOSED: if we can't tell, treat as restricted
+    _SESSION_ROLE_CACHE[token] = (role, _ed_time.time())
+    return role
+
+# (method, path regex) an editor may call. Everything else is refused.
+_EDITOR_ALLOW = [
+    ("GET",    r"^/$"),
+    ("GET",    r"^/static/.*"),
+    ("GET",    r"^/logout$"),
+    ("GET",    r"^/login$"), ("POST", r"^/login$"),
+    ("GET",    r"^/favicon\.ico$"),
+    ("GET",    r"^/api/whoami$"),
+    ("GET",    r"^/api/listings(/.*)?$"),
+    ("GET",    r"^/api/settings$"),
+    ("GET",    r"^/api/stats$"),
+    ("GET",    r"^/api/stuck-groups$"),
+    ("GET",    r"^/api/acquisitions$"),
+    ("GET",    r"^/api/ebay/(category-picker-list|shipping-policy-options|sync-categories-status)$"),
+    ("PATCH",  r"^/api/listings/\d+$"),
+    ("POST",   r"^/api/listings/\d+/(field-mark|set-category|auto-category|rematch-category|assign-lot|assign-lot-from-group|add-photos)$"),
+    ("POST",   r"^/api/photos/rotate$"),
+    ("DELETE", r"^/api/listings/\d+/photos/[^/]+$"),
+]
+_EDITOR_ALLOW = [(m, re.compile(rx)) for m, rx in _EDITOR_ALLOW]
+
+# Listing columns an editor may never write through PATCH /api/listings/{id}
+# (publish state, platform ids, ownership). Content fields stay editable.
+_EDITOR_BLOCKED_FIELDS = {
+    "id", "business_id", "photo_id", "created_at",
+    "ebay_item_id", "ebay_status", "ebay_offer_id", "ebay_sku", "ebay_scheduled_at", "ebay_error",
+    "shopify_product_id", "shopify_status", "shopify_error", "sold_count",
+}
+_EDITOR_ALLOWED_STATUS = {"scanned", "ready", "archived", "pending"}
+
+@app.middleware("http")
+async def _editor_role_guard(request, call_next):
+    if request.cookies.get("session_id") and get_session_role(request) == "editor":
+        path, method = request.url.path, request.method.upper()
+        if method == "HEAD":
+            method = "GET"
+        if not any(m == method and rx.match(path) for m, rx in _EDITOR_ALLOW):
+            from fastapi.responses import RedirectResponse
+            if method == "GET" and not path.startswith("/api/"):
+                return RedirectResponse("/", status_code=302)
+            return JSONResponse({"detail": "Editor login: not allowed (publishing/settings are owner-only)"}, status_code=403)
+    return await call_next(request)
+
+@app.get("/api/whoami")
+async def whoami(request: Request):
+    return {"role": get_session_role(request)}
+
 import os as _os
 if _os.path.isdir("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -3343,6 +3415,11 @@ async def update_listing(item_id: str, body: UpdateField, request: Request):
         # separate blind spot worth closing: now genuinely confirms a row was
         # touched before reporting success, so any future silent-failure shows
         # up as a real error instead of a lie.
+        if get_session_role(request) == "editor":
+            if body.field in _EDITOR_BLOCKED_FIELDS:
+                raise HTTPException(403, f"Editor login can't change '{body.field}'")
+            if body.field == "status" and str(body.value) not in _EDITOR_ALLOWED_STATUS:
+                raise HTTPException(403, f"Editor login can't set status '{body.value}'")
         res = supabase.table("listings").update({body.field: body.value}).eq("id", item_id).execute()
         if not res.data:
             raise HTTPException(404, f"listing {item_id} not found or not updated")
@@ -16857,7 +16934,11 @@ async def get_settings(request: Request):
     if not business_id:
         raise HTTPException(401, "Unauthorized")
     try:
-        return get_ebay_settings(business_id)
+        st = get_ebay_settings(business_id)
+        if get_session_role(request) == "editor" and isinstance(st, dict):
+            st = {k: v for k, v in st.items()
+                  if not re.search(r"TOKEN|KEY|SECRET|CERT|PASS|DEV_ID|APP_ID|RUNAME", str(k), re.I)}
+        return st
     except Exception:
         return {}
 
@@ -16917,13 +16998,20 @@ async def login_submit(request: Request):
     password = str(form.get("password", ""))
     try:
         res = supabase.table("businesses").select("id,password_hash").eq("email", email).execute()
+        role = "owner"
         if not res.data:
-            return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid email or password"})
+            # Editor logins (see _editor_role_guard) live in business_editors and
+            # land in the owner's business with restricted, draft-edit-only access.
+            ed = supabase.table("business_editors").select("business_id,password_hash").eq("email", email).execute()
+            if not ed.data:
+                return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid email or password"})
+            res.data = [{"id": ed.data[0]["business_id"], "password_hash": ed.data[0]["password_hash"]}]
+            role = "editor"
         biz = res.data[0]
         if not verify_password(password, biz["password_hash"]):
             return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid email or password"})
         token = secrets.token_hex(32)
-        supabase.table("sessions").insert({"token": token, "business_id": biz["id"]}).execute()
+        supabase.table("sessions").insert({"token": token, "business_id": biz["id"], "role": role}).execute()
         from fastapi.responses import RedirectResponse
         resp = RedirectResponse("/", status_code=302)
         resp.set_cookie("session_id", token, httponly=True, max_age=60*60*24*30)

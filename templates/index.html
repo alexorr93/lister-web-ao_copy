@@ -4900,5 +4900,21 @@ document.addEventListener('mousedown', function(e) {
   if (box.style.display === 'block' && !box.contains(e.target)) closeCatPicker();
 });
 </script>
+<script>
+// Editor login (10/6): server already refuses publish/settings for editors;
+// this just greys the controls out so it's obvious. Owner sees no change.
+(function(){
+  fetch('/api/whoami',{credentials:'include'}).then(function(r){return r.json();}).then(function(w){
+    if(!w || w.role!=='editor') return;
+    document.documentElement.classList.add('editor-mode');
+    var st=document.createElement('style');
+    st.textContent='.editor-mode [onclick*="ublish"],.editor-mode [onclick*="Shopify"],.editor-mode [onclick*="EbayV2"],.editor-mode [onclick*="rchive"],.editor-mode [onclick*="Settings"],.editor-mode [onclick*="connectEbay"],.editor-mode [onclick*="syncEbay"],.editor-mode [onclick*="submit"],.editor-mode [onclick*="Submit"]{opacity:.35!important;pointer-events:none!important;cursor:not-allowed!important;filter:grayscale(1);}'+
+      '#editor-mode-banner{position:fixed;bottom:10px;left:10px;z-index:99999;background:#7c2d12;color:#fff;font:600 12px sans-serif;padding:6px 10px;border-radius:6px;}';
+    document.head.appendChild(st);
+    var b=document.createElement('div'); b.id='editor-mode-banner'; b.textContent='EDITOR MODE — publishing disabled';
+    (document.body||document.documentElement).appendChild(b);
+  }).catch(function(){});
+})();
+</script>
 </body>
 </html>
