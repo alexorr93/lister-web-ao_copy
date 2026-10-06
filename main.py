@@ -144,6 +144,8 @@ def _category_is_restricted_ok(cat_id: str, path_map: dict) -> bool:
     path = path_map.get(str(cat_id))
     if path is None:
         return False
+    if _is_motors_vehicle_path(path):
+        return False   # whole-vehicle Motors category -> worker re-picks it (10/6)
     return ("Business & Industrial" in path) or ("eBay Motors" in path)
 
 async def auto_fill_worker():
