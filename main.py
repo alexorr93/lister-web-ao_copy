@@ -6470,9 +6470,17 @@ async def list_acquisitions(request: Request):
         start += 1000
 
     uncategorized_sales = 0
+    ebay_orders_by_prefix = {}  # count of eBay orders per lot, shown as "(#)" next to the eBay $ column
     _resolve_sku = _order_sku_resolver(business_id)
     for o in all_orders:
         sku = _resolve_sku(o) if o.get("platform") == "eBay" else (o.get("sku") or "")
+        # Same lot-matching rule the eBay $ itself uses (recalculate_acquisition_profits:
+        # sku_override first, else order sku, prefix before the first '-'), so the
+        # count always lines up with the dollar figure beside it.
+        if o.get("platform") == "eBay" and sku:
+            _p = _lot_prefix(sku)
+            if _p in known_lot_skus:
+                ebay_orders_by_prefix[_p] = ebay_orders_by_prefix.get(_p, 0) + 1
         if not sku or sku.lower() in ("(no sku)",) or sku.lower().startswith("lister-"):
             continue
         if _lot_prefix(sku) not in known_lot_skus:
@@ -6481,6 +6489,7 @@ async def list_acquisitions(request: Request):
     for a in acquisitions:
         a["active_listings_value"] = round(value_by_prefix.get(a.get("sku"), 0), 2)
         a["active_listings_count"] = count_by_prefix.get(a.get("sku"), 0)
+        a["ebay_orders_count"] = ebay_orders_by_prefix.get(a.get("sku"), 0)
         a["active_listings_synced_at"] = active_synced_at
 
     uncategorized = {

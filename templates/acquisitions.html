@@ -688,7 +688,7 @@ function renderTable() {
       <td${editCls} ${ed('cost', 'number')}>${fmtMoney(a.cost)}</td>
       <td${editCls} ${ed('freight_other', 'number')}>${fmtMoney(a.freight_other)}</td>
       <td${editCls} ${ed('cash', 'number')}>${fmtMoney(a.cash)}</td>
-      <td>${fmtMoney(a.ebay)}</td>
+      <td>${fmtMoney(a.ebay)} <span class="muted">(${a.ebay_orders_count ?? 0})</span></td>
       <td>${fmtMoney(a.shopify_payouts)}</td>
       <td>${fmtMoney(a.total_payouts)}</td>
       <td class="${profitClass}">${fmtMoney(a.profit)}</td>
@@ -706,12 +706,13 @@ function renderTable() {
   const totalProfit = sorted.reduce((n, a) => n + (a.profit || 0), 0);
   const totalActiveListingsValue = sorted.reduce((n, a) => n + (a.active_listings_value || 0), 0);
   const totalActiveListingsCount = sorted.reduce((n, a) => n + (a.active_listings_count || 0), 0);
+  const totalEbayOrders = sorted.reduce((n, a) => n + (a.ebay_orders_count || 0), 0);
   html += `<tr style="font-weight:800;border-top:2px solid var(--border);background:rgba(255,255,255,0.03);">
     <td colspan="4">TOTAL (${sorted.length} lot${sorted.length===1?'':'s'})</td>
     <td>${fmtMoney(totalCost)}</td>
     <td>${fmtMoney(totalFreightOther)}</td>
     <td>${fmtMoney(totalCash)}</td>
-    <td>${fmtMoney(totalEbay)}</td>
+    <td>${fmtMoney(totalEbay)} <span class="muted">(${totalEbayOrders})</span></td>
     <td>${fmtMoney(totalShopify)}</td>
     <td>${fmtMoney(totalPayouts)}</td>
     <td class="${totalProfit >= 0 ? 'pos' : 'neg'}">${fmtMoney(totalProfit)}</td>
