@@ -321,6 +321,169 @@ async def _oneshot_archive_shopify_duplicates():
     except Exception:
         pass
 
+# ------------------------------------------------------------------ #
+#  SHOPIFY REACTIVATION (10/6 per owner) + DB-ONLY QTY GUARD
+#  Plan rows were computed in SQL from the DB (ebay_listing_status Active,
+#  minus eBay orders since that listing's last sync) into
+#  shopify_reactivation_plan. This worker ONLY talks to Shopify -- never eBay.
+#  Order per product: set Shopify qty FIRST, then flip status, so nothing is
+#  ever live at a wrong quantity. Batches gated by app setting
+#  SHOPIFY_REACTIVATE_MAX_BATCH (rows with batch <= it get processed).
+# ------------------------------------------------------------------ #
+def _reactivation_shopify_ctx(business_id: str):
+    settings = get_ebay_settings(business_id)
+    domain = (settings.get("SHOPIFY_STORE_DOMAIN", "") or "").strip().replace("https://", "").replace("http://", "").strip("/")
+    token = get_shopify_access_token(business_id)
+    headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
+    return domain, headers
+
+def _reactivation_gql(domain, headers, query, variables=None, tries=5):
+    import requests as _req, time as _t
+    for i in range(tries):
+        r = _req.post(f"https://{domain}/admin/api/2024-10/graphql.json", headers=headers,
+                      json={"query": query, "variables": variables or {}}, timeout=30)
+        if r.status_code == 429 or r.status_code >= 500:
+            _t.sleep(2 * (i + 1)); continue
+        out = r.json()
+        errs = out.get("errors") or []
+        if errs and any("THROTTLED" in str(e) for e in errs):
+            _t.sleep(2 * (i + 1)); continue
+        if errs:
+            raise Exception(str(errs)[:300])
+        return out.get("data") or {}
+    raise Exception("Shopify throttled/5xx after retries")
+
+def _run_reactivation_chunk(business_id: str, rows: list, location_id: str, domain: str, headers: dict):
+    import datetime as _dt, time as _t
+    gids = [f"gid://shopify/ProductVariant/{r['shopify_variant_id']}" for r in rows]
+    data = _reactivation_gql(domain, headers, """
+      query($ids:[ID!]!){ nodes(ids:$ids){ ... on ProductVariant { id inventoryItem { id } product { id status } } } }""",
+      {"ids": gids})
+    inv_by_vid = {}
+    for n in (data.get("nodes") or []):
+        if n and n.get("id"):
+            inv_by_vid[n["id"].rsplit("/", 1)[-1]] = (n.get("inventoryItem") or {}).get("id")
+    # 1) quantities first, in one call
+    qtys = [{"inventoryItemId": inv_by_vid[r["shopify_variant_id"]], "locationId": location_id,
+             "quantity": int(r["target_qty"] or 0)} for r in rows if inv_by_vid.get(r["shopify_variant_id"])]
+    if qtys:
+        d = _reactivation_gql(domain, headers, """
+          mutation($input: InventorySetQuantitiesInput!){ inventorySetQuantities(input:$input){ userErrors { field message } } }""",
+          {"input": {"reason": "correction", "name": "available", "ignoreCompareQuantity": True, "quantities": qtys}})
+        ue = (d.get("inventorySetQuantities") or {}).get("userErrors") or []
+        if ue:
+            raise Exception(f"qty set failed: {str(ue)[:300]}")
+    # 2) then status, one product at a time
+    for r in rows:
+        upd = {"status": None, "error": None, "done_at": _dt.datetime.utcnow().isoformat()}
+        if not inv_by_vid.get(r["shopify_variant_id"]):
+            upd.update(status="error", error="variant not found on Shopify")
+        else:
+            want = "ACTIVE" if r["action"] == "activate" else "ARCHIVED"
+            try:
+                d = _reactivation_gql(domain, headers, """
+                  mutation($input: ProductInput!){ productUpdate(input:$input){ product { id status } userErrors { field message } } }""",
+                  {"input": {"id": f"gid://shopify/Product/{r['shopify_product_id']}", "status": want}})
+                ue = (d.get("productUpdate") or {}).get("userErrors") or []
+                if ue:
+                    upd.update(status="error", error=str(ue)[:300])
+                else:
+                    upd["status"] = "done"
+                    try:
+                        supabase.table("shopify_inventory").update(
+                            {"status": want.lower(), "quantity": int(r["target_qty"] or 0)}
+                        ).eq("business_id", business_id).eq("product_id", r["shopify_product_id"]).execute()
+                    except Exception as e:
+                        print(f"[shopify-reactivate] mirror update failed {r['shopify_product_id']}: {e}")
+            except Exception as e:
+                upd.update(status="error", error=str(e)[:300])
+            _t.sleep(0.3)
+        supabase.table("shopify_reactivation_plan").update(upd).eq("id", r["id"]).execute()
+
+async def shopify_reactivation_worker():
+    import asyncio
+    await asyncio.sleep(45)
+    while True:
+        try:
+            rows = (supabase.table("shopify_reactivation_plan").select("business_id")
+                    .eq("status", "pending").limit(1).execute().data or [])
+            if rows:
+                biz = rows[0]["business_id"]
+                max_batch = int((get_ebay_settings(biz) or {}).get("SHOPIFY_REACTIVATE_MAX_BATCH", "0") or 0)
+                if max_batch > 0:
+                    domain, headers = await asyncio.to_thread(_reactivation_shopify_ctx, biz)
+                    loc = await asyncio.to_thread(_get_shopify_primary_location_id, domain, headers)
+                    if not loc:
+                        print("[shopify-reactivate] no Shopify location -- skipping")
+                    else:
+                        while True:
+                            chunk = (supabase.table("shopify_reactivation_plan").select("*")
+                                     .eq("business_id", biz).eq("status", "pending").lte("batch", max_batch)
+                                     .order("action", desc=True).order("id").limit(50).execute().data or [])
+                            if not chunk:
+                                break
+                            try:
+                                await asyncio.to_thread(_run_reactivation_chunk, biz, chunk, loc, domain, headers)
+                            except Exception as e:
+                                print(f"[shopify-reactivate] chunk failed: {e}")
+                                for r in chunk:
+                                    supabase.table("shopify_reactivation_plan").update(
+                                        {"status": "error", "error": str(e)[:300]}).eq("id", r["id"]).execute()
+                            print(f"[shopify-reactivate] processed {len(chunk)} (batch<={max_batch})")
+                            await asyncio.sleep(1)
+        except Exception as e:
+            print(f"[shopify-reactivate] pass failed: {e}")
+        await asyncio.sleep(120)
+
+async def shopify_db_qty_guard_worker():
+    """Every 20 min, DB-only (no eBay calls): for every ACTIVE Shopify product
+    linked to an eBay listing, target = eBay qty available (daily sync) minus
+    eBay orders since that listing's sync (orders sync every 20 min), 0 if the
+    eBay listing isn't Active. Only ever LOWERS Shopify qty -- never raises --
+    so a Shopify-side sale (which eBay doesn't know about) can't be undone."""
+    import asyncio
+    await asyncio.sleep(90)
+    while True:
+        try:
+            res = supabase.rpc("shopify_db_qty_targets", {}).execute()
+            todo = res.data or []
+            by_biz = {}
+            for t in todo:
+                by_biz.setdefault(t["business_id"], []).append(t)
+            for biz, items in by_biz.items():
+                if (get_ebay_settings(biz) or {}).get("SHOPIFY_DB_QTY_GUARD", "true") != "true":
+                    continue
+                domain, headers = await asyncio.to_thread(_reactivation_shopify_ctx, biz)
+                loc = await asyncio.to_thread(_get_shopify_primary_location_id, domain, headers)
+                if not loc:
+                    continue
+                for i in range(0, len(items), 50):
+                    chunk = items[i:i+50]
+                    rows = [{"id": None, "shopify_variant_id": c["variant_id"], "shopify_product_id": c["product_id"],
+                             "target_qty": c["target_qty"]} for c in chunk]
+                    try:
+                        def _push(rows=rows):
+                            gids = [f"gid://shopify/ProductVariant/{r['shopify_variant_id']}" for r in rows]
+                            data = _reactivation_gql(domain, headers, """
+                              query($ids:[ID!]!){ nodes(ids:$ids){ ... on ProductVariant { id inventoryItem { id } } } }""", {"ids": gids})
+                            inv = {n["id"].rsplit("/", 1)[-1]: (n.get("inventoryItem") or {}).get("id") for n in (data.get("nodes") or []) if n}
+                            q = [{"inventoryItemId": inv[r["shopify_variant_id"]], "locationId": loc, "quantity": int(r["target_qty"])}
+                                 for r in rows if inv.get(r["shopify_variant_id"])]
+                            if q:
+                                _reactivation_gql(domain, headers, """
+                                  mutation($input: InventorySetQuantitiesInput!){ inventorySetQuantities(input:$input){ userErrors { message } } }""",
+                                  {"input": {"reason": "correction", "name": "available", "ignoreCompareQuantity": True, "quantities": q}})
+                            for r in rows:
+                                supabase.table("shopify_inventory").update({"quantity": int(r["target_qty"])})\
+                                    .eq("business_id", biz).eq("product_id", r["shopify_product_id"]).execute()
+                        await asyncio.to_thread(_push)
+                        print(f"[shopify-db-qty-guard] lowered {len(chunk)} Shopify qty(s) for {biz}")
+                    except Exception as e:
+                        print(f"[shopify-db-qty-guard] push failed: {e}")
+        except Exception as e:
+            print(f"[shopify-db-qty-guard] pass failed: {e}")
+        await asyncio.sleep(1200)
+
 @app.on_event("startup")
 async def start_background_jobs():
     import asyncio
@@ -346,6 +509,8 @@ async def start_background_jobs():
     # asyncio.create_task(shopify_sync_auto_refresh_worker())  # disabled 9/24 per user: not using Shopify; was eating eBay Trading API quota
     asyncio.create_task(_oneshot_archive_shopify_duplicates())
     asyncio.create_task(browse_search_daily_worker())
+    asyncio.create_task(shopify_reactivation_worker())  # 10/6: one-time Shopify reactivation from shopify_reactivation_plan (Shopify calls only)
+    asyncio.create_task(shopify_db_qty_guard_worker())  # 10/6: DB-only eBay->Shopify qty lowering, no eBay calls
     asyncio.create_task(ebay_listing_backup_worker())  # 9/24: ONE-TIME finish of remaining listings, then stops forever (EBAY_BACKUP_DONE)
 
 async def browse_search_daily_worker():
