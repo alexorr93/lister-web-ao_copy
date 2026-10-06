@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en"{% if is_editor %} class="editor-mode"{% endif %}>
 <head>
 <link rel="icon" type="image/png" href="/static/favicon.png">
 <link rel="apple-touch-icon" href="/static/favicon.png">
@@ -315,6 +315,15 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 /* SELECT dropdown */
 select.field-input { background: #fff; color: #0f172a; }
 </style>
+{% if is_editor %}<style>
+/* Editor login (10/6): rendered server-side so publish/settings controls never
+   appear at all, not even for a split second. Server also refuses those calls. */
+.editor-mode [onclick*="ublish"],.editor-mode [onclick*="Shopify"],.editor-mode [onclick*="EbayV2"],.editor-mode [onclick*="rchive"],.editor-mode [onclick*="Settings"],.editor-mode [onclick*="connectEbay"],.editor-mode [onclick*="syncEbay"],.editor-mode [onclick*="submit"],.editor-mode [onclick*="Submit"],.editor-mode [onclick*="schedule"]{display:none!important}
+.editor-mode .nav-btn:not(.nav-intake){display:none!important}
+.editor-mode #tab-upload,.editor-mode #tab-fastscan,.editor-mode #tab-auction,.editor-mode #tab-settings{display:none!important}
+.editor-mode #tab-intake{display:block!important}
+#editor-mode-banner{position:fixed;bottom:10px;left:10px;z-index:99999;background:#7c2d12;color:#fff;font:600 12px sans-serif;padding:6px 10px;border-radius:6px;}
+</style>{% endif %}
 </head>
 <body>
 
@@ -4900,27 +4909,6 @@ document.addEventListener('mousedown', function(e) {
   if (box.style.display === 'block' && !box.contains(e.target)) closeCatPicker();
 });
 </script>
-<script>
-// Editor login (10/6): server already refuses publish/settings for editors;
-// this just greys the controls out so it's obvious. Owner sees no change.
-(function(){
-  fetch('/api/whoami',{credentials:'include'}).then(function(r){return r.json();}).then(function(w){
-    if(!w || w.role!=='editor') return;
-    document.documentElement.classList.add('editor-mode');
-    var st=document.createElement('style');
-    st.textContent='.editor-mode [onclick*="ublish"],.editor-mode [onclick*="Shopify"],.editor-mode [onclick*="EbayV2"],.editor-mode [onclick*="rchive"],.editor-mode [onclick*="Settings"],.editor-mode [onclick*="connectEbay"],.editor-mode [onclick*="syncEbay"],.editor-mode [onclick*="submit"],.editor-mode [onclick*="Submit"]{opacity:.35!important;pointer-events:none!important;cursor:not-allowed!important;filter:grayscale(1);}'+
-      '.editor-mode .nav-btn:not(.nav-intake){display:none!important}.editor-mode #tab-upload,.editor-mode #tab-fastscan,.editor-mode #tab-auction,.editor-mode #tab-settings{display:none!important}'+
-      '#editor-mode-banner{position:fixed;bottom:10px;left:10px;z-index:99999;background:#7c2d12;color:#fff;font:600 12px sans-serif;padding:6px 10px;border-radius:6px;}';
-    document.head.appendChild(st);
-    // Intake only: snap back to the Intake tab if opened on any other tab
-    if (typeof activeTab !== 'undefined' && activeTab !== 'intake') {
-      var ib=document.querySelector('.nav-btn.nav-intake[data-tab="intake"]'); if (ib) ib.click();
-    }
-    var t=document.getElementById('tab-intake'); if (t) t.classList.add('active');
-    var b=document.createElement('div'); b.id='editor-mode-banner'; b.textContent='EDITOR MODE — Intake only, publishing disabled';
-    (document.body||document.documentElement).appendChild(b);
-  }).catch(function(){});
-})();
-</script>
+{% if is_editor %}<div id="editor-mode-banner">EDITOR MODE — Intake only, publishing disabled</div>{% endif %}
 </body>
 </html>

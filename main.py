@@ -3040,7 +3040,7 @@ async def dashboard(request: Request):
         inline = _json.dumps({"listings": listings, "today_only": (settings or {}).get("INTAKE_TODAY_ONLY_FILTER") == "true"})
     except Exception as e:
         print(f"intake inline build failed, falling back to fetch-on-load: {e}")
-    return templates.TemplateResponse("index.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "intake", "inline_listings_json": inline.replace("</", "<\\/"), "inline_categories_json": _category_picker_inline_json()})
+    return templates.TemplateResponse("index.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "intake", "inline_listings_json": inline.replace("</", "<\\/"), "inline_categories_json": _category_picker_inline_json(), "is_editor": get_session_role(request) == "editor"})
 
 # ── API: LISTINGS ─────────────────────────────────────────────── #
 
