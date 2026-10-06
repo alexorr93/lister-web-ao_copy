@@ -129,6 +129,14 @@ def guess_brand_from_title(title: str) -> str:
     first_word = (title or "").split()[0].strip(",.;:-") if title else ""
     return first_word if first_word else "Unbranded"
 
+# eBay Motors branches that are actual VEHICLES (whole cars/trucks/boats etc.).
+# Never auto-pick these -- this business only sells parts/tools (owner 10/6).
+_MOTORS_VEHICLE_BRANCHES = {"Cars & Trucks", "Motorcycles", "Boats", "Powersports", "Other Vehicles & Trailers"}
+
+def _is_motors_vehicle_path(path: str) -> bool:
+    segs = [x.strip() for x in (path or "").split(" > ")]
+    return len(segs) > 1 and segs[0] == "eBay Motors" and segs[1] in _MOTORS_VEHICLE_BRANCHES
+
 def _category_is_restricted_ok(cat_id: str, path_map: dict) -> bool:
     """True only if cat_id is known locally (synced via sync_ebay_categories) AND its
     path actually falls under Business & Industrial / eBay Motors. An id that's blank,
@@ -4279,10 +4287,16 @@ def _motors_fallback_id(business_id: str) -> str:
         pass
 
     try:
+        # 10/6: this used to take ANY "Other %" leaf in tree 100 with no ordering --
+        # live it returned 6197 "Cars & Trucks > Dodge > Other Pickups", a whole-VEHICLE
+        # category. Now: parts-side catch-all only, shortest path first
+        # (= "eBay Motors > Parts & Accessories > Other", 6755).
         res = supabase.table("ebay_categories").select("category_id,path").eq("tree_id", "100")\
-            .eq("is_leaf", True).ilike("name", "Other %").limit(1).execute()
+            .eq("is_leaf", True).like("path", "eBay Motors > Parts & Accessories > %")\
+            .ilike("name", "Other%").limit(50).execute()
         if res.data:
-            return str(res.data[0]["category_id"])
+            best = sorted(res.data, key=lambda r: len(r.get("path") or ""))[0]
+            return str(best["category_id"])
     except Exception as e:
         print(f"_motors_fallback_id: auto-lookup failed: {e}")
 
@@ -4426,7 +4440,14 @@ def suggest_ebay_category(title: str, business_id: str, restrict: bool = True,
                 print(f"suggest_ebay_category: eBay suggested categories for '{title}' but none rooted under "
                       f"'Business & Industrial' -- top raw suggestion(s): {pre_restrict_paths} -- falling back")
                 return _fallback()
-    # mode == "motors" needs no filter: tree 100 IS eBay Motors by definition.
+    if mode == "motors":
+        # tree 100 is eBay Motors, but it also holds whole-vehicle branches
+        # (e.g. "Cars & Trucks > GMC > Vandura") -- never pick those for a part.
+        pre_vehicle = [x["path"] for x in results[:5]]
+        results = [x for x in results if not _is_motors_vehicle_path(x.get("path"))]
+        if not results:
+            print(f"suggest_ebay_category: '{title}' -- only vehicle categories suggested {pre_vehicle} -- falling back")
+            return _fallback()
 
     if exclude_ids:
         exclude_set = {str(x) for x in exclude_ids if x}
@@ -4527,6 +4548,7 @@ def suggest_ebay_category(title: str, business_id: str, restrict: bool = True,
                 if restrict and mode == "industrial":
                     local_hits = [h for h in local_hits
                                   if (h.get("path") or "").split(" > ")[0].strip() == "Business & Industrial"]
+                local_hits = [h for h in local_hits if not _is_motors_vehicle_path(h.get("path"))]
                 if exclude_ids:
                     exclude_set = {str(x) for x in exclude_ids if x}
                     local_hits = [h for h in local_hits if str(h["category_id"]) not in exclude_set]
