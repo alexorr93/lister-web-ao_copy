@@ -318,7 +318,8 @@ select.field-input { background: #fff; color: #0f172a; }
 {% if is_editor %}<style>
 /* Editor login (10/6): rendered server-side so publish/settings controls never
    appear at all, not even for a split second. Server also refuses those calls. */
-.editor-mode [onclick*="ublish"],.editor-mode [onclick*="Shopify"],.editor-mode [onclick*="EbayV2"],.editor-mode [onclick*="rchive"],.editor-mode [onclick*="Settings"],.editor-mode [onclick*="connectEbay"],.editor-mode [onclick*="syncEbay"],.editor-mode [onclick*="submit"],.editor-mode [onclick*="Submit"],.editor-mode [onclick*="schedule"]{display:none!important}
+.editor-mode [onclick]:not([onclick^="handleTileClick"]):not([onclick^="handlePhotoClick"]):not([onclick^="closeModal"]):not([onclick^="saveModal"]):not([onclick^="toggleModalDesc"]):not([onclick="event.stopPropagation()"]):not([onclick*="toggleModalImgZoom"]):not([onclick*="stepModalPhoto"]):not([onclick*="cyclePhoto"]):not([onclick^="if(event.target===this)"]){display:none!important}
+.editor-mode a[href*="google.com"],.editor-mode .tile-check,.editor-mode input[type="checkbox"],.editor-mode .tile-rescan,.editor-mode .make-main-btn,.editor-mode .delete-photo-btn,.editor-mode .tile-done-toggle{display:none!important}
 .editor-mode .nav-btn:not(.nav-intake){display:none!important}
 .editor-mode #tab-upload,.editor-mode #tab-fastscan,.editor-mode #tab-auction,.editor-mode #tab-settings{display:none!important}
 .editor-mode #tab-intake{display:block!important}

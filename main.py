@@ -77,20 +77,17 @@ _EDITOR_ALLOW = [
     ("GET",    r"^/api/acquisitions$"),
     ("GET",    r"^/api/ebay/(category-picker-list|shipping-policy-options|sync-categories-status)$"),
     ("PATCH",  r"^/api/listings/\d+$"),
-    ("POST",   r"^/api/listings/\d+/(field-mark|set-category|auto-category|rematch-category|assign-lot|assign-lot-from-group|add-photos)$"),
-    ("POST",   r"^/api/photos/rotate$"),
-    ("DELETE", r"^/api/listings/\d+/photos/[^/]+$"),
+    ("POST",   r"^/api/listings/\d+/field-mark$"),
 ]
 _EDITOR_ALLOW = [(m, re.compile(rx)) for m, rx in _EDITOR_ALLOW]
 
-# Listing columns an editor may never write through PATCH /api/listings/{id}
-# (publish state, platform ids, ownership). Content fields stay editable.
-_EDITOR_BLOCKED_FIELDS = {
-    "id", "business_id", "photo_id", "created_at",
-    "ebay_item_id", "ebay_status", "ebay_offer_id", "ebay_sku", "ebay_scheduled_at", "ebay_error",
-    "shopify_product_id", "shopify_status", "shopify_error", "sold_count",
+# Editor may ONLY write these plain text/number fields, one listing at a time.
+_EDITOR_EDITABLE_FIELDS = {
+    "title", "subtitle", "description", "price", "price_used", "price_new", "price_note",
+    "condition", "condition_description", "condition_notes", "brand", "model", "mpn",
+    "ebay_mpn", "ebay_mpn_is_fallback", "upc", "color", "quantity", "weight_oz", "weight_lb",
+    "ebay_item_specifics",
 }
-_EDITOR_ALLOWED_STATUS = {"scanned", "ready", "archived", "pending"}
 
 @app.middleware("http")
 async def _editor_role_guard(request, call_next):
@@ -3416,10 +3413,8 @@ async def update_listing(item_id: str, body: UpdateField, request: Request):
         # touched before reporting success, so any future silent-failure shows
         # up as a real error instead of a lie.
         if get_session_role(request) == "editor":
-            if body.field in _EDITOR_BLOCKED_FIELDS:
+            if body.field not in _EDITOR_EDITABLE_FIELDS:
                 raise HTTPException(403, f"Editor login can't change '{body.field}'")
-            if body.field == "status" and str(body.value) not in _EDITOR_ALLOWED_STATUS:
-                raise HTTPException(403, f"Editor login can't set status '{body.value}'")
         res = supabase.table("listings").update({body.field: body.value}).eq("id", item_id).execute()
         if not res.data:
             raise HTTPException(404, f"listing {item_id} not found or not updated")
