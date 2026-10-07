@@ -79,6 +79,7 @@ _EDITOR_ALLOW = [
     ("PATCH",  r"^/api/listings/\d+$"),
     ("POST",   r"^/api/listings/\d+/field-mark$"),
     ("POST",   r"^/api/listings/\d+/grok-state$"),
+    ("POST",   r"^/api/listings/\d+/set-category$"),   # draft-only, enforced in the handler
 ]
 _EDITOR_ALLOW = [(m, re.compile(rx)) for m, rx in _EDITOR_ALLOW]
 
@@ -4770,6 +4771,13 @@ async def api_set_category(item_id: str, request: Request, body: dict = Body(...
     if not hit:
         raise HTTPException(400, f"{cat_id} is not an allowed leaf category (B&I / eBay Motors)")
     mode = "motors" if hit[2] == "100" else "industrial"
+    if get_session_role(request) == "editor":
+        cur = (supabase.table("listings").select("ebay_status")
+               .eq("id", item_id).eq("business_id", business_id).limit(1).execute()).data
+        if not cur:
+            raise HTTPException(404, "listing not found")
+        if (cur[0].get("ebay_status") or "").lower() in ("published", "scheduled"):
+            raise HTTPException(403, "Editor login can only set categories on drafts")
     res = (supabase.table("listings")
            .update({"ebay_category_id": cat_id, "category_mode": mode})
            .eq("id", item_id).eq("business_id", business_id).execute())
