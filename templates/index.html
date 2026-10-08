@@ -3146,6 +3146,7 @@ function setUpCondition(c) {
   upCondition = c;
   document.getElementById('up-cond-used').className = 'btn' + (c==='used' ? ' btn-primary' : '');
   document.getElementById('up-cond-new').className  = 'btn' + (c==='new'  ? ' btn-primary' : '');
+  if (upBatchId) _saveUpSession();
 }
 
 async function startUploadBatch() {
@@ -3163,6 +3164,7 @@ async function createUpGroup() {
   upGroupId = r.id;
   document.getElementById('up-item-label').textContent = `Item ${upItems.length + 1}`;
   document.getElementById('up-qty-display').textContent = upQtyVal = 1;
+  _saveUpSession();
 }
 
 // ── CONTINUOUS CAMERA MODE ──────────────────────────────────────
@@ -3322,16 +3324,12 @@ function closeCameraMode(keepShots) {
     // picks) untouched.
     const removed = upPhotos.splice(cameraModeStartIdx);
     removed.forEach(p => URL.revokeObjectURL(p.url));
+    _saveUpSession();
     return;
   }
   // Sync the main upload screen's thumbnail strip with what was just captured.
-  for (let i = cameraModeStartIdx; i < upPhotos.length; i++) {
-    const div = document.createElement('div');
-    div.className = 'photo-thumb';
-    div.id = `up-thumb-${i}`;
-    div.innerHTML = `<img src="${upPhotos[i].url}"/><button class="photo-thumb-del" onclick="removeUpPhoto(${i})">×</button>`;
-    document.getElementById('upload-thumbs').appendChild(div);
-  }
+  renderUpThumbs();
+  _saveUpSession();
 }
 
 // Explicit, reliable save-to-device -- doesn't depend on whatever the phone's
@@ -3357,28 +3355,99 @@ async function handleUploadFiles(input, isCameraCapture) {
   const files = Array.from(input.files).slice(0, 10 - upPhotos.length);
   for (const f of files) {
     if (isCameraCapture) saveFileToDevice(f);
-    const url = URL.createObjectURL(f);
-    const idx = upPhotos.length;
-    upPhotos.push({file: f, url});
-    const div = document.createElement('div');
-    div.className = 'photo-thumb';
-    div.id = `up-thumb-${idx}`;
-    div.innerHTML = `<img src="${url}"/><button class="photo-thumb-del" onclick="removeUpPhoto(${idx})">×</button>`;
-    document.getElementById('upload-thumbs').appendChild(div);
+    upPhotos.push({file: f, url: URL.createObjectURL(f)});
   }
   input.value = '';
+  renderUpThumbs();
+  _saveUpSession();  // saved BEFORE the next camera trip, which is when the phone kills the tab
+}
+
+// Thumbs always rebuilt from upPhotos so ×-buttons never point at a stale
+// index (old code kept the original index after a delete, so deleting a
+// second photo could remove the wrong one).
+function renderUpThumbs() {
+  const box = document.getElementById('upload-thumbs');
+  if (!box) return;
+  box.innerHTML = upPhotos.map((p, i) =>
+    `<div class="photo-thumb" id="up-thumb-${i}"><img src="${p.url}"/><button class="photo-thumb-del" onclick="removeUpPhoto(${i})">×</button></div>`
+  ).join('');
 }
 
 function removeUpPhoto(idx) {
-  upPhotos.splice(idx, 1);
-  const el = document.getElementById(`up-thumb-${idx}`);
-  if (el) el.remove();
+  const [p] = upPhotos.splice(idx, 1);
+  if (p && p.url) URL.revokeObjectURL(p.url);
+  renderUpThumbs();
+  _saveUpSession();
 }
 
 function upQty(d) {
   upQtyVal = Math.max(1, upQtyVal + d);
   document.getElementById('up-qty-display').textContent = upQtyVal;
+  _saveUpSession();
 }
+
+// 10/8: the 📷 Take Photo button opens the phone's own camera app. While it's
+// open, the phone (Android especially) often kills the Lister tab to free
+// memory, and coming back reloads the page -- which used to wipe the whole
+// upload batch (it only lived in memory), dumping you back at Start Batch
+// mid-item. Now the in-progress batch -- current item's photos included --
+// is kept on the phone (IndexedDB) after every change and restored on load.
+const _UPSESS_DB = 'lister-upload-session';
+function _upSessDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(_UPSESS_DB, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('s');
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+let _upSessSaveChain = Promise.resolve();
+function _saveUpSession() {
+  // Serialized so an older snapshot can never land after a newer one.
+  const snap = upBatchId ? {
+    batchId: upBatchId, groupId: upGroupId, condition: upCondition, qty: upQtyVal,
+    items: upItems.slice(), files: upPhotos.map(p => p.file), savedAt: Date.now(),
+  } : null;
+  _upSessSaveChain = _upSessSaveChain.then(async () => {
+    try {
+      const db = await _upSessDb();
+      await new Promise((res) => {
+        const tx = db.transaction('s', 'readwrite');
+        if (snap) tx.objectStore('s').put(snap, 'current'); else tx.objectStore('s').delete('current');
+        tx.oncomplete = res; tx.onerror = res; tx.onabort = res;
+      });
+    } catch (e) { console.warn('upload session save failed', e); }
+  });
+  return _upSessSaveChain;
+}
+async function _restoreUpSession() {
+  if (upBatchId) return;  // a batch is already live in this page
+  let snap = null;
+  try {
+    const db = await _upSessDb();
+    snap = await new Promise((res) => {
+      const r = db.transaction('s', 'readonly').objectStore('s').get('current');
+      r.onsuccess = () => res(r.result || null); r.onerror = () => res(null);
+    });
+  } catch (e) { return; }
+  if (!snap || !snap.batchId) return;
+  if (Date.now() - (snap.savedAt || 0) > 24 * 3600 * 1000) { upBatchId = null; _saveUpSession(); return; }
+  upBatchId = snap.batchId; upGroupId = snap.groupId;
+  upItems = snap.items || []; upQtyVal = snap.qty || 1;
+  upPhotos = (snap.files || []).map(f => ({file: f, url: URL.createObjectURL(f)}));
+  if (snap.condition) setUpCondition(snap.condition);
+  const btn = document.querySelector('.nav-btn[data-tab="upload"]');
+  if (btn && activeTab !== 'upload') btn.click();
+  document.getElementById('upload-start').style.display = 'none';
+  document.getElementById('upload-active').style.display = 'block';
+  document.getElementById('up-item-label').textContent = `Item ${upItems.length + 1}`;
+  document.getElementById('up-qty-display').textContent = upQtyVal;
+  renderUpThumbs();
+  renderUpItems();
+  if (!upGroupId) { try { await createUpGroup(); } catch (e) {} }
+  toast(`↻ Picked up where you left off — Item ${upItems.length + 1}, ${upPhotos.length} photo(s)`);
+}
+document.addEventListener('DOMContentLoaded', () => setTimeout(_restoreUpSession, 300));
 
 let upBackgroundJobs = 0;  // count of item uploads still running in the background
 let upBackgroundQueue = [];  // ordered queue -- items process strictly in submission order
@@ -3516,6 +3585,7 @@ window.addEventListener('beforeunload', (e) => {
 function submitUploadItem() {
   if (!upPhotos.length) { toast('Select photos first', 'error'); return; }
   if (!requireActiveLotSku()) return;
+  if (!upGroupId) { toast('One sec — still setting up this item, tap again', 'error'); return; }
   const photosForThis = upPhotos;
   const groupForThis = upGroupId;
   const conditionForThis = upCondition;
@@ -3524,10 +3594,11 @@ function submitUploadItem() {
 
   // Reset immediately -- don't wait on anything below this line.
   upPhotos = [];
+  upGroupId = null;  // never let a restore attach new photos to the item just submitted
   document.getElementById('upload-thumbs').innerHTML = '';
   upItems.push({count: photosForThis.length, qty: qtyForThis});
   renderUpItems();
-  createUpGroup();
+  createUpGroup();  // saves the session once the next item's group exists
 
   const _job = {photos: photosForThis, groupId: groupForThis, condition: conditionForThis, qty: qtyForThis, itemNumber};
   upBackgroundQueue.push(_job);
@@ -3623,6 +3694,7 @@ function endUploadBatch() {
   document.getElementById('upload-active').style.display = 'none';
   document.getElementById('upload-items-list').innerHTML = '';
   upBatchId = null; upGroupId = null; upPhotos = []; upItems = [];
+  _saveUpSession();  // clears the saved batch
 }
 
 // ── AUCTION CAPTURE ────────────────────────────────────────────
