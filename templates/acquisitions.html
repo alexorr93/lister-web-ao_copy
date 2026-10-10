@@ -134,9 +134,10 @@ tr:last-child td { border-bottom: none; }
         <h3 style="margin-bottom:16px;">Add Cash Payment</h3>
         <div style="margin-bottom:12px;">
           <div style="font-size:11px;color:var(--muted,#64748b);font-weight:700;text-transform:uppercase;margin-bottom:4px;">Lot</div>
-          <select id="cash-pmt-sku" style="width:100%;padding:8px 10px;border-radius:8px;border:none;font-size:13px;">
-            <option value="">Select a lot...</option>
-          </select>
+          <input type="hidden" id="cash-pmt-sku" value=""/>
+          <input type="text" id="cash-pmt-search" class="field-input" placeholder="Type to search lots (SKU or name)…" oninput="renderCashPmtLotList()" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" name="cash-pmt-lot-search-nofill"/>
+          <div id="cash-pmt-lot-list" style="max-height:200px;overflow-y:auto;margin-top:6px;border:1px solid var(--border,#2d3348);border-radius:8px;"></div>
+          <div id="cash-pmt-selected" style="font-size:12px;margin-top:6px;color:var(--muted,#64748b);">No lot selected</div>
         </div>
         <div style="margin-bottom:12px;">
           <div style="font-size:11px;color:var(--muted,#64748b);font-weight:700;text-transform:uppercase;margin-bottom:4px;">Amount</div>
@@ -520,15 +521,37 @@ async function undoLastEdit() {
   }
 }
 
+// Lot picker: a filterable clickable list instead of a native <select>
+// (the native dropdown wouldn't let a lot be picked on the user's browser).
+function renderCashPmtLotList() {
+  const q = (document.getElementById('cash-pmt-search').value || '').trim().toLowerCase();
+  const chosen = document.getElementById('cash-pmt-sku').value;
+  const lots = acquisitions.filter(a => a.sku && (!q || a.sku.toLowerCase().includes(q) || (a.name || '').toLowerCase().includes(q)));
+  const list = document.getElementById('cash-pmt-lot-list');
+  if (!lots.length) { list.innerHTML = '<div style="padding:8px 10px;font-size:12px;color:var(--muted,#64748b);">No matching lots</div>'; return; }
+  list.innerHTML = lots.map(a => {
+    const on = a.sku === chosen;
+    return `<div data-sku="${escapeHtml(a.sku)}" onclick="pickCashPmtLot(this.dataset.sku)" style="padding:7px 10px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border,#2d3348);${on ? 'background:#2563eb;color:#fff;' : ''}"><b style="font-family:monospace;">${escapeHtml(a.sku)}</b> — ${escapeHtml(a.name || '')}</div>`;
+  }).join('');
+}
+
+function pickCashPmtLot(sku) {
+  document.getElementById('cash-pmt-sku').value = sku;
+  const lot = acquisitions.find(a => a.sku === sku);
+  const sel = document.getElementById('cash-pmt-selected');
+  sel.textContent = `Selected: ${sku}${lot && lot.name ? ' — ' + lot.name : ''}`;
+  sel.style.color = '#16a34a';
+  renderCashPmtLotList();
+}
+
 function openAddCashPmtModal() {
-  const select = document.getElementById('cash-pmt-sku');
-  select.innerHTML = '<option value="">Select a lot...</option>' +
-    acquisitions
-      .filter(a => a.sku)
-      .map(a => `<option value="${a.sku}">${a.sku} — ${(a.name || '').replace(/</g,'&lt;')}</option>`)
-      .join('');
+  document.getElementById('cash-pmt-sku').value = '';
+  document.getElementById('cash-pmt-search').value = '';
+  const sel = document.getElementById('cash-pmt-selected');
+  sel.textContent = 'No lot selected'; sel.style.color = '';
+  renderCashPmtLotList();
   document.getElementById('cash-pmt-amount').value = '';
-  document.getElementById('cash-pmt-date').value = new Date().toISOString().slice(0,10);
+  { const d = new Date(); document.getElementById('cash-pmt-date').value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; } // local date, not UTC
   document.getElementById('cash-pmt-status').textContent = '';
   document.getElementById('cash-pmt-modal').style.display = 'flex';
 }
