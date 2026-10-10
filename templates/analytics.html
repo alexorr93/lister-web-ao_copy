@@ -362,16 +362,43 @@ function setChartMode(mode) {
   if (lastTrendData) renderTrendChart(lastTrendData);
 }
 
+// Current (partial) month is projected to a full-month pace so it doesn't
+// show as a fake dip: value × (days in month ÷ days elapsed). Drawn dashed and
+// labeled "projected" in the tooltip. Totals elsewhere stay actual.
+function currentMonthProjection(months) {
+  const now = new Date();
+  const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const idx = (months || []).lastIndexOf(key);
+  if (idx < 0) return { idx: -1, factor: 1 };
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const elapsed = Math.max(1, now.getDate() - 1 + (now.getHours() * 60 + now.getMinutes()) / 1440);
+  return { idx, factor: daysInMonth / elapsed };
+}
+function projectSeries(arr, proj) {
+  if (!arr || proj.idx < 0) return arr;
+  return arr.map((v, i) => (i === proj.idx && v != null) ? v * proj.factor : v);
+}
+function projectedStyle(proj) {
+  // dash the line segment leading into the projected point, and hollow the point
+  return {
+    segment: { borderDash: c => (proj.idx >= 0 && c.p1DataIndex === proj.idx) ? [6, 5] : undefined },
+    pointStyle: c => (c.dataIndex === proj.idx ? 'rectRot' : 'circle'),
+    pointRadius: c => (c.dataIndex === proj.idx ? 6 : 3),
+  };
+}
+
 function renderTrendChart(data) {
   lastTrendData = data;
   const ctx = document.getElementById('trend-chart').getContext('2d');
   if (trendChart) trendChart.destroy();
 
+  const proj = currentMonthProjection(data.months);
+  const ps = projectedStyle(proj);
   let datasets;
   if (chartMode === 'pct') {
     datasets = [{
       label: 'Inventory Multiple (Spend as % of Sales)',
-      data: data.pct_multiple,
+      data: data.pct_multiple,  // a ratio, so no projection needed
       borderColor: '#a78bfa',
       backgroundColor: 'rgba(167,139,250,0.15)',
       tension: 0.25,
@@ -379,17 +406,22 @@ function renderTrendChart(data) {
   } else if (chartMode === 'variance') {
     datasets = [{
       label: '$ Variance (Sales − Inventory Spend)',
-      data: data.dollar_variance,
+      data: projectSeries(data.dollar_variance, proj),
       borderColor: '#38bdf8',
       backgroundColor: 'rgba(56,189,248,0.15)',
       tension: 0.25,
+      ...ps,
     }];
   } else {
     datasets = [
-      { label: 'Inventory Spend', data: data.inventory_spend, borderColor: '#f97316', backgroundColor: 'rgba(249,115,22,0.1)', tension: 0.25 },
-      { label: 'Sales', data: data.sales, borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.1)', tension: 0.25 },
+      { label: 'Inventory Spend', data: projectSeries(data.inventory_spend, proj), borderColor: '#f97316', backgroundColor: 'rgba(249,115,22,0.1)', tension: 0.25, ...ps },
+      { label: 'Sales', data: projectSeries(data.sales, proj), borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.1)', tension: 0.25, ...ps },
     ];
   }
+  const actualFor = (c) => {
+    const src = chartMode === 'variance' ? data.dollar_variance : (c.datasetIndex === 0 ? data.inventory_spend : data.sales);
+    return src ? src[c.dataIndex] : null;
+  };
 
   const isPct = chartMode === 'pct';
   trendChart = new Chart(ctx, {
@@ -401,12 +433,24 @@ function renderTrendChart(data) {
         legend: { labels: { color: '#f1f5f9' } },
         tooltip: {
           callbacks: {
-            label: ctx => `${ctx.dataset.label}: ${isPct ? Math.round(ctx.parsed.y) + '%' : '$' + Math.round(ctx.parsed.y).toLocaleString()}`,
+            label: ctx => {
+              if (isPct) return `${ctx.dataset.label}: ${Math.round(ctx.parsed.y)}%`;
+              const base = `${ctx.dataset.label}: $${Math.round(ctx.parsed.y).toLocaleString()}`;
+              if (ctx.dataIndex !== proj.idx) return base;
+              const actual = actualFor(ctx);
+              return `${base} (projected full month · $${Math.round(actual || 0).toLocaleString()} so far)`;
+            },
           },
         },
       },
       scales: {
-        x: { ticks: { color: '#64748b' }, grid: { color: '#2d3348' } },
+        x: {
+          ticks: {
+            color: '#64748b',
+            callback: function(v, i) { const l = this.getLabelForValue(v); return (!isPct && i === proj.idx) ? l + ' (proj.)' : l; },
+          },
+          grid: { color: '#2d3348' },
+        },
         y: {
           ticks: {
             color: '#64748b',
@@ -794,13 +838,22 @@ function renderWeeklySalesChart(full) {
   const lastIdx = n - 1;
   const inProgress = !data.complete[lastIdx];
   const dash = c => (inProgress && c.p1DataIndex === lastIdx) ? [6, 6] : undefined;
+  // Project the in-progress week to a full-week pace (net × 7 ÷ days elapsed)
+  // so it doesn't read as a fake drop; tooltip shows the actual-so-far figure.
+  let weekFactor = 1;
+  if (inProgress) {
+    const start = new Date(data.labels[lastIdx] + 'T00:00:00');
+    const elapsedDays = Math.max(1, (Date.now() - start.getTime()) / 86400000);
+    weekFactor = 7 / Math.min(7, elapsedDays);
+  }
+  const plotNet = data.net.map((v, i) => (inProgress && i === lastIdx) ? v * weekFactor : v);
   const short = iso => new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
   weeklySalesChart = new Chart(canvas.getContext('2d'), {
     type: 'line',
     data: {
       labels: data.labels.map(short),
       datasets: [
-        { label: 'Net (after refunds & fees)', data: data.net, borderColor: '#60a5fa', backgroundColor: 'rgba(96,165,250,0.08)', fill: true, tension: 0.2, pointRadius: n <= 20 ? 3 : 0, pointHoverRadius: 4, borderWidth: 2, segment: { borderDash: dash } },
+        { label: 'Net (after refunds & fees)', data: plotNet, borderColor: '#60a5fa', backgroundColor: 'rgba(96,165,250,0.08)', fill: true, tension: 0.2, pointRadius: n <= 20 ? 3 : 0, pointHoverRadius: 4, borderWidth: 2, segment: { borderDash: dash } },
       ],
     },
     options: {
@@ -814,7 +867,9 @@ function renderWeeklySalesChart(full) {
               const i = items[0].dataIndex;
               return 'Week of ' + fmtWeekDay(data.labels[i]) + ' – ' + fmtWeekDay(data.week_end[i]) + (data.complete[i] ? '' : ' (in progress)');
             },
-            label: c => `Net: $${Math.round(c.parsed.y).toLocaleString()}`,
+            label: c => (inProgress && c.dataIndex === lastIdx)
+              ? `Net: $${Math.round(c.parsed.y).toLocaleString()} projected full week · $${Math.round(data.net[lastIdx]).toLocaleString()} so far`
+              : `Net: $${Math.round(c.parsed.y).toLocaleString()}`,
             afterBody: items => {
               const i = items[0].dataIndex;
               return [`Orders: ${data.orders[i]}`, `Refunds: $${Math.round(data.refunds[i]).toLocaleString()}`];
