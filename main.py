@@ -164,7 +164,15 @@ async def auto_fill_worker():
 
 @app.on_event("startup")
 async def start_background_jobs():
-    import asyncio
+    # This branch only serves the Input environment (catalog feed / Flags UI).
+    # Background workers are OFF unless explicitly enabled: on 10/6 the
+    # auto-recast loop here was found burning ~16k Gemini calls/day, and the
+    # order/Shopify/auto-fill workers are stale copies of production's that
+    # must not run alongside it. Set ENABLE_BACKGROUND_WORKERS=1 to turn on.
+    import asyncio, os
+    if os.environ.get("ENABLE_BACKGROUND_WORKERS") != "1":
+        print("[startup] background workers disabled (ENABLE_BACKGROUND_WORKERS != 1)")
+        return
     asyncio.create_task(auto_fill_worker())
     asyncio.create_task(order_sync_worker())
     asyncio.create_task(shopify_sync_worker())
