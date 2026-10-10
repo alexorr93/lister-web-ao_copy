@@ -544,6 +544,16 @@ loadLastCatalogAdded();
 setInterval(loadLastCatalogAdded, 5 * 60 * 1000); // cheap query, refreshing every 5 min is effectively free
 
 loadFlags().then(highlightFromUrlParam);
+
+// Auto-refresh the table every 5 min so newly added catalogs show up without a
+// reload. Pure database read (no Gemini/paid APIs). Filters are preserved by
+// loadFlags; skipped while a keyword dropdown is open or the tab is hidden.
+setInterval(() => {
+  if (document.hidden) return;
+  const dropdownOpen = [...document.querySelectorAll('.kw-dropdown')].some(d => d.style.display !== 'none');
+  if (dropdownOpen) return;
+  loadFlags();
+}, 5 * 60 * 1000);
 </script>
 </body>
 </html>
