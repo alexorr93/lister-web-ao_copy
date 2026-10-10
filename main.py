@@ -3612,16 +3612,46 @@ async def set_grok_state(item_id: str, body: dict = Body(...), request: Request 
     state = body.get("state")
     if state not in (None, "tagged", "actioned"):
         raise HTTPException(400, "state must be null, 'tagged' or 'actioned'")
-    cur = (supabase.table("listings").select("grok_state").eq("id", item_id)
+    cur = (supabase.table("listings").select("grok_state,title").eq("id", item_id)
            .eq("business_id", business_id).limit(1).execute().data or [])
     if not cur:
         raise HTTPException(404, "listing not found")
-    if get_session_role(request) == "editor":
+    is_editor = get_session_role(request) == "editor"
+    if is_editor:
         allowed = {("tagged", "actioned"), ("actioned", "tagged")}
         if (cur[0].get("grok_state"), state) not in allowed:
             raise HTTPException(403, "Editor can only mark a Grok-tagged item as actioned (or undo that)")
     supabase.table("listings").update({"grok_state": state}).eq("id", item_id).eq("business_id", business_id).execute()
+    # Owner switching the toggle ON (purple) pings Grok's webhook. Fire-and-forget:
+    # a failed/slow webhook never blocks or undoes the toggle save.
+    if state == "tagged" and cur[0].get("grok_state") != "tagged" and not is_editor:
+        import asyncio
+        asyncio.create_task(_notify_grok_webhook(item_id, cur[0].get("title") or ""))
     return {"ok": True, "grok_state": state}
+
+
+async def _notify_grok_webhook(item_id: str, title: str):
+    """POST {"card_id", "title"} to GROK_WEBHOOK_URL with Authorization set to
+    GROK_WEBHOOK_AUTH (the full header value, e.g. 'Bearer <key>'). Both live in
+    Railway env vars, never in code. No-op if the URL isn't configured."""
+    url = os.environ.get("GROK_WEBHOOK_URL", "").strip()
+    if not url:
+        return
+    headers = {"Content-Type": "application/json"}
+    auth = os.environ.get("GROK_WEBHOOK_AUTH", "").strip()
+    if auth:
+        headers["Authorization"] = auth
+    try:
+        card_id = int(item_id)
+    except (TypeError, ValueError):
+        card_id = item_id
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(url, json={"card_id": card_id, "title": title}, headers=headers)
+        print(f"[grok-webhook] card {item_id} -> HTTP {r.status_code}", flush=True)
+    except Exception as e:
+        print(f"[grok-webhook] card {item_id} failed: {type(e).__name__}: {e}", flush=True)
 
 @app.post("/api/listings/{item_id}/field-mark")
 async def set_field_mark(item_id: str, body: dict = Body(...), request: Request = None):
