@@ -15,12 +15,12 @@
   <a class="nav-btn nav-upload" href="/?tab=upload">📸 Upload</a>
   <a class="nav-btn nav-fastscan" href="/?tab=fastscan">⚡ Fast Scan</a>
   {% endif %}
-  <a class="nav-btn nav-archive{{ ' active' if active_tab == 'archive' else '' }}" href="/archive">🗄️ Archive</a>
+  <a class="nav-btn nav-lots{{ ' active' if active_tab == 'lots' else '' }}" href="/acquisitions">🛒 Lots</a>
   <a class="nav-btn nav-ready{{ ' active' if active_tab == 'ready' else '' }}" href="/ready">✅ Ready</a>
   <a class="nav-btn nav-inventory{{ ' active' if active_tab == 'inventory' else '' }}" href="/inventory">📦 Inventory</a>
   <a class="nav-btn nav-uncat{{ ' active' if active_tab == 'uncat' else '' }}" href="/uncat">🚩 Uncat</a>
   <a class="nav-btn nav-financials{{ ' active' if active_tab == 'financials' else '' }}" href="/financials">💰 Financials</a>
-  <a class="nav-btn nav-lots{{ ' active' if active_tab == 'lots' else '' }}" href="/acquisitions">🛒 Lots</a>
+  <a class="nav-btn nav-archive{{ ' active' if active_tab == 'archive' else '' }}" href="/archive">🗄️ Archive</a>
   <a class="nav-btn nav-analytics{{ ' active' if active_tab == 'analytics' else '' }}" href="/analytics">📊 Analytics</a>
   <a class="nav-btn nav-shopify{{ ' active' if active_tab == 'shopify' else '' }}" href="/shopify-sync">🔁 Sync</a>
   {#- Categories hidden per request (7/31/26) -- no longer needed day-to-day, but the
