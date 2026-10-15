@@ -1219,7 +1219,7 @@ def _live_verify_ended_rows(business_id: str, rows: list) -> list:
                 resp = _req.get(f"https://{domain}/admin/api/2024-10/products/{pid}.json",
                                 headers=headers, params={"fields": "id,status,variants"}, timeout=15)
             if resp.status_code == 404:
-                supabase.table("shopify_inventory").update({"status": "deleted"}).eq("business_id", business_id).eq("product_id", pid).execute()
+                supabase.table("shopify_inventory").update({"status": "deleted", "deleted_at": datetime.utcnow().isoformat()}).eq("business_id", business_id).eq("product_id", pid).execute()
                 return None
             if resp.status_code != 200:
                 r["live_check"] = f"HTTP {resp.status_code}"
@@ -13529,6 +13529,7 @@ def sync_inventory(business_id: str) -> dict:
         "sku": it["sku"], "title": it["title"], "price": it["price"], "quantity": it["quantity"],
         "status": it["status"], "handle": it["handle"],
         "synced_at": _now_iso,  # was never written on refresh, so the column froze at row-creation time and looked a month stale
+        "deleted_at": None,     # back on Shopify -> no longer deleted
     } for it in shopify_items if it.get("variant_id")]
 
     for i in range(0, len(ebay_records), 500):
@@ -13541,6 +13542,35 @@ def sync_inventory(business_id: str) -> dict:
             supabase.table("shopify_inventory").upsert(shopify_records[i:i+500]).execute()
         except Exception as e:
             errors["shopify_write"] = str(e)
+
+    # Rows are never removed from shopify_inventory. A product Shopify no longer
+    # returns gets status='deleted' + deleted_at, so "what's on Shopify" is just
+    # status != 'deleted'. Only after a clean, complete fetch; and skipped if the
+    # fetch came back far smaller than what we already know about (a partial or
+    # throttled response must never mass-mark live products as deleted).
+    if shopify_records and "shopify" not in errors and "shopify_write" not in errors:
+        try:
+            seen = {r["id"] for r in shopify_records}
+            known, start = [], 0
+            while True:
+                page = (supabase.table("shopify_inventory").select("id")
+                        .eq("business_id", business_id).neq("status", "deleted")
+                        .range(start, start + 999).execute().data or [])
+                known.extend(str(r["id"]) for r in page)
+                if len(page) < 1000:
+                    break
+                start += 1000
+            missing = [vid for vid in known if vid not in seen]
+            if known and len(seen) < 0.7 * len(known):
+                errors["shopify_deleted_mark"] = (f"skipped: fetch returned {len(seen)} vs {len(known)} known -- "
+                                                  "looks partial, not marking anything deleted")
+            else:
+                for i in range(0, len(missing), 200):
+                    (supabase.table("shopify_inventory")
+                     .update({"status": "deleted", "deleted_at": _now_iso})
+                     .eq("business_id", business_id).in_("id", missing[i:i+200]).execute())
+        except Exception as e:
+            errors["shopify_deleted_mark"] = str(e)
 
     result = _rematch_inventory_from_cache(business_id)
     result["errors"] = {**errors, **result.get("errors", {})}
