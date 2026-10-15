@@ -86,7 +86,7 @@ _EDITOR_ALLOW = [(m, re.compile(rx)) for m, rx in _EDITOR_ALLOW]
 # Editor may ONLY write these plain text/number fields, one listing at a time.
 _EDITOR_EDITABLE_FIELDS = {
     "title", "subtitle", "description", "price", "price_used", "price_new", "price_note",
-    "condition", "condition_description", "condition_notes", "brand", "model", "mpn",
+    "condition", "condition_description", "condition_notes", "custom_description", "brand", "model", "mpn",
     "ebay_mpn", "ebay_mpn_is_fallback", "upc", "color", "quantity", "weight_oz", "weight_lb",
     "ebay_item_specifics",
 }
@@ -2239,6 +2239,18 @@ def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
         supabase.table("analytics_snapshots").insert(record).execute()
     return record
 
+def build_listing_description(listing: dict) -> str:
+    """Final published description: optional per-item custom text on top, a blank
+    line, then the standard description (saved description or the default).
+    No custom text -> standard description only, unchanged from before."""
+    from html import escape as _hesc
+    base = listing.get("description") or EBAY_DESCRIPTION
+    extra = (listing.get("custom_description") or "").strip()
+    if not extra:
+        return base
+    extra_html = _hesc(extra).replace("\r\n", "\n").replace("\n", "<br>")
+    return f"{extra_html}<br><br>{base}"
+
 EBAY_DESCRIPTION = "Shipped primarily with UPS and sometimes USPS. If you have special packing or shipping needs, please send a message. This item is sold in as-is condition. The seller assumes no liability for the use, operation, or installation of this product. Due to the technical nature of this equipment, the buyer is responsible for having the item professionally inspected and installed by a certified technician prior to use."
 
 def photo_url(photo_id: str, thumb: bool = False) -> str:
@@ -2560,7 +2572,7 @@ def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None,
 
     sku = listing.get("ebay_sku") or f"lister-{listing['id']}"
     title = (listing.get("title") or "Untitled item")[:80]
-    desc  = listing.get("description") or EBAY_DESCRIPTION
+    desc  = build_listing_description(listing)
     qty   = int(listing.get("quantity") or 1)
     price = float(listing.get("price") or 0)
     pid   = str(listing.get("photo_id") or "")
@@ -2737,7 +2749,7 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
 
     sku = listing.get("ebay_sku") or f"lister-{listing['id']}"
     title = (listing.get("title") or "Untitled item")[:80]
-    desc  = listing.get("description") or EBAY_DESCRIPTION
+    desc  = build_listing_description(listing)
     qty   = int(listing.get("quantity") or 1)
     price = float(listing.get("price") or 0)
     pid   = str(listing.get("photo_id") or "")
@@ -3426,7 +3438,7 @@ async def export_ebay_csv(request: Request):
             str(int(item.get("quantity") or 1)),
             pic,
             cond_id,
-            str(item.get('description','') or EBAY_DESCRIPTION),
+            build_listing_description(item),
             "FixedPrice",
         ])
 
@@ -12755,7 +12767,7 @@ def push_listing_to_shopify(listing: dict, image_urls_override: list = None) -> 
     api_base = f"https://{domain}/admin/api/2024-10"
 
     title = (listing.get("title") or "Untitled item")[:255]
-    desc  = listing.get("description") or EBAY_DESCRIPTION
+    desc  = build_listing_description(listing)
     price = float(listing.get("price") or 0)
     qty   = int(listing.get("quantity") or 1)
     brand = (listing.get("brand") or "").strip() or "Unbranded"

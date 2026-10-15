@@ -794,9 +794,9 @@ select.field-input { background: #fff; color: #0f172a; }
             </select>
           </div>
         </div>
-        <div id="modal-cond-desc-wrap" style="margin-top:10px;">
-          <div class="field-label">Condition Notes <span style="text-transform:none;font-weight:400;opacity:0.7;">(shown under condition on eBay — not allowed for plain New)</span></div>
-          <textarea class="field-input" id="modal-cond-desc-input" rows="2" maxlength="1000" style="resize:vertical;font-size:12px;line-height:1.4;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="modal-cond-desc-nofill"></textarea>
+        <div id="modal-custom-desc-wrap" style="margin-top:10px;">
+          <div class="field-label">Description <span style="text-transform:none;font-weight:400;opacity:0.7;">(optional — added above the standard description)</span></div>
+          <textarea class="field-input" id="modal-custom-desc-input" rows="2" maxlength="4000" style="resize:vertical;font-size:12px;line-height:1.4;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="modal-custom-desc-nofill"></textarea>
         </div>
       </div>
       <div>
@@ -2571,7 +2571,7 @@ function openModal(id) {
   document.getElementById('modal-shipping-policy-select').value = l.ebay_fulfillment_policy_id || '';
   document.getElementById('modal-price-input').value = l.price.toFixed(2);
   document.getElementById('modal-cond-input').value  = l.condition || 'used';
-  document.getElementById('modal-cond-desc-input').value = l.condition_description || '';
+  document.getElementById('modal-custom-desc-input').value = l.custom_description || '';
   document.getElementById('modal-desc-input').value = l.description || window._defaultDesc || '';
   document.getElementById('modal-desc-input').style.display = 'none'; // collapsed by default, expand via toggleModalDesc()
   document.getElementById('modal-desc-caret').textContent = '▸';
@@ -2675,11 +2675,11 @@ async function saveModal() {
       markFieldChanged(modalItemId + '_description'); // no tile-level equivalent field yet, but kept consistent
       toast('Saved ✓');
     }
-    const condDesc = document.getElementById('modal-cond-desc-input').value.trim();
-    if (condDesc !== ((l && l.condition_description) || '')) {
-      await api('PATCH', `/api/listings/${modalItemId}`, {field:'condition_description', value:condDesc});
-      if (l) l.condition_description = condDesc;
-      markFieldChanged(modalItemId + '_condition');
+    const customDesc = document.getElementById('modal-custom-desc-input').value.trim();
+    if (customDesc !== ((l && l.custom_description) || '')) {
+      await api('PATCH', `/api/listings/${modalItemId}`, {field:'custom_description', value:customDesc});
+      if (l) l.custom_description = customDesc;
+      markFieldChanged(modalItemId + '_description');
     }
     if (brand && brand !== (l && l.brand)) {
       await api('PATCH', `/api/listings/${modalItemId}`, {field:'brand', value:brand});
