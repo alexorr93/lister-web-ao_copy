@@ -1851,6 +1851,7 @@ function initTileListeners() {
       var id = el.dataset.id, cond = el.dataset.cond;
       el.parentElement.querySelectorAll('.tile-cond-btn').forEach(function(b){b.classList.remove('active');});
       el.classList.add('active');
+      listingsMutationEpoch++; // don't let an in-flight poll revert this toggle
       updateField(id, 'condition', cond);
       // Update badge
       var badge = document.querySelector('#tile-'+id+' .tile-badge-tl');
@@ -2571,6 +2572,7 @@ function openModal(id) {
   document.getElementById('modal-shipping-policy-select').value = l.ebay_fulfillment_policy_id || '';
   document.getElementById('modal-price-input').value = l.price.toFixed(2);
   document.getElementById('modal-cond-input').value  = l.condition || 'used';
+  document.getElementById('modal-cond-input').dataset.prev = l.condition || 'used';
   document.getElementById('modal-custom-desc-input').value = l.custom_description || '';
   document.getElementById('modal-desc-input').value = l.description || window._defaultDesc || '';
   document.getElementById('modal-desc-input').style.display = 'none'; // collapsed by default, expand via toggleModalDesc()
@@ -4871,13 +4873,27 @@ async function rotatePhoto(dir) {
   }
 }
 
+function _condComp(l, cond) {
+  return (cond === 'new' || cond === 'new_other') ? (l.price_new || 0) : (l.price_used || 0);
+}
 function updatePriceByCondition() {
   var l = window._modalListing;
   if (!l) return;
-  var cond = document.getElementById('modal-cond-input').value;
-  var p = (cond === 'new' || cond === 'new_other') ? (l.price_new || l.price) : (l.price_used || l.price);
+  var sel = document.getElementById('modal-cond-input');
+  var cond = sel.value;
+  var prevCond = sel.dataset.prev || l.condition || 'used';
+  sel.dataset.prev = cond;
+  // Only swap to the other condition's comp price if the current price is still
+  // the untouched comp for the previous condition. A price you typed is never
+  // overwritten by a condition change.
+  var priceInput = document.getElementById('modal-price-input');
+  var cur = parseFloat(priceInput.value);
+  var prevComp = _condComp(l, prevCond);
+  var untouched = !(cur > 0) || (prevComp > 0 && Math.abs(cur - prevComp) < 1.0);
+  if (!untouched) return;
+  var p = _condComp(l, cond);
   if (p > 0) {
-    document.getElementById('modal-price-input').value = p.toFixed(2);
+    priceInput.value = p.toFixed(2);
     document.getElementById('modal-price').textContent = '$' + p.toFixed(2);
   }
 }
