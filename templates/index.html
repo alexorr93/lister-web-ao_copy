@@ -1852,6 +1852,10 @@ function initTileListeners() {
       el.parentElement.querySelectorAll('.tile-cond-btn').forEach(function(b){b.classList.remove('active');});
       el.classList.add('active');
       listingsMutationEpoch++; // don't let an in-flight poll revert this toggle
+      // Keep the local copy in sync too -- the modal opens from it, and a stale
+      // condition there got written back over this toggle on modal save.
+      var condL = listings.find(function(x) { return String(x.id) === String(id); });
+      if (condL) condL.condition = cond;
       updateField(id, 'condition', cond);
       // Update badge
       var badge = document.querySelector('#tile-'+id+' .tile-badge-tl');
@@ -2660,11 +2664,14 @@ async function saveModal() {
   const origCond  = l ? l.condition : undefined;
   try {
     if (modalDirty) {
-      await api('PATCH', `/api/listings/${modalItemId}`, {field:'title', value:title});
+      // Only write fields that actually changed in the modal, so opening and
+      // saving the modal can never overwrite edits made on the tile.
+      if (title !== origTitle) await api('PATCH', `/api/listings/${modalItemId}`, {field:'title', value:title});
       const desc = document.getElementById('modal-desc-input').value.trim();
-      await api('PATCH', `/api/listings/${modalItemId}`, {field:'description', value:desc});
-      await api('PATCH', `/api/listings/${modalItemId}`, {field:'price', value:price});
-      await api('PATCH', `/api/listings/${modalItemId}`, {field:'condition', value:cond});
+      if (desc !== ((l && l.description) || window._defaultDesc || '').trim()) await api('PATCH', `/api/listings/${modalItemId}`, {field:'description', value:desc});
+      if (price !== origPrice) await api('PATCH', `/api/listings/${modalItemId}`, {field:'price', value:price});
+      if (cond !== origCond) await api('PATCH', `/api/listings/${modalItemId}`, {field:'condition', value:cond});
+      if (l) l.description = desc;
       if (l) { l.title = title; l.price = price; l.condition = cond; }
       // Edited through the modal should color the same as editing right on
       // the tile -- yellow, persisted forever, not just for this session.
