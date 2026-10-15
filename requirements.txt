@@ -19,3 +19,6 @@ Pillow==11.0.0
 resend==2.0.0
 tzdata
 ijson>=3.2
+bcrypt==4.2.0
+pyotp==2.9.0
+qrcode==8.0

@@ -113,6 +113,12 @@ if _os.path.isdir("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
+# Owner-only access + authenticator 2FA + permanently trusted devices (10/14).
+import lister_security as _sec
+_sec.init(supabase, templates)
+app.include_router(_sec.router)
+app.middleware("http")(_sec.guard)   # registered last = runs first, before the editor guard
+
 # Railway restarts this process on every deploy, so process-start time is a
 # reliable proxy for "last deployed at" -- no dependency on any Railway-specific
 # env var that may or may not exist. Registered as a Jinja2 global (not passed
@@ -17206,18 +17212,7 @@ async def save_setting(body: SaveSetting, request: Request):
     except Exception as e:
         raise HTTPException(500, str(e))
 import hashlib, secrets
-
-def hash_password(password: str) -> str:
-    salt = secrets.token_hex(16)
-    hashed = hashlib.sha256((salt + password).encode()).hexdigest()
-    return f"{salt}:{hashed}"
-
-def verify_password(password: str, stored: str) -> bool:
-    try:
-        salt, hashed = stored.split(":")
-        return hashlib.sha256((salt + password).encode()).hexdigest() == hashed
-    except Exception:
-        return False
+hash_password = _sec.hash_password
 
 def get_business_id(request: Request):
     """Get business_id from session cookie."""
@@ -17238,65 +17233,57 @@ async def login_page(request: Request, error: str = ""):
 
 @app.post("/login")
 async def login_submit(request: Request):
+    """Password step. Only the owner account and editor logins may sign in; the
+    owner then goes through device trust / authenticator code (lister_security)."""
     form = await request.form()
     email = str(form.get("email", "")).strip().lower()
     password = str(form.get("password", ""))
+    bad = lambda msg="Invalid email or password": templates.TemplateResponse("login.html", {"request": request, "error": msg})
+    ip = _sec.client_ip(request)
+    keys = (f"pw:{email}", f"ip:{ip}")
+    wait = _sec.locked_out(*keys)
+    if wait:
+        return bad(_sec.lock_message(wait))
+    if not email or not password:
+        return bad()
     try:
-        res = supabase.table("businesses").select("id,password_hash").eq("email", email).execute()
-        role = "owner"
-        if not res.data:
-            # Editor logins (see _editor_role_guard) live in business_editors and
-            # land in the owner's business with restricted, draft-edit-only access.
-            ed = supabase.table("business_editors").select("business_id,password_hash").eq("email", email).execute()
-            if not ed.data:
-                return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid email or password"})
-            res.data = [{"id": ed.data[0]["business_id"], "password_hash": ed.data[0]["password_hash"]}]
-            role = "editor"
-        biz = res.data[0]
-        if not verify_password(password, biz["password_hash"]):
-            return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid email or password"})
-        token = secrets.token_hex(32)
-        supabase.table("sessions").insert({"token": token, "business_id": biz["id"], "role": role}).execute()
+        if email == _sec.OWNER_EMAIL:
+            owner = _sec.owner_row(force=True)
+            ok, upgrade = _sec.verify_password(password, (owner or {}).get("password_hash") or "")
+            if not owner or not ok:
+                _sec.record_fail(*keys)
+                return bad()
+            _sec.clear_fails(*keys)
+            if upgrade:
+                supabase.table("businesses").update({"password_hash": _sec.hash_password(password)}).eq("id", owner["id"]).execute()
+                _sec.invalidate_caches()
+            return _sec.owner_login_response(request, owner)
+        # Editor logins (see _editor_role_guard): land in the owner's business with
+        # restricted, draft-edit-only access. Password-only by design.
+        owner = _sec.owner_row()
+        ed = supabase.table("business_editors").select("id,business_id,password_hash").eq("email", email).limit(1).execute()
+        row = ed.data[0] if ed.data else None
+        ok, upgrade = _sec.verify_password(password, (row or {}).get("password_hash") or "")
+        if not row or not ok or not owner or str(row["business_id"]) != str(owner["id"]):
+            _sec.record_fail(*keys)
+            return bad()
+        _sec.clear_fails(*keys)
+        if upgrade:
+            supabase.table("business_editors").update({"password_hash": _sec.hash_password(password)}).eq("id", row["id"]).execute()
+        token = _sec.create_session(row["business_id"], "editor")
         from fastapi.responses import RedirectResponse
         resp = RedirectResponse("/", status_code=302)
-        resp.set_cookie("session_id", token, httponly=True, max_age=60*60*24*30)
+        _sec.set_cookie(resp, "session_id", token)
         return resp
     except Exception as e:
-        return templates.TemplateResponse("login.html", {"request": request, "error": f"Login failed: {e}"})
+        print(f"[login] error: {e}")
+        return bad("Login failed, try again.")
 
+# Public sign-up is closed: single-owner app.
 @app.get("/register")
-async def register_page(request: Request, error: str = ""):
-    return templates.TemplateResponse("register.html", {"request": request, "error": error})
-
 @app.post("/register")
-async def register_submit(request: Request):
-    form = await request.form()
-    business_name = str(form.get("business_name", "")).strip()
-    email = str(form.get("email", "")).strip().lower()
-    password = str(form.get("password", ""))
-    if not business_name or not email or not password:
-        return templates.TemplateResponse("register.html", {"request": request, "error": "All fields required"})
-    if len(password) < 8:
-        return templates.TemplateResponse("register.html", {"request": request, "error": "Password must be at least 8 characters"})
-    try:
-        existing = supabase.table("businesses").select("id").eq("email", email).execute()
-        if existing.data:
-            return templates.TemplateResponse("register.html", {"request": request, "error": "Email already registered"})
-        password_hash = hash_password(password)
-        res = supabase.table("businesses").insert({
-            "name": business_name,
-            "email": email,
-            "password_hash": password_hash
-        }).execute()
-        business_id = res.data[0]["id"]
-        token = secrets.token_hex(32)
-        supabase.table("sessions").insert({"token": token, "business_id": business_id}).execute()
-        from fastapi.responses import RedirectResponse
-        resp = RedirectResponse("/", status_code=302)
-        resp.set_cookie("session_id", token, httponly=True, max_age=60*60*24*30)
-        return resp
-    except Exception as e:
-        return templates.TemplateResponse("register.html", {"request": request, "error": f"Registration failed: {e}"})
+async def register_closed(request: Request):
+    raise HTTPException(404, "Not found")
 
 @app.get("/logout")
 async def logout(request: Request):

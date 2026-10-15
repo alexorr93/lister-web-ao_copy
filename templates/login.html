@@ -37,11 +37,10 @@
   </div>
   {% if error %}<div class="error">{{ error }}</div>{% endif %}
   <form method="POST" action="/login">
-    <div class="field"><label>Email</label><input type="email" name="email" required autofocus></div>
-    <div class="field"><label>Password</label><input type="password" name="password" required></div>
+    <div class="field"><label>Email</label><input type="email" name="email" required autofocus autocomplete="username"></div>
+    <div class="field"><label>Password</label><input type="password" name="password" required autocomplete="current-password"></div>
     <button class="btn" type="submit">Sign In</button>
   </form>
-  <div class="link">Don't have an account? <a href="/register">Register</a></div>
 </div>
 </body>
 </html>

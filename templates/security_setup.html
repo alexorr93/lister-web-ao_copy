@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Set up 2-step — Lister AI</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<link rel="apple-touch-icon" href="/static/favicon.png">
+<link rel="manifest" href="/static/manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Lister AI">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0a0c10; color:#f1f5f9; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; min-height:100vh; display:flex; align-items:center; justify-content:center; }
+  .card { background:#111318; border:1px solid #1e2330; border-radius:16px; padding:40px; width:100%; max-width:400px; }
+  .logo { text-align:center; margin-bottom:32px; }
+  .logo img { width:56px; height:56px; border-radius:50%; }
+  .logo h1 { font-size:22px; font-weight:800; margin-top:12px; }
+  .logo p { color:#64748b; font-size:13px; margin-top:4px; }
+  .field { margin-bottom:16px; }
+  .field label { display:block; font-size:12px; color:#64748b; font-weight:600; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.05em; }
+  .field input { width:100%; background:#0f1117; border:1px solid #1e2330; border-radius:8px; padding:12px 14px; color:#f1f5f9; font-size:14px; outline:none; transition:border-color 0.2s; }
+  .field input:focus { border-color:#22c55e; }
+  .btn { width:100%; background:#22c55e; border:none; border-radius:8px; padding:13px; color:#000; font-size:15px; font-weight:700; cursor:pointer; margin-top:8px; transition:background 0.2s; }
+  .btn:hover { background:#16a34a; }
+  .error { background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:8px; padding:12px; color:#ef4444; font-size:13px; margin-bottom:16px; }
+  .link { text-align:center; margin-top:20px; font-size:13px; color:#64748b; }
+  .link a { color:#22c55e; text-decoration:none; }
+
+  .card { max-width:440px; }
+  .sub { color:#94a3b8; font-size:13px; line-height:1.5; margin-bottom:18px; text-align:center; }
+  .code input { font-size:26px; letter-spacing:0.35em; text-align:center; font-variant-numeric:tabular-nums; }
+  .qr { background:#fff; border-radius:12px; padding:10px; width:220px; height:220px; margin:0 auto 14px; }
+  .qr svg { width:100%; height:100%; }
+  .secret { font-family:ui-monospace,Menlo,monospace; font-size:13px; color:#cbd5e1; background:#0f1117; border:1px solid #1e2330; border-radius:8px; padding:10px; text-align:center; word-break:break-all; margin-bottom:18px; user-select:all; }
+  ol { color:#94a3b8; font-size:13px; line-height:1.6; padding-left:18px; margin-bottom:16px; }
+  .dev { display:flex; align-items:center; gap:10px; padding:12px 0; border-top:1px solid #1e2330; }
+  .dev:first-of-type { border-top:none; }
+  .dev .meta { flex:1; min-width:0; }
+  .dev .nm { font-weight:600; font-size:14px; }
+  .dev .tm { color:#64748b; font-size:12px; margin-top:2px; }
+  .tag { background:rgba(34,197,94,.15); color:#22c55e; font-size:11px; font-weight:700; border-radius:6px; padding:2px 6px; margin-left:6px; }
+  .btn-sm { background:transparent; border:1px solid #334155; color:#f1f5f9; border-radius:8px; padding:7px 10px; font-size:12px; cursor:pointer; }
+  .btn-sm.danger { border-color:rgba(239,68,68,.5); color:#ef4444; }
+  .btn.ghost { background:transparent; border:1px solid #334155; color:#f1f5f9; }
+  .warn { background:rgba(234,179,8,.1); border:1px solid rgba(234,179,8,.35); color:#eab308; border-radius:8px; padding:12px; font-size:13px; margin-bottom:16px; }
+  h2 { font-size:14px; text-transform:uppercase; letter-spacing:.05em; color:#64748b; margin:24px 0 6px; }
+  .row-actions { display:flex; gap:6px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <img src="/static/favicon.png" alt="Logo">
+    <h1>Lock down Lister</h1>
+  </div>
+  <p class="sub">One-time setup. After this, only devices you approve with a code can open Lister.</p>
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  <ol>
+    <li>Open Google Authenticator (or Microsoft Authenticator / Authy) and add an account.</li>
+    <li>Scan this QR code. Can't scan on this phone? Tap "enter a setup key" and type the key below.</li>
+    <li>Enter the 6-digit code it shows.</li>
+  </ol>
+  <div class="qr">{{ qr_svg | safe }}</div>
+  <div class="secret">{{ secret }}</div>
+  <form method="POST" action="/security/setup">
+    <div class="field code"><label>Code</label><input name="code" inputmode="numeric" pattern="[0-9 ]*" maxlength="7" autocomplete="one-time-code" required></div>
+    <div class="field"><label>Name this device</label><input name="device_name" value="{{ device_name }}" maxlength="80"></div>
+    <button class="btn" type="submit">Turn on</button>
+  </form>
+  <div class="link"><a href="/logout">Log out</a></div>
+</div>
+</body>
+</html>
