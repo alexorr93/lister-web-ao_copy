@@ -351,7 +351,7 @@ async def _oneshot_shopify_google_attrs_backfill():
     its value and printed to logs as [google-attrs]."""
     import asyncio, json as _json
     await asyncio.sleep(45)
-    flag_key = "SHOPIFY_GOOGLE_ATTRS_BACKFILL_20261016"
+    flag_key = "SHOPIFY_GOOGLE_ATTRS_BACKFILL_20261016_V2"
     try:
         if (supabase.table("app_settings").select("value").eq("key", flag_key).limit(1).execute()).data:
             return
@@ -436,7 +436,7 @@ def _run_shopify_google_attrs_backfill(biz_id: str) -> dict:
         _t.sleep(0.5)
 
     # tags + vendor, per product only where something actually differs
-    TAG = {"new": "New", "used": "Used", "refurbished": "Refurbished"}
+    TAG = {"new": "New", "used": "Used", "refurbished": "Refurbished"}  # Refurbished kept only so an old tag gets removed
     for pid, v in plan.items():
         node = live.get(pid)
         if not node:
@@ -12949,14 +12949,14 @@ def _resolve_listing_mpn_for_shopify(listing: dict, title: str, brand: str):
 
 def _google_condition(raw) -> str:
     """eBay/Lister condition -> Google Shopping condition (new | used | refurbished).
+    Owner rule (10/16): eBay "New" -> new, everything else -> used. No
+    "refurbished" (Google requires a warranty for it; items sell untested).
     Only plain New / Brand New count as new; open-box / new-other go to used,
     since Google's "new" means unopened original packaging and calling a
     non-pristine item new is a misrepresentation flag."""
     c = (str(raw or "")).strip().lower().replace("_", " ")
     if c in ("new", "brand new"):
         return "new"
-    if "remanufactured" in c or "refurb" in c:
-        return "refurbished"
     if not c:
         return ""
     return "used"
