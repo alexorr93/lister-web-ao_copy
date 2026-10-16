@@ -12797,6 +12797,47 @@ def get_shopify_access_token(business_id: str, force_refresh: bool = False) -> s
     save_ebay_setting(business_id, "SHOPIFY_TOKEN_EXPIRES_AT", str(new_expires_at))
     return token
 
+def _resolve_listing_mpn_for_shopify(listing: dict, title: str, brand: str):
+    """Same MPN priority the eBay v2 publish uses (saved eBay MPN -> scanner MPN ->
+    title guess), so Shopify gets exactly the part number eBay got. Returns None
+    instead of eBay's "Does Not Apply" placeholder -- Google treats a fake MPN
+    worse than a missing one."""
+    mpn = (listing.get("ebay_mpn") or "").strip() or (listing.get("mpn") or "").strip()
+    if not mpn:
+        words = [w.strip(",.;:-") for w in (title or "").split()]
+        alnum = [w for w in words if w and w.lower() != (brand or "").lower()
+                 and any(c.isdigit() for c in w) and any(c.isalpha() for c in w)]
+        if alnum:
+            mpn = max(alnum, key=len)
+        else:
+            nums = [w for w in words if w.isdigit() and len(w) >= 6]
+            if nums:
+                mpn = max(nums, key=len)
+    if not mpn or mpn.lower() in ("does not apply", "n/a", "na", "none"):
+        return None
+    return mpn[:70]
+
+def _set_shopify_variant_mpn(domain: str, token: str, variant_id, mpn: str) -> dict:
+    """Writes the MPN to the variant metafield the Google & YouTube channel reads
+    (mm-google-shopping.mpn). Non-fatal by design: the caller never fails a
+    publish over this."""
+    import requests as _req
+    mutation = {
+        "query": "mutation($m:[MetafieldsSetInput!]!){metafieldsSet(metafields:$m){userErrors{field message}}}",
+        "variables": {"m": [{
+            "ownerId": f"gid://shopify/ProductVariant/{variant_id}",
+            "namespace": "mm-google-shopping", "key": "mpn",
+            "type": "single_line_text_field", "value": mpn,
+        }]},
+    }
+    r = _req.post(f"https://{domain}/admin/api/2024-10/graphql.json",
+                  headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+                  json=mutation, timeout=20)
+    if r.status_code != 200:
+        return {"error": f"HTTP {r.status_code}: {r.text[:200]}"}
+    errs = (((r.json() or {}).get("data") or {}).get("metafieldsSet") or {}).get("userErrors") or []
+    return {"error": errs} if errs else {"ok": True, "mpn": mpn}
+
 def push_listing_to_shopify(listing: dict, image_urls_override: list = None) -> dict:
     """Creates an active product on Shopify via the Admin REST API.
     image_urls_override, when given, is used as-is (skips the photo_id/group_photos
@@ -12921,6 +12962,16 @@ def push_listing_to_shopify(listing: dict, image_urls_override: list = None) -> 
     variants = data.get("variants") or []
     variant_id = variants[0].get("id") if variants else None
 
+    mpn_result = {}
+    _mpn = _resolve_listing_mpn_for_shopify(listing, title, brand)
+    if variant_id and _mpn:
+        try:
+            mpn_result = _set_shopify_variant_mpn(domain, token, variant_id, _mpn)
+        except Exception as e:
+            mpn_result = {"error": str(e)}
+        if mpn_result.get("error"):
+            print(f"push_listing_to_shopify: MPN metafield not set for variant {variant_id} (publish still succeeded): {mpn_result['error']}")
+
     channel_result = {}
     if product_id:
         try:
@@ -12931,7 +12982,7 @@ def push_listing_to_shopify(listing: dict, image_urls_override: list = None) -> 
 
     return {
         "product_id": product_id, "variant_id": variant_id, "status": data.get("status"),
-        "handle": data.get("handle"), "channels": channel_result,
+        "handle": data.get("handle"), "channels": channel_result, "mpn": mpn_result,
         "sku": variants[0].get("sku") if variants else sku,
         "price": float(variants[0].get("price")) if variants else price,
         "quantity": variants[0].get("inventory_quantity") if variants else qty,
