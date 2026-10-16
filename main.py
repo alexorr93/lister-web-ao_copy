@@ -1219,7 +1219,8 @@ def _live_verify_ended_rows(business_id: str, rows: list) -> list:
                 resp = _req.get(f"https://{domain}/admin/api/2024-10/products/{pid}.json",
                                 headers=headers, params={"fields": "id,status,variants"}, timeout=15)
             if resp.status_code == 404:
-                supabase.table("shopify_inventory").update({"status": "deleted", "deleted_at": datetime.utcnow().isoformat()}).eq("business_id", business_id).eq("product_id", pid).execute()
+                supabase.table("shopify_inventory").update({"status": "deleted"}).eq("business_id", business_id).eq("product_id", pid).execute()
+                supabase.table("shopify_inventory").update({"deleted_at": datetime.utcnow().isoformat()}).eq("business_id", business_id).eq("product_id", pid).is_("deleted_at", "null").execute()
                 return None
             if resp.status_code != 200:
                 r["live_check"] = f"HTTP {resp.status_code}"
@@ -13529,7 +13530,6 @@ def sync_inventory(business_id: str) -> dict:
         "sku": it["sku"], "title": it["title"], "price": it["price"], "quantity": it["quantity"],
         "status": it["status"], "handle": it["handle"],
         "synced_at": _now_iso,  # was never written on refresh, so the column froze at row-creation time and looked a month stale
-        "deleted_at": None,     # back on Shopify -> no longer deleted
     } for it in shopify_items if it.get("variant_id")]
 
     for i in range(0, len(ebay_records), 500):
@@ -13566,9 +13566,12 @@ def sync_inventory(business_id: str) -> dict:
                                                   "looks partial, not marking anything deleted")
             else:
                 for i in range(0, len(missing), 200):
-                    (supabase.table("shopify_inventory")
-                     .update({"status": "deleted", "deleted_at": _now_iso})
-                     .eq("business_id", business_id).in_("id", missing[i:i+200]).execute())
+                    chunk = missing[i:i+200]
+                    (supabase.table("shopify_inventory").update({"status": "deleted"})
+                     .eq("business_id", business_id).in_("id", chunk).execute())
+                    # deleted_at = date first discovered deleted; set once, never changed
+                    (supabase.table("shopify_inventory").update({"deleted_at": _now_iso})
+                     .eq("business_id", business_id).in_("id", chunk).is_("deleted_at", "null").execute())
         except Exception as e:
             errors["shopify_deleted_mark"] = str(e)
 
