@@ -339,6 +339,135 @@ async def _oneshot_archive_shopify_duplicates():
     except Exception:
         pass
 
+async def _oneshot_shopify_google_attrs_backfill():
+    """ONE-SHOT (10/16 per owner): brand + condition on every live Shopify
+    product, taken from that product's own eBay listing (ebay_listing_backup via
+    inventory_match -- matched by eBay ID, never by title).
+      - condition -> variant metafield mm-google-shopping.condition (what the
+        Google channel reads) + a New/Used/Refurbished tag (opposite tag removed)
+      - brand -> Shopify vendor, only where the live vendor differs and eBay has
+        a real brand (blank / Unbranded / Does Not Apply never overwrite)
+    Shopify calls only, never eBay. Done-flag in app_settings; summary stored in
+    its value and printed to logs as [google-attrs]."""
+    import asyncio, json as _json
+    await asyncio.sleep(45)
+    flag_key = "SHOPIFY_GOOGLE_ATTRS_BACKFILL_20261016"
+    try:
+        if (supabase.table("app_settings").select("value").eq("key", flag_key).limit(1).execute()).data:
+            return
+    except Exception:
+        pass
+    try:
+        biz_rows = (supabase.table("shopify_inventory").select("business_id")
+                    .eq("status", "active").is_("deleted_at", "null").limit(1).execute()).data or []
+        if not biz_rows:
+            print("[google-attrs] no active Shopify products; nothing to do"); return
+        biz_id = biz_rows[0]["business_id"]
+        summary = await asyncio.to_thread(_run_shopify_google_attrs_backfill, biz_id)
+        print(f"[google-attrs] done: {summary}")
+        supabase.table("app_settings").upsert({"business_id": biz_id, "key": flag_key,
+                                               "value": _json.dumps(summary)[:4000]}).execute()
+    except Exception as e:
+        print(f"[google-attrs] fatal (will retry next boot): {e}")
+
+def _run_shopify_google_attrs_backfill(biz_id: str) -> dict:
+    import time as _t
+    sp = [r for r in _fetch_all_for_business(biz_id, "shopify_inventory", "id,product_id,status,deleted_at")
+          if (r.get("status") or "").lower() == "active" and not r.get("deleted_at")]
+    im = _fetch_all_for_business(biz_id, "inventory_match", "shopify_id,ebay_id")
+    bk = _fetch_all_for_business(biz_id, "ebay_listing_backup", "item_id,brand,condition_display_name")
+    by_item = {str(b["item_id"]): b for b in bk if b.get("item_id")}
+    ebay_by_shop = {}
+    for r in im:
+        if r.get("shopify_id") and r.get("ebay_id") and str(r["ebay_id"]) in by_item:
+            ebay_by_shop[str(r["shopify_id"])] = str(r["ebay_id"])
+    plan = {}  # product_id -> {variant, cond, brand}
+    for r in sp:
+        pid, vid = str(r.get("product_id") or ""), str(r["id"])
+        if not pid or pid in plan:
+            continue
+        eid = ebay_by_shop.get(vid) or ebay_by_shop.get(pid)
+        if not eid:
+            continue
+        b = by_item[eid]
+        brand = (b.get("brand") or "").strip()
+        if brand.lower() in ("", "unbranded", "does not apply", "n/a", "na", "unknown"):
+            brand = ""
+        plan[pid] = {"variant": vid, "cond": _google_condition(b.get("condition_display_name")), "brand": brand}
+    stats = {"live_products": len({str(r.get("product_id")) for r in sp}), "matched": len(plan),
+             "cond_set": 0, "cond_err": 0, "vendor_updated": 0, "vendor_err": 0, "tags_fixed": 0,
+             "cond_new": 0, "cond_used": 0, "cond_refurb": 0}
+    domain, headers = _reactivation_shopify_ctx(biz_id)
+    pids = list(plan.keys())
+
+    # live vendor + tags, 100 products per call
+    live = {}
+    for k in range(0, len(pids), 100):
+        chunk = pids[k:k+100]
+        try:
+            d = _reactivation_gql(domain, headers,
+                "query($ids:[ID!]!){nodes(ids:$ids){... on Product{id vendor tags}}}",
+                {"ids": [f"gid://shopify/Product/{x}" for x in chunk]})
+            for n in (d.get("nodes") or []):
+                if n and n.get("id"):
+                    live[n["id"].rsplit("/", 1)[-1]] = n
+        except Exception as e:
+            print(f"[google-attrs] live fetch chunk {k} failed: {e}")
+        _t.sleep(0.5)
+
+    # condition metafields, 25 per call
+    items = [(pid, v) for pid, v in plan.items() if v["cond"] and pid in live]
+    for k in range(0, len(items), 25):
+        chunk = items[k:k+25]
+        m = [{"ownerId": f"gid://shopify/ProductVariant/{v['variant']}", "namespace": "mm-google-shopping",
+              "key": "condition", "type": "single_line_text_field", "value": v["cond"]} for _, v in chunk]
+        try:
+            d = _reactivation_gql(domain, headers,
+                "mutation($m:[MetafieldsSetInput!]!){metafieldsSet(metafields:$m){userErrors{field message}}}", {"m": m})
+            errs = ((d.get("metafieldsSet") or {}).get("userErrors")) or []
+            if errs:
+                stats["cond_err"] += len(chunk); print(f"[google-attrs] cond chunk {k} errors: {str(errs)[:300]}")
+            else:
+                stats["cond_set"] += len(chunk)
+                for _, v in chunk:
+                    stats[{"new": "cond_new", "used": "cond_used", "refurbished": "cond_refurb"}[v["cond"]]] += 1
+        except Exception as e:
+            stats["cond_err"] += len(chunk); print(f"[google-attrs] cond chunk {k} failed: {e}")
+        _t.sleep(0.5)
+
+    # tags + vendor, per product only where something actually differs
+    TAG = {"new": "New", "used": "Used", "refurbished": "Refurbished"}
+    for pid, v in plan.items():
+        node = live.get(pid)
+        if not node:
+            continue
+        gid = f"gid://shopify/Product/{pid}"
+        try:
+            if v["cond"]:
+                want = TAG[v["cond"]]
+                tags = node.get("tags") or []
+                wrong = [t for t in tags if t in TAG.values() and t != want]
+                if wrong:
+                    _reactivation_gql(domain, headers,
+                        "mutation($id:ID!,$t:[String!]!){tagsRemove(id:$id,tags:$t){userErrors{message}}}", {"id": gid, "t": wrong})
+                if want not in tags:
+                    _reactivation_gql(domain, headers,
+                        "mutation($id:ID!,$t:[String!]!){tagsAdd(id:$id,tags:$t){userErrors{message}}}", {"id": gid, "t": [want]})
+                if wrong or want not in tags:
+                    stats["tags_fixed"] += 1
+            if v["brand"] and (node.get("vendor") or "").strip() != v["brand"]:
+                d = _reactivation_gql(domain, headers,
+                    "mutation($i:ProductInput!){productUpdate(input:$i){userErrors{message}}}",
+                    {"i": {"id": gid, "vendor": v["brand"]}})
+                if ((d.get("productUpdate") or {}).get("userErrors")):
+                    stats["vendor_err"] += 1
+                else:
+                    stats["vendor_updated"] += 1
+        except Exception as e:
+            stats["vendor_err"] += 1; print(f"[google-attrs] product {pid} failed: {e}")
+        _t.sleep(0.3)
+    return stats
+
 # ------------------------------------------------------------------ #
 #  SHOPIFY REACTIVATION (10/6 per owner) + DB-ONLY QTY GUARD
 #  Plan rows were computed in SQL from the DB (ebay_listing_status Active,
@@ -572,6 +701,7 @@ async def start_background_jobs():
     asyncio.create_task(category_picker_warm_worker())
     # asyncio.create_task(shopify_sync_auto_refresh_worker())  # disabled 9/24 per user: not using Shopify; was eating eBay Trading API quota
     asyncio.create_task(_oneshot_archive_shopify_duplicates())
+    asyncio.create_task(_oneshot_shopify_google_attrs_backfill())  # 10/16: one-time brand+condition backfill from eBay to Shopify
     asyncio.create_task(browse_search_daily_worker())
     asyncio.create_task(shopify_reactivation_worker())  # 10/6: one-time Shopify reactivation from shopify_reactivation_plan (Shopify calls only)
     asyncio.create_task(shopify_db_qty_guard_worker())  # 10/6: DB-only eBay->Shopify qty lowering, no eBay calls
@@ -12817,18 +12947,38 @@ def _resolve_listing_mpn_for_shopify(listing: dict, title: str, brand: str):
         return None
     return mpn[:70]
 
-def _set_shopify_variant_mpn(domain: str, token: str, variant_id, mpn: str) -> dict:
-    """Writes the MPN to the variant metafield the Google & YouTube channel reads
-    (mm-google-shopping.mpn). Non-fatal by design: the caller never fails a
-    publish over this."""
+def _google_condition(raw) -> str:
+    """eBay/Lister condition -> Google Shopping condition (new | used | refurbished).
+    Only plain New / Brand New count as new; open-box / new-other go to used,
+    since Google's "new" means unopened original packaging and calling a
+    non-pristine item new is a misrepresentation flag."""
+    c = (str(raw or "")).strip().lower().replace("_", " ")
+    if c in ("new", "brand new"):
+        return "new"
+    if "remanufactured" in c or "refurb" in c:
+        return "refurbished"
+    if not c:
+        return ""
+    return "used"
+
+def _set_shopify_variant_google_fields(domain: str, token: str, variant_id, mpn: str = None, condition: str = None) -> dict:
+    """Writes MPN / condition to the variant metafields the Google & YouTube
+    channel reads (mm-google-shopping.mpn / .condition). Non-fatal by design:
+    the caller never fails a publish over this."""
     import requests as _req
+    m = []
+    gid = f"gid://shopify/ProductVariant/{variant_id}"
+    if mpn:
+        m.append({"ownerId": gid, "namespace": "mm-google-shopping", "key": "mpn",
+                  "type": "single_line_text_field", "value": mpn})
+    if condition:
+        m.append({"ownerId": gid, "namespace": "mm-google-shopping", "key": "condition",
+                  "type": "single_line_text_field", "value": condition})
+    if not m:
+        return {}
     mutation = {
         "query": "mutation($m:[MetafieldsSetInput!]!){metafieldsSet(metafields:$m){userErrors{field message}}}",
-        "variables": {"m": [{
-            "ownerId": f"gid://shopify/ProductVariant/{variant_id}",
-            "namespace": "mm-google-shopping", "key": "mpn",
-            "type": "single_line_text_field", "value": mpn,
-        }]},
+        "variables": {"m": m},
     }
     r = _req.post(f"https://{domain}/admin/api/2024-10/graphql.json",
                   headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
@@ -12836,7 +12986,7 @@ def _set_shopify_variant_mpn(domain: str, token: str, variant_id, mpn: str) -> d
     if r.status_code != 200:
         return {"error": f"HTTP {r.status_code}: {r.text[:200]}"}
     errs = (((r.json() or {}).get("data") or {}).get("metafieldsSet") or {}).get("userErrors") or []
-    return {"error": errs} if errs else {"ok": True, "mpn": mpn}
+    return {"error": errs} if errs else {"ok": True, "mpn": mpn, "condition": condition}
 
 def push_listing_to_shopify(listing: dict, image_urls_override: list = None) -> dict:
     """Creates an active product on Shopify via the Admin REST API.
@@ -12906,6 +13056,7 @@ def push_listing_to_shopify(listing: dict, image_urls_override: list = None) -> 
             "title": title,
             "body_html": desc,
             "vendor": brand,
+            "tags": {"new": "New", "used": "Used", "refurbished": "Refurbished"}.get(_google_condition(listing.get("condition")), ""),
             "status": "active",
             "images": images,
             "variants": [{
@@ -12964,13 +13115,14 @@ def push_listing_to_shopify(listing: dict, image_urls_override: list = None) -> 
 
     mpn_result = {}
     _mpn = _resolve_listing_mpn_for_shopify(listing, title, brand)
-    if variant_id and _mpn:
+    _cond = _google_condition(listing.get("condition"))
+    if variant_id and (_mpn or _cond):
         try:
-            mpn_result = _set_shopify_variant_mpn(domain, token, variant_id, _mpn)
+            mpn_result = _set_shopify_variant_google_fields(domain, token, variant_id, _mpn, _cond)
         except Exception as e:
             mpn_result = {"error": str(e)}
         if mpn_result.get("error"):
-            print(f"push_listing_to_shopify: MPN metafield not set for variant {variant_id} (publish still succeeded): {mpn_result['error']}")
+            print(f"push_listing_to_shopify: Google MPN/condition metafields not set for variant {variant_id} (publish still succeeded): {mpn_result['error']}")
 
     channel_result = {}
     if product_id:
