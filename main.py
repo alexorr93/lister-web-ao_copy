@@ -620,7 +620,11 @@ async def browse_search_daily_worker():
                     today = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
                     for s in searches:
                         try:
-                            _req.post(
+                            # Run in a thread: a blocking request to our OWN server from the
+                            # event loop deadlocks the whole app (each call froze every page
+                            # for its full 60s timeout -- 7 searches = ~7 min frozen daily).
+                            await asyncio.to_thread(
+                                _req.post,
                                 f"http://localhost:{os.environ.get('PORT', '8000')}/api/saved-searches/run",
                                 json={
                                     "query": s["query"],
