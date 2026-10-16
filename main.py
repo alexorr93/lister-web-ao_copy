@@ -502,10 +502,56 @@ async def shopify_db_qty_guard_worker():
             print(f"[shopify-db-qty-guard] pass failed: {e}")
         await asyncio.sleep(1200)
 
+async def lot_sku_autofill_worker():
+    """Every 20s: give any scanned, unpublished listing with no SKU the lot that
+    was stored on its upload group ("LOT-" or "LOT-SUFFIX"). Runs server-side so
+    items get their lot whether or not an Intake page is open in a browser. DB
+    only, never touches eBay. Never overwrites an existing SKU."""
+    import asyncio
+    await asyncio.sleep(15)
+    while True:
+        try:
+            def _run():
+                rows = (supabase.table("listings").select("id,photo_id,ebay_sku")
+                        .eq("status", "scanned").is_("ebay_status", "null")
+                        .order("id", desc=True).limit(500).execute().data or [])
+                todo = [r for r in rows if not (r.get("ebay_sku") or "").strip() and r.get("photo_id")]
+                if not todo:
+                    return 0
+                pids = list({str(r["photo_id"]) for r in todo})
+                gp = (supabase.table("group_photos").select("photo_id,group_id")
+                      .in_("photo_id", pids).execute().data or [])
+                g_by_photo = {str(x["photo_id"]): x["group_id"] for x in gp}
+                gids = list({g for g in g_by_photo.values() if g})
+                if not gids:
+                    return 0
+                grps = (supabase.table("listing_groups").select("id,lot_sku,lot_suffix")
+                        .in_("id", gids).execute().data or [])
+                lot_by_g = {g["id"]: ((g.get("lot_sku") or "").strip(), (g.get("lot_suffix") or "").strip())
+                            for g in grps}
+                n = 0
+                for r in todo:
+                    lot, suf = lot_by_g.get(g_by_photo.get(str(r["photo_id"])), ("", ""))
+                    if not lot:
+                        continue
+                    new_sku = f"{lot}-{suf}" if suf else f"{lot}-"
+                    # only fill if still empty (never clobber a SKU set meanwhile)
+                    (supabase.table("listings").update({"ebay_sku": new_sku})
+                     .eq("id", r["id"]).or_("ebay_sku.is.null,ebay_sku.eq.").execute())
+                    n += 1
+                return n
+            filled = await asyncio.to_thread(_run)
+            if filled:
+                print(f"[lot_sku_autofill_worker] filled lot SKU on {filled} listing(s)")
+        except Exception as e:
+            print(f"[lot_sku_autofill_worker] error: {e}")
+        await asyncio.sleep(20)
+
 @app.on_event("startup")
 async def start_background_jobs():
     import asyncio
     asyncio.create_task(auto_fill_worker())
+    asyncio.create_task(lot_sku_autofill_worker())  # 10/16: server-side lot SKU from upload group
     asyncio.create_task(order_sync_worker())
     # asyncio.create_task(shopify_sync_worker())  # disabled 9/24 per user: not using Shopify; was eating eBay Trading API quota
     asyncio.create_task(analytics_snapshot_worker())
