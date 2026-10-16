@@ -351,7 +351,7 @@ async def _oneshot_shopify_google_attrs_backfill():
     its value and printed to logs as [google-attrs]."""
     import asyncio, json as _json
     await asyncio.sleep(45)
-    flag_key = "SHOPIFY_GOOGLE_ATTRS_BACKFILL_20261016_V2"
+    flag_key = "SHOPIFY_GOOGLE_ATTRS_BACKFILL_20261016_V3"
     try:
         if (supabase.table("app_settings").select("value").eq("key", flag_key).limit(1).execute()).data:
             return
@@ -375,7 +375,7 @@ def _run_shopify_google_attrs_backfill(biz_id: str) -> dict:
     sp = [r for r in _fetch_all_for_business(biz_id, "shopify_inventory", "id,product_id,status,deleted_at")
           if (r.get("status") or "").lower() == "active" and not r.get("deleted_at")]
     im = _fetch_all_for_business(biz_id, "inventory_match", "shopify_id,ebay_id")
-    bk = _fetch_all_for_business(biz_id, "ebay_listing_backup", "item_id,brand,condition_display_name")
+    bk = _fetch_all_for_business(biz_id, "ebay_listing_backup", "item_id,brand,condition_display_name,mpn")
     by_item = {str(b["item_id"]): b for b in bk if b.get("item_id")}
     ebay_by_shop = {}
     for r in im:
@@ -393,10 +393,17 @@ def _run_shopify_google_attrs_backfill(biz_id: str) -> dict:
         brand = (b.get("brand") or "").strip()
         if brand.lower() in ("", "unbranded", "does not apply", "n/a", "na", "unknown"):
             brand = ""
-        plan[pid] = {"variant": vid, "cond": _google_condition(b.get("condition_display_name")), "brand": brand}
+        mpn = (b.get("mpn") or "").strip()
+        # only real-looking part numbers: no placeholders, needs a digit, not just the brand
+        if (mpn.lower() in ("does not apply", "n/a", "na", "none", "unknown", "not applicable")
+                or len(mpn) < 3 or not any(ch.isdigit() for ch in mpn)
+                or mpn.lower() == brand.lower()):
+            mpn = ""
+        plan[pid] = {"variant": vid, "cond": _google_condition(b.get("condition_display_name")),
+                     "brand": brand, "mpn": mpn[:70]}
     stats = {"live_products": len({str(r.get("product_id")) for r in sp}), "matched": len(plan),
              "cond_set": 0, "cond_err": 0, "vendor_updated": 0, "vendor_err": 0, "tags_fixed": 0,
-             "cond_new": 0, "cond_used": 0, "cond_refurb": 0}
+             "cond_new": 0, "cond_used": 0, "cond_refurb": 0, "mpn_set": 0}
     domain, headers = _reactivation_shopify_ctx(biz_id)
     pids = list(plan.keys())
 
@@ -415,12 +422,19 @@ def _run_shopify_google_attrs_backfill(biz_id: str) -> dict:
             print(f"[google-attrs] live fetch chunk {k} failed: {e}")
         _t.sleep(0.5)
 
-    # condition metafields, 25 per call
-    items = [(pid, v) for pid, v in plan.items() if v["cond"] and pid in live]
-    for k in range(0, len(items), 25):
-        chunk = items[k:k+25]
-        m = [{"ownerId": f"gid://shopify/ProductVariant/{v['variant']}", "namespace": "mm-google-shopping",
-              "key": "condition", "type": "single_line_text_field", "value": v["cond"]} for _, v in chunk]
+    # condition + MPN metafields, 12 products (<=24 metafields) per call
+    items = [(pid, v) for pid, v in plan.items() if (v["cond"] or v["mpn"]) and pid in live]
+    for k in range(0, len(items), 12):
+        chunk = items[k:k+12]
+        m = []
+        for _, v in chunk:
+            g = f"gid://shopify/ProductVariant/{v['variant']}"
+            if v["cond"]:
+                m.append({"ownerId": g, "namespace": "mm-google-shopping", "key": "condition",
+                          "type": "single_line_text_field", "value": v["cond"]})
+            if v["mpn"]:
+                m.append({"ownerId": g, "namespace": "mm-google-shopping", "key": "mpn",
+                          "type": "single_line_text_field", "value": v["mpn"]})
         try:
             d = _reactivation_gql(domain, headers,
                 "mutation($m:[MetafieldsSetInput!]!){metafieldsSet(metafields:$m){userErrors{field message}}}", {"m": m})
@@ -428,9 +442,12 @@ def _run_shopify_google_attrs_backfill(biz_id: str) -> dict:
             if errs:
                 stats["cond_err"] += len(chunk); print(f"[google-attrs] cond chunk {k} errors: {str(errs)[:300]}")
             else:
-                stats["cond_set"] += len(chunk)
                 for _, v in chunk:
-                    stats[{"new": "cond_new", "used": "cond_used", "refurbished": "cond_refurb"}[v["cond"]]] += 1
+                    if v["cond"]:
+                        stats["cond_set"] += 1
+                        stats[{"new": "cond_new", "used": "cond_used", "refurbished": "cond_refurb"}[v["cond"]]] += 1
+                    if v["mpn"]:
+                        stats["mpn_set"] += 1
         except Exception as e:
             stats["cond_err"] += len(chunk); print(f"[google-attrs] cond chunk {k} failed: {e}")
         _t.sleep(0.5)
