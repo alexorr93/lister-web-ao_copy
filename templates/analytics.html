@@ -222,6 +222,19 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
     </div>
   </div>
 
+  <h2>Listed on eBay, by day</h2>
+  <div class="sub" style="margin-bottom:10px;">Value (price × qty) of everything published to eBay each day, frozen at midnight Mountain time. Days before 10/17/26 are rebuilt from eBay at current prices.</div>
+  <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
+    <button class="btn btn-primary" id="ld-range-30d" onclick="loadListedDaily('30d')">30 Days</button>
+    <button class="btn" id="ld-range-90d" onclick="loadListedDaily('90d')">90 Days</button>
+    <button class="btn" id="ld-range-1y" onclick="loadListedDaily('1y')">1 Year (weekly)</button>
+    <button class="btn" id="ld-range-all" onclick="loadListedDaily('all')">All (monthly)</button>
+    <span id="ld-summary" style="margin-left:10px;font-size:12px;color:var(--muted);"></span>
+  </div>
+  <div class="summary-card" style="padding:16px;">
+    <canvas id="listed-daily-chart" height="90"></canvas>
+  </div>
+
   <h2>Net Business Appreciation</h2>
   <div class="sub" style="margin-bottom:10px;">Net Cash Yield + Inventory Appreciation = Total Business Appreciation. Month/YTD views collapse to one point per month; the zoom views below pull every real daily snapshot so day-to-day moves actually show up.</div>
   <div style="display:flex;gap:6px;margin-bottom:10px;">
@@ -652,6 +665,45 @@ initNetCashYieldYearPicker();
 loadNetCashYield();
 loadMonthlyTrend();
 loadInventoryValueChart();
+let listedDailyChart = null;
+async function loadListedDaily(range) {
+  ['30d','90d','1y','all'].forEach(k => document.getElementById('ld-range-' + k).classList.toggle('btn-primary', k === range));
+  const canvas = document.getElementById('listed-daily-chart');
+  try {
+    const r = await fetch('/api/analytics/listed-daily?range=' + range);
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Request failed');
+    const money = v => '$' + Math.round(v).toLocaleString('en-US');
+    const per = {day: 'day', week: 'week of', month: 'month'}[d.bucket];
+    document.getElementById('ld-summary').textContent =
+      `${d.total_count.toLocaleString()} listed · ${money(d.total_value)} total · ${money(d.avg_value_per_day)}/day avg · today so far ${d.today.count} · ${money(d.today.value)}`;
+    if (listedDailyChart) listedDailyChart.destroy();
+    listedDailyChart = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: { labels: d.labels, datasets: [{
+        label: 'Listed Value', data: d.values,
+        backgroundColor: 'rgba(168,85,247,0.55)', borderColor: '#a855f7', borderWidth: 1,
+      }]},
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { labels: { color: '#f1f5f9' } },
+          tooltip: { callbacks: {
+            title: items => (per === 'week of' ? 'Week of ' : '') + items[0].label,
+            label: c => `${money(c.parsed.y)} · ${d.counts[c.dataIndex]} listed`,
+          } },
+        },
+        scales: {
+          x: { ticks: { color: '#64748b', maxRotation: 0, autoSkip: true }, grid: { color: '#2d3348' } },
+          y: { beginAtZero: true, ticks: { color: '#64748b', callback: v => money(v) }, grid: { color: '#2d3348' } },
+        },
+      },
+    });
+  } catch (e) {
+    document.getElementById('ld-summary').textContent = '❌ ' + e.message;
+  }
+}
+loadListedDaily('30d');
 
 function renderBizAppChart(data, zoomed) {
   const ctx = document.getElementById('biz-appreciation-chart').getContext('2d');

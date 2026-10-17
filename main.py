@@ -5586,6 +5586,55 @@ async def analytics_page(request: Request):
         "inline_weekly_sales_json": _json.dumps(weekly_sales),
     })
 
+@app.get("/api/analytics/listed-daily")
+async def analytics_listed_daily(request: Request, range: str = "30d"):
+    """Listed-per-day history from listed_daily_snapshot (frozen at midnight MT)
+    plus today's live value. range: 30d/90d daily, 1y weekly, all monthly.
+    Missing days count as zero."""
+    import datetime as _dt, asyncio
+    from zoneinfo import ZoneInfo
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    today = _dt.datetime.now(ZoneInfo("America/Denver")).date()
+    span = {"30d": 30, "90d": 90, "1y": 365}.get(range)
+    def _work():
+        q = supabase.table("listed_daily_snapshot").select("day,listed_count,listed_value").eq("business_id", str(business_id))
+        if span:
+            q = q.gte("day", (today - _dt.timedelta(days=span - 1)).isoformat())
+        rows = q.order("day").limit(5000).execute().data or []
+        live = _listed_totals_for_day(str(business_id), today)
+        return rows, live
+    rows, live = await asyncio.to_thread(_work)
+    by_day = {r["day"]: (int(r["listed_count"] or 0), float(r["listed_value"] or 0)) for r in rows}
+    by_day[today.isoformat()] = (live["count"], live["value"])
+    start = (today - _dt.timedelta(days=span - 1)) if span else (min(_dt.date.fromisoformat(d) for d in by_day) if by_day else today)
+    bucket = "day" if range in ("30d", "90d") else ("week" if range == "1y" else "month")
+    def key(d):
+        if bucket == "day":
+            return d.isoformat()
+        if bucket == "week":
+            return (d - _dt.timedelta(days=d.weekday())).isoformat()
+        return d.strftime("%Y-%m")
+    agg = {}
+    d = start
+    while d <= today:
+        c, v = by_day.get(d.isoformat(), (0, 0.0))
+        k = key(d)
+        a = agg.setdefault(k, [0, 0.0])
+        a[0] += c; a[1] += v
+        d += _dt.timedelta(days=1)
+    labels = list(agg.keys())
+    total_c = sum(a[0] for a in agg.values()); total_v = sum(a[1] for a in agg.values())
+    ndays = (today - start).days + 1
+    return {
+        "bucket": bucket, "labels": labels,
+        "counts": [agg[k][0] for k in labels], "values": [round(agg[k][1], 2) for k in labels],
+        "total_count": total_c, "total_value": round(total_v, 2),
+        "avg_value_per_day": round(total_v / ndays, 2) if ndays else 0,
+        "today": {"count": live["count"], "value": live["value"]},
+    }
+
 @app.get("/api/analytics/weekly-sales")
 async def api_weekly_sales(request: Request):
     """Cache-only read of the precomputed weekly sales series (used by the
