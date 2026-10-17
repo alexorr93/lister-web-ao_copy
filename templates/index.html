@@ -114,7 +114,7 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tab-content.active { display: block; }
 
 /* STATS */
-.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
 .stat { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; border-top: 3px solid var(--c, var(--accent)); }
 .stat-num { font-size: 24px; font-weight: 800; color: var(--text); letter-spacing: -0.5px; }
 .stat-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; margin-top: 3px; }
@@ -361,6 +361,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <div class="stat" style="--c:#2563eb"><div class="stat-num" id="stat-items">—</div><div class="stat-lbl">Items</div></div>
       <div class="stat" style="--c:#16a34a"><div class="stat-num" id="stat-value">—</div><div class="stat-lbl">Batch Value</div></div>
       <div class="stat" style="--c:#f59e0b"><div class="stat-num" id="stat-units">—</div><div class="stat-lbl">Total Units</div></div>
+      <div class="stat" style="--c:#a855f7"><div class="stat-num" id="stat-listed-today">—</div><div class="stat-lbl">Listed Today</div></div>
     </div>
     <div class="action-bar">
       <button class="btn" onclick="selectAll()">☑ Select All</button>
@@ -1321,7 +1322,21 @@ document.addEventListener('DOMContentLoaded', function() {
 // concurrent auto-refresh overwrote the tile with the old photo, user clicked
 // delete again on a photo that was already gone -> 404). Discard those.
 let listingsMutationEpoch = 0;
+let _listedTodayAt = 0;
+async function refreshListedToday(force) {
+  if (!force && Date.now() - _listedTodayAt < 30000) return;
+  _listedTodayAt = Date.now();
+  try {
+    const r = await fetch('/api/listings/listed-today');
+    if (!r.ok) return;
+    const d = await r.json();
+    const el = document.getElementById('stat-listed-today');
+    if (el) el.textContent = d.count ?? '—';
+  } catch (e) {}
+}
+
 async function loadListings() {
+  refreshListedToday();
   try {
     const epochAtStart = listingsMutationEpoch;
     const fresh = await api('GET', '/api/listings');

@@ -3574,6 +3574,43 @@ def _build_listings_payload(business_id: str, archived: bool = False, ready: boo
                 l["listing_type"] = "fixed"
         return listings
 
+_listed_today_cache = {}  # business_id -> (expires_epoch, payload)
+
+@app.get("/api/listings/listed-today")
+async def listings_listed_today(request: Request):
+    """Count of listings published to eBay today (Mountain time) for the
+    Intake 'Listed Today' card. No publish timestamp is stored, so it unions
+    two read-only sources: (a) the eBay mirror's own start_time = today, and
+    (b) listings created today that already have an eBay item id (covers
+    today's publishes the mirror hasn't synced yet). 30s cache -- Intake polls."""
+    import time as _time, datetime as _dt
+    from zoneinfo import ZoneInfo
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    hit = _listed_today_cache.get(business_id)
+    if hit and hit[0] > _time.time():
+        return hit[1]
+    mt = ZoneInfo("America/Denver")
+    start_utc = _dt.datetime.now(mt).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(_dt.timezone.utc).isoformat()
+
+    def _work():
+        ids = set()
+        mirror = (supabase.table("ebay_listing_status").select("item_id")
+                  .eq("business_id", business_id).gte("start_time", start_utc).execute()).data or []
+        ids |= {r["item_id"] for r in mirror if r.get("item_id")}
+        fresh = (supabase.table("listings").select("ebay_item_id,ebay_status")
+                 .eq("business_id", business_id).gte("created_at", start_utc)
+                 .not_.is_("ebay_item_id", "null").execute()).data or []
+        ids |= {r["ebay_item_id"] for r in fresh
+                if r.get("ebay_item_id") and str(r.get("ebay_status") or "").lower() in ("published", "scheduled")}
+        return {"count": len(ids)}
+
+    import asyncio
+    payload = await asyncio.to_thread(_work)
+    _listed_today_cache[business_id] = (_time.time() + 30, payload)
+    return payload
+
 @app.get("/api/listings")
 async def get_listings(request: Request, archived: bool = False, ready: bool = False):
     business_id = require_auth(request)
