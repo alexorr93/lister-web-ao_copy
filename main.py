@@ -3614,7 +3614,7 @@ async def listings_listed_today(request: Request):
             iid = str(r.get("ebay_item_id") or "")
             if iid and iid not in vals and str(r.get("ebay_status") or "").lower() in ("published", "scheduled"):
                 vals[iid] = float(r.get("price") or 0) * float(r.get("quantity") or 1)
-        return {"count": len(vals), "value": round(sum(vals.values()), 2)}
+        return {"count": len(vals), "value": round(sum(vals.values()), 2), "item_ids": list(vals.keys())}
 
     import asyncio
     payload = await asyncio.to_thread(_work)
@@ -4456,6 +4456,7 @@ async def submit_to_ebay_v2(item_id: str, body: EbaySubmit, request: Request):
         if listing.get("ebay_item_id") and not listing.get("ebay_offer_id") and body.mode != "draft":
             raise HTTPException(400, "Already published — re-submitting isn't supported yet. Use the SKU field to relabel it instead.")
         result = push_listing_to_ebay_v2(listing, body.mode, body.hours_from_now, body.brand, body.mpn)
+        _listed_today_cache.pop(business_id, None)  # Listed Today card re-reads fresh
         update = {
             "ebay_sku": result["sku"],
             "ebay_status": result["status"],

@@ -1323,19 +1323,38 @@ document.addEventListener('DOMContentLoaded', function() {
 // delete again on a photo that was already gone -> 404). Discard those.
 let listingsMutationEpoch = 0;
 let _listedTodayAt = 0;
+// Server total + items published from this tab today that the server can't see
+// yet (eBay mirror not synced). Bumped instantly on publish, no extra DB query.
+let _ltServer = null;                       // {count, value, item_ids}
+let _ltLocal = {day: '', items: {}};        // item_id -> price x qty
+function _mtDay() { return new Date().toLocaleDateString('en-CA', {timeZone: 'America/Denver'}); }
+function renderListedToday() {
+  const el = document.getElementById('stat-listed-today');
+  if (!el) return;
+  if (_ltLocal.day !== _mtDay()) _ltLocal = {day: _mtDay(), items: {}};
+  if (!_ltServer) { el.textContent = '—'; return; }
+  const seen = new Set((_ltServer.item_ids || []).map(String));
+  let count = _ltServer.count || 0, value = _ltServer.value || 0;
+  for (const [iid, v] of Object.entries(_ltLocal.items)) {
+    if (!seen.has(iid)) { count++; value += v; }
+  }
+  el.textContent = `${count} · $${Math.round(value).toLocaleString('en-US')}`;
+}
+function bumpListedToday(l, itemId, status) {
+  if (!itemId || String(status || '').toLowerCase() !== 'published') return;
+  if (_ltLocal.day !== _mtDay()) _ltLocal = {day: _mtDay(), items: {}};
+  const qty = (l && (quantities[l.id] ?? l.quantity)) || 1;
+  _ltLocal.items[String(itemId)] = (Number(l && l.price) || 0) * qty;
+  renderListedToday();
+}
 async function refreshListedToday(force) {
   if (!force && Date.now() - _listedTodayAt < 30000) return;
   _listedTodayAt = Date.now();
   try {
     const r = await fetch('/api/listings/listed-today');
     if (!r.ok) return;
-    const d = await r.json();
-    const el = document.getElementById('stat-listed-today');
-    if (el) {
-      if (d.count == null) { el.textContent = '—'; return; }
-      const v = '$' + Math.round(d.value || 0).toLocaleString('en-US');
-      el.textContent = `${d.count} · ${v}`;
-    }
+    _ltServer = await r.json();
+    renderListedToday();
   } catch (e) {}
 }
 
@@ -2391,6 +2410,7 @@ async function submitSelectedNowV2() {
       const brand = dirtyBrands[id] ?? (l ? l.brand : undefined) ?? undefined;
       const r = await api('POST', `/api/listings/${id}/ebay-v2`, {mode: 'now', mpn, brand});
       if (l) { l.ebay_status = r.status; l.ebay_item_id = r.item_id; l.ebay_sku = r.sku; l.ebay_mpn = r.mpn; l.ebay_mpn_is_fallback = r.mpn_is_fallback; l.brand = r.brand; }
+      bumpListedToday(l, r.item_id, r.status);
       success++;
     } catch(e) { failed++; }
     renderTiles();
@@ -2650,6 +2670,7 @@ async function submitToEbayV2(mode) {
       l.ebay_sku = r.sku;
       l.brand = r.brand;
     }
+    bumpListedToday(l, r.item_id, r.status);
     toast(mode === 'schedule' ? 'Scheduled ✓' : 'Published ✓');
     openModal(modalItemId);
     renderTiles();
