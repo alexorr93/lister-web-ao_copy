@@ -712,6 +712,7 @@ async def start_background_jobs():
     asyncio.create_task(inventory_value_sync_worker())
     asyncio.create_task(ebay_best_offers_sync_worker())
     asyncio.create_task(offer_history_worker())
+    asyncio.create_task(listed_daily_snapshot_worker())
     asyncio.create_task(ebay_notification_subscribe_worker())
     asyncio.create_task(ebay_analytics_sync_worker())
     # asyncio.create_task(ebay_sync_check_worker())  # disabled 9/24 per user: not using Shopify; was eating eBay Trading API quota
@@ -3574,6 +3575,75 @@ def _build_listings_payload(business_id: str, archived: bool = False, ready: boo
                 l["listing_type"] = "fixed"
         return listings
 
+def _listed_totals_for_day(business_id: str, day) -> dict:
+    """eBay listings published on one Mountain-time calendar day: count and
+    value (price x qty, same math as Batch Value). Unions the eBay mirror's
+    start_time with Lister's own publish stamps (covers publishes the mirror
+    hasn't synced yet). Used by the Intake card and the nightly snapshot."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    mt = ZoneInfo("America/Denver")
+    d0 = _dt.datetime.combine(day, _dt.time.min, tzinfo=mt)
+    d1 = d0 + _dt.timedelta(days=1)
+    start_utc = d0.astimezone(_dt.timezone.utc).isoformat()
+    end_utc = d1.astimezone(_dt.timezone.utc).isoformat()
+    # eBay mirror price wins; listings row is the fallback for unsynced publishes.
+    vals = {}
+    mirror = (supabase.table("ebay_listing_status").select("item_id,price,quantity")
+              .eq("business_id", business_id).gte("start_time", start_utc).lt("start_time", end_utc)
+              .execute()).data or []
+    for r in mirror:
+        if r.get("item_id"):
+            vals[str(r["item_id"])] = float(r.get("price") or 0) * float(r.get("quantity") or 1)
+    # listings.created_at holds MOUNTAIN wall-clock time labeled as UTC
+    # (confirmed 10/17), so compare against the MT day *as written*.
+    c0 = day.strftime("%Y-%m-%d") + "T00:00:00+00:00"
+    c1 = (day + _dt.timedelta(days=1)).strftime("%Y-%m-%d") + "T00:00:00+00:00"
+    cols = "ebay_item_id,ebay_status,price,quantity"
+    fresh = (supabase.table("listings").select(cols).eq("business_id", business_id)
+             .gte("created_at", c0).lt("created_at", c1)
+             .not_.is_("ebay_item_id", "null").execute()).data or []
+    # published_at is true UTC, stamped at publish time (any scan date).
+    fresh += (supabase.table("listings").select(cols).eq("business_id", business_id)
+              .gte("published_at", start_utc).lt("published_at", end_utc)
+              .not_.is_("ebay_item_id", "null").execute()).data or []
+    for r in fresh:
+        iid = str(r.get("ebay_item_id") or "")
+        if iid and iid not in vals and str(r.get("ebay_status") or "").lower() in ("published", "scheduled"):
+            vals[iid] = float(r.get("price") or 0) * float(r.get("quantity") or 1)
+    return {"count": len(vals), "value": round(sum(vals.values()), 2), "item_ids": list(vals.keys())}
+
+
+async def listed_daily_snapshot_worker():
+    """Freezes each finished Mountain-time day's Listed Today count + $ into
+    listed_daily_snapshot (one row per day, written just after midnight MT).
+    Fills any day missed in the last week (e.g. a deploy at midnight); never
+    overwrites a day that already has a row."""
+    import asyncio, datetime as _dt
+    from zoneinfo import ZoneInfo
+    await asyncio.sleep(120)
+    while True:
+        try:
+            today = _dt.datetime.now(ZoneInfo("America/Denver")).date()
+            days = [today - _dt.timedelta(days=i) for i in range(1, 8)]
+            res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
+            for biz_id in list(set(str(r["business_id"]) for r in (res.data or []))):
+                have = {r["day"] for r in (supabase.table("listed_daily_snapshot").select("day")
+                        .eq("business_id", biz_id).gte("day", days[-1].isoformat()).execute()).data or []}
+                for d in days:
+                    if d.isoformat() in have:
+                        continue
+                    t = await asyncio.to_thread(_listed_totals_for_day, biz_id, d)
+                    supabase.table("listed_daily_snapshot").upsert({
+                        "business_id": biz_id, "day": d.isoformat(), "listed_count": t["count"],
+                        "listed_value": t["value"], "source": "live",
+                    }, on_conflict="business_id,day", ignore_duplicates=True).execute()
+                    print(f"listed_daily_snapshot: {biz_id} {d}: {t['count']} / ${t['value']}")
+        except Exception as e:
+            print(f"listed_daily_snapshot_worker error: {e}")
+        await asyncio.sleep(600)
+
+
 _listed_today_cache = {}  # business_id -> (expires_epoch, payload)
 
 @app.get("/api/listings/listed-today")
@@ -3591,35 +3661,10 @@ async def listings_listed_today(request: Request):
     hit = _listed_today_cache.get(business_id)
     if hit and hit[0] > _time.time():
         return hit[1]
-    mt = ZoneInfo("America/Denver")
-    start_utc = _dt.datetime.now(mt).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(_dt.timezone.utc).isoformat()
+    mt_today = _dt.datetime.now(ZoneInfo("America/Denver")).date()
 
     def _work():
-        # item_id -> listed value (price x qty, same math as Batch Value).
-        # eBay mirror price wins; listings row is the fallback for unsynced publishes.
-        vals = {}
-        mirror = (supabase.table("ebay_listing_status").select("item_id,price,quantity")
-                  .eq("business_id", business_id).gte("start_time", start_utc).execute()).data or []
-        for r in mirror:
-            if r.get("item_id"):
-                vals[str(r["item_id"])] = float(r.get("price") or 0) * float(r.get("quantity") or 1)
-        # listings.created_at holds MOUNTAIN wall-clock time labeled as UTC
-        # (confirmed 10/17: rows peak at "11-13 UTC" = business hours MT),
-        # so compare against today's MT date at midnight *as written*.
-        mt_midnight_as_stored = _dt.datetime.now(mt).strftime("%Y-%m-%d") + "T00:00:00+00:00"
-        fresh = (supabase.table("listings").select("ebay_item_id,ebay_status,price,quantity")
-                 .eq("business_id", business_id).gte("created_at", mt_midnight_as_stored)
-                 .not_.is_("ebay_item_id", "null").execute()).data or []
-        # Anything published today regardless of when it was scanned (published_at
-        # is true UTC, stamped at publish time).
-        fresh += (supabase.table("listings").select("ebay_item_id,ebay_status,price,quantity")
-                  .eq("business_id", business_id).gte("published_at", start_utc)
-                  .not_.is_("ebay_item_id", "null").execute()).data or []
-        for r in fresh:
-            iid = str(r.get("ebay_item_id") or "")
-            if iid and iid not in vals and str(r.get("ebay_status") or "").lower() in ("published", "scheduled"):
-                vals[iid] = float(r.get("price") or 0) * float(r.get("quantity") or 1)
-        return {"count": len(vals), "value": round(sum(vals.values()), 2), "item_ids": list(vals.keys())}
+        return _listed_totals_for_day(business_id, mt_today)
 
     import asyncio
     payload = await asyncio.to_thread(_work)
