@@ -711,6 +711,7 @@ async def start_background_jobs():
     asyncio.create_task(shopify_shipping_rule_worker())
     asyncio.create_task(inventory_value_sync_worker())
     asyncio.create_task(ebay_best_offers_sync_worker())
+    asyncio.create_task(offer_history_worker())
     asyncio.create_task(ebay_notification_subscribe_worker())
     asyncio.create_task(ebay_analytics_sync_worker())
     # asyncio.create_task(ebay_sync_check_worker())  # disabled 9/24 per user: not using Shopify; was eating eBay Trading API quota
@@ -14899,6 +14900,12 @@ async def ebay_platform_notification(request: Request):
                             print(f"ebay_platform_notification: item {item_id} -> {len(found)} active offer(s) for business {biz_id}")
                     except Exception as e:
                         print(f"ebay_platform_notification: item {item_id} failed for business {biz_id}: {e}")
+                    try:
+                        # Also log to the permanent history right away, so an
+                        # offer accepted within minutes is never missed.
+                        _record_offer_history(biz_id, _ebay_get_best_offers_all_status(token, item_id))
+                    except Exception as e:
+                        print(f"ebay_platform_notification: history log item {item_id} failed: {e}")
     except Exception as e:
         print(f"ebay_platform_notification: failed to process payload: {e}")
     return Response(status_code=200)
@@ -15084,6 +15091,247 @@ def _sync_ebay_best_offers_work(business_id: str) -> dict:
         supabase.table("ebay_best_offers").delete().eq("business_id", business_id).in_("best_offer_id", stale).execute()
 
     return {"active_offers": len(rows), "synced_at": now_iso}
+
+# ---------------------------------------------------------------------------
+# OFFER HISTORY + METRICS (10/17)
+# ebay_best_offers above is the LIVE "open offers" mirror and deletes rows
+# the moment they close -- which is why no offer history ever existed.
+# ebay_offer_history is a separate permanent log: every offer (buyer offer,
+# buyer counter, MY counter) is kept forever with its final outcome. Never
+# deleted. Metrics are precomputed into offer_metrics; the endpoint only
+# SELECTs from it.
+# ---------------------------------------------------------------------------
+_OFFER_TERMINAL_STATUSES = {"Accepted", "Declined", "Expired", "Retracted", "Withdrawn", "AdminEnded", "Countered", "Unresolved"}
+
+def _ebay_get_best_offers_all_status(token: str, item_id: str = None) -> list:
+    """GetBestOffers with BestOfferStatus=All (open AND closed offers).
+    Account-wide when item_id is None (paginated), else one item. Returns
+    [{"item_id", "offer"}]. Raises on a failed Ack -- a failure must never
+    look like 'no offers'."""
+    import requests as _req
+    import xml.etree.ElementTree as ET
+    out = []
+    page = 1
+    while True:
+        xml_body = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<GetBestOffersRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+            f'<RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>'
+            + (f'<ItemID>{item_id}</ItemID>' if item_id else '') +
+            '<BestOfferStatus>All</BestOfferStatus>'
+            + ('' if item_id else f'<Pagination><EntriesPerPage>200</EntriesPerPage><PageNumber>{page}</PageNumber></Pagination>') +
+            '<DetailLevel>ReturnAll</DetailLevel>'
+            '</GetBestOffersRequest>'
+        )
+        headers = {
+            "X-EBAY-API-COMPATIBILITY-LEVEL": "1193",
+            "X-EBAY-API-CALL-NAME": "GetBestOffers",
+            "X-EBAY-API-SITEID": "0",
+            "Content-Type": "text/xml",
+        }
+        r = _req.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_body.encode("utf-8"), timeout=30)
+        resp = _ebay_xml_to_dict(ET.fromstring(r.content))
+        ack = resp.get("Ack")
+        if ack not in ("Success", "Warning"):
+            errors = resp.get("Errors") or {}
+            error_code = (errors.get("ErrorCode") if isinstance(errors, dict) else None)
+            tag = item_id or f"history-page-{page}"
+            raise EbayCallLimitError(tag, errors) if error_code == "518" else Exception(f"offer history {tag} Ack={ack}: {errors}")
+        if item_id:
+            offers = (resp.get("BestOfferArray") or {}).get("BestOffer") or []
+            if isinstance(offers, dict):
+                offers = [offers]
+            out.extend({"item_id": item_id, "offer": o} for o in offers)
+            return out
+        array = (resp.get("ItemBestOffersArray") or {}).get("ItemBestOffers") or []
+        if isinstance(array, dict):
+            array = [array]
+        for entry in array:
+            iid = (entry.get("Item") or {}).get("ItemID")
+            offers = (entry.get("BestOfferArray") or {}).get("BestOffer") or []
+            if isinstance(offers, dict):
+                offers = [offers]
+            out.extend({"item_id": iid, "offer": o} for o in offers)
+        total_pages = _safe_int((resp.get("PaginationResult") or {}).get("TotalNumberOfPages")) or 1
+        if page >= total_pages:
+            return out
+        page += 1
+
+def _record_offer_history(business_id: str, entries: list) -> dict:
+    """Upserts offers into ebay_offer_history. New rows get first_seen_at +
+    the listing's price at that moment; existing rows only get status/
+    last_seen/closed_at updates (first_seen_at and list_price never change).
+    Returns {"new": n, "updated": n, "seen_ids": [...]}."""
+    import datetime as _dt, json as _json
+    now_iso = _dt.datetime.utcnow().isoformat()
+    parsed = []
+    for e in entries:
+        off = e["offer"]
+        bid = off.get("BestOfferID")
+        if not bid:
+            continue
+        price_raw = off.get("Price")
+        price = (price_raw.get("value") if isinstance(price_raw, dict) else price_raw)
+        parsed.append({
+            "business_id": business_id, "best_offer_id": bid, "item_id": e.get("item_id"),
+            "buyer_user_id": (off.get("Buyer") or {}).get("UserID"),
+            "offer_type": off.get("BestOfferCodeType"),
+            "offer_price": _safe_float(price), "quantity": _safe_int(off.get("Quantity")),
+            "status": off.get("Status"), "status_source": "ebay",
+            "expiration_time": off.get("ExpirationTime"),
+            "buyer_message": off.get("BuyerMessage"),
+            "last_seen_at": now_iso,
+            "raw": _json.loads(_json.dumps(off, default=str)),
+        })
+    if not parsed:
+        return {"new": 0, "updated": 0, "seen_ids": []}
+    ids = [p["best_offer_id"] for p in parsed]
+    existing = {}
+    for i in range(0, len(ids), 200):
+        res = (supabase.table("ebay_offer_history").select("best_offer_id,status")
+               .eq("business_id", business_id).in_("best_offer_id", ids[i:i+200]).execute())
+        for r in (res.data or []):
+            existing[r["best_offer_id"]] = r.get("status")
+    new_rows, updated = [], 0
+    item_ids = list({p["item_id"] for p in parsed if p["best_offer_id"] not in existing and p.get("item_id")})
+    price_by_item = {}
+    for i in range(0, len(item_ids), 200):
+        res = (supabase.table("ebay_listing_status").select("item_id,price")
+               .eq("business_id", business_id).in_("item_id", item_ids[i:i+200]).execute())
+        for r in (res.data or []):
+            price_by_item[r["item_id"]] = r.get("price")
+    for p in parsed:
+        terminal = p["status"] in _OFFER_TERMINAL_STATUSES
+        if p["best_offer_id"] not in existing:
+            row = dict(p, first_seen_at=now_iso, list_price=_safe_float(price_by_item.get(p["item_id"])) if price_by_item.get(p["item_id"]) is not None else None,
+                       closed_at=(now_iso if terminal else None))
+            new_rows.append(row)
+        else:
+            upd = {k: p[k] for k in ("status", "status_source", "last_seen_at", "expiration_time", "offer_type", "raw")}
+            if terminal and existing[p["best_offer_id"]] not in _OFFER_TERMINAL_STATUSES:
+                upd["closed_at"] = now_iso
+            supabase.table("ebay_offer_history").update(upd).eq("business_id", business_id).eq("best_offer_id", p["best_offer_id"]).execute()
+            updated += 1
+    for i in range(0, len(new_rows), 200):
+        supabase.table("ebay_offer_history").upsert(new_rows[i:i+200], on_conflict="business_id,best_offer_id").execute()
+    return {"new": len(new_rows), "updated": updated, "seen_ids": ids}
+
+def _resolve_vanished_offers(business_id: str, token: str, seen_ids: set, max_items: int = 40) -> dict:
+    """Open offers that the account-wide call stopped returning (usually the
+    listing ended -- sold or pulled). Ask eBay per item first; if eBay won't
+    say, infer from orders: an eBay order on that item at the offer price
+    (within $0.01) on/after the day the offer was first seen = Accepted.
+    Otherwise, once past expiration, mark Unresolved (shown as its own count,
+    never guessed into accepted/declined)."""
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc)
+    open_rows = (supabase.table("ebay_offer_history")
+                 .select("best_offer_id,item_id,offer_price,quantity,first_seen_at,expiration_time,status")
+                 .eq("business_id", business_id)
+                 .not_.in_("status", list(_OFFER_TERMINAL_STATUSES)).execute()).data or []
+    vanished = [r for r in open_rows if r["best_offer_id"] not in seen_ids]
+    if not vanished:
+        return {"vanished": 0}
+    resolved_ebay = resolved_order = unresolved = 0
+    still_missing = []
+    for item_id in list({r["item_id"] for r in vanished if r.get("item_id")})[:max_items]:
+        try:
+            got = _ebay_get_best_offers_all_status(token, item_id)
+            res = _record_offer_history(business_id, got)
+            seen_ids |= set(res["seen_ids"])
+        except EbayCallLimitError:
+            break
+        except Exception as e:
+            print(f"_resolve_vanished_offers: item {item_id} lookup failed: {e}")
+    for r in vanished:
+        if r["best_offer_id"] in seen_ids:
+            resolved_ebay += 1
+        else:
+            still_missing.append(r)
+    now_iso = now.replace(tzinfo=None).isoformat()
+    for r in still_missing:
+        first_day = (r.get("first_seen_at") or "")[:10]
+        orders = (supabase.table("orders").select("gross_revenue,buyer_shipping,quantity,order_date")
+                  .eq("business_id", business_id).eq("platform", "eBay")
+                  .eq("legacy_item_id", r["item_id"]).gte("order_date", first_day).execute()).data or []
+        matched = False
+        for o in orders:
+            qty = o.get("quantity") or 1
+            unit = ((o.get("gross_revenue") or 0) - (o.get("buyer_shipping") or 0)) / qty
+            if r.get("offer_price") is not None and abs(unit - float(r["offer_price"])) <= 0.01:
+                matched = True
+                break
+        exp = r.get("expiration_time")
+        expired = False
+        try:
+            expired = bool(exp) and _dt.datetime.fromisoformat(exp.replace("Z", "+00:00")) < now
+        except Exception:
+            pass
+        if matched:
+            upd = {"status": "Accepted", "status_source": "inferred_order", "closed_at": now_iso}
+            resolved_order += 1
+        elif expired:
+            upd = {"status": "Unresolved", "status_source": "unresolved", "closed_at": now_iso}
+            unresolved += 1
+        else:
+            continue  # not expired yet -- check again next cycle
+        supabase.table("ebay_offer_history").update(upd).eq("business_id", business_id).eq("best_offer_id", r["best_offer_id"]).execute()
+    return {"vanished": len(vanished), "resolved_ebay": resolved_ebay, "resolved_order": resolved_order, "unresolved": unresolved}
+
+def _compute_offer_metrics(business_id: str) -> None:
+    """Precomputes the three rates for 30d / 90d / all-time into offer_metrics
+    via the compute_offer_metrics() SQL function."""
+    import datetime as _dt
+    now_iso = _dt.datetime.utcnow().isoformat()
+    for days in (30, 90, 0):
+        m = supabase.rpc("compute_offer_metrics", {"p_biz": business_id, "p_days": days}).execute().data
+        supabase.table("offer_metrics").upsert(
+            {"business_id": business_id, "window_days": days, "computed_at": now_iso, "metrics": m},
+            on_conflict="business_id,window_days").execute()
+
+def _sync_offer_history_work(business_id: str) -> dict:
+    token = get_ebay_access_token(business_id)
+    entries = _ebay_get_best_offers_all_status(token)
+    rec = _record_offer_history(business_id, entries)
+    resolved = _resolve_vanished_offers(business_id, token, set(rec["seen_ids"]))
+    _compute_offer_metrics(business_id)
+    return {"offers_returned": len(entries), "new": rec["new"], "updated": rec["updated"], "resolve": resolved}
+
+async def offer_history_worker():
+    """Own 10-minute clock. Offers last 48h, so a 10-min sweep catches every
+    status change while the listing is live; _resolve_vanished_offers covers
+    listings that end."""
+    import asyncio
+    await asyncio.sleep(90)  # let boot settle
+    while True:
+        try:
+            res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
+            for biz_id in list(set(r["business_id"] for r in (res.data or []))):
+                try:
+                    result = await asyncio.to_thread(_sync_offer_history_work, biz_id)
+                    print(f"offer_history_worker: business {biz_id}: {result}")
+                except Exception as e:
+                    print(f"offer_history_worker: business {biz_id} failed: {e}")
+        except Exception as e:
+            print(f"offer_history_worker error: {e}")
+        await asyncio.sleep(600)
+
+@app.get("/api/offer-metrics")
+async def get_offer_metrics(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    rows = (supabase.table("offer_metrics").select("window_days,computed_at,metrics")
+            .eq("business_id", business_id).execute()).data or []
+    return {"windows": rows}
+
+@app.post("/api/offer-metrics/refresh")
+async def refresh_offer_metrics(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio
+    return await asyncio.to_thread(_sync_offer_history_work, business_id)
 
 async def ebay_best_offers_sync_worker():
     """Safety-net worker, own 10-minute clock -- see _sync_ebay_best_offers_work.
