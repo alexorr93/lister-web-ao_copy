@@ -15181,17 +15181,18 @@ def _record_offer_history(business_id: str, entries: list) -> dict:
             "expiration_time": off.get("ExpirationTime"),
             "buyer_message": off.get("BuyerMessage"),
             "last_seen_at": now_iso,
-            "raw": _json.loads(_json.dumps(off, default=str)),
+            # Buyer email/address dropped -- only the UserID is kept.
+            "raw": _json.loads(_json.dumps(dict(off, Buyer={"UserID": (off.get("Buyer") or {}).get("UserID")}), default=str)),
         })
     if not parsed:
         return {"new": 0, "updated": 0, "seen_ids": []}
     ids = [p["best_offer_id"] for p in parsed]
     existing = {}
     for i in range(0, len(ids), 200):
-        res = (supabase.table("ebay_offer_history").select("best_offer_id,status")
+        res = (supabase.table("ebay_offer_history").select("best_offer_id,status,offer_type,transitions")
                .eq("business_id", business_id).in_("best_offer_id", ids[i:i+200]).execute())
         for r in (res.data or []):
-            existing[r["best_offer_id"]] = r.get("status")
+            existing[r["best_offer_id"]] = r
     new_rows, updated = [], 0
     item_ids = list({p["item_id"] for p in parsed if p["best_offer_id"] not in existing and p.get("item_id")})
     price_by_item = {}
@@ -15202,13 +15203,22 @@ def _record_offer_history(business_id: str, entries: list) -> dict:
             price_by_item[r["item_id"]] = r.get("price")
     for p in parsed:
         terminal = p["status"] in _OFFER_TERMINAL_STATUSES
+        step = {"at": now_iso, "type": p["offer_type"], "status": p["status"]}
         if p["best_offer_id"] not in existing:
             row = dict(p, first_seen_at=now_iso, list_price=_safe_float(price_by_item.get(p["item_id"])) if price_by_item.get(p["item_id"]) is not None else None,
-                       closed_at=(now_iso if terminal else None))
+                       closed_at=(now_iso if terminal else None), transitions=[step])
             new_rows.append(row)
         else:
+            prev = existing[p["best_offer_id"]]
             upd = {k: p[k] for k in ("status", "status_source", "last_seen_at", "expiration_time", "offer_type", "raw")}
-            if terminal and existing[p["best_offer_id"]] not in _OFFER_TERMINAL_STATUSES:
+            # eBay reuses ONE offer record and flips its type as the negotiation
+            # goes back and forth (BuyerBestOffer -> SellerCounterOffer ->
+            # BuyerCounterOffer...). Every type/status change is logged so my
+            # counters are never lost when the record moves on.
+            trans = prev.get("transitions") or []
+            if not trans or trans[-1].get("type") != step["type"] or trans[-1].get("status") != step["status"]:
+                upd["transitions"] = trans + [step]
+            if terminal and prev.get("status") not in _OFFER_TERMINAL_STATUSES:
                 upd["closed_at"] = now_iso
             supabase.table("ebay_offer_history").update(upd).eq("business_id", business_id).eq("best_offer_id", p["best_offer_id"]).execute()
             updated += 1
@@ -15226,7 +15236,7 @@ def _resolve_vanished_offers(business_id: str, token: str, seen_ids: set, max_it
     import datetime as _dt
     now = _dt.datetime.now(_dt.timezone.utc)
     open_rows = (supabase.table("ebay_offer_history")
-                 .select("best_offer_id,item_id,offer_price,quantity,first_seen_at,expiration_time,status")
+                 .select("best_offer_id,item_id,offer_price,quantity,first_seen_at,expiration_time,status,offer_type,transitions")
                  .eq("business_id", business_id)
                  .not_.in_("status", list(_OFFER_TERMINAL_STATUSES)).execute()).data or []
     vanished = [r for r in open_rows if r["best_offer_id"] not in seen_ids]
@@ -15275,6 +15285,7 @@ def _resolve_vanished_offers(business_id: str, token: str, seen_ids: set, max_it
             unresolved += 1
         else:
             continue  # not expired yet -- check again next cycle
+        upd["transitions"] = (r.get("transitions") or []) + [{"at": now_iso, "type": r.get("offer_type"), "status": upd["status"]}]
         supabase.table("ebay_offer_history").update(upd).eq("business_id", business_id).eq("best_offer_id", r["best_offer_id"]).execute()
     return {"vanished": len(vanished), "resolved_ebay": resolved_ebay, "resolved_order": resolved_order, "unresolved": unresolved}
 

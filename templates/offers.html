@@ -470,7 +470,7 @@ function renderMetrics() {
       <td>${inputsHtml([['eBay sales', fp.total_sales || 0], ['Full price', fp.full_price || 0], ['Below list', fp.below_list || 0], ['No list price (excluded)', fp.no_list_price || 0, true]])}</td>
     </tr>`;
 
-  const unknown = Object.keys(offers).filter(k => !['BuyerBestOffer', 'SellerCounterOffer', 'BuyerCounterOffer'].includes(k));
+  const unknown = (m.unknown_types || []).map(t => t === null ? 'blank' : t);
   const since = m.tracking_since ? new Date(m.tracking_since).toLocaleDateString() : 'not started';
   let metaText = `Offer tracking since ${since} · updated ${new Date(row.computed_at).toLocaleTimeString()}`;
   if (unknown.length) metaText += ` · ⚠️ unclassified offer types: ${unknown.join(', ')}`;
