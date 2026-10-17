@@ -3610,6 +3610,11 @@ async def listings_listed_today(request: Request):
         fresh = (supabase.table("listings").select("ebay_item_id,ebay_status,price,quantity")
                  .eq("business_id", business_id).gte("created_at", mt_midnight_as_stored)
                  .not_.is_("ebay_item_id", "null").execute()).data or []
+        # Anything published today regardless of when it was scanned (published_at
+        # is true UTC, stamped at publish time).
+        fresh += (supabase.table("listings").select("ebay_item_id,ebay_status,price,quantity")
+                  .eq("business_id", business_id).gte("published_at", start_utc)
+                  .not_.is_("ebay_item_id", "null").execute()).data or []
         for r in fresh:
             iid = str(r.get("ebay_item_id") or "")
             if iid and iid not in vals and str(r.get("ebay_status") or "").lower() in ("published", "scheduled"):
@@ -4416,6 +4421,9 @@ async def submit_to_ebay(item_id: str, body: EbaySubmit, request: Request):
             update["ebay_item_id"] = result["item_id"]
         if result["scheduled_at"]:
             update["ebay_scheduled_at"] = result["scheduled_at"]
+        if result.get("status") == "published" and result.get("item_id"):
+            import datetime as _pdt
+            update["published_at"] = _pdt.datetime.now(_pdt.timezone.utc).isoformat()
         try:
             update["ebay_mpn"] = result.get("mpn")
             update["ebay_mpn_is_fallback"] = result.get("mpn_is_fallback", False)
@@ -4474,6 +4482,9 @@ async def submit_to_ebay_v2(item_id: str, body: EbaySubmit, request: Request):
             update["ebay_item_id"] = result["item_id"]
         if result["scheduled_at"]:
             update["ebay_scheduled_at"] = result["scheduled_at"]
+        if result.get("status") == "published" and result.get("item_id"):
+            import datetime as _pdt
+            update["published_at"] = _pdt.datetime.now(_pdt.timezone.utc).isoformat()
         try:
             update["ebay_mpn"] = result.get("mpn")
             update["ebay_mpn_is_fallback"] = result.get("mpn_is_fallback", False)
