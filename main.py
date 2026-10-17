@@ -3599,8 +3599,12 @@ async def listings_listed_today(request: Request):
         mirror = (supabase.table("ebay_listing_status").select("item_id")
                   .eq("business_id", business_id).gte("start_time", start_utc).execute()).data or []
         ids |= {r["item_id"] for r in mirror if r.get("item_id")}
+        # listings.created_at holds MOUNTAIN wall-clock time labeled as UTC
+        # (confirmed 10/17: rows peak at "11-13 UTC" = business hours MT),
+        # so compare against today's MT date at midnight *as written*.
+        mt_midnight_as_stored = _dt.datetime.now(mt).strftime("%Y-%m-%d") + "T00:00:00+00:00"
         fresh = (supabase.table("listings").select("ebay_item_id,ebay_status")
-                 .eq("business_id", business_id).gte("created_at", start_utc)
+                 .eq("business_id", business_id).gte("created_at", mt_midnight_as_stored)
                  .not_.is_("ebay_item_id", "null").execute()).data or []
         ids |= {r["ebay_item_id"] for r in fresh
                 if r.get("ebay_item_id") and str(r.get("ebay_status") or "").lower() in ("published", "scheduled")}
