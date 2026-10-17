@@ -3595,20 +3595,26 @@ async def listings_listed_today(request: Request):
     start_utc = _dt.datetime.now(mt).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(_dt.timezone.utc).isoformat()
 
     def _work():
-        ids = set()
-        mirror = (supabase.table("ebay_listing_status").select("item_id")
+        # item_id -> listed value (price x qty, same math as Batch Value).
+        # eBay mirror price wins; listings row is the fallback for unsynced publishes.
+        vals = {}
+        mirror = (supabase.table("ebay_listing_status").select("item_id,price,quantity")
                   .eq("business_id", business_id).gte("start_time", start_utc).execute()).data or []
-        ids |= {r["item_id"] for r in mirror if r.get("item_id")}
+        for r in mirror:
+            if r.get("item_id"):
+                vals[str(r["item_id"])] = float(r.get("price") or 0) * float(r.get("quantity") or 1)
         # listings.created_at holds MOUNTAIN wall-clock time labeled as UTC
         # (confirmed 10/17: rows peak at "11-13 UTC" = business hours MT),
         # so compare against today's MT date at midnight *as written*.
         mt_midnight_as_stored = _dt.datetime.now(mt).strftime("%Y-%m-%d") + "T00:00:00+00:00"
-        fresh = (supabase.table("listings").select("ebay_item_id,ebay_status")
+        fresh = (supabase.table("listings").select("ebay_item_id,ebay_status,price,quantity")
                  .eq("business_id", business_id).gte("created_at", mt_midnight_as_stored)
                  .not_.is_("ebay_item_id", "null").execute()).data or []
-        ids |= {r["ebay_item_id"] for r in fresh
-                if r.get("ebay_item_id") and str(r.get("ebay_status") or "").lower() in ("published", "scheduled")}
-        return {"count": len(ids)}
+        for r in fresh:
+            iid = str(r.get("ebay_item_id") or "")
+            if iid and iid not in vals and str(r.get("ebay_status") or "").lower() in ("published", "scheduled"):
+                vals[iid] = float(r.get("price") or 0) * float(r.get("quantity") or 1)
+        return {"count": len(vals), "value": round(sum(vals.values()), 2)}
 
     import asyncio
     payload = await asyncio.to_thread(_work)

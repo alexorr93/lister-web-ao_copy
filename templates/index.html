@@ -1331,7 +1331,11 @@ async function refreshListedToday(force) {
     if (!r.ok) return;
     const d = await r.json();
     const el = document.getElementById('stat-listed-today');
-    if (el) el.textContent = d.count ?? '—';
+    if (el) {
+      if (d.count == null) { el.textContent = '—'; return; }
+      const v = '$' + Math.round(d.value || 0).toLocaleString('en-US');
+      el.innerHTML = `${d.count} <span style="font-size:.6em;opacity:.85;">· ${v}</span>`;
+    }
   } catch (e) {}
 }
 
