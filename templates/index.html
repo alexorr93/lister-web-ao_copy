@@ -118,6 +118,7 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .stat { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; border-top: 3px solid var(--c, var(--accent)); }
 .stat-num { font-size: 24px; font-weight: 800; color: var(--text); letter-spacing: -0.5px; }
 .stat-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; margin-top: 3px; }
+@media (max-width: 700px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; } .stat { padding: 8px 10px; min-width: 0; } .stat-num { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } }
 
 /* ACTION BAR */
 .action-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
