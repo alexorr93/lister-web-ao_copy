@@ -1408,7 +1408,7 @@ async function autoAssignLotToNewArrivals(newItems) {
       const r = await api('POST', `/api/listings/${l.id}/assign-lot-from-group`, {});
       if (r.ebay_sku) { l.ebay_sku = r.ebay_sku; ok++; continue; }
       if (!activeLotSku) continue;
-      const body = {lot_sku: activeLotSku};
+      const body = {lot_sku: activeLotSku, only_if_blank: true};
       if (activeLotSuffix) body.suffix = activeLotSuffix;
       const r2 = await api('POST', `/api/listings/${l.id}/assign-lot`, body);
       l.ebay_sku = r2.ebay_sku;

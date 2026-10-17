@@ -3998,6 +3998,7 @@ async def set_field_mark(item_id: str, body: dict = Body(...), request: Request 
 class AssignLot(BaseModel):
     lot_sku: str
     suffix: Optional[str] = None
+    only_if_blank: bool = False  # auto-fill paths: never overwrite an existing SKU
 
 @app.post("/api/listings/{item_id}/assign-lot")
 async def assign_lot_sku(item_id: str, body: AssignLot, request: Request):
@@ -4020,7 +4021,14 @@ async def assign_lot_sku(item_id: str, body: AssignLot, request: Request):
     suffix = (body.suffix or "").strip()
     new_sku = f"{lot}-{suffix}" if suffix else f"{lot}-"
     try:
-        supabase.table("listings").update({"ebay_sku": new_sku}).eq("id", item_id).execute()
+        q = supabase.table("listings").update({"ebay_sku": new_sku}).eq("id", item_id)
+        if getattr(body, "only_if_blank", False):
+            q = q.or_("ebay_sku.is.null,ebay_sku.eq.")
+            if not (q.execute().data):
+                cur = supabase.table("listings").select("ebay_sku").eq("id", item_id).limit(1).execute().data or [{}]
+                return {"ok": True, "ebay_sku": cur[0].get("ebay_sku"), "kept_existing": True}
+            return {"ok": True, "ebay_sku": new_sku}
+        q.execute()
         return {"ok": True, "ebay_sku": new_sku}
     except Exception as e:
         raise HTTPException(500, str(e))
@@ -10010,6 +10018,12 @@ async def assign_lot_from_group(item_id: str, request: Request):
     res = supabase.table("listings").select("photo_id,ebay_sku").eq("id", item_id).limit(1).execute()
     if not res.data:
         raise HTTPException(404, "Listing not found")
+    existing = (res.data[0].get("ebay_sku") or "").strip()
+    if existing:
+        # 10/17 BUG FIX: never overwrite a SKU that's already set. A stale tab
+        # that still thought this item was blank was stamping the upload-group
+        # lot (e.g. RB7-) back over SKUs the user had manually changed (RB13).
+        return {"ok": True, "ebay_sku": existing, "lot_sku": existing.split("-")[0], "kept_existing": True}
     photo_id = res.data[0].get("photo_id")
     lot, suffix = "", ""
     if photo_id:
@@ -10023,7 +10037,11 @@ async def assign_lot_from_group(item_id: str, request: Request):
     if not lot:
         return {"ok": True, "ebay_sku": None, "lot_sku": ""}
     new_sku = f"{lot}-{suffix}" if suffix else f"{lot}-"
-    supabase.table("listings").update({"ebay_sku": new_sku}).eq("id", item_id).execute()
+    upd = (supabase.table("listings").update({"ebay_sku": new_sku}).eq("id", item_id)
+           .or_("ebay_sku.is.null,ebay_sku.eq.").execute())
+    if not upd.data:  # someone set a SKU between the read and the write -- keep theirs
+        cur = supabase.table("listings").select("ebay_sku").eq("id", item_id).limit(1).execute().data or [{}]
+        return {"ok": True, "ebay_sku": cur[0].get("ebay_sku"), "lot_sku": lot, "kept_existing": True}
     return {"ok": True, "ebay_sku": new_sku, "lot_sku": lot}
 
 
