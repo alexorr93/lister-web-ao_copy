@@ -67,3 +67,22 @@
   setInterval(updateBrowseBadge,5*60*1000);
 })();
 </script>
+<script>
+// 10/18 BUG FIX: selecting text in a popup field and releasing the mouse
+// outside the popup closed it. The browser fires "click" on the overlay
+// (common ancestor of mousedown + mouseup), which every "click backdrop to
+// close" handler reads as a backdrop click. Only count it as a backdrop
+// click if the press also STARTED on the backdrop.
+(function(){
+  if (window.__overlayDragGuard) return; window.__overlayDragGuard = true;
+  var downTarget = null;
+  document.addEventListener('mousedown', function(e){ downTarget = e.target; }, true);
+  document.addEventListener('click', function(e){
+    var t = e.target;
+    if (!t || !t.matches || !t.matches('[class*="overlay"], .lp-back, #modal')) return;
+    if (downTarget && downTarget !== t && t.contains(downTarget)) {
+      e.stopPropagation(); e.preventDefault();
+    }
+  }, true);
+})();
+</script>
