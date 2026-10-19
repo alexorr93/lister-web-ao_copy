@@ -718,7 +718,7 @@ async def start_background_jobs():
     asyncio.create_task(ebay_sync_check_worker())  # 10/19: re-enabled -- discovery only (queues Shopify sales on Sync tab); push stays manual
     asyncio.create_task(inventory_cache_warm_worker())
     asyncio.create_task(category_picker_warm_worker())
-    # asyncio.create_task(shopify_sync_auto_refresh_worker())  # disabled 9/24 per user: not using Shopify; was eating eBay Trading API quota
+    asyncio.create_task(shopify_sync_auto_refresh_worker())  # 10/19: re-enabled as REFRESH ONLY (fills Sync table); pushes are manual unless SHOPIFY_SYNC_AUTO_PUSH=true
     asyncio.create_task(_oneshot_archive_shopify_duplicates())
     asyncio.create_task(_oneshot_shopify_google_attrs_backfill())  # 10/16: one-time brand+condition backfill from eBay to Shopify
     asyncio.create_task(browse_search_daily_worker())
@@ -14741,7 +14741,9 @@ async def shopify_sync_auto_refresh_worker():
                 except Exception as ex:
                     print(f"auto orders pull failed for {bid}: {ex}")
                 end = _dt.datetime.utcnow().strftime("%Y-%m-%d")
-                start = (_dt.datetime.utcnow() - _dt.timedelta(days=7)).strftime("%Y-%m-%d")
+                # 10/19: 2-day window (was 7) -- keeps eBay GetItem calls per run small;
+                # this quota burn is why the worker was switched off on 9/24.
+                start = (_dt.datetime.utcnow() - _dt.timedelta(days=2)).strftime("%Y-%m-%d")
                 sold = await asyncio.to_thread(_shopify_sync_sold_by_title, bid, start, end)
                 items = [{"title": v["title"], "sku": v.get("sku") or "", "legacy_item_id": v.get("legacy_item_id") or ""}
                          for v in (sold or {}).values()]
@@ -14756,9 +14758,15 @@ async def shopify_sync_auto_refresh_worker():
                     # so an eBay sale that was missed on its day (hourly only looks at
                     # "today") still gets Shopify corrected instead of being lost.
                     try:
+                        # 10/19 per user: refresh only -- pushing to Shopify is a manual
+                        # click on the Sync page unless SHOPIFY_SYNC_AUTO_PUSH is "true".
+                        if (get_ebay_settings(bid) or {}).get("SHOPIFY_SYNC_AUTO_PUSH", "false") != "true":
+                            raise StopIteration
                         pushed = await asyncio.to_thread(_push_window_mismatches, bid, set(sold.keys()), sold)
                         if pushed.get("pushed"):
                             print(f"auto sync push: business {bid} -> {pushed}")
+                    except StopIteration:
+                        pass  # auto-push off (manual push only)
                     except Exception as ex:
                         print(f"auto sync push failed for {bid}: {ex}")
                 # Full quantity reconcile (8/21) -- runs LAST on purpose: the sales-window
@@ -14775,7 +14783,7 @@ async def shopify_sync_auto_refresh_worker():
                 # in that section still work regardless of this setting.
                 try:
                     _mm_settings = await asyncio.to_thread(get_ebay_settings, bid)
-                    if (_mm_settings or {}).get("QTY_MISMATCH_AUTO_PUSH", "true") != "true":
+                    if (_mm_settings or {}).get("QTY_MISMATCH_AUTO_PUSH", "false") != "true":
                         raise StopIteration
                     mm_rows = await asyncio.to_thread(_build_qty_mismatch_rows, bid)
                     if mm_rows:
