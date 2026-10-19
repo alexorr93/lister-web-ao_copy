@@ -17918,6 +17918,30 @@ async def publish_ebay_only_to_shopify(row_id: str, request: Request):
         "ebay_sku": row.get("sku"),
         "id": row_id,
     }
+    # 10/19 BUG FIX: this path sent no brand/condition/MPN, so every eBay-only
+    # publish went to Shopify as vendor "Unbranded" + Google condition "used"
+    # (even brand-new items) + no MPN. Fill them from the same sources eBay used:
+    # the Lister listing row first, then the permanent eBay listing backup.
+    try:
+        lrow = (supabase.table("listings").select("brand,condition,mpn,ebay_mpn,ebay_mpn_is_fallback")
+                .eq("business_id", business_id).eq("ebay_item_id", str(row_id)).limit(1).execute().data or [])
+        if lrow:
+            l = lrow[0]
+            if l.get("brand"): synthetic_listing["brand"] = l["brand"]
+            if l.get("condition"): synthetic_listing["condition"] = l["condition"]
+            for k in ("mpn", "ebay_mpn", "ebay_mpn_is_fallback"):
+                if l.get(k) is not None: synthetic_listing[k] = l[k]
+        if not synthetic_listing.get("brand") or not synthetic_listing.get("condition"):
+            brow = (supabase.table("ebay_listing_backup").select("brand,mpn,condition_display_name")
+                    .eq("business_id", business_id).eq("item_id", str(row_id)).limit(1).execute().data or [])
+            if brow:
+                b = brow[0]
+                if not synthetic_listing.get("brand") and b.get("brand"): synthetic_listing["brand"] = b["brand"]
+                if not synthetic_listing.get("condition") and b.get("condition_display_name"):
+                    synthetic_listing["condition"] = b["condition_display_name"]
+                if not synthetic_listing.get("mpn") and b.get("mpn"): synthetic_listing["mpn"] = b["mpn"]
+    except Exception as e:
+        print(f"publish_ebay_only_to_shopify: attribute lookup failed for {row_id}: {e}")
     # Same lock every other publish path enforces — a SKU must match a real lot
     # before anything goes live, no exceptions for this path either.
     _require_valid_lot_sku_for_publish(business_id, synthetic_listing)
