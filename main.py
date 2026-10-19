@@ -715,7 +715,7 @@ async def start_background_jobs():
     asyncio.create_task(listed_daily_snapshot_worker())
     asyncio.create_task(ebay_notification_subscribe_worker())
     asyncio.create_task(ebay_analytics_sync_worker())
-    # asyncio.create_task(ebay_sync_check_worker())  # disabled 9/24 per user: not using Shopify; was eating eBay Trading API quota
+    asyncio.create_task(ebay_sync_check_worker())  # 10/19: re-enabled -- discovery only (queues Shopify sales on Sync tab); push stays manual
     asyncio.create_task(inventory_cache_warm_worker())
     asyncio.create_task(category_picker_warm_worker())
     # asyncio.create_task(shopify_sync_auto_refresh_worker())  # disabled 9/24 per user: not using Shopify; was eating eBay Trading API quota
