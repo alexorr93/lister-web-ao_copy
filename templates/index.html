@@ -793,6 +793,7 @@ select.field-input { background: #fff; color: #0f172a; }
               <option value="used">Used</option>
               <option value="new">New</option>
               <option value="new_other">New (other)</option>
+              <option value="reman">Remanufactured</option>
             </select>
           </div>
         </div>
@@ -1542,7 +1543,7 @@ function renderTiles() {
       <div class="tile-photo" onclick="handlePhotoClick('${l.id}')">
         ${photoHtml}
         ${photoNavHtml}
-        <div class="tile-badge-tl" style="color:${condCol};">${cond==='new_other'?'NEW OTHER':(isNew?'NEW':'USED')}</div>
+        <div class="tile-badge-tl" style="color:${condCol};">${cond==='new_other'?'NEW OTHER':(cond==='reman'?'REMAN':(isNew?'NEW':'USED'))}</div>
         <div class="tile-badge-tr">${statusBadge}</div>
         ${needsMpnAttention(l) ? `<div class="tile-mpn-flag" title="${l.ebay_mpn_is_fallback ? 'eBay MPN set to &quot;Does Not Apply&quot; — click to fix' : 'No confirmed MPN on file — will publish as &quot;Does Not Apply&quot; unless fixed first'}" onclick="event.stopPropagation();openModal('${l.id}')"></div>` : ''}
         ${(onEbay || onShopify) ? `<div class="tile-platform-badges">${onEbay ? `<div class="tile-platform-badge ebay">${onEbayLabel}</div>` : ''}${onShopify ? '<div class="tile-platform-badge shopify">Shopify</div>' : ''}</div>` : ''}
@@ -1563,7 +1564,7 @@ function renderTiles() {
           <input class="tile-price-input${fieldClassFor(l.id,'price')}" type="number" step="0.01" value="${dirtyPrices[l.id] ?? l.price.toFixed(2)}" data-id="${l.id}" autocomplete="off" data-lpignore="true" data-1p-ignore="true" name="price-${l.id}">
           ${l.category_mode === 'motors' ? `<input class="tile-mpn-input${fieldClassFor(l.id,'mpn')}${needsMpnAttention(l) ? ' missing' : ''}" type="text" value="${(dirtyMpns[l.id] ?? (l.ebay_mpn_is_fallback ? '' : (l.ebay_mpn || l.mpn || guessMpn(l.title || '', l.brand || guessBrand(l.title || ''))))).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="MPN" title="Manufacturer Part Number — required before this item can publish. Same field as the modal's MPN box." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" name="mpn-${l.id}">` : ''}
           <div class="tile-cond-toggle">
-            <button class="tile-cond-btn${isNew?'' :' active'}" data-id="${l.id}" data-cond="used">Used</button>
+            <button class="tile-cond-btn${cond==='used'?' active':''}" data-id="${l.id}" data-cond="used">Used</button>
             <button class="tile-cond-btn${isNew?' active':''}" data-id="${l.id}" data-cond="new">New</button>
           </div>
           <input class="tile-lotsku-input${fieldClassFor(l.id,'lotsku')}${lotSkuFor(l) ? '' : ' missing'}" type="text" value="${(dirtyLotSkus[l.id] ?? lotSkuFor(l)).replace(/"/g,'&quot;')}" data-id="${l.id}" placeholder="Lot SKU" title="Must match a real Lot SKU from the Lots page — required before this item can publish to eBay or Shopify" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" name="lot-sku-${l.id}">

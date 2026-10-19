@@ -2733,6 +2733,8 @@ def ebay_condition(cond: str) -> str:
         return "NEW"
     if c == "new_other":
         return "NEW_OTHER"
+    if c == "reman":
+        return "SELLER_REFURBISHED"
     return "USED_EXCELLENT"
 
 def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None, brand_override: str = None, mpn_override: str = None) -> dict:
@@ -2983,10 +2985,11 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
         mpn = "Does Not Apply"
         mpn_is_fallback = True
 
-    # 1000 New / 1500 New other / 3000 Used. Condition notes (ConditionDescription)
-    # are only accepted by eBay for non-New conditions.
+    # 1000 New / 1500 New other / 2500 Remanufactured (eBay's "Seller refurbished"
+    # ID, displayed as "Remanufactured" in parts categories) / 3000 Used.
+    # Condition notes (ConditionDescription) are only accepted for non-New.
     _ec = ebay_condition(listing.get("condition"))
-    condition_id = {"NEW": "1000", "NEW_OTHER": "1500"}.get(_ec, "3000")
+    condition_id = {"NEW": "1000", "NEW_OTHER": "1500", "SELLER_REFURBISHED": "2500"}.get(_ec, "3000")
     _cond_desc = (listing.get("condition_description") or "").strip()[:1000]
     cond_desc_xml = (f'<ConditionDescription>{_xesc(_cond_desc)}</ConditionDescription>'
                      if _cond_desc and condition_id != "1000" else "")
@@ -3566,9 +3569,13 @@ def _build_listings_payload(business_id: str, archived: bool = False, ready: boo
             l["price_used"] = float(l.get("price_used") or 0)
             l["price_new"]  = float(l.get("price_new") or 0)
             l["quantity"]   = int(l.get("quantity") or 1)
-            # Normalize condition — default to "used" if blank/null
+            # Normalize condition — default to "used" if blank/null.
+            # 10/19 BUG FIX: this whitelist was only ("new", "used"), so every
+            # New Other item came back to the browser as "used" — the modal and
+            # tile showed Used even though the DB (and the eBay publish) were
+            # New Other. Keep this list in sync with the modal's <select>.
             cond = str(l.get("condition") or "").strip().lower()
-            l["condition"] = cond if cond in ("new", "used") else "used"
+            l["condition"] = cond if cond in ("new", "used", "new_other", "reman") else "used"
             # Normalize listing_type — items from batch upload are not auctions
             lt = str(l.get("listing_type") or "").strip().lower()
             if lt not in ("auction", "fixed"):
@@ -3719,7 +3726,7 @@ async def export_ebay_csv(request: Request):
 
     for item in items:
         cond = str(item.get("condition") or "used").strip().lower()
-        cond_id = {"new": "NEW", "new_other": "NEW_OTHER"}.get(cond, "USED")
+        cond_id = {"new": "NEW", "new_other": "NEW_OTHER", "reman": "SELLER_REFURBISHED"}.get(cond, "USED")
         pid = str(item.get("photo_id") or "")
         pic = "|".join(photo_url(p) for p in get_all_photo_ids(pid) if photo_url(p))
         category_id = "12576"
