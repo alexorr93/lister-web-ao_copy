@@ -23,6 +23,54 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 print(f"Connecting to Supabase: {SUPABASE_URL}")
 supabase     = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+
+def _install_auto_pagination():
+    """GLOBAL FIX (10/20) for the recurring 1000-row bug. Supabase/PostgREST
+    silently caps every select at 1000 rows, and ~139 reads in this file had
+    no pagination -- each time a table crossed 1000 rows some page quietly
+    started showing wrong data (latest: Sync page, shopify_sync_snapshot at
+    1,502 rows). Instead of patching reads one by one, every plain list select
+    now auto-pages: if a read with no explicit .limit()/.range() comes back
+    with exactly the cap, the remaining pages are fetched and appended.
+    Reads under the cap are untouched (same single request as before)."""
+    try:
+        from postgrest._sync.request_builder import SyncSelectRequestBuilder
+    except Exception as e:
+        print(f"auto-pagination NOT installed: {e}")
+        return
+    _orig_execute = SyncSelectRequestBuilder.execute
+    PAGE = 1000
+
+    def _execute(self):
+        res = _orig_execute(self)
+        try:
+            data = res.data
+            if (self.http_method != "GET" or not isinstance(data, list) or len(data) < PAGE
+                    or "limit" in self.params or "offset" in self.params):
+                return res
+            all_rows = list(data)
+            base_params = self.params
+            offset = len(all_rows)
+            while True:
+                self.params = base_params.add("offset", offset).add("limit", PAGE)
+                try:
+                    page = _orig_execute(self).data or []
+                finally:
+                    self.params = base_params
+                all_rows.extend(page)
+                if len(page) < PAGE:
+                    break
+                offset += len(page)
+            res.data = all_rows
+        except Exception as e:
+            print(f"auto-pagination: extra pages failed, returning first page only: {e}")
+        return res
+
+    SyncSelectRequestBuilder.execute = _execute
+    print("auto-pagination installed on Supabase selects")
+
+_install_auto_pagination()
+
 app = FastAPI(title="Lister AI")
 
 @app.middleware("http")
