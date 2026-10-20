@@ -242,6 +242,14 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .tile-done-check.checked::after { content: '✓'; display:block; text-align:center; color: #0b1120; font-size: 13px; font-weight: 900; line-height: 19px; }
 .tile-done-label { font-size: 11px; font-weight: 700; color: #22c55e; }
 .tile-grok-toggle { display: flex; align-items: center; gap: 5px; margin-left: auto; flex-shrink: 0; cursor: pointer; user-select: none; }
+/* 10/20: Trash tag -- owner marks an item to throw away (red tile). */
+.tile-trash-toggle { display: flex; align-items: center; gap: 5px; margin-left: auto; flex-shrink: 0; cursor: pointer; user-select: none; }
+.tile-trash-toggle + .tile-grok-toggle { margin-left: 10px; }
+.tile-trash-check { width: 20px; height: 20px; border-radius: 5px; border: 1.5px solid #ef4444; flex-shrink: 0; }
+.tile-trash-check.checked { background: #ef4444; }
+.tile-trash-check.checked::after { content: '✓'; display:block; text-align:center; color: #0b1120; font-size: 13px; font-weight: 900; line-height: 19px; }
+.tile-trash-label { font-size: 11px; font-weight: 700; color: #ef4444; }
+.tile.trash-tagged { background: rgba(239,68,68,0.16); border-color: #ef4444; }
 .tile-grok-toggle + .tile-done-toggle { margin-left: 10px; }
 .tile-grok-check { width: 20px; height: 20px; border-radius: 5px; border: 1.5px solid #a855f7; flex-shrink: 0; }
 .tile-grok-check.tagged { background: #a855f7; }
@@ -328,7 +336,7 @@ select.field-input { background: #fff; color: #0f172a; }
 /* Editor login (10/6): rendered server-side so publish/settings controls never
    appear at all, not even for a split second. Server also refuses those calls. */
 .editor-mode [onclick]:not([onclick^="handleTileClick"]):not([onclick^="handlePhotoClick"]):not([onclick^="closeModal"]):not([onclick^="saveModal"]):not([onclick^="toggleModalDesc"]):not([onclick^="toggleTodayFilter"]):not([onclick*="toggleGrok"]):not([onclick="event.stopPropagation()"]):not([onclick*="toggleModalImgZoom"]):not([onclick*="stepModalPhoto"]):not([onclick*="cyclePhoto"]):not([onclick^="if(event.target===this)"]){display:none!important}
-.editor-mode a[href*="google.com"],.editor-mode .tile-check,.editor-mode input[type="checkbox"],.editor-mode .tile-rescan,.editor-mode .make-main-btn,.editor-mode .delete-photo-btn,.editor-mode .tile-done-toggle{display:none!important}
+.editor-mode a[href*="google.com"],.editor-mode .tile-check,.editor-mode input[type="checkbox"],.editor-mode .tile-rescan,.editor-mode .make-main-btn,.editor-mode .delete-photo-btn,.editor-mode .tile-done-toggle,.editor-mode .tile-trash-toggle{display:none!important}
 .editor-mode .nav-btn:not(.nav-intake){display:none!important}
 .editor-mode #tab-upload,.editor-mode #tab-fastscan,.editor-mode #tab-auction,.editor-mode #tab-settings{display:none!important}
 .editor-mode #tab-intake{display:block!important}
@@ -1539,7 +1547,7 @@ function renderTiles() {
          <button class="delete-photo-btn" onclick="event.stopPropagation();deletePhotoFromTile('${l.id}')" title="Delete this photo">✕</button>`
       : '';
 
-    return `<div class="tile${isSel?' selected':''}${ebayDraft?' ebay-draft':''}${ebayFailed?' ebay-failed':''}${l.marked_done?' marked-done':''}" id="tile-${l.id}" data-photos='${JSON.stringify(photos)}' data-photo-idx="${startIdx}" onclick="handleTileClick(event,'${l.id}')">
+    return `<div class="tile${isSel?' selected':''}${ebayDraft?' ebay-draft':''}${ebayFailed?' ebay-failed':''}${l.marked_done?' marked-done':''}${l.trash_tagged?' trash-tagged':''}" id="tile-${l.id}" data-photos='${JSON.stringify(photos)}' data-photo-idx="${startIdx}" onclick="handleTileClick(event,'${l.id}')">
       <div class="tile-photo" onclick="handlePhotoClick('${l.id}')">
         ${photoHtml}
         ${photoNavHtml}
@@ -1587,6 +1595,10 @@ function renderTiles() {
         <button class="tile-rescan" id="tile-chatgpt-${l.id}" style="color:#6ee7b7;border-color:#059669;" title="Ask ChatGPT: reads title/MPN off the photos and fills in a market price. Right-click to give it a clue first." ${askChatGptInFlight.has(String(l.id)) ? 'disabled' : ''} onclick="event.stopPropagation();askChatGptTile('${l.id}')" oncontextmenu="event.preventDefault();event.stopPropagation();askChatGptTile('${l.id}',true)">${askChatGptInFlight.has(String(l.id)) ? '⏳' : '💬'}</button>
         <button class="tile-rescan" onclick="rescanItem('${l.id}')">🔄</button>
         <button class="tile-rescan" style="color:var(--red);border-color:#991b1b;" onclick="deleteItem('${l.id}')">✕</button>
+        <div class="tile-trash-toggle" onclick="event.stopPropagation();toggleTrash('${l.id}')" title="Red = throw this item away">
+          <div class="tile-trash-check${l.trash_tagged?' checked':''}" id="trash-check-${l.id}"></div>
+          <span class="tile-trash-label">Trash</span>
+        </div>
         <div class="tile-grok-toggle" onclick="event.stopPropagation();toggleGrok('${l.id}')" title="Purple = tagged for Grok to edit · Yellow = Grok actioned it">
           <div class="tile-grok-check ${l.grok_state||''}" id="grok-check-${l.id}"></div>
           <span class="tile-grok-label ${l.grok_state==='actioned'?'actioned':''}" id="grok-label-${l.id}">Grok</span>
@@ -2104,6 +2116,23 @@ function toggleGrok(id) {
         body: JSON.stringify({state: next})})
     .then(r => { if (!r.ok) throw new Error(r.status); })
     .catch(() => { l.grok_state = cur; paint(cur); });
+}
+function toggleTrash(id) {
+  id = String(id);
+  const l = listings.find(x => String(x.id) === id);
+  if (!l) return;
+  const next = !l.trash_tagged;
+  const paint = (v) => {
+    const tile = document.getElementById('tile-' + id), chk = document.getElementById('trash-check-' + id);
+    if (tile) tile.classList.toggle('trash-tagged', v);
+    if (chk)  chk.classList.toggle('checked', v);
+  };
+  l.trash_tagged = next; paint(next);  // optimistic
+  listingsMutationEpoch++;  // don't let an in-flight poll revert this toggle
+  fetch(`/api/listings/${id}`, {method: 'PATCH', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({field: 'trash_tagged', value: next})})
+    .then(r => { if (!r.ok) throw new Error(r.status); })
+    .catch(() => { l.trash_tagged = !next; paint(!next); });
 }
 function toggleDone(id) {
   id = String(id);
