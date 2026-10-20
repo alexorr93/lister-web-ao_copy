@@ -394,9 +394,17 @@ async def _oneshot_publish_lot_18r_to_shopify():
     stale qty (some sold since listing), 6 a stale price, 9 an edited title.
     Uses the normal publish path (lot-SKU lock, same-title dedup guard, local
     record + inventory_match link). Runs once (app_settings flag)."""
-    import asyncio
-    await asyncio.sleep(45)
-    flag_key = "SHOPIFY_PUBLISH_LOT_18R_DONE_20261020"
+    import asyncio, datetime as _dt
+    from zoneinfo import ZoneInfo
+    # v2 (10/20): the daytime run choked Lister (photo uploads timing out), so
+    # it was stopped at 90/123. Owner rule: bulk Shopify publishing runs AT NIGHT
+    # only (11pm-5am Denver), slowly, so Lister stays usable.
+    flag_key = "SHOPIFY_PUBLISH_LOT_18R_DONE_20261020_V2"
+    while True:
+        _h = _dt.datetime.now(ZoneInfo("America/Denver")).hour
+        if _h >= 23 or _h < 5:
+            break
+        await asyncio.sleep(600)
     biz_id = "e6aa8f2d-4e17-4b88-b511-2cffd3c2168d"
     try:
         if (supabase.table("app_settings").select("value").eq("key", flag_key).limit(1).execute()).data:
@@ -406,16 +414,17 @@ async def _oneshot_publish_lot_18r_to_shopify():
         print(f"[publish-18R] flag check failed, not running: {e}"); return
     ok = fail = skipped = 0
     try:
-        live = [r for r in (supabase.table("ebay_listing_status")
+        _all_active = await asyncio.to_thread(lambda: supabase.table("ebay_listing_status")
                 .select("item_id,title,price,quantity_available,sku,sku_override,listing_status")
                 .eq("business_id", biz_id).eq("listing_status", "Active").execute().data or [])
+        live = [r for r in _all_active
                 if ((r.get("sku_override") or "").strip() or (r.get("sku") or "")).upper().startswith("18R")]
         print(f"[publish-18R] {len(live)} active 18R eBay listings")
         for r in live:
             iid = str(r["item_id"])
             try:
-                lrow = (supabase.table("listings").select("*").eq("business_id", biz_id)
-                        .eq("ebay_item_id", iid).limit(1).execute().data or [])
+                lrow = await asyncio.to_thread(lambda: (supabase.table("listings").select("*").eq("business_id", biz_id)
+                        .eq("ebay_item_id", iid).limit(1).execute().data or []))
                 if not lrow:
                     skipped += 1; print(f"[publish-18R] {iid} no Lister row, skipped"); continue
                 listing = dict(lrow[0])
@@ -431,15 +440,15 @@ async def _oneshot_publish_lot_18r_to_shopify():
                 eff_sku = (r.get("sku_override") or "").strip() or (r.get("sku") or "").strip()
                 if eff_sku:
                     listing["ebay_sku"] = eff_sku
-                _require_valid_lot_sku_for_publish(biz_id, listing)
+                await asyncio.to_thread(_require_valid_lot_sku_for_publish, biz_id, listing)
                 result = await asyncio.to_thread(push_listing_to_shopify, listing)
-                supabase.table("listings").update({
+                await asyncio.to_thread(lambda: supabase.table("listings").update({
                     "shopify_product_id": str(result.get("product_id") or ""),
                     "shopify_status": result.get("status") or "active", "shopify_error": None,
-                }).eq("id", listing["id"]).execute()
+                }).eq("id", listing["id"]).execute())
                 await asyncio.to_thread(_record_new_shopify_publish_locally, biz_id, result, iid)
                 try:
-                    _maybe_confirm_inventory_match(biz_id, listing["id"])
+                    await asyncio.to_thread(_maybe_confirm_inventory_match, biz_id, listing["id"])
                 except Exception:
                     pass
                 ok += 1
@@ -447,7 +456,7 @@ async def _oneshot_publish_lot_18r_to_shopify():
             except Exception as e:
                 fail += 1
                 print(f"[publish-18R] {iid} FAILED: {str(e)[:200]}")
-            await asyncio.sleep(1)
+            await asyncio.sleep(5)
     except Exception as e:
         print(f"[publish-18R] fatal: {e}")
     print(f"[publish-18R] DONE published={ok} failed={fail} skipped={skipped}")
