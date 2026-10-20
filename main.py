@@ -911,8 +911,10 @@ def run_hourly_shopify_sync_for_business(business_id: str) -> dict:
         return {"sold_today": len(sold_by_title), "refresh_error": refresh_result["error"]}
 
     norm_titles = set(sold_by_title.keys())
-    snap_res = supabase.table("shopify_sync_snapshot").select("*").eq("business_id", business_id).execute()
-    snapshots = {row["norm_title"]: row for row in (snap_res.data or []) if row["norm_title"] in norm_titles}
+    # PAGINATED (10/20): snapshot table passed 1000 rows; the unpaginated read
+    # silently dropped every row past the cap, so those eBay sales never pushed.
+    _snap_rows = _fetch_all_for_business(business_id, "shopify_sync_snapshot", "*")
+    snapshots = {row["norm_title"]: row for row in _snap_rows if row["norm_title"] in norm_titles}
 
     push_items = []
     for norm_title, snap in snapshots.items():
@@ -14541,15 +14543,14 @@ def _shopify_sync_refresh_work(business_id: str, items: list) -> dict:
     # .in_() filter here — real titles can contain commas/quotes that corrupt
     # PostgREST's in.() syntax (confirmed elsewhere on this page) — fetch
     # everything for the business and match locally instead.
-    existing_res = supabase.table("shopify_sync_snapshot").select("norm_title,ebay_live_qty,ebay_ended,updated_at")\
-        .eq("business_id", business_id).execute()
+    _existing_rows = _fetch_all_for_business(business_id, "shopify_sync_snapshot", "norm_title,ebay_live_qty,ebay_ended,updated_at")
     now_check = _dt.datetime.utcnow()
     known_ebay = {}
     recent_failures = set()  # titles whose eBay lookup failed within the last 4h — skip
                               # entirely this run (don't touch/re-upsert them) so their
                               # timestamp keeps aging naturally toward the retry window,
                               # instead of being refreshed every run and never retried.
-    for row in (existing_res.data or []):
+    for row in _existing_rows:
         updated_at = row.get("updated_at")
         if row.get("ebay_live_qty") is not None:
             # Reuse a stored eBay answer ONLY if it is fresh. Before 8/21 any
@@ -14697,9 +14698,9 @@ def _push_window_mismatches(business_id: str, norm_titles: set, sold_by_title: d
     Shopify qty differs from eBay's live qty. Factored out of
     run_hourly_shopify_sync_for_business so the 20-min auto worker can apply
     the identical rule over a wider date window."""
-    snap_res = supabase.table("shopify_sync_snapshot").select("*").eq("business_id", business_id).execute()
+    # PAGINATED (10/20): see note in run_hourly_shopify_sync_for_business.
     push_items = []
-    for row in (snap_res.data or []):
+    for row in _fetch_all_for_business(business_id, "shopify_sync_snapshot", "*"):
         if row.get("norm_title") not in norm_titles:
             continue
         if not row.get("shopify_inventory_item_id") or row.get("ebay_live_qty") is None:
@@ -16693,10 +16694,8 @@ async def shopify_sync_debug_summary(request: Request):
     if not business_id:
         raise HTTPException(401, "Unauthorized")
 
-    snap_res = supabase.table("shopify_sync_snapshot").select(
-        "norm_title,title,sku,ebay_live_qty,ebay_ended,shopify_found,shopify_live_qty,updated_at"
-    ).eq("business_id", business_id).execute()
-    rows = snap_res.data or []
+    rows = _fetch_all_for_business(business_id, "shopify_sync_snapshot",
+        "norm_title,title,sku,ebay_live_qty,ebay_ended,shopify_found,shopify_live_qty,updated_at")
 
     ebay_known = [r for r in rows if r.get("ebay_live_qty") is not None]
     ebay_unknown = [r for r in rows if r.get("ebay_live_qty") is None]
@@ -16807,11 +16806,12 @@ async def shopify_sync_today(request: Request, response: Response, date: str = N
     # a verified-correct snapshot row disappeared from a same-batch .in_() query while
     # being fetchable individually). Matching locally in Python sidesteps that
     # entirely, the same fix already applied to Shopify's own search.
-    snap_res = supabase.table("shopify_sync_snapshot").select("*").eq("business_id", business_id).execute()
-    snapshots = {row["norm_title"]: row for row in (snap_res.data or [])}
-
-    ignored_res = supabase.table("shopify_sync_ignored").select("norm_title").eq("business_id", business_id).execute()
-    ignored_titles = {row["norm_title"] for row in (ignored_res.data or [])}
+    # PAGINATED (10/20): the snapshot table passed 1000 rows (1,502) and this
+    # unpaginated read silently dropped the rest -- matched items showed
+    # "Found in Shopify: No" with a blank eBay qty (Kanaflex hose, LENZ LLG5,
+    # S&M collets, V58-1022 were all matched in the snapshot but shown as No).
+    snapshots = {row["norm_title"]: row for row in _fetch_all_for_business(business_id, "shopify_sync_snapshot", "*")}
+    ignored_titles = {row["norm_title"] for row in _fetch_all_for_business(business_id, "shopify_sync_ignored", "norm_title")}
 
     items = []
     for norm_title, entry in sold_by_title.items():
@@ -16829,10 +16829,13 @@ async def shopify_sync_today(request: Request, response: Response, date: str = N
     # Real server-side "already pushed" check against the push audit table —
     # most recent successful push per order_id wins, since a row can be re-pushed.
     try:
-        log_res = supabase.table("shopify_push_log").select("order_id,new_quantity,created_at")\
-            .eq("business_id", business_id).eq("status", "success").order("created_at").execute()
+        # PAGINATED (10/20): 1,722 rows; ordered oldest-first, so the 1000-row
+        # cap was dropping the NEWEST pushes. Sort locally after a full fetch.
+        _log_rows = [r for r in _fetch_all_for_business(business_id, "shopify_push_log", "order_id,new_quantity,created_at,status")
+                     if r.get("status") == "success"]
+        _log_rows.sort(key=lambda r: r.get("created_at") or "")
         pushed_by_order_id = {}
-        for row in (log_res.data or []):
+        for row in _log_rows:
             for oid in (row.get("order_id") or "").split(","):
                 oid = oid.strip()
                 if oid:
