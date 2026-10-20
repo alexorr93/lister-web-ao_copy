@@ -387,6 +387,76 @@ async def _oneshot_archive_shopify_duplicates():
     except Exception:
         pass
 
+async def _oneshot_publish_lot_18r_to_shopify():
+    """ONE-SHOT (10/20 per owner): publish every ACTIVE eBay listing in lot 18R
+    that isn't on Shopify yet. Title/price/qty/SKU come from the LIVE eBay mirror
+    (ebay_listing_status), not the Lister row -- 17 of the 114 Lister rows had a
+    stale qty (some sold since listing), 6 a stale price, 9 an edited title.
+    Uses the normal publish path (lot-SKU lock, same-title dedup guard, local
+    record + inventory_match link). Runs once (app_settings flag)."""
+    import asyncio
+    await asyncio.sleep(45)
+    flag_key = "SHOPIFY_PUBLISH_LOT_18R_DONE_20261020"
+    biz_id = "e6aa8f2d-4e17-4b88-b511-2cffd3c2168d"
+    try:
+        if (supabase.table("app_settings").select("value").eq("key", flag_key).limit(1).execute()).data:
+            return
+        supabase.table("app_settings").upsert({"business_id": biz_id, "key": flag_key, "value": "running"}).execute()
+    except Exception as e:
+        print(f"[publish-18R] flag check failed, not running: {e}"); return
+    ok = fail = skipped = 0
+    try:
+        live = [r for r in (supabase.table("ebay_listing_status")
+                .select("item_id,title,price,quantity_available,sku,sku_override,listing_status")
+                .eq("business_id", biz_id).eq("listing_status", "Active").execute().data or [])
+                if ((r.get("sku_override") or "").strip() or (r.get("sku") or "")).upper().startswith("18R")]
+        print(f"[publish-18R] {len(live)} active 18R eBay listings")
+        for r in live:
+            iid = str(r["item_id"])
+            try:
+                lrow = (supabase.table("listings").select("*").eq("business_id", biz_id)
+                        .eq("ebay_item_id", iid).limit(1).execute().data or [])
+                if not lrow:
+                    skipped += 1; print(f"[publish-18R] {iid} no Lister row, skipped"); continue
+                listing = dict(lrow[0])
+                if str(listing.get("shopify_product_id") or "").strip():
+                    skipped += 1; continue
+                qty = int(r.get("quantity_available") or 0)
+                if qty <= 0:
+                    skipped += 1; print(f"[publish-18R] {iid} qty 0 on eBay, skipped"); continue
+                listing["title"] = r.get("title") or listing.get("title")
+                if r.get("price") is not None:
+                    listing["price"] = r["price"]
+                listing["quantity"] = qty
+                eff_sku = (r.get("sku_override") or "").strip() or (r.get("sku") or "").strip()
+                if eff_sku:
+                    listing["ebay_sku"] = eff_sku
+                _require_valid_lot_sku_for_publish(biz_id, listing)
+                result = await asyncio.to_thread(push_listing_to_shopify, listing)
+                supabase.table("listings").update({
+                    "shopify_product_id": str(result.get("product_id") or ""),
+                    "shopify_status": result.get("status") or "active", "shopify_error": None,
+                }).eq("id", listing["id"]).execute()
+                await asyncio.to_thread(_record_new_shopify_publish_locally, biz_id, result, iid)
+                try:
+                    _maybe_confirm_inventory_match(biz_id, listing["id"])
+                except Exception:
+                    pass
+                ok += 1
+                print(f"[publish-18R] {iid} -> Shopify {result.get('product_id')} qty {qty} \"{listing['title'][:50]}\"")
+            except Exception as e:
+                fail += 1
+                print(f"[publish-18R] {iid} FAILED: {str(e)[:200]}")
+            await asyncio.sleep(1)
+    except Exception as e:
+        print(f"[publish-18R] fatal: {e}")
+    print(f"[publish-18R] DONE published={ok} failed={fail} skipped={skipped}")
+    try:
+        supabase.table("app_settings").upsert({"business_id": biz_id, "key": flag_key,
+            "value": f"done ok={ok} fail={fail} skipped={skipped}"}).execute()
+    except Exception:
+        pass
+
 async def _oneshot_shopify_google_attrs_backfill():
     """ONE-SHOT (10/16 per owner): brand + condition on every live Shopify
     product, taken from that product's own eBay listing (ebay_listing_backup via
@@ -768,6 +838,7 @@ async def start_background_jobs():
     asyncio.create_task(category_picker_warm_worker())
     asyncio.create_task(shopify_sync_auto_refresh_worker())  # 10/19: re-enabled as REFRESH ONLY (fills Sync table); pushes are manual unless SHOPIFY_SYNC_AUTO_PUSH=true
     asyncio.create_task(_oneshot_archive_shopify_duplicates())
+    asyncio.create_task(_oneshot_publish_lot_18r_to_shopify())  # 10/20: one-time publish of lot 18R to Shopify
     asyncio.create_task(_oneshot_shopify_google_attrs_backfill())  # 10/16: one-time brand+condition backfill from eBay to Shopify
     asyncio.create_task(browse_search_daily_worker())
     asyncio.create_task(shopify_reactivation_worker())  # 10/6: one-time Shopify reactivation from shopify_reactivation_plan (Shopify calls only)
