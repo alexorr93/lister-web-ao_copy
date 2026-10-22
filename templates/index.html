@@ -3481,6 +3481,32 @@ function _upSessDb() {
     req.onerror = () => reject(req.error);
   });
 }
+// 10/22: some phone browsers (iOS Safari especially) refuse to store a camera
+// File object in IndexedDB -- the put fails, and the save used to swallow that
+// silently, so after the phone killed the tab there was nothing to restore and
+// the batch was gone. Photos are now stored as plain bytes (ArrayBuffer), which
+// every browser can store, and rebuilt into Files on restore.
+const _upBufCache = new WeakMap();
+async function _fileToRec(f) {
+  if (!(f instanceof Blob)) return f;  // already a stored record
+  let buf = _upBufCache.get(f);
+  if (!buf) { buf = await f.arrayBuffer(); _upBufCache.set(f, buf); }
+  return {name: f.name || `lister-photo-${Date.now()}.jpg`, type: f.type || 'image/jpeg', buf};
+}
+function _recToFile(r) {
+  if (r instanceof Blob) return r;  // saved by older code
+  if (!r || !r.buf) return null;
+  const f = new File([r.buf], r.name || 'photo.jpg', {type: r.type || 'image/jpeg'});
+  _upBufCache.set(f, r.buf);
+  return f;
+}
+let _upSaveWarned = false;
+function _warnUpSaveFailed(e) {
+  console.warn('upload session save failed', e);
+  if (_upSaveWarned) return;
+  _upSaveWarned = true;
+  try { toast('⚠️ Phone blocked saving this batch on-device — if the tab reloads, photos may be lost', 'error'); } catch (_) {}
+}
 let _upSessSaveChain = Promise.resolve();
 function _saveUpSession() {
   // Serialized so an older snapshot can never land after a newer one.
@@ -3490,13 +3516,14 @@ function _saveUpSession() {
   } : null;
   _upSessSaveChain = _upSessSaveChain.then(async () => {
     try {
+      if (snap) snap.files = await Promise.all(snap.files.map(_fileToRec));
       const db = await _upSessDb();
-      await new Promise((res) => {
+      await new Promise((res, rej) => {
         const tx = db.transaction('s', 'readwrite');
         if (snap) tx.objectStore('s').put(snap, 'current'); else tx.objectStore('s').delete('current');
-        tx.oncomplete = res; tx.onerror = res; tx.onabort = res;
+        tx.oncomplete = res; tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error);
       });
-    } catch (e) { console.warn('upload session save failed', e); }
+    } catch (e) { _warnUpSaveFailed(e); }
   });
   return _upSessSaveChain;
 }
@@ -3514,7 +3541,7 @@ async function _restoreUpSession() {
   if (Date.now() - (snap.savedAt || 0) > 24 * 3600 * 1000) { upBatchId = null; _saveUpSession(); return; }
   upBatchId = snap.batchId; upGroupId = snap.groupId;
   upItems = snap.items || []; upQtyVal = snap.qty || 1;
-  upPhotos = (snap.files || []).map(f => ({file: f, url: URL.createObjectURL(f)}));
+  upPhotos = (snap.files || []).map(_recToFile).filter(Boolean).map(f => ({file: f, url: URL.createObjectURL(f)}));
   if (snap.condition) setUpCondition(snap.condition);
   const btn = document.querySelector('.nav-btn[data-tab="upload"]');
   if (btn && activeTab !== 'upload') btn.click();
@@ -3573,13 +3600,14 @@ function _upDb() {
 }
 async function _upDbPut(job) {
   try {
+    const recs = await Promise.all(job.photos.map(p => _fileToRec(p.file)));
     const db = await _upDb();
     await new Promise((res, rej) => {
       const tx = db.transaction('jobs', 'readwrite');
       tx.objectStore('jobs').put({
         groupId: job.groupId, condition: job.condition, qty: job.qty,
         itemNumber: job.itemNumber, batchTs: job.batchTs || null,
-        files: job.photos.map(p => p.file), savedAt: Date.now(),
+        files: recs, savedAt: Date.now(),
       });
       tx.oncomplete = res; tx.onerror = () => rej(tx.error);
     });
@@ -3613,7 +3641,7 @@ async function _resumeSavedUploads() {
   let added = 0;
   for (const j of saved) {
     if (known.has(j.groupId)) continue;
-    upBackgroundQueue.push({photos: (j.files || []).map(f => ({file: f})), groupId: j.groupId,
+    upBackgroundQueue.push({photos: (j.files || []).map(_recToFile).filter(Boolean).map(f => ({file: f})), groupId: j.groupId,
       condition: j.condition, qty: j.qty, itemNumber: j.itemNumber, batchTs: j.batchTs});
     upBackgroundJobs++; added++;
   }
