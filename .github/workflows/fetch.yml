@@ -1,0 +1,19 @@
+name: fetch
+on:
+  push:
+    branches: [tmp-rb7-photos]
+permissions:
+  contents: write
+jobs:
+  f:
+    if: "!contains(github.event.head_commit.message, 'photos')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          mkdir -p photos
+          cat photos.txt | xargs -P 16 -I{} curl -sfL -o photos/{} "https://xpminxpygwlvgybntawo.supabase.co/storage/v1/object/public/part-photos/{}" || true
+          pip install -q pillow && python shrink.py
+          ls photos | wc -l
+          git config user.name bot; git config user.email bot@x
+          git add photos && git commit -qm photos && git push
