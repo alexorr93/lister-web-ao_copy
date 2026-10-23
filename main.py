@@ -466,6 +466,141 @@ async def _oneshot_publish_lot_18r_to_shopify():
     except Exception:
         pass
 
+async def _oneshot_publish_lots_am1_btm2_to_shopify():
+    """ONE-SHOT (10/23 per owner): publish every ACTIVE eBay listing in lots AM1 and
+    BTM2 that isn't live on Shopify -- including the post-suspension items (owner
+    said "do everything") and items whose old Shopify product was deleted.
+    Same pattern as the 18R job: night-only (11pm-5am Denver), slow, live eBay
+    title/price/qty/SKU, normal publish path (lot-SKU lock, same-title dedup guard,
+    local record + inventory_match link). eBay-only items (no Lister row) get 2
+    photos pulled into our storage first, then the eBay-only publish logic.
+    Paginates ebay_listing_status (1000-row cap). Runs once (app_settings flag)."""
+    import asyncio, datetime as _dt
+    from zoneinfo import ZoneInfo
+    LOTS = ("AM1-", "BTM2-")
+    flag_key = "SHOPIFY_PUBLISH_LOTS_AM1_BTM2_DONE_20261023"
+    biz_id = "e6aa8f2d-4e17-4b88-b511-2cffd3c2168d"
+    try:
+        if (supabase.table("app_settings").select("value").eq("key", flag_key).limit(1).execute()).data:
+            return
+    except Exception as e:
+        print(f"[publish-AM1-BTM2] flag check failed, not running: {e}"); return
+    while True:
+        _h = _dt.datetime.now(ZoneInfo("America/Denver")).hour
+        if _h >= 23 or _h < 5:
+            break
+        await asyncio.sleep(600)
+    try:
+        if (supabase.table("app_settings").select("value").eq("key", flag_key).limit(1).execute()).data:
+            return
+        supabase.table("app_settings").upsert({"business_id": biz_id, "key": flag_key, "value": "running"}).execute()
+    except Exception as e:
+        print(f"[publish-AM1-BTM2] flag write failed, not running: {e}"); return
+
+    def _all(table, cols, **eqs):
+        out, start = [], 0
+        while True:
+            q = supabase.table(table).select(cols).eq("business_id", biz_id)
+            for k, v in eqs.items():
+                q = q.eq(k, v)
+            page = q.range(start, start + 999).execute().data or []
+            out.extend(page)
+            if len(page) < 1000:
+                return out
+            start += 1000
+
+    ok = fail = skipped = 0
+    try:
+        active = await asyncio.to_thread(_all, "ebay_listing_status",
+                    "item_id,title,price,quantity_available,sku,sku_override", listing_status="Active")
+        live = [r for r in active
+                if ((r.get("sku_override") or "").strip() or (r.get("sku") or "")).upper().startswith(LOTS)]
+        shop = await asyncio.to_thread(_all, "shopify_inventory", "id,product_id,status,deleted_at")
+        live_shop_ids = set()
+        for si in shop:
+            if (si.get("status") or "") == "active" and not si.get("deleted_at"):
+                live_shop_ids.add(str(si.get("id") or "")); live_shop_ids.add(str(si.get("product_id") or ""))
+        live_shop_ids.discard("")
+        matches = await asyncio.to_thread(_all, "inventory_match", "ebay_id,shopify_id")
+        on_shop = {str(m["ebay_id"]) for m in matches if str(m.get("shopify_id") or "") in live_shop_ids}
+        print(f"[publish-AM1-BTM2] {len(live)} active AM1/BTM2 eBay listings, {len(on_shop & {str(r['item_id']) for r in live})} already live on Shopify")
+        etoken = None
+        for r in live:
+            iid = str(r["item_id"])
+            try:
+                if iid in on_shop:
+                    skipped += 1; continue
+                qty = int(r.get("quantity_available") or 0)
+                if qty <= 0:
+                    skipped += 1; print(f"[publish-AM1-BTM2] {iid} qty 0 on eBay, skipped"); continue
+                eff_sku = (r.get("sku_override") or "").strip() or (r.get("sku") or "").strip()
+                lrow = await asyncio.to_thread(lambda: (supabase.table("listings").select("*").eq("business_id", biz_id)
+                        .eq("ebay_item_id", iid).limit(1).execute().data or []))
+                if lrow:
+                    listing = dict(lrow[0])
+                    spid = str(listing.get("shopify_product_id") or "").strip()
+                    if spid and spid in live_shop_ids:
+                        skipped += 1; continue  # already live, just not linked
+                    listing["title"] = r.get("title") or listing.get("title")
+                    if r.get("price") is not None:
+                        listing["price"] = r["price"]
+                    listing["quantity"] = qty
+                    if eff_sku:
+                        listing["ebay_sku"] = eff_sku
+                    await asyncio.to_thread(_require_valid_lot_sku_for_publish, biz_id, listing)
+                    result = await asyncio.to_thread(push_listing_to_shopify, listing)
+                    await asyncio.to_thread(lambda: supabase.table("listings").update({
+                        "shopify_product_id": str(result.get("product_id") or ""),
+                        "shopify_status": result.get("status") or "active", "shopify_error": None,
+                    }).eq("id", listing["id"]).execute())
+                    await asyncio.to_thread(_record_new_shopify_publish_locally, biz_id, result, iid)
+                    try:
+                        await asyncio.to_thread(_maybe_confirm_inventory_match, biz_id, listing["id"])
+                    except Exception:
+                        pass
+                else:
+                    # eBay-only item: pull 2 photos into our storage, then publish like the eBay-only endpoint
+                    if etoken is None:
+                        etoken = await asyncio.to_thread(get_ebay_access_token, biz_id)
+                    erow = await asyncio.to_thread(lambda: (supabase.table("ebay_inventory").select("id,local_photo_ids")
+                            .eq("business_id", biz_id).eq("id", iid).limit(1).execute().data or []))
+                    photo_ids = [p.strip() for p in ((erow[0].get("local_photo_ids") if erow else "") or "").split(",") if p.strip()]
+                    if not photo_ids:
+                        photo_ids = await asyncio.to_thread(_download_and_store_ebay_photos, iid, etoken, 2)
+                        if photo_ids and erow:
+                            await asyncio.to_thread(lambda: supabase.table("ebay_inventory").update(
+                                {"local_photo_ids": ",".join(photo_ids)}).eq("id", iid).execute())
+                    image_urls = [photo_url(p) for p in photo_ids if photo_url(p)]
+                    if not image_urls:
+                        fail += 1; print(f"[publish-AM1-BTM2] {iid} eBay-only, no photos pulled -- NOT published"); continue
+                    syn = {"business_id": biz_id, "title": r.get("title"), "price": r.get("price"),
+                           "quantity": qty, "ebay_sku": eff_sku, "id": iid}
+                    brow = await asyncio.to_thread(lambda: (supabase.table("ebay_listing_backup")
+                            .select("brand,mpn,condition_display_name").eq("business_id", biz_id)
+                            .eq("item_id", iid).limit(1).execute().data or []))
+                    if brow:
+                        b = brow[0]
+                        if b.get("brand"): syn["brand"] = b["brand"]
+                        if b.get("condition_display_name"): syn["condition"] = b["condition_display_name"]
+                        if b.get("mpn"): syn["mpn"] = b["mpn"]
+                    await asyncio.to_thread(_require_valid_lot_sku_for_publish, biz_id, syn)
+                    result = await asyncio.to_thread(push_listing_to_shopify, syn, image_urls)
+                    await asyncio.to_thread(_record_new_shopify_publish_locally, biz_id, result, iid)
+                ok += 1
+                print(f"[publish-AM1-BTM2] {iid} -> Shopify {result.get('product_id')} qty {qty} \"{(r.get('title') or '')[:50]}\"")
+            except Exception as e:
+                fail += 1
+                print(f"[publish-AM1-BTM2] {iid} FAILED: {str(e)[:200]}")
+            await asyncio.sleep(5)
+    except Exception as e:
+        print(f"[publish-AM1-BTM2] fatal: {e}")
+    print(f"[publish-AM1-BTM2] DONE published={ok} failed={fail} skipped={skipped}")
+    try:
+        supabase.table("app_settings").update({"value": f"done ok={ok} fail={fail} skipped={skipped}"}) \
+            .eq("business_id", biz_id).eq("key", flag_key).execute()
+    except Exception:
+        pass
+
 async def _oneshot_shopify_google_attrs_backfill():
     """ONE-SHOT (10/16 per owner): brand + condition on every live Shopify
     product, taken from that product's own eBay listing (ebay_listing_backup via
@@ -848,6 +983,7 @@ async def start_background_jobs():
     asyncio.create_task(shopify_sync_auto_refresh_worker())  # 10/19: re-enabled as REFRESH ONLY (fills Sync table); pushes are manual unless SHOPIFY_SYNC_AUTO_PUSH=true
     asyncio.create_task(_oneshot_archive_shopify_duplicates())
     asyncio.create_task(_oneshot_publish_lot_18r_to_shopify())  # 10/20: one-time publish of lot 18R to Shopify
+    asyncio.create_task(_oneshot_publish_lots_am1_btm2_to_shopify())  # 10/23: one-time night publish of lots AM1 + BTM2 to Shopify
     asyncio.create_task(_oneshot_shopify_google_attrs_backfill())  # 10/16: one-time brand+condition backfill from eBay to Shopify
     asyncio.create_task(browse_search_daily_worker())
     asyncio.create_task(shopify_reactivation_worker())  # 10/6: one-time Shopify reactivation from shopify_reactivation_plan (Shopify calls only)
