@@ -601,6 +601,43 @@ async def _oneshot_publish_lots_am1_btm2_to_shopify():
     except Exception:
         pass
 
+async def _oneshot_archive_samiflex_inserts_20261023():
+    """ONE-SHOT (10/23 per owner): take down the two Samiflex insert products posted
+    to Shopify 10/22 (listings 6607 A4 / 6608 A3) -- contradicted by newer posts.
+    ARCHIVE only (reversible). Shopify only; eBay untouched."""
+    import asyncio
+    await asyncio.sleep(30)
+    biz_id = "e6aa8f2d-4e17-4b88-b511-2cffd3c2168d"
+    flag_key = "SHOPIFY_ARCHIVE_SAMIFLEX_20261023"
+    try:
+        if (supabase.table("app_settings").select("value").eq("key", flag_key).limit(1).execute()).data:
+            return
+    except Exception as e:
+        print(f"[archive-samiflex] flag check failed: {e}"); return
+    TARGETS = {"9122810953899": 6607, "9122810626219": 6608}
+    results = []
+    try:
+        domain, headers = await asyncio.to_thread(_reactivation_shopify_ctx, biz_id)
+        for pid, lid in TARGETS.items():
+            try:
+                d = await asyncio.to_thread(_reactivation_gql, domain, headers, """
+                  mutation($input: ProductInput!){ productUpdate(input:$input){ product { id status } userErrors { field message } } }""",
+                  {"input": {"id": f"gid://shopify/Product/{pid}", "status": "ARCHIVED"}})
+                ue = (d.get("productUpdate") or {}).get("userErrors") or []
+                if ue:
+                    results.append(f"{pid}:err"); print(f"[archive-samiflex] {pid} userErrors {ue}"); continue
+                supabase.table("shopify_inventory").update({"status": "archived"}).eq("business_id", biz_id).eq("product_id", pid).execute()
+                supabase.table("listings").update({"shopify_status": "archived"}).eq("id", lid).execute()
+                results.append(f"{pid}:archived"); print(f"[archive-samiflex] {pid} archived")
+            except Exception as e:
+                results.append(f"{pid}:err"); print(f"[archive-samiflex] {pid} FAILED: {e}")
+    except Exception as e:
+        print(f"[archive-samiflex] fatal: {e}"); return
+    try:
+        supabase.table("app_settings").insert({"business_id": biz_id, "key": flag_key, "value": " ".join(results)}).execute()
+    except Exception:
+        pass
+
 async def _oneshot_shopify_google_attrs_backfill():
     """ONE-SHOT (10/16 per owner): brand + condition on every live Shopify
     product, taken from that product's own eBay listing (ebay_listing_backup via
@@ -983,6 +1020,7 @@ async def start_background_jobs():
     asyncio.create_task(shopify_sync_auto_refresh_worker())  # 10/19: re-enabled as REFRESH ONLY (fills Sync table); pushes are manual unless SHOPIFY_SYNC_AUTO_PUSH=true
     asyncio.create_task(_oneshot_archive_shopify_duplicates())
     asyncio.create_task(_oneshot_publish_lot_18r_to_shopify())  # 10/20: one-time publish of lot 18R to Shopify
+    asyncio.create_task(_oneshot_archive_samiflex_inserts_20261023())  # 10/23: archive 2 Samiflex insert products on Shopify
     asyncio.create_task(_oneshot_publish_lots_am1_btm2_to_shopify())  # 10/23: one-time night publish of lots AM1 + BTM2 to Shopify
     asyncio.create_task(_oneshot_shopify_google_attrs_backfill())  # 10/16: one-time brand+condition backfill from eBay to Shopify
     asyncio.create_task(browse_search_daily_worker())
