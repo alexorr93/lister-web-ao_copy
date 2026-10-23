@@ -3294,6 +3294,14 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
     # Condition notes (ConditionDescription) are only accepted for non-New.
     _ec = ebay_condition(listing.get("condition"))
     condition_id = {"NEW": "1000", "NEW_OTHER": "1500", "SELLER_REFURBISHED": "2500"}.get(_ec, "3000")
+    # Manuals/books categories (e.g. "Heavy Equipment Manuals & Books") reject plain
+    # Used (3000) -- they require a book grade. Per standing rule, used manuals go up
+    # as "Very Good" (4000). The retry below the request also catches any other
+    # category that rejects 3000 the same way.
+    _cat_name = (listing.get("ebay_category") or "").lower()
+    if condition_id == "3000" and ("book" in _cat_name or "manual" in _cat_name) \
+            and "transmission" not in _cat_name:
+        condition_id = "4000"
     _cond_desc = (listing.get("condition_description") or "").strip()[:1000]
     cond_desc_xml = (f'<ConditionDescription>{_xesc(_cond_desc)}</ConditionDescription>'
                      if _cond_desc and condition_id != "1000" else "")
@@ -3383,6 +3391,14 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
     r = _req.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_body.encode("utf-8"), timeout=30)
     resp = _ebay_xml_to_dict(ET.fromstring(r.content))
     ack = resp.get("Ack")
+    # Category rejected plain Used (error 21916883 "Invalid condition id") -> it's a
+    # book-graded category; retry once as Very Good (4000).
+    if ack not in ("Success", "Warning") and condition_id == "3000" \
+            and "21916883" in str(resp.get("Errors")):
+        xml_body = xml_body.replace("<ConditionID>3000</ConditionID>", "<ConditionID>4000</ConditionID>", 1)
+        r = _req.post("https://api.ebay.com/ws/api.dll", headers=headers, data=xml_body.encode("utf-8"), timeout=30)
+        resp = _ebay_xml_to_dict(ET.fromstring(r.content))
+        ack = resp.get("Ack")
     if ack not in ("Success", "Warning"):
         raise Exception(f"AddFixedPriceItem failed (Ack={ack}): {resp.get('Errors')}")
 
