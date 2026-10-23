@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           mkdir -p photos
-          cat photos.txt | xargs -P 16 -I{} curl -sfL -o photos/{} "https://xpminxpygwlvgybntawo.supabase.co/storage/v1/object/public/part-photos/{}" || true
+          cat photos.txt | xargs -P 4 -I{} curl -sfL --retry 5 --retry-delay 2 --retry-all-errors -o photos/{} "https://xpminxpygwlvgybntawo.supabase.co/storage/v1/object/public/part-photos/{}" || true
           pip install -q pillow && python shrink.py
           ls photos | wc -l
           git config user.name bot; git config user.email bot@x
