@@ -3887,6 +3887,36 @@ def get_nav_context(request: Request):
         account_label = biz.data[0].get("email") or biz.data[0].get("name") or ""
     return {"business_id": business_id, "is_admin": is_admin, "account_label": account_label}
 
+def _lot_skus_by_recency(business_id):
+    """Lot SKUs only, newest-created lot first — feeds the Upload / Fast Scan lot
+    dropdown. Deliberately tiny: the dropdown used to call the full /api/acquisitions
+    Lots payload (every Active eBay row + every listing + every order) just to get
+    these names, which is why it took forever to fill."""
+    newest = {}
+    start = 0
+    while True:
+        page = supabase.table("acquisitions").select("sku,created_at,date")\
+            .eq("business_id", business_id).range(start, start + 999).execute().data or []
+        for a in page:
+            sku = a.get("sku")
+            if not sku:
+                continue
+            ts = a.get("created_at") or a.get("date") or ""
+            if sku not in newest or ts > newest[sku]:
+                newest[sku] = ts
+        if len(page) < 1000:
+            break
+        start += 1000
+    return sorted(newest, key=lambda k: newest[k], reverse=True)
+
+@app.get("/api/lot-skus")
+async def list_lot_skus(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio
+    return {"lot_skus": await asyncio.to_thread(_lot_skus_by_recency, business_id)}
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     nav = get_nav_context(request)
@@ -3898,8 +3928,10 @@ async def dashboard(request: Request):
     # round trips. Falls back to the old fetch-on-load path if the build fails.
     import asyncio, json as _json
     inline = "null"
+    inline_lots = "null"
+    bid = nav["business_id"]
+    lots_task = asyncio.create_task(asyncio.to_thread(_lot_skus_by_recency, bid))
     try:
-        bid = nav["business_id"]
         listings, settings = await asyncio.gather(
             asyncio.to_thread(_build_listings_payload, bid, False),
             asyncio.to_thread(get_ebay_settings, bid),
@@ -3907,7 +3939,11 @@ async def dashboard(request: Request):
         inline = _json.dumps({"listings": listings, "today_only": (settings or {}).get("INTAKE_TODAY_ONLY_FILTER") == "true"})
     except Exception as e:
         print(f"intake inline build failed, falling back to fetch-on-load: {e}")
-    return templates.TemplateResponse("index.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "intake", "inline_listings_json": inline.replace("</", "<\\/"), "inline_categories_json": _category_picker_inline_json(), "is_editor": get_session_role(request) == "editor"})
+    try:
+        inline_lots = _json.dumps(await lots_task)
+    except Exception as e:
+        print(f"lot sku inline build failed, falling back to fetch-on-load: {e}")
+    return templates.TemplateResponse("index.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "intake", "inline_listings_json": inline.replace("</", "<\\/"), "inline_lot_skus_json": inline_lots.replace("</", "<\\/"), "inline_categories_json": _category_picker_inline_json(), "is_editor": get_session_role(request) == "editor"})
 
 # ── API: LISTINGS ─────────────────────────────────────────────── #
 

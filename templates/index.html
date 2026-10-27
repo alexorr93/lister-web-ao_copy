@@ -903,8 +903,11 @@ let dirtyBrands   = {}; // id -> unsaved brand text
 let dirtyLotSkus  = {}; // id -> unsaved (possibly invalid, not-yet-saved) lot SKU text
 let dirtyMpns     = {}; // id -> unsaved MPN text (motors items only)
 let askChatGptInFlight = new Set(); // id -> Ask ChatGPT request currently running, so the ~10s background poll re-render doesn't clobber the ⏳ state mid-request (same class of bug as the mutation-epoch guard elsewhere)
-let knownLotSkus  = new Set(); // real Lot SKUs from the Lots page — publishing requires a match
-let lotSkusByRecency = []; // same SKUs, most-recently-created lot first — feeds the Fast Scan / Batch Upload lot picker
+// Lot SKUs are rendered into the page server-side (inline_lot_skus_json) so the
+// Upload / Fast Scan lot dropdown is filled the instant the page opens.
+const INLINE_LOT_SKUS = {{ inline_lot_skus_json | default('null') | safe }};
+let lotSkusByRecency = Array.isArray(INLINE_LOT_SKUS) ? INLINE_LOT_SKUS.slice() : []; // most-recently-created lot first — feeds the Fast Scan / Batch Upload lot picker
+let knownLotSkus  = new Set(lotSkusByRecency); // real Lot SKUs from the Lots page — publishing requires a match
 // Unified color-state system for ALL editable fields (title/price/brand/category):
 // no color = untouched, PINK = clicked into it (reviewed/confirmed as-is), YELLOW = actually changed. Keys are "id_field".
 // Persisted in localStorage (same pattern/reasoning as isResearched below --
@@ -974,24 +977,13 @@ function lotSkuFor(l) {
 
 async function loadLotSkus() {
   try {
-    const r = await api('GET', '/api/acquisitions');
-    const acqs = r.acquisitions || [];
-    const skus = acqs.map(a => a.sku).filter(Boolean);
+    // Lightweight lot-name-only endpoint (was the full /api/acquisitions Lots payload).
+    const r = await api('GET', '/api/lot-skus');
+    const skus = (r && r.lot_skus) || [];
+    const changed = skus.join('|') !== lotSkusByRecency.join('|');
+    lotSkusByRecency = skus;
     knownLotSkus = new Set(skus);
-    // A lot SKU can appear on more than one acquisition row (e.g. a second purchase
-    // added into the same lot later) — take the latest actual creation timestamp
-    // seen for that SKU, so the picker lists lots in the order they were actually
-    // added to Lister, not by the manually-entered purchase Date field (which can
-    // be backdated/edited and drift from the real creation order).
-    const newestByLot = {};
-    for (const a of acqs) {
-      if (!a.sku) continue;
-      const ts = a.created_at || a.date || '';
-      if (!newestByLot[a.sku] || ts > newestByLot[a.sku]) newestByLot[a.sku] = ts;
-    }
-    lotSkusByRecency = Array.from(knownLotSkus).sort((x, y) => (newestByLot[y] || '').localeCompare(newestByLot[x] || ''));
-    renderTiles();
-    renderActiveLotBars();
+    if (changed) { renderTiles(); renderActiveLotBars(); }
   } catch(e) { console.error('Failed to load Lot SKUs', e); }
 }
 
