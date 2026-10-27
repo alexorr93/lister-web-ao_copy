@@ -1615,15 +1615,17 @@ def _check_new_shopify_sales_for_ebay_sync(business_id: str) -> dict:
     for row in found["rows"]:
         existing = (supabase.table("ebay_sync_queue").select("id,qty_sold,status")
                     .eq("business_id", business_id).eq("shopify_variant_id", row["shopify_variant_id"])
-                    .in_("status", ["pending", "ignored", "pushed"]).execute()).data
+                    .eq("status", "pending").execute()).data
+        # Only an OPEN (pending) row absorbs a new sale. A row already
+        # pushed/ignored belongs to an EARLIER sale -- a repeat sale of the
+        # same product is a new event and always gets its own row (it used
+        # to be silently dropped, so eBay qty was never lowered for it).
         if existing:
-            if existing[0]["status"] == "pending":
-                supabase.table("ebay_sync_queue").update({
-                    "qty_sold": existing[0]["qty_sold"] + row["qty_sold"],
-                    "discovered_at": now.isoformat(),
-                }).eq("id", existing[0]["id"]).execute()
-                queued += 1
-            # else: already ignored/pushed -- don't resurrect it
+            supabase.table("ebay_sync_queue").update({
+                "qty_sold": existing[0]["qty_sold"] + row["qty_sold"],
+                "discovered_at": now.isoformat(),
+            }).eq("id", existing[0]["id"]).execute()
+            queued += 1
         else:
             live_status = _live_check_ebay_listing_status(business_id, row["ebay_item_id"])
             supabase.table("ebay_sync_queue").insert({
@@ -1640,14 +1642,13 @@ def _check_new_shopify_sales_for_ebay_sync(business_id: str) -> dict:
     for row in found.get("unmatched_rows") or []:
         existing = (supabase.table("ebay_sync_queue").select("id,qty_sold,status")
                     .eq("business_id", business_id).eq("shopify_variant_id", row["shopify_variant_id"])
-                    .in_("status", ["pending", "unmatched", "ignored", "pushed"]).execute()).data
+                    .in_("status", ["pending", "unmatched"]).execute()).data
+        # Same rule as above: only an open row absorbs a repeat sale.
         if existing:
-            if existing[0]["status"] in ("pending", "unmatched"):
-                supabase.table("ebay_sync_queue").update({
-                    "qty_sold": existing[0]["qty_sold"] + row["qty_sold"], "discovered_at": now.isoformat(),
-                }).eq("id", existing[0]["id"]).execute()
-                queued += 1
-            # else: already ignored/pushed -- don't resurrect it
+            supabase.table("ebay_sync_queue").update({
+                "qty_sold": existing[0]["qty_sold"] + row["qty_sold"], "discovered_at": now.isoformat(),
+            }).eq("id", existing[0]["id"]).execute()
+            queued += 1
         else:
             live_status = row.get("fallback_status")
             if row.get("ebay_item_id"):
