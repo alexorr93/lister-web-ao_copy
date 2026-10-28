@@ -13837,14 +13837,70 @@ def push_listing_to_shopify(listing: dict, image_urls_override: list = None) -> 
             # product itself was created successfully — a channel-publish failure shouldn't fail the whole call
             channel_result = {"error": str(e)}
 
+    ship_result = {}
+    if variant_id:
+        try:
+            ship_result = _apply_shipping_profile_at_publish(biz_id, listing, variant_id)
+        except Exception as e:
+            # Non-fatal: the 15-min shopify_shipping_rule_worker is still the safety net.
+            ship_result = {"error": str(e)}
+            print(f"push_listing_to_shopify: shipping profile not set at publish for variant {variant_id} "
+                  f"(worker will retry): {e}")
+
     return {
         "product_id": product_id, "variant_id": variant_id, "status": data.get("status"),
         "handle": data.get("handle"), "channels": channel_result, "mpn": mpn_result,
+        "shipping_profile": ship_result,
         "sku": variants[0].get("sku") if variants else sku,
         "price": float(variants[0].get("price")) if variants else price,
         "quantity": variants[0].get("inventory_quantity") if variants else qty,
         "title": data.get("title") or title,
     }
+
+def _apply_shipping_profile_at_publish(business_id: str, listing: dict, variant_id) -> dict:
+    """10/28: assign a freshly created Shopify variant to the matching
+    'eBay $69/$195 Shipping' delivery profile AT PUBLISH TIME, instead of
+    waiting for the eBay sync + HD_ID match + 15-min worker to catch it.
+    Cost source, in order: (1) the eBay shipping policy chosen on the Lister
+    listing itself (ebay_fulfillment_policy_id), (2) the synced
+    ebay_listing_status.shipping_cost for its eBay item id. Only $69/$195 are
+    acted on (same scope as apply_shopify_shipping_rule). Marks
+    shopify_ship_rule_applied so the worker doesn't redo it."""
+    cost = None
+    source = None
+    pol = str(listing.get("ebay_fulfillment_policy_id") or "").strip()
+    if pol and pol in _EBAY_SHIP_POLICY_COST_BY_ID:
+        cost = _EBAY_SHIP_POLICY_COST_BY_ID[pol]
+        source = "listing_policy"
+    ebay_item_id = str(listing.get("ebay_item_id") or "").strip()
+    if cost is None and ebay_item_id:
+        row = (supabase.table("ebay_listing_status").select("shipping_cost")
+               .eq("business_id", business_id).eq("item_id", ebay_item_id)
+               .limit(1).execute().data or [])
+        if row and row[0].get("shipping_cost") is not None:
+            cost = float(row[0]["shipping_cost"])
+            source = "ebay_listing_status"
+    if cost is None or float(cost) not in (69.0, 195.0):
+        return {"skipped": True, "cost": cost, "source": source}
+    cost = int(float(cost))
+    profile_id = _ensure_shipping_profile(business_id, cost)
+    data = _shopify_gql(business_id, """
+      mutation assign($id: ID!, $profile: DeliveryProfileInput!) {
+        deliveryProfileUpdate(id: $id, profile: $profile) {
+          userErrors { field message }
+        }
+      }""", {"id": profile_id,
+             "profile": {"variantsToAssociate": [f"gid://shopify/ProductVariant/{variant_id}"]}})
+    errs = ((data.get("deliveryProfileUpdate") or {}).get("userErrors")) or []
+    if errs:
+        raise Exception(f"deliveryProfileUpdate: {errs}")
+    if ebay_item_id:
+        try:
+            supabase.table("ebay_listing_status").update({"shopify_ship_rule_applied": cost})\
+                .eq("business_id", business_id).eq("item_id", ebay_item_id).execute()
+        except Exception as e:
+            print(f"_apply_shipping_profile_at_publish: applied-flag write failed for {ebay_item_id}: {e}")
+    return {"ok": True, "cost": cost, "source": source}
 
 def _record_new_shopify_publish_locally(business_id: str, result: dict, ebay_id: str = None) -> None:
     """Writes the just-created Shopify product/variant into shopify_inventory and
@@ -18434,6 +18490,10 @@ async def publish_ebay_only_to_shopify(row_id: str, request: Request):
         "quantity": row.get("quantity") or 1,
         "ebay_sku": row.get("sku"),
         "id": row_id,
+        # row_id IS the eBay item id here; lets the publish set the $69/$195
+        # Shopify shipping profile immediately (image_urls_override is always
+        # passed on this path, so the eBay-photo fallback never triggers off it).
+        "ebay_item_id": str(row_id),
     }
     # 10/19 BUG FIX: this path sent no brand/condition/MPN, so every eBay-only
     # publish went to Shopify as vendor "Unbranded" + Google condition "used"
