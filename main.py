@@ -40,8 +40,39 @@ def _install_auto_pagination():
         return
     _orig_execute = SyncSelectRequestBuilder.execute
     PAGE = 1000
+    # STABLE ORDER (10/30): Postgres gives no row order without ORDER BY, so
+    # paging (offset/limit, manual .range() or the auto-pager below) could
+    # return a row twice or skip one between pages -- confirmed Sep 2026 Monthly
+    # Snapshot totals $46-61 off vs direct SQL. Every select with no explicit
+    # .order() now gets ORDER BY its primary key. Tables whose PK isn't "id" are
+    # listed; views without a PK (None) are left as-is.
+    _PK_ORDER = {
+        "bidspotter_lot_pull_progress": "business_id", "bidspotter_scan_status": "business_id",
+        "ebay_best_offers": "business_id,best_offer_id", "ebay_categories": "category_id",
+        "ebay_listing_backup": "business_id,item_id", "ebay_offer_history": "business_id,best_offer_id",
+        "geo_sales": "business_id,view,label,week_start", "listed_daily_snapshot": "business_id,day",
+        "monthly_snapshot_history": "business_id,month", "offer_metrics": "business_id,window_days",
+        "shipping_labels": "tracking_number", "timeline_import_log": "business_id",
+        "timeline_meta": "business_id,key", "timeline_points": "business_id,seg_seq,idx",
+        "timeline_raw_signals": "business_id,seq", "timeline_segments": "business_id,seq",
+        "weekly_sales": "business_id,week_start",
+        "finance_uncategorized_order_skus": None, "listings_sku_backup_20260726": None,
+        "shopify_ebay_qty_reconcile": None,
+    }
+
+    def _ensure_order(self):
+        try:
+            if self.http_method != "GET" or "order" in self.params:
+                return
+            table = str(self.path).rstrip("/").rsplit("/", 1)[-1].split("?")[0]
+            cols = _PK_ORDER.get(table, "id")
+            if cols:
+                self.params = self.params.add("order", ",".join(c + ".asc" for c in cols.split(",")))
+        except Exception as e:
+            print(f"stable-order: skipped: {e}")
 
     def _execute(self):
+        _ensure_order(self)
         res = _orig_execute(self)
         try:
             data = res.data
@@ -2816,10 +2847,7 @@ def run_daily_analytics_snapshot_for_business(business_id: str) -> dict:
     total_qty_sold = sum(r.get("quantity") or 0 for r in order_rows)
     avg_sale_price_day = round(total_revenue / total_qty_sold, 2) if total_qty_sold else 0
 
-    listing_rows = _fetch_all_for_business(business_id, "listings", "price,created_at")
-    listing_rows = [r for r in listing_rows if mt_today <= (r.get("created_at") or "") <= mt_today + "T23:59:59"]
-    new_listings_count_day = len(listing_rows)
-    new_listings_value_day = round(sum(r.get("price") or 0 for r in listing_rows), 2)
+    new_listings_count_day, new_listings_value_day = _new_listings_range_totals(business_id, mt_today, mt_today)
 
     # FIXED a real bug here: these two were plain unpaginated .execute() calls,
     # which Supabase caps around 1000 rows -- silently undercounting if there
@@ -4130,6 +4158,59 @@ def _listed_totals_for_day(business_id: str, day) -> dict:
             vals[iid] = float(r.get("price") or 0) * float(r.get("quantity") or 1)
     return {"count": len(vals), "value": round(sum(vals.values()), 2), "item_ids": list(vals.keys())}
 
+
+def _new_listings_range_totals(business_id: str, start_str: str, end_str: str) -> tuple:
+    """New Listings (count, $) for an inclusive date range, one rule app-wide
+    (10/30): per-item diff of active_listings_daily_snapshot (rpc
+    daily_new_listings) -- new eBay item IDs at price x qty available plus qty
+    added to existing listings x price; sales/offers/price changes/ended
+    listings never count. Days before per-item history began use the frozen
+    listed_daily_snapshot; today uses the live published count until today's
+    per-item snapshot exists. Replaces the old Lister `listings.created_at`
+    count, which included scans/drafts that never went live (Oct 2026:
+    1,085 counted vs ~900 actually published)."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    bid = str(business_id)
+    today = _dt.datetime.now(ZoneInfo("America/Denver")).date()
+    d0, d1 = _dt.date.fromisoformat(start_str[:10]), min(_dt.date.fromisoformat(end_str[:10]), today)
+    if d1 < d0:
+        return 0, 0.0
+    count, value = 0, 0.0
+    boundary = None
+    try:
+        snap0 = (supabase.table("active_listings_daily_snapshot").select("snapshot_date")
+                 .eq("business_id", bid).order("snapshot_date").limit(1).execute()).data
+        if snap0:
+            boundary = _dt.date.fromisoformat(snap0[0]["snapshot_date"]) + _dt.timedelta(days=1)
+    except Exception as e:
+        print(f"new_listings_range: boundary lookup failed: {e}")
+    covered = set()
+    if boundary and d1 >= boundary:
+        try:
+            rows = supabase.rpc("daily_new_listings", {"p_business_id": bid,
+                   "p_start": max(d0, boundary).isoformat(), "p_end": d1.isoformat()}).execute().data or []
+            for r in rows:
+                count += int(r.get("new_count") or 0)
+                value += float(r.get("new_value") or 0) + float(r.get("bump_value") or 0)
+                covered.add(r.get("day"))
+        except Exception as e:
+            print(f"new_listings_range: rpc failed: {e}")
+    pre_end = min(d1, (boundary - _dt.timedelta(days=1)) if boundary else d1)
+    if d0 <= pre_end:
+        old = (supabase.table("listed_daily_snapshot").select("day,listed_count,listed_value")
+               .eq("business_id", bid).gte("day", d0.isoformat()).lte("day", pre_end.isoformat())
+               .execute()).data or []
+        for r in old:
+            count += int(r.get("listed_count") or 0)
+            value += float(r.get("listed_value") or 0)
+    if d0 <= today <= d1 and today.isoformat() not in covered:
+        try:
+            t = _listed_totals_for_day(bid, today)
+            count += int(t["count"]); value += float(t["value"])
+        except Exception as e:
+            print(f"new_listings_range: live today failed: {e}")
+    return count, round(value, 2)
 
 async def listed_daily_snapshot_worker():
     """Freezes each finished Mountain-time day's Listed Today count + $ into
@@ -8380,14 +8461,15 @@ async def get_undelivered_shipments(request: Request):
     # Filter server-side: only rows with a status that isn't Delivered/Refunded
     # This avoids the Supabase row-limit cap on the full 4700+ table
     res = supabase.table("shipping_labels")\
-        .select("tracking_number,recipient,cost,created_date,ship_from,source,status")\
+        .select("tracking_number,recipient,cost,created_date,created_ts,ship_from,source,status")\
         .eq("business_id", business_id)\
         .not_.is_("status", "null")\
         .not_.in_("status", ["Delivered", "Refunded"])\
         .execute()
     rows = res.data or []
-    # Sort by created_date descending (newest first)
-    rows.sort(key=lambda x: x.get("created_date") or "", reverse=True)
+    # Newest first by the parsed created_ts (created_date is M/D/YY text, so a
+    # string sort put 9/9/26 after 10/23/26).
+    rows.sort(key=lambda x: x.get("created_ts") or "", reverse=True)
     return {"ok": True, "rows": rows, "count": len(rows)}
 
 @app.post("/api/financials/match-shipping")
@@ -9721,10 +9803,7 @@ def _compute_analytics_payload(business_id: str, start_date_str: str, end_date_s
         inventory_growth_pct = round((end_inv_value - start_inv_value) / start_inv_value * 100, 1)
 
     # --- Average New Listings Per Day: count and $ (within the selected date range) ---
-    listing_rows = _fetch_all_for_business(business_id, "listings", "price,created_at")
-    listing_rows = [r for r in listing_rows if start_date_str <= (r.get("created_at") or "") <= end_date_str + "T23:59:59"]
-    total_new_listings = len(listing_rows)
-    total_new_listings_value = sum(r.get("price") or 0 for r in listing_rows)
+    total_new_listings, total_new_listings_value = _new_listings_range_totals(business_id, start_date_str, end_date_str)
     avg_new_listings_per_day_count = round(total_new_listings / num_days, 2)
     avg_new_listings_per_day_value = round(total_new_listings_value / num_days, 2)
 
