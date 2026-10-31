@@ -9593,7 +9593,7 @@ def _build_monthly_snapshot_payload(business_id: str, n_months: int = 13) -> dic
             "spend": round(a["spend"], 2),
             "freight": round(a["freight"], 2),
         })
-    return {"rows": rows, "as_of": today_iso}
+    return {"rows": rows, "as_of": today.isoformat()}
 
 def _record_monthly_snapshot_history(business_id: str, payload: dict):
     """Persists the Monthly Snapshot metrics to monthly_snapshot_history for
