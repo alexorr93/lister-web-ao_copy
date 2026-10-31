@@ -1140,6 +1140,7 @@ async def start_background_jobs():
     asyncio.create_task(analytics_snapshot_worker())
     asyncio.create_task(analytics_cache_refresh_worker())
     asyncio.create_task(weekly_sales_refresh_worker())
+    asyncio.create_task(monthly_snapshot_warm_worker())
     asyncio.create_task(geo_sales_refresh_worker())
     asyncio.create_task(backfill_ytd_history_worker())
     asyncio.create_task(auction_archive_worker())
@@ -6102,8 +6103,15 @@ async def analytics_page(request: Request):
         except Exception as e:
             print(f"analytics_page: failed to inline geo sales: {e}")
             geo_sales = {"rows": []}
+    monthly_snapshot = {"rows": []}
+    try:
+        import asyncio as _asyncio
+        monthly_snapshot = await _asyncio.to_thread(_get_monthly_snapshot, business_id)
+    except Exception as e:
+        print(f"analytics_page: failed to inline monthly snapshot: {e}")
     return templates.TemplateResponse("analytics.html", {
         "request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "analytics",
+        "inline_monthly_snapshot_json": _json.dumps(monthly_snapshot),
         "inline_geo_sales_json": _json.dumps(geo_sales),
         "inline_biz_app_1m_json": _json.dumps(inline_biz_app_1m),
         "inline_biz_app_3m_json": _json.dumps(inline_biz_app_3m),
@@ -9348,7 +9356,7 @@ def _set_analytics_cache(business_id: str, endpoint: str, start: str, end: str, 
     else:
         supabase.table("analytics_query_cache").insert(record).execute()
 
-def _compute_green_revenue(business_id: str, start_date_str: str, end_date_str: str) -> float:
+def _compute_green_revenue(business_id: str, start_date_str: str, end_date_str: str, _pre: dict = None) -> float:
     """'Green Revenue' -- sum of actual order revenue (gross_revenue, per the
     user's own flag: is lot profit > 1 = Green) PLUS cash payments belonging to
     green lots, within the SELECTED DATE RANGE, for lots that are currently
@@ -9373,13 +9381,16 @@ def _compute_green_revenue(business_id: str, start_date_str: str, end_date_str: 
     Cash from a green lot follows the exact same became_green_at boundary --
     a spread payment's contribution is bounded to days on/after that date, and
     a precise payment only counts if dated on/after it, same as orders."""
-    lot_rows = _fetch_all_for_business(business_id, "acquisitions", "sku,profit,became_green_at")
+    # _pre (optional): {"lot_rows", "order_rows", "resolve"} already fetched by
+    # a caller computing many ranges at once (Monthly Snapshot) -- same math,
+    # just skips re-pulling every order per month.
+    lot_rows = _pre["lot_rows"] if _pre else _fetch_all_for_business(business_id, "acquisitions", "sku,profit,became_green_at")
     green_lots = {r["sku"]: r["became_green_at"] for r in lot_rows if r.get("sku") and (r.get("profit") or 0) > 1 and r.get("became_green_at")}
     if not green_lots:
         return 0.0
 
-    order_rows = _fetch_all_for_business(business_id, "orders", "sku,final_net,order_date,legacy_item_id,title,platform")
-    _resolve_sku = _order_sku_resolver(business_id)
+    order_rows = _pre["order_rows"] if _pre else _fetch_all_for_business(business_id, "orders", "sku,final_net,order_date,legacy_item_id,title,platform")
+    _resolve_sku = _pre["resolve"] if _pre else _order_sku_resolver(business_id)
     order_rows = [r for r in order_rows if start_date_str <= (r.get("order_date") or "") <= end_date_str]
     total = 0.0
     for r in order_rows:
@@ -9403,6 +9414,129 @@ def _compute_green_revenue(business_id: str, start_date_str: str, end_date_str: 
     min_date_by_sku = {sku: ts[:10] for sku, ts in green_lots.items()}
     total += _compute_cash_in_range(business_id, start_date_str, end_date_str, only_skus=set(green_lots.keys()), min_date_by_sku=min_date_by_sku)
     return round(total, 2)
+
+_MONTHLY_SNAPSHOT_CACHE = {}  # business_id (str) -> (built_at_epoch, payload)
+
+def _build_monthly_snapshot_payload(business_id: str, n_months: int = 13) -> dict:
+    """Monthly Snapshot block (Analytics, bottom): per calendar month --
+    Sales (gross - refunds + cash), Net Sales (final_net + cash: after fees,
+    refunds, shipping labels), Green Net Sales (_compute_green_revenue, same
+    rule as the Green Revenue card), Shipping Cost (orders.shipping_cost),
+    New Listings (listed_daily_snapshot + today's live count) and Inventory
+    Spend (acquisitions.cost). All eBay + Shopify, Mountain-time months.
+    Current month is month-to-date."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    bid = str(business_id)
+    today = _dt.datetime.now(ZoneInfo("America/Denver")).date()
+    months = []
+    y, m = today.year, today.month
+    for _ in range(n_months):
+        months.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            m, y = 12, y - 1
+    months.reverse()
+    first = months[0] + "-01"
+
+    def _bounds(mo):
+        yy, mm = int(mo[:4]), int(mo[5:7])
+        nxt = _dt.date(yy + (mm == 12), 1 if mm == 12 else mm + 1, 1)
+        end = min(nxt - _dt.timedelta(days=1), today)
+        return f"{mo}-01", end.isoformat()
+
+    orders = _fetch_all_for_business(bid, "orders", "sku,gross_revenue,refund,final_net,shipping_cost,order_date,legacy_item_id,title,platform")
+    acq = _fetch_all_for_business(bid, "acquisitions", "sku,cost,date,profit,became_green_at")
+    listed = (supabase.table("listed_daily_snapshot").select("day,listed_count")
+              .eq("business_id", bid).gte("day", first).limit(5000).execute()).data or []
+    pre = {"lot_rows": acq, "order_rows": orders, "resolve": _order_sku_resolver(bid)}
+
+    agg = {mo: {"sales": 0.0, "net": 0.0, "ship": 0.0, "listings": 0, "spend": 0.0} for mo in months}
+    for r in orders:
+        mo = (r.get("order_date") or "")[:7]
+        if mo in agg:
+            a = agg[mo]
+            a["sales"] += float(r.get("gross_revenue") or 0) - float(r.get("refund") or 0)
+            a["net"] += float(r.get("final_net") or 0)
+            a["ship"] += float(r.get("shipping_cost") or 0)
+    for r in acq:
+        mo = (r.get("date") or "")[:7]
+        if mo in agg:
+            agg[mo]["spend"] += float(r.get("cost") or 0)
+    today_iso = today.isoformat()
+    have_days = set()
+    for r in listed:
+        mo = (r.get("day") or "")[:7]
+        if mo in agg and r.get("day") != today_iso:
+            agg[mo]["listings"] += int(r.get("listed_count") or 0)
+            have_days.add(r.get("day"))
+    # Days the nightly snapshot never froze (e.g. 10/2/2026) would count as 0 --
+    # fill the recent ones (last 62 days) live with the same function.
+    d = today - _dt.timedelta(days=62)
+    while d < today:
+        di = d.isoformat()
+        if di[:7] in agg and di not in have_days:
+            try:
+                agg[di[:7]]["listings"] += int(_listed_totals_for_day(bid, d)["count"])
+            except Exception as e:
+                print(f"monthly_snapshot: fill {di} failed: {e}")
+        d += _dt.timedelta(days=1)
+    try:
+        agg[months[-1]]["listings"] += int(_listed_totals_for_day(bid, today)["count"])
+    except Exception as e:
+        print(f"monthly_snapshot: live listed count failed: {e}")
+
+    rows = []
+    for mo in months:
+        s0, s1 = _bounds(mo)
+        cash = _compute_cash_in_range(bid, s0, s1)
+        a = agg[mo]
+        rows.append({
+            "month": mo,
+            "sales": round(a["sales"] + cash, 2),
+            "net": round(a["net"] + cash, 2),
+            "green_net": _compute_green_revenue(bid, s0, s1, _pre=pre),
+            "shipping": round(a["ship"], 2),
+            "listings": a["listings"],
+            "spend": round(a["spend"], 2),
+        })
+    return {"rows": rows, "as_of": today_iso}
+
+def _get_monthly_snapshot(business_id: str, max_age: int = 20 * 60) -> dict:
+    import time as _t
+    hit = _MONTHLY_SNAPSHOT_CACHE.get(str(business_id))
+    if hit and _t.time() - hit[0] < max_age:
+        return hit[1]
+    payload = _build_monthly_snapshot_payload(business_id)
+    _MONTHLY_SNAPSHOT_CACHE[str(business_id)] = (_t.time(), payload)
+    return payload
+
+async def monthly_snapshot_warm_worker():
+    """Keeps the Monthly Snapshot cache warm (every 18 min, TTL 20) so the
+    Analytics page never computes it on load. Only businesses with orders."""
+    import asyncio, time as _t
+    await asyncio.sleep(30)
+    while True:
+        try:
+            biz = (supabase.table("businesses").select("id").execute()).data or []
+            for b in biz:
+                bid = str(b["id"])
+                has = (supabase.table("orders").select("id").eq("business_id", bid).limit(1).execute()).data
+                if not has:
+                    continue
+                payload = await asyncio.to_thread(_build_monthly_snapshot_payload, bid)
+                _MONTHLY_SNAPSHOT_CACHE[bid] = (_t.time(), payload)
+        except Exception as e:
+            print(f"monthly_snapshot_warm_worker error: {e}")
+        await asyncio.sleep(18 * 60)
+
+@app.get("/api/analytics/monthly-snapshot")
+async def api_monthly_snapshot(request: Request):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    import asyncio as _asyncio
+    return await _asyncio.to_thread(_get_monthly_snapshot, business_id)
 
 @app.get("/api/analytics/green-revenue-breakdown")
 async def api_green_revenue_breakdown(request: Request, start: str, end: str):
