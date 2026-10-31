@@ -9465,33 +9465,35 @@ def _build_monthly_snapshot_payload(business_id: str, n_months: int = 13) -> dic
             fr = float(r.get("freight_other") or 0)
             agg[mo]["spend"] += float(r.get("cost") or 0) + fr
             agg[mo]["freight"] += fr
-    today_iso = today.isoformat()
-    have_days = set()
-    for r in listed:
-        mo = (r.get("day") or "")[:7]
-        if mo in agg and r.get("day") != today_iso:
-            agg[mo]["listings"] += int(r.get("listed_count") or 0)
-            agg[mo]["listings_value"] += float(r.get("listed_value") or 0)
-            have_days.add(r.get("day"))
-    # Days the nightly snapshot never froze (e.g. 10/2/2026) would count as 0 --
-    # fill the recent ones (last 62 days) live with the same function.
-    d = today - _dt.timedelta(days=62)
-    while d < today:
-        di = d.isoformat()
-        if di[:7] in agg and di not in have_days:
-            try:
-                t = _listed_totals_for_day(bid, d)
-                agg[di[:7]]["listings"] += int(t["count"])
-                agg[di[:7]]["listings_value"] += float(t["value"])
-            except Exception as e:
-                print(f"monthly_snapshot: fill {di} failed: {e}")
-        d += _dt.timedelta(days=1)
+    # New Listings (10/30 rule): per-item diff of active_listings_daily_snapshot
+    # vs the prior snapshot day -- new item IDs at price x qty available, plus
+    # qty increases on existing listings x price (catches in-app qty edits).
+    # Sales, offers, price changes and ended listings never count. Computed in
+    # SQL (rpc monthly_new_listings). Days before per-item history exists fall
+    # back to the old listed_daily_snapshot totals.
+    boundary = None
     try:
-        t = _listed_totals_for_day(bid, today)
-        agg[months[-1]]["listings"] += int(t["count"])
-        agg[months[-1]]["listings_value"] += float(t["value"])
+        snap0 = (supabase.table("active_listings_daily_snapshot").select("snapshot_date")
+                 .eq("business_id", bid).order("snapshot_date").limit(1).execute()).data
+        if snap0:
+            boundary = _dt.date.fromisoformat(snap0[0]["snapshot_date"]) + _dt.timedelta(days=1)
     except Exception as e:
-        print(f"monthly_snapshot: live listed count failed: {e}")
+        print(f"monthly_snapshot: snapshot boundary lookup failed: {e}")
+    if boundary:
+        try:
+            nl = supabase.rpc("monthly_new_listings", {"p_business_id": bid, "p_start": boundary.isoformat()}).execute().data or []
+            for r in nl:
+                if r.get("month") in agg:
+                    agg[r["month"]]["listings"] += int(r.get("new_count") or 0)
+                    agg[r["month"]]["listings_value"] += float(r.get("new_value") or 0) + float(r.get("bump_value") or 0)
+        except Exception as e:
+            print(f"monthly_snapshot: monthly_new_listings rpc failed: {e}")
+    cutoff = boundary.isoformat() if boundary else "9999-12-31"
+    for r in listed:
+        day = r.get("day") or ""
+        if day[:7] in agg and day < cutoff:
+            agg[day[:7]]["listings"] += int(r.get("listed_count") or 0)
+            agg[day[:7]]["listings_value"] += float(r.get("listed_value") or 0)
 
     rows = []
     for mo in months:

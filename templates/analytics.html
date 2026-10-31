@@ -283,7 +283,7 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
   <div class="summary-card" style="padding:0;overflow-x:auto;">
     <table id="ms-table" style="width:100%;border-collapse:collapse;font-size:14px;"></table>
   </div>
-  <div class="note" style="font-size:10px;color:var(--muted);margin-top:8px;">Sales = gross − refunds + cash · Net = after fees, refunds &amp; shipping labels + cash · Green Net = net from lots currently green, since they turned green · Shipping = label cost matched to orders (only as complete as the last label upload) · New Listings = eBay listings published (count, and $ = price × qty) · Spend = lot purchase cost + inbound freight (Lots page freight, by lot purchase date).</div>
+  <div class="note" style="font-size:10px;color:var(--muted);margin-top:8px;">Sales = gross − refunds + cash · Net = after fees, refunds &amp; shipping labels + cash · Green Net = net from lots currently green, since they turned green · Shipping = label cost matched to orders (only as complete as the last label upload) · New Listings = $ value · count of new eBay listings (new items at price × qty, plus qty added to existing listings; sales, offers, price changes ignored) · Spend = lot purchase cost + inbound freight (Lots page freight, by lot purchase date).</div>
 </div>
 
 <script>
@@ -1060,8 +1060,7 @@ const MS_METRICS = [
   ['shipping', 'Shipping Cost', '$', -1],
   ['net', 'Net Sales', '$', 1],
   ['green_net', 'Green Net Sales', '$', 1],
-  ['listings', 'New Listings (count)', '', 1],
-  ['listings_value', 'New Listings ($)', '$', 1],
+  ['listings_value', 'New Listings', '$', 1],
   ['spend', 'Inventory Spend (incl. inbound freight)', '$', 0],
   ['freight', 'Inbound Freight', '$', 0],
 ];
@@ -1096,7 +1095,8 @@ function renderMonthlySnapshot() {
     }
     const td = 'padding:10px 14px;text-align:right;border-bottom:1px solid var(--border);';
     const indent = (k === 'green_net' || k === 'freight') ? 'padding-left:28px;' : '';
-    h += `<tr><td style="${td}text-align:left;${indent}">${name}</td><td style="${td}font-weight:700;">${msFmt(a, unit)}</td><td style="${td}color:var(--muted);">${msFmt(b, unit)}</td><td style="${td}font-weight:700;color:${col};">${pct}</td></tr>`;
+    const cnt = (r) => k === 'listings_value' ? ` <span style="font-weight:400;color:var(--muted);">· ${Math.round(Number(r.listings || 0)).toLocaleString()}</span>` : '';
+    h += `<tr><td style="${td}text-align:left;${indent}">${name}</td><td style="${td}font-weight:700;">${msFmt(a, unit)}${cnt(cur)}</td><td style="${td}color:var(--muted);">${msFmt(b, unit)}${cnt(prev)}</td><td style="${td}font-weight:700;color:${col};">${pct}</td></tr>`;
   });
   tbl.innerHTML = h;
 }
