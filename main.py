@@ -9446,12 +9446,12 @@ def _build_monthly_snapshot_payload(business_id: str, n_months: int = 13) -> dic
         return f"{mo}-01", end.isoformat()
 
     orders = _fetch_all_for_business(bid, "orders", "sku,gross_revenue,refund,final_net,shipping_cost,order_date,legacy_item_id,title,platform")
-    acq = _fetch_all_for_business(bid, "acquisitions", "sku,cost,date,profit,became_green_at")
+    acq = _fetch_all_for_business(bid, "acquisitions", "sku,cost,freight_other,date,profit,became_green_at")
     listed = (supabase.table("listed_daily_snapshot").select("day,listed_count,listed_value")
               .eq("business_id", bid).gte("day", first).limit(5000).execute()).data or []
     pre = {"lot_rows": acq, "order_rows": orders, "resolve": _order_sku_resolver(bid)}
 
-    agg = {mo: {"sales": 0.0, "net": 0.0, "ship": 0.0, "listings": 0, "listings_value": 0.0, "spend": 0.0} for mo in months}
+    agg = {mo: {"sales": 0.0, "net": 0.0, "ship": 0.0, "listings": 0, "listings_value": 0.0, "spend": 0.0, "freight": 0.0} for mo in months}
     for r in orders:
         mo = (r.get("order_date") or "")[:7]
         if mo in agg:
@@ -9462,7 +9462,9 @@ def _build_monthly_snapshot_payload(business_id: str, n_months: int = 13) -> dic
     for r in acq:
         mo = (r.get("date") or "")[:7]
         if mo in agg:
-            agg[mo]["spend"] += float(r.get("cost") or 0)
+            fr = float(r.get("freight_other") or 0)
+            agg[mo]["spend"] += float(r.get("cost") or 0) + fr
+            agg[mo]["freight"] += fr
     today_iso = today.isoformat()
     have_days = set()
     for r in listed:
@@ -9505,6 +9507,7 @@ def _build_monthly_snapshot_payload(business_id: str, n_months: int = 13) -> dic
             "listings": a["listings"],
             "listings_value": round(a["listings_value"], 2),
             "spend": round(a["spend"], 2),
+            "freight": round(a["freight"], 2),
         })
     return {"rows": rows, "as_of": today_iso}
 
