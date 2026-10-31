@@ -283,7 +283,7 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
   <div class="summary-card" style="padding:0;overflow-x:auto;">
     <table id="ms-table" style="width:100%;border-collapse:collapse;font-size:14px;"></table>
   </div>
-  <div class="note" style="font-size:10px;color:var(--muted);margin-top:8px;">Sales = gross − refunds + cash · Net = after fees, refunds &amp; shipping labels + cash · Green Net = net from lots currently green, since they turned green · Shipping = label cost matched to orders (only as complete as the last label upload) · New Listings = eBay listings published · Spend = lot purchase cost.</div>
+  <div class="note" style="font-size:10px;color:var(--muted);margin-top:8px;">Sales = gross − refunds + cash · Net = after fees, refunds &amp; shipping labels + cash · Green Net = net from lots currently green, since they turned green · Shipping = label cost matched to orders (only as complete as the last label upload) · New Listings = eBay listings published (count, and $ = price × qty) · Spend = lot purchase cost.</div>
 </div>
 
 <script>
@@ -1057,10 +1057,11 @@ try { renderGeoSalesChart(); } catch (e) { console.error('geo sales chart failed
 let monthlySnap = {{ inline_monthly_snapshot_json | safe }};
 const MS_METRICS = [
   ['sales', 'Total Sales', '$', 1],
+  ['shipping', 'Shipping Cost', '$', -1],
   ['net', 'Net Sales', '$', 1],
   ['green_net', 'Green Net Sales', '$', 1],
-  ['shipping', 'Shipping Cost', '$', -1],
-  ['listings', 'New Listings', '', 1],
+  ['listings', 'New Listings (count)', '', 1],
+  ['listings_value', 'New Listings ($)', '$', 1],
   ['spend', 'Inventory Spend', '$', 0],
 ];
 function msFmt(v, unit) {

@@ -9447,11 +9447,11 @@ def _build_monthly_snapshot_payload(business_id: str, n_months: int = 13) -> dic
 
     orders = _fetch_all_for_business(bid, "orders", "sku,gross_revenue,refund,final_net,shipping_cost,order_date,legacy_item_id,title,platform")
     acq = _fetch_all_for_business(bid, "acquisitions", "sku,cost,date,profit,became_green_at")
-    listed = (supabase.table("listed_daily_snapshot").select("day,listed_count")
+    listed = (supabase.table("listed_daily_snapshot").select("day,listed_count,listed_value")
               .eq("business_id", bid).gte("day", first).limit(5000).execute()).data or []
     pre = {"lot_rows": acq, "order_rows": orders, "resolve": _order_sku_resolver(bid)}
 
-    agg = {mo: {"sales": 0.0, "net": 0.0, "ship": 0.0, "listings": 0, "spend": 0.0} for mo in months}
+    agg = {mo: {"sales": 0.0, "net": 0.0, "ship": 0.0, "listings": 0, "listings_value": 0.0, "spend": 0.0} for mo in months}
     for r in orders:
         mo = (r.get("order_date") or "")[:7]
         if mo in agg:
@@ -9469,6 +9469,7 @@ def _build_monthly_snapshot_payload(business_id: str, n_months: int = 13) -> dic
         mo = (r.get("day") or "")[:7]
         if mo in agg and r.get("day") != today_iso:
             agg[mo]["listings"] += int(r.get("listed_count") or 0)
+            agg[mo]["listings_value"] += float(r.get("listed_value") or 0)
             have_days.add(r.get("day"))
     # Days the nightly snapshot never froze (e.g. 10/2/2026) would count as 0 --
     # fill the recent ones (last 62 days) live with the same function.
@@ -9477,12 +9478,16 @@ def _build_monthly_snapshot_payload(business_id: str, n_months: int = 13) -> dic
         di = d.isoformat()
         if di[:7] in agg and di not in have_days:
             try:
-                agg[di[:7]]["listings"] += int(_listed_totals_for_day(bid, d)["count"])
+                t = _listed_totals_for_day(bid, d)
+                agg[di[:7]]["listings"] += int(t["count"])
+                agg[di[:7]]["listings_value"] += float(t["value"])
             except Exception as e:
                 print(f"monthly_snapshot: fill {di} failed: {e}")
         d += _dt.timedelta(days=1)
     try:
-        agg[months[-1]]["listings"] += int(_listed_totals_for_day(bid, today)["count"])
+        t = _listed_totals_for_day(bid, today)
+        agg[months[-1]]["listings"] += int(t["count"])
+        agg[months[-1]]["listings_value"] += float(t["value"])
     except Exception as e:
         print(f"monthly_snapshot: live listed count failed: {e}")
 
@@ -9498,6 +9503,7 @@ def _build_monthly_snapshot_payload(business_id: str, n_months: int = 13) -> dic
             "green_net": _compute_green_revenue(bid, s0, s1, _pre=pre),
             "shipping": round(a["ship"], 2),
             "listings": a["listings"],
+            "listings_value": round(a["listings_value"], 2),
             "spend": round(a["spend"], 2),
         })
     return {"rows": rows, "as_of": today_iso}
