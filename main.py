@@ -9513,6 +9513,35 @@ def _build_monthly_snapshot_payload(business_id: str, n_months: int = 13) -> dic
         })
     return {"rows": rows, "as_of": today_iso}
 
+def _record_monthly_snapshot_history(business_id: str, payload: dict):
+    """Persists the Monthly Snapshot metrics to monthly_snapshot_history for
+    plotting later. Current + previous month are re-upserted every run (late
+    label uploads / refunds still land); older months are written once if
+    missing and then left alone (is_final=true) so history isn't rewritten as
+    lots flip green/red later."""
+    import datetime as _dt
+    rows = payload.get("rows") or []
+    if not rows:
+        return
+    live = {r["month"] for r in rows[-2:]}
+    existing = {r["month"] for r in (supabase.table("monthly_snapshot_history").select("month")
+                .eq("business_id", str(business_id)).execute().data or [])}
+    now = _dt.datetime.utcnow().isoformat() + "+00:00"
+    out = []
+    for r in rows:
+        if r["month"] not in live and r["month"] in existing:
+            continue
+        out.append({
+            "business_id": str(business_id), "month": r["month"],
+            "total_sales": r.get("sales"), "shipping_cost": r.get("shipping"),
+            "net_sales": r.get("net"), "green_net_sales": r.get("green_net"),
+            "new_listings_value": r.get("listings_value"), "new_listings_count": r.get("listings"),
+            "inventory_spend": r.get("spend"), "inbound_freight": r.get("freight"),
+            "is_final": r["month"] not in live, "updated_at": now,
+        })
+    if out:
+        supabase.table("monthly_snapshot_history").upsert(out, on_conflict="business_id,month").execute()
+
 def _get_monthly_snapshot(business_id: str, max_age: int = 20 * 60) -> dict:
     import time as _t
     hit = _MONTHLY_SNAPSHOT_CACHE.get(str(business_id))
@@ -9537,6 +9566,10 @@ async def monthly_snapshot_warm_worker():
                     continue
                 payload = await asyncio.to_thread(_build_monthly_snapshot_payload, bid)
                 _MONTHLY_SNAPSHOT_CACHE[bid] = (_t.time(), payload)
+                try:
+                    await asyncio.to_thread(_record_monthly_snapshot_history, bid, payload)
+                except Exception as e:
+                    print(f"monthly_snapshot history write failed for {bid}: {e}")
         except Exception as e:
             print(f"monthly_snapshot_warm_worker error: {e}")
         await asyncio.sleep(18 * 60)
