@@ -7646,6 +7646,85 @@ async def api_uncategorized_listings_only(request: Request):
     uncategorized_items.sort(key=lambda r: r.get("created_at") or "", reverse=True)
     return {"active_listings_value": round(uncategorized_value, 2), "active_listings_count": uncategorized_count, "items": uncategorized_items}
 
+
+@app.post("/api/inventory/remove-everywhere")
+async def api_remove_everywhere(request: Request, body: dict = Body(...)):
+    """Uncat page 'Remove' action: ends the eBay listing (Trading EndItem) and
+    archives the matched Shopify product (reversible -- same 'archived' status
+    the Sync page's Ended-on-eBay action uses). Shopify product resolved the
+    same two ways as everywhere else: inventory_match (hd_id link; shopify_id
+    may be a variant OR product id) then listings.shopify_product_id. Never by
+    title. eBay first; if eBay fails, Shopify is not touched for that item."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    item_ids = [str(i) for i in (body.get("item_ids") or []) if i]
+    if not item_ids:
+        raise HTTPException(400, "item_ids required")
+    import asyncio
+
+    match_by_ebay = {}
+    for r in (supabase.table("inventory_match").select("ebay_id,shopify_id").eq("business_id", business_id)
+              .in_("ebay_id", item_ids).execute().data or []):
+        if r.get("shopify_id"):
+            match_by_ebay.setdefault(str(r["ebay_id"]), str(r["shopify_id"]))
+    listing_by_ebay = {}
+    for r in (supabase.table("listings").select("ebay_item_id,shopify_product_id").eq("business_id", business_id)
+              .in_("ebay_item_id", item_ids).execute().data or []):
+        if r.get("shopify_product_id"):
+            listing_by_ebay.setdefault(str(r["ebay_item_id"]), str(r["shopify_product_id"]))
+    sids = list(set(match_by_ebay.values()) | set(listing_by_ebay.values()))
+    shop_rows = []
+    if sids:
+        shop_rows += supabase.table("shopify_inventory").select("id,product_id,status").eq("business_id", business_id).in_("id", sids).execute().data or []
+        shop_rows += supabase.table("shopify_inventory").select("id,product_id,status").eq("business_id", business_id).in_("product_id", sids).execute().data or []
+    pid_by_any = {}
+    for s in shop_rows:
+        if s.get("product_id"):
+            pid_by_any[str(s["id"])] = str(s["product_id"])
+            pid_by_any[str(s["product_id"])] = str(s["product_id"])
+
+    results = []
+    for iid in item_ids:
+        res = {"item_id": iid, "ebay": None, "shopify": None}
+        try:
+            await asyncio.to_thread(_ebay_end_item, business_id, iid, "NotAvailable")
+            res["ebay"] = "ended"
+        except Exception as ex:
+            msg = str(ex)
+            # Already ended on eBay (e.g. code 1047) -> still fine to pull Shopify.
+            if "1047" in msg or "already been closed" in msg.lower():
+                res["ebay"] = "already ended"
+            else:
+                res["ebay"] = f"error: {msg[:200]}"
+                results.append(res)
+                continue
+        try:
+            await asyncio.to_thread(_live_check_ebay_listing_status, business_id, iid)
+        except Exception:
+            pass
+        sid = match_by_ebay.get(iid) or listing_by_ebay.get(iid)
+        pid = pid_by_any.get(sid) if sid else None
+        if not pid and listing_by_ebay.get(iid):
+            pid = listing_by_ebay[iid]
+        if not pid:
+            res["shopify"] = "no Shopify match"
+        else:
+            try:
+                await asyncio.to_thread(_shopify_set_product_status, business_id, pid, "archived")
+                supabase.table("shopify_inventory").update({"status": "archived"})\
+                    .eq("business_id", business_id).eq("product_id", pid).execute()
+                res["shopify"] = "archived"
+            except Exception as ex:
+                res["shopify"] = f"error: {str(ex)[:200]}"
+        results.append(res)
+    try:
+        for k in [k for k in _ended_ebay_cache if k[0] == business_id]:
+            _ended_ebay_cache.pop(k, None)
+    except Exception:
+        pass
+    return {"results": results}
+
 @app.get("/api/acquisitions")
 async def list_acquisitions(request: Request):
     business_id = require_auth(request)
