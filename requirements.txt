@@ -18,3 +18,4 @@ Pillow==11.0.0
 resend==2.0.0
 tzdata
 playwright==1.48.0
+bcrypt>=4.0.1

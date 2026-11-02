@@ -10475,6 +10475,13 @@ def hash_password(password: str) -> str:
     return f"{salt}:{hashed}"
 
 def verify_password(password: str, stored: str) -> bool:
+    # Main Lister upgraded the owner hash to bcrypt — accept both formats
+    if stored and stored.startswith(("$2a$", "$2b$", "$2y$")):
+        try:
+            import bcrypt
+            return bcrypt.checkpw(password.encode(), stored.encode())
+        except Exception:
+            return False
     try:
         salt, hashed = stored.split(":")
         return hashlib.sha256((salt + password).encode()).hexdigest() == hashed
@@ -10514,7 +10521,7 @@ async def login_submit(request: Request):
         supabase.table("sessions").insert({"token": token, "business_id": biz["id"]}).execute()
         from fastapi.responses import RedirectResponse
         resp = RedirectResponse("/", status_code=302)
-        resp.set_cookie("session_id", token, httponly=True, max_age=60*60*24*30)
+        resp.set_cookie("session_id", token, httponly=True, max_age=60*60*24*365*10)
         return resp
     except Exception as e:
         return templates.TemplateResponse("login.html", {"request": request, "error": f"Login failed: {e}"})
@@ -10548,7 +10555,7 @@ async def register_submit(request: Request):
         supabase.table("sessions").insert({"token": token, "business_id": business_id}).execute()
         from fastapi.responses import RedirectResponse
         resp = RedirectResponse("/", status_code=302)
-        resp.set_cookie("session_id", token, httponly=True, max_age=60*60*24*30)
+        resp.set_cookie("session_id", token, httponly=True, max_age=60*60*24*365*10)
         return resp
     except Exception as e:
         return templates.TemplateResponse("register.html", {"request": request, "error": f"Registration failed: {e}"})
