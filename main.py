@@ -4811,7 +4811,7 @@ confident from context -- never guess or make one up."""
 
     try:
         response = client.responses.create(
-            model="gpt-5.5",
+            model="gpt-5.6-luna",
             input=[{"role": "user", "content": content}],
         )
         text = (response.output_text or "").strip()
@@ -5042,7 +5042,7 @@ Return ONLY a JSON object, no other text, in this exact shape:
             content.append({"type": "input_image", "image_url": photo_url(photo_id), "detail": "high"})
         try:
             id_resp = client.responses.create(
-                model="gpt-5.6-sol",
+                model="gpt-5.6-luna",
                 reasoning={"effort": "high"},
                 input=[{"role": "user", "content": content}],
             )
@@ -5069,7 +5069,7 @@ Return ONLY a JSON object, no other text, in this exact shape:
     if lookup_title:
         try:
             price_resp = client.responses.create(
-                model="gpt-5.6-sol",
+                model="gpt-5.6-luna",
                 reasoning={"effort": "high"},
                 tools=[{"type": "web_search"}],
                 input=[{"role": "user", "content": [{"type": "input_text", "text": (
@@ -6972,7 +6972,7 @@ VERDICT: BUY at $Y or below | PASS — one sentence vs the ${item.get('price') o
             content.append({"type": "input_image", "image_url": url})
 
         response = client.responses.create(
-            model="gpt-5.6",
+            model="gpt-5.6-luna",
             reasoning={"effort": "high"},
             tools=[{"type": "web_search", "search_context_size": "medium"}],
             tool_choice="required",
@@ -10709,7 +10709,7 @@ Only use values you can actually see. Never guess a date."""
         content.append({"type": "input_image", "detail": "high",
                         "image_url": "data:image/png;base64," + base64.b64encode(png).decode()})
     try:
-        resp = client.responses.create(model="gpt-5.5", input=[{"role": "user", "content": content}])
+        resp = client.responses.create(model="gpt-5.6-luna", input=[{"role": "user", "content": content}])
         text = (resp.output_text or "").strip()
         if text.startswith("```"):
             text = text.split("```")[1]
@@ -13396,7 +13396,7 @@ def _openai_resale_eval_call(client, title: str, description: str, photo_urls) -
             print(f"gpt-evaluate: could not fetch photo {photo_url}: {e}")
 
     response = client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-5.6-luna",
         messages=[{"role": "user", "content": content}],
         max_tokens=1200,
     )
