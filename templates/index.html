@@ -497,6 +497,12 @@ select.field-input { background: #fff; color: #0f172a; }
   <canvas id="camera-mode-canvas" style="display:none;"></canvas>
   <div style="background:rgba(0,0,0,0.85);padding:10px 12px;">
     <div id="camera-mode-thumbs" style="display:flex;gap:6px;overflow-x:auto;margin-bottom:10px;min-height:44px;"></div>
+    <div style="display:flex;justify-content:center;margin-bottom:10px;">
+      <div style="display:inline-flex;border:1px solid #475569;border-radius:999px;overflow:hidden;">
+        <button id="cam-cond-used" onclick="setUpCondition('used')" style="border:none;padding:8px 22px;font-size:14px;font-weight:700;background:none;color:#cbd5e1;">Used</button>
+        <button id="cam-cond-new" onclick="setUpCondition('new')" style="border:none;padding:8px 22px;font-size:14px;font-weight:700;background:none;color:#cbd5e1;">New</button>
+      </div>
+    </div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
       <button onclick="closeCameraMode(false)" style="background:none;border:none;color:#94a3b8;font-size:14px;font-weight:600;padding:10px;">Cancel</button>
       <button onclick="captureShot()" style="width:66px;height:66px;border-radius:50%;background:#fff;border:4px solid #64748b;flex-shrink:0;" title="Take photo"></button>
@@ -3218,7 +3224,20 @@ function setUpCondition(c) {
   upCondition = c;
   document.getElementById('up-cond-used').className = 'btn' + (c==='used' ? ' btn-primary' : '');
   document.getElementById('up-cond-new').className  = 'btn' + (c==='new'  ? ' btn-primary' : '');
+  _syncCamCondToggle();
   if (upBatchId) _saveUpSession();
+}
+
+// Used/New toggle inside the camera overlay -- mirrors upCondition, which is
+// read at submit time, so a switch mid-batch applies to the item being shot.
+function _syncCamCondToggle() {
+  const u = document.getElementById('cam-cond-used'), n = document.getElementById('cam-cond-new');
+  if (!u || !n) return;
+  [[u, 'used'], [n, 'new']].forEach(([b, c]) => {
+    const active = upCondition === c;
+    b.style.background = active ? '#16a34a' : 'none';
+    b.style.color = active ? '#fff' : '#cbd5e1';
+  });
 }
 
 async function startUploadBatch() {
@@ -3352,6 +3371,7 @@ async function openCameraMode() {
   document.getElementById('camera-mode-thumbs').innerHTML = '';
   document.getElementById('camera-mode-done-btn').textContent = 'Done (0)';
   document.getElementById('camera-mode-overlay').style.display = 'flex';
+  _syncCamCondToggle();
   const vid = document.getElementById('camera-mode-video');
   vid.ontouchstart = _onCameraTouchStart;
   vid.ontouchmove = _onCameraTouchMove;

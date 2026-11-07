@@ -70,6 +70,9 @@ tr.ignored td { color: var(--muted); opacity: 0.55; }
 tr.ignored:hover td { opacity: 0.85; }
 .synced-badge { color: var(--green); font-weight: 700; }
 .push-again, .ignore-link, .unignore-link { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); background: none; border: none; text-decoration: underline; cursor: pointer; padding: 0; }
+/* Item links: white so they're readable on the dark background, still underlined as links */
+a.item-link, table a, table a:visited { color: #f1f5f9; text-decoration: underline; text-underline-offset: 2px; }
+a.item-link:hover, table a:hover { color: #4ade80; }
 </style>
 </head>
 <body>
