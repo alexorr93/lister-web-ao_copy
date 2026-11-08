@@ -60,6 +60,7 @@ _EDITOR_ALLOW = [(m, _ed_re.compile(rx)) for m, rx in [
     ("GET",   r"^/favicon\.ico$"),
     ("GET",   r"^/logout$"),
     ("GET",   r"^/login$"), ("POST", r"^/login$"),
+    ("GET",   r"^/grok-login$"),
     ("GET",   r"^/api/whoami$"),
     ("GET",   r"^/api/auction/capture/sessions$"),
     ("GET",   r"^/api/auction/capture/sessions/[^/]+/lots$"),
@@ -10657,6 +10658,28 @@ def get_business_id(request: Request):
     except Exception:
         pass
     return None
+
+@app.get("/grok-login")
+async def grok_key_login(request: Request, key: str = ""):
+    """Private auto-login link for the Grok editor (no form, so Grok's password
+    vault can't block it). Key is stored only as a sha256 hash in
+    business_editors.login_key_hash; clear that column to revoke."""
+    from fastapi.responses import RedirectResponse
+    if len(key) < 32:
+        return RedirectResponse("/login", status_code=302)
+    try:
+        h = hashlib.sha256(key.encode()).hexdigest()
+        ed = supabase.table("business_editors").select("id,business_id,login_key_hash").eq("login_key_hash", h).limit(1).execute()
+        row = ed.data[0] if ed.data else None
+        if not row or not secrets.compare_digest(row.get("login_key_hash") or "", h):
+            return RedirectResponse("/login", status_code=302)
+        token = secrets.token_hex(32)
+        supabase.table("sessions").insert({"token": token, "business_id": row["business_id"], "role": "editor"}).execute()
+        resp = RedirectResponse("/?tab=auction", status_code=302)
+        resp.set_cookie("session_id", token, httponly=True, max_age=60*60*24*365*10)
+        return resp
+    except Exception:
+        return RedirectResponse("/login", status_code=302)
 
 @app.get("/login")
 async def login_page(request: Request, error: str = ""):
