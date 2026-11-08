@@ -7645,7 +7645,33 @@ async def set_capture_lot_grok_state(lot_id: str, request: Request, body: dict =
         if (lot.get("grok_state"), state) not in {("tagged", "actioned"), ("actioned", "tagged")}:
             raise HTTPException(403, "Grok can only mark a tagged lot as actioned (or undo that)")
     supabase.table("auction_lots").update({"grok_state": state}).eq("id", lot_id).execute()
+    # Same as Lister Intake: owner switching a lot ON (purple) pings Grok's webhook.
+    # Fire-and-forget, never blocks or undoes the save.
+    if state == "tagged" and lot.get("grok_state") != "tagged" and get_session_role(request) != "editor":
+        import asyncio
+        asyncio.create_task(_notify_grok_webhook(lot_id, f"Auction lot: {lot.get('title') or ''}".strip()))
     return {"ok": True, "grok_state": state}
+
+
+async def _notify_grok_webhook(card_id, title: str):
+    """Same call as production Lister: POST {"card_id", "title"} to GROK_WEBHOOK_URL
+    with Authorization = GROK_WEBHOOK_AUTH. Both are Railway env vars (must be set
+    on this Input service too). No-op if the URL isn't configured."""
+    url = os.environ.get("GROK_WEBHOOK_URL", "").strip()
+    if not url:
+        print("[grok-webhook] GROK_WEBHOOK_URL not set on this service -- no ping sent", flush=True)
+        return
+    headers = {"Content-Type": "application/json"}
+    auth = os.environ.get("GROK_WEBHOOK_AUTH", "").strip()
+    if auth:
+        headers["Authorization"] = auth
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(url, json={"card_id": card_id, "title": title}, headers=headers)
+        print(f"[grok-webhook] {card_id} -> HTTP {r.status_code}", flush=True)
+    except Exception as e:
+        print(f"[grok-webhook] {card_id} failed: {type(e).__name__}: {e}", flush=True)
 
 @app.post("/api/auction/capture/lots/grok-tag-bulk")
 async def bulk_tag_capture_lots_for_grok(request: Request, body: dict = Body(...)):
@@ -7665,6 +7691,9 @@ async def bulk_tag_capture_lots_for_grok(request: Request, body: dict = Body(...
         if not all(_owned_capture_session(s, business_id) for s in sess_ids):
             raise HTTPException(404, "Lot not found")
         done += len(supabase.table("auction_lots").update({"grok_state": state}).in_("id", chunk).execute().data or [])
+    if state == "tagged" and done:
+        import asyncio
+        asyncio.create_task(_notify_grok_webhook(lot_ids[0], f"{done} auction lot(s) tagged for Grok on the Auctions tab"))
     return {"ok": True, "updated": done}
 
 @app.patch("/api/auction/capture/lots/{lot_id}/notes")
