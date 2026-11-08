@@ -7381,7 +7381,7 @@ async def create_capture_session(request: Request, body: AuctionCaptureSessionCr
     return session
 
 @app.get("/api/auction/capture/sessions")
-async def list_capture_sessions(request: Request):
+def list_capture_sessions(request: Request):
     business_id = require_auth(request)
     if not business_id:
         raise HTTPException(401, "Unauthorized")
@@ -7555,7 +7555,7 @@ def _owned_capture_session(session_id: str, business_id) -> bool:
                 .eq("id", session_id).eq("business_id", str(business_id)).limit(1).execute().data)
 
 @app.get("/api/auction/capture/sessions/{session_id}/lots")
-async def list_capture_lots(session_id: str, request: Request):
+def list_capture_lots(session_id: str, request: Request):
     """Paginated (Supabase caps a single read at 1,000 rows -- big catalogs were
     silently cut off) and item fetch chunked (one .in_() with thousands of ids
     blows the URL limit). Grok editor login only sees lots tagged for Grok."""

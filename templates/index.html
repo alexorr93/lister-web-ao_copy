@@ -577,7 +577,7 @@ select.field-input { background: #fff; color: #0f172a; }
     </div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
-      <select id="auction-session-select" class="field-input" style="flex:1;min-width:200px;" onchange="loadAuctionItems(this.value, true)">
+      <select id="auction-session-select" class="field-input" style="flex:1;min-width:200px;" onchange="_saveView({session: this.value, scroll: 0}); loadAuctionItems(this.value, true)">
         <option value="">Select a capture session...</option>
       </select>
       <button class="owner-only btn" onclick="stopSelectedCapture()">⏸️ Stop Capture</button>
@@ -1092,7 +1092,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.classList.add('active');
     document.getElementById('tab-' + tab).classList.add('active');
     activeTab = tab;
-    if (tab === 'intake') { loadListings(); }
+    if (tab === 'intake') { loadListings(); loadIntakeExtras(); }
     if (tab === 'auction')   loadAuctionSessions();
     if (tab === 'settings')  loadSettings();
   });
@@ -2314,11 +2314,12 @@ async function loadAuctionSessions() {
       }).join('');
     document.getElementById('auction-empty').style.display = auctionSessions.length ? 'none' : 'block';
     if (auctionSessions.length) {
+      const saved = _loadView().session;
       const stillExists = auctionSessions.some(s => s.id === keepId);
-      const targetId = stillExists ? keepId : auctionSessions[0].id;
+      const targetId = stillExists ? keepId
+        : (auctionSessions.some(s => s.id === saved) ? saved : auctionSessions[0].id);
       sel.value = targetId;
-      loadAuctionItems(targetId, targetId !== activeSession);
-      prefetchAllSessionLots();
+      Promise.resolve(loadAuctionItems(targetId, targetId !== activeSession)).then(prefetchAllSessionLots);
     } else {
       document.getElementById('auction-list').innerHTML = '';
     }
@@ -2458,12 +2459,13 @@ let _prefetchStarted = false;
 function prefetchAllSessionLots() {
   if (_prefetchStarted) return;
   _prefetchStarted = true;
-  (auctionSessions || []).forEach(s => {
-    if (auctionLotsBySession[s.id]) return;
-    api('GET', `/api/auction/capture/sessions/${s.id}/lots`)
-      .then(lots => { if (!auctionLotsBySession[s.id]) auctionLotsBySession[s.id] = lots; })
-      .catch(() => {});
-  });
+  (async () => {
+    for (const s of (auctionSessions || [])) {
+      if (auctionLotsBySession[s.id]) continue;
+      try { const lots = await api('GET', `/api/auction/capture/sessions/${s.id}/lots`);
+            if (!auctionLotsBySession[s.id]) auctionLotsBySession[s.id] = lots; } catch (e) {}
+    }
+  })();
 }
 
 async function loadAuctionItems(sessionId, useCache) {
@@ -2496,7 +2498,12 @@ async function loadAuctionItems(sessionId, useCache) {
   } catch(e) { toast('Failed to load lots', 'error'); }
 }
 
-let lotSortDir = null; // null = capture order, 'asc' or 'desc' = by lot number
+// Remembered view (this browser): last auction day, sort, scroll. Reopening the
+// page puts you right back where you were.
+const _VIEW_KEY = 'input_auction_view';
+function _loadView() { try { return JSON.parse(localStorage.getItem(_VIEW_KEY) || '{}') || {}; } catch (e) { return {}; } }
+function _saveView(patch) { try { localStorage.setItem(_VIEW_KEY, JSON.stringify(Object.assign(_loadView(), patch))); } catch (e) {} }
+let lotSortDir = _loadView().sort || null; // null = capture order, 'asc' or 'desc' = by lot number
 
 function lotNumberSortKey(lotNumber) {
   const s = String(lotNumber || '');
@@ -2506,6 +2513,7 @@ function lotNumberSortKey(lotNumber) {
 
 function toggleLotSort() {
   lotSortDir = lotSortDir === null ? 'asc' : (lotSortDir === 'asc' ? 'desc' : null);
+  _saveView({sort: lotSortDir});
   renderAuctionTable();
 }
 
@@ -2592,7 +2600,9 @@ function renderAuctionTable() {
       </div>`
     : '';
   const _prevBox = document.getElementById('auction-scroll');
-  const _keep = (_prevBox && _prevBox.dataset.session === activeSession) ? [_prevBox.scrollTop, _prevBox.scrollLeft] : [0, 0];
+  const _sv = _loadView();
+  const _keep = (_prevBox && _prevBox.dataset.session === activeSession) ? [_prevBox.scrollTop, _prevBox.scrollLeft]
+    : (_sv.session === activeSession ? [_sv.scroll || 0, _sv.scrollLeft || 0] : [0, 0]);
   document.getElementById('auction-list').innerHTML = `
     ${selectToolbar}
     <div id="auction-scroll" data-session="${activeSession}">
@@ -2613,6 +2623,11 @@ function renderAuctionTable() {
     </div>`;
   const _box = document.getElementById('auction-scroll');
   _box.scrollTop = _keep[0]; _box.scrollLeft = _keep[1];
+  let _t;
+  _box.addEventListener('scroll', () => {
+    clearTimeout(_t);
+    _t = setTimeout(() => _saveView({session: activeSession, scroll: _box.scrollTop, scrollLeft: _box.scrollLeft}), 250);
+  });
 }
 
 function grokValueCells(lot) {
@@ -3287,11 +3302,17 @@ async function loadShippingPolicyOptions() {
 }
 
 // ── INIT ───────────────────────────────────────────────────────
-if (!IS_EDITOR) {
-  loadListings();
-  initTileListeners();
+let _intakeExtrasLoaded = false;
+function loadIntakeExtras() {
+  if (_intakeExtrasLoaded || IS_EDITOR) return;
+  _intakeExtrasLoaded = true;
   loadShippingPolicyOptions();
   loadLotSkus();
+}
+const _startTab = new URLSearchParams(window.location.search).get('tab');
+if (!IS_EDITOR) {
+  initTileListeners();
+  if (!_startTab || _startTab === 'intake') { loadListings(); loadIntakeExtras(); }
 } else {
   document.getElementById('grok-editor-hint').style.display = '';
 }
