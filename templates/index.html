@@ -483,6 +483,13 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
       <input type="file" id="upload-file-input" accept="image/*,image/heic" multiple style="display:none;" onchange="handleUploadFiles(this)"/>
       <div id="upload-thumbs" class="photo-thumbs"></div>
+      <div style="margin-bottom:12px;">
+        <div class="field-label">Condition (this item)</div>
+        <div style="display:flex;gap:8px;margin-top:6px;">
+          <button class="btn" id="up-batch-cond-used" onclick="setUpCondition('used')" style="flex:1;font-size:14px;padding:10px;">Used</button>
+          <button class="btn" id="up-batch-cond-new" onclick="setUpCondition('new')" style="flex:1;font-size:14px;padding:10px;">New</button>
+        </div>
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;"><button class="btn" style="font-size:14px;padding:12px;" onclick="document.getElementById('upload-camera-input').click()">📷 Take Photo</button><button class="btn" style="font-size:14px;padding:12px;" onclick="document.getElementById('upload-file-input').click()">🖼️ Gallery</button></div><input type="file" id="upload-camera-input" accept="image/*" capture="environment" multiple style="display:none;" onchange="handleUploadFiles(this, true)"/>
 <div id="camera-mode-overlay" style="display:none;position:fixed;inset:0;background:#000;z-index:500;flex-direction:column;">
   <div style="position:relative;flex:1;overflow:hidden;">
@@ -3231,6 +3238,12 @@ function setUpCondition(c) {
 // Used/New toggle inside the camera overlay -- mirrors upCondition, which is
 // read at submit time, so a switch mid-batch applies to the item being shot.
 function _syncCamCondToggle() {
+  // Batch screen toggle (11/8) -- the one actually visible while shooting.
+  const bu = document.getElementById('up-batch-cond-used'), bn = document.getElementById('up-batch-cond-new');
+  if (bu && bn) {
+    bu.className = 'btn' + (upCondition === 'used' ? ' btn-primary' : '');
+    bn.className = 'btn' + (upCondition === 'new'  ? ' btn-primary' : '');
+  }
   const u = document.getElementById('cam-cond-used'), n = document.getElementById('cam-cond-new');
   if (!u || !n) return;
   [[u, 'used'], [n, 'new']].forEach(([b, c]) => {
@@ -3247,6 +3260,7 @@ async function startUploadBatch() {
   document.getElementById('upload-thumbs').innerHTML = '';
   document.getElementById('upload-start').style.display = 'none';
   document.getElementById('upload-active').style.display = 'block';
+  _syncCamCondToggle();
   await createUpGroup();
 }
 
@@ -3559,6 +3573,7 @@ async function _restoreUpSession() {
   if (btn && activeTab !== 'upload') btn.click();
   document.getElementById('upload-start').style.display = 'none';
   document.getElementById('upload-active').style.display = 'block';
+  _syncCamCondToggle();
   document.getElementById('up-item-label').textContent = `Item ${upItems.length + 1}`;
   document.getElementById('up-qty-display').textContent = upQtyVal;
   renderUpThumbs();
