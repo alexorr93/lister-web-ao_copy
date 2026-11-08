@@ -316,6 +316,10 @@ select.field-input { background: #fff; color: #0f172a; }
 .lot-grok-check.tagged::after, .lot-grok-check.actioned::after { content:'✓'; display:block; text-align:center; color:#0b1120; font-size:13px; font-weight:900; line-height:19px; }
 .lot-grok-label { font-size:11px; font-weight:700; color:#a855f7; }
 .lot-grok-label.actioned { color:#eab308; }
+/* Auction lots: header row stays frozen while scrolling */
+#auction-scroll { overflow:auto; max-height:calc(100vh - 170px); }
+#auction-scroll .pdf-result-table { margin-top:0; }
+#auction-scroll thead th { position:sticky; top:0; z-index:5; box-shadow:0 1px 0 var(--border); }
 .grok-input { width:100%; font-size:11px; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:4px; margin-bottom:3px; box-sizing:border-box; }
 /* Grok editor login: everything except viewing lots + entering values is hidden.
    The server refuses all of it anyway; this just keeps the page clean. */
@@ -573,7 +577,7 @@ select.field-input { background: #fff; color: #0f172a; }
     </div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
-      <select id="auction-session-select" class="field-input" style="flex:1;min-width:200px;" onchange="loadAuctionItems(this.value)">
+      <select id="auction-session-select" class="field-input" style="flex:1;min-width:200px;" onchange="loadAuctionItems(this.value, true)">
         <option value="">Select a capture session...</option>
       </select>
       <button class="owner-only btn" onclick="stopSelectedCapture()">⏸️ Stop Capture</button>
@@ -2313,7 +2317,8 @@ async function loadAuctionSessions() {
       const stillExists = auctionSessions.some(s => s.id === keepId);
       const targetId = stillExists ? keepId : auctionSessions[0].id;
       sel.value = targetId;
-      loadAuctionItems(targetId);
+      loadAuctionItems(targetId, targetId !== activeSession);
+      prefetchAllSessionLots();
     } else {
       document.getElementById('auction-list').innerHTML = '';
     }
@@ -2405,6 +2410,7 @@ async function deleteOneLot(lotId) {
   try {
     await api('POST', '/api/auction/capture/lots/bulk-delete', {lot_ids: [lotId]});
     auctionLotsCache = auctionLotsCache.filter(l => l.id !== lotId);
+    if (activeSession) auctionLotsBySession[activeSession] = auctionLotsCache;
     selectedLotIds.delete(lotId);
     renderAuctionTable();
   } catch(e) { toast('Failed to remove lot', 'error'); }
@@ -2445,8 +2451,34 @@ async function deleteSelectedLots() {
   } catch(e) { toast('Failed to delete selected lots', 'error'); }
 }
 
-async function loadAuctionItems(sessionId) {
+// sessionId -> lots[]. Filled for every session in the background on page load,
+// so picking another auction day renders instantly from memory.
+const auctionLotsBySession = {};
+let _prefetchStarted = false;
+function prefetchAllSessionLots() {
+  if (_prefetchStarted) return;
+  _prefetchStarted = true;
+  (auctionSessions || []).forEach(s => {
+    if (auctionLotsBySession[s.id]) return;
+    api('GET', `/api/auction/capture/sessions/${s.id}/lots`)
+      .then(lots => { if (!auctionLotsBySession[s.id]) auctionLotsBySession[s.id] = lots; })
+      .catch(() => {});
+  });
+}
+
+async function loadAuctionItems(sessionId, useCache) {
   if (!sessionId) { document.getElementById('auction-list').innerHTML = ''; return; }
+  if (useCache && auctionLotsBySession[sessionId]) {
+    const isNew = activeSession !== sessionId;
+    activeSession = sessionId;
+    const sessionInfo = (auctionSessions || []).find(s => s.id === sessionId);
+    document.getElementById('auction-back-to-flags').innerHTML = (sessionInfo && sessionInfo.source_catalog_url)
+      ? `<a href="/flags?catalog=${encodeURIComponent(sessionInfo.source_catalog_url)}" style="font-size:12px;">← Back to Flags</a>` : '';
+    auctionLotsCache = auctionLotsBySession[sessionId];
+    renderAuctionTable();
+    if (isNew) resumeMetricJobIfAny();
+    return;
+  }
   const isNewSession = activeSession !== sessionId;
   activeSession = sessionId;
   const backEl = document.getElementById('auction-back-to-flags');
@@ -2456,7 +2488,9 @@ async function loadAuctionItems(sessionId) {
     : '';
   try {
     const lots = await api('GET', `/api/auction/capture/sessions/${sessionId}/lots`);
+    if (activeSession !== sessionId) return;  // user already switched days
     auctionLotsCache = lots;
+    auctionLotsBySession[sessionId] = lots;
     renderAuctionTable();
     if (isNewSession) resumeMetricJobIfAny();
   } catch(e) { toast('Failed to load lots', 'error'); }
@@ -2557,9 +2591,11 @@ function renderAuctionTable() {
         <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="bulkTagGrok(null)">Untag Grok</button>
       </div>`
     : '';
+  const _prevBox = document.getElementById('auction-scroll');
+  const _keep = (_prevBox && _prevBox.dataset.session === activeSession) ? [_prevBox.scrollTop, _prevBox.scrollLeft] : [0, 0];
   document.getElementById('auction-list').innerHTML = `
     ${selectToolbar}
-    <div style="overflow-x:auto;">
+    <div id="auction-scroll" data-session="${activeSession}">
       <table class="pdf-result-table" style="width:100%;">
         <thead><tr>
           ${lotSelectMode ? `<th><input type="checkbox" onclick="toggleSelectAllLots(this)"></th>` : ''}
@@ -2575,6 +2611,8 @@ function renderAuctionTable() {
         <tbody>${rows}</tbody>
       </table>
     </div>`;
+  const _box = document.getElementById('auction-scroll');
+  _box.scrollTop = _keep[0]; _box.scrollLeft = _keep[1];
 }
 
 function grokValueCells(lot) {
