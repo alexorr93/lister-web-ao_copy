@@ -28,6 +28,62 @@ if _os.path.isdir("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
+# ------------------------------------------------------------------ #
+#  GROK EDITOR LOGIN (11/8, ported from production Lister's editor role).
+#  The same Grok Bot login (business_editors table, shared Supabase) can sign
+#  in here, lands on the Auctions tab, and can ONLY: view sessions/lots,
+#  write values on lots the owner tagged for Grok (one lot per request), and
+#  flip tagged <-> actioned. Enforced server-side on every request below;
+#  hiding buttons in the UI is cosmetic on top. Owner sessions are untouched.
+# ------------------------------------------------------------------ #
+import re as _ed_re, time as _ed_time
+_SESSION_ROLE_CACHE: dict = {}   # token -> (role, fetched_at)
+
+def get_session_role(request) -> str:
+    token = request.cookies.get("session_id")
+    if not token:
+        return "anon"
+    hit = _SESSION_ROLE_CACHE.get(token)
+    if hit and _ed_time.time() - hit[1] < 300:
+        return hit[0]
+    try:
+        res = supabase.table("sessions").select("role").eq("token", token).limit(1).execute()
+        role = (res.data[0].get("role") or "owner") if res.data else "anon"
+    except Exception:
+        role = "editor"   # fail CLOSED: if we can't tell, treat as restricted
+    _SESSION_ROLE_CACHE[token] = (role, _ed_time.time())
+    return role
+
+_EDITOR_ALLOW = [(m, _ed_re.compile(rx)) for m, rx in [
+    ("GET",   r"^/$"),
+    ("GET",   r"^/static/.*"),
+    ("GET",   r"^/favicon\.ico$"),
+    ("GET",   r"^/logout$"),
+    ("GET",   r"^/login$"), ("POST", r"^/login$"),
+    ("GET",   r"^/api/whoami$"),
+    ("GET",   r"^/api/auction/capture/sessions$"),
+    ("GET",   r"^/api/auction/capture/sessions/[^/]+/lots$"),
+    ("PATCH", r"^/api/auction/capture/lots/[^/]+/values$"),
+    ("POST",  r"^/api/auction/capture/lots/[^/]+/grok-state$"),
+]]
+
+@app.middleware("http")
+async def _editor_role_guard(request, call_next):
+    if request.cookies.get("session_id") and get_session_role(request) == "editor":
+        path, method = request.url.path, request.method.upper()
+        if method == "HEAD":
+            method = "GET"
+        if not any(m == method and rx.match(path) for m, rx in _EDITOR_ALLOW):
+            if method == "GET" and not path.startswith("/api/"):
+                from fastapi.responses import RedirectResponse
+                return RedirectResponse("/?tab=auction", status_code=302)
+            return JSONResponse({"detail": "Grok login: not allowed (Auctions values only)"}, status_code=403)
+    return await call_next(request)
+
+@app.get("/api/whoami")
+async def whoami(request: Request):
+    return {"role": get_session_role(request)}
+
 # Railway restarts this process on every deploy, so process-start time is a
 # reliable proxy for "last deployed at" -- no dependency on any Railway-specific
 # env var that may or may not exist. Registered as a Jinja2 global (not passed
@@ -1039,6 +1095,12 @@ async def dashboard(request: Request):
     if nav is None:
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/login", status_code=302)
+    is_editor = get_session_role(request) == "editor"
+    if is_editor and request.query_params.get("tab") != "auction":
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/?tab=auction", status_code=302)
+    if is_editor:
+        return templates.TemplateResponse("index.html", {"request": request, "is_admin": nav["is_admin"], "account_label": "Grok (editor)", "active_tab": "intake", "is_editor": True})
     if not request.query_params.get("tab"):
         # This environment's nav only shows Auctions/Auction Monitor/Analytics/Flags --
         # Intake isn't reachable from anywhere in the nav here, so landing on bare "/"
@@ -7487,27 +7549,122 @@ async def create_capture_lots_bulk(body: AuctionLotBulkCreate):
     ok = sum(1 for r in results if r["status"] == "ok")
     return {"session_id": body.session_id, "total": len(lot_bodies), "ok": ok, "errors": len(lot_bodies) - ok, "results": results}
 
+def _owned_capture_session(session_id: str, business_id) -> bool:
+    return bool(supabase.table("auction_capture_sessions").select("id")
+                .eq("id", session_id).eq("business_id", str(business_id)).limit(1).execute().data)
+
 @app.get("/api/auction/capture/sessions/{session_id}/lots")
-async def list_capture_lots(session_id: str):
-    lots_res = (supabase.table("auction_lots")
-                .select("*")
-                .eq("session_id", session_id)
-                .order("created_at")
-                .execute())
-    lots = lots_res.data
+async def list_capture_lots(session_id: str, request: Request):
+    """Paginated (Supabase caps a single read at 1,000 rows -- big catalogs were
+    silently cut off) and item fetch chunked (one .in_() with thousands of ids
+    blows the URL limit). Grok editor login only sees lots tagged for Grok."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    if not _owned_capture_session(session_id, business_id):
+        raise HTTPException(404, "Session not found")
+    is_editor = get_session_role(request) == "editor"
+    lots, start = [], 0
+    while True:
+        q = supabase.table("auction_lots").select("*").eq("session_id", session_id)
+        if is_editor:
+            q = q.not_.is_("grok_state", "null")
+        page = q.order("created_at").range(start, start + 999).execute().data or []
+        lots.extend(page)
+        if len(page) < 1000:
+            break
+        start += 1000
     if not lots:
         return []
-    lot_ids = [l["id"] for l in lots]
-    items_res = (supabase.table("auction_lot_items")
-                 .select("*")
-                 .in_("lot_id", lot_ids)
-                 .execute())
     items_by_lot = {}
-    for it in items_res.data:
-        items_by_lot.setdefault(it["lot_id"], []).append(it)
+    lot_ids = [l["id"] for l in lots]
+    for i in range(0, len(lot_ids), 150):
+        for it in (supabase.table("auction_lot_items").select("*")
+                   .in_("lot_id", lot_ids[i:i + 150]).execute().data or []):
+            items_by_lot.setdefault(it["lot_id"], []).append(it)
     for lot in lots:
         lot["items"] = items_by_lot.get(lot["id"], [])
     return lots
+
+def _owned_lot(lot_id: str, business_id) -> dict:
+    lot = (supabase.table("auction_lots").select("id,session_id,grok_state,title")
+           .eq("id", lot_id).limit(1).execute().data or [])
+    if not lot or not _owned_capture_session(lot[0]["session_id"], business_id):
+        raise HTTPException(404, "Lot not found")
+    return lot[0]
+
+_LOT_VALUE_FIELDS = {
+    "resale_value_low": "num", "resale_value_high": "num", "resale_value_notes": "text",
+    "liquidity_rating": "text", "liquidity_notes": "text",
+    "weight_lbs": "num", "weight_notes": "text",
+    "max_bid": "num", "max_bid_notes": "text",
+}
+
+@app.patch("/api/auction/capture/lots/{lot_id}/values")
+async def update_capture_lot_values(lot_id: str, request: Request, body: dict = Body(...)):
+    """Manual value entry for one lot (resale/liquidity/weight/max bid + notes).
+    Grok editor login may only write lots the owner tagged for Grok."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    lot = _owned_lot(lot_id, business_id)
+    if get_session_role(request) == "editor" and not lot.get("grok_state"):
+        raise HTTPException(403, "Grok login can only edit lots tagged for Grok")
+    patch = {}
+    for k, v in body.items():
+        kind = _LOT_VALUE_FIELDS.get(k)
+        if not kind:
+            raise HTTPException(400, f"Field '{k}' can't be edited here")
+        if v in (None, ""):
+            patch[k] = None
+        elif kind == "num":
+            try:
+                patch[k] = float(str(v).replace("$", "").replace(",", "").strip())
+            except ValueError:
+                raise HTTPException(400, f"'{k}' must be a number")
+        else:
+            patch[k] = str(v)[:2000]
+    if not patch:
+        raise HTTPException(400, "Nothing to update")
+    res = supabase.table("auction_lots").update(patch).eq("id", lot_id).execute()
+    return res.data[0] if res.data else {}
+
+@app.post("/api/auction/capture/lots/{lot_id}/grok-state")
+async def set_capture_lot_grok_state(lot_id: str, request: Request, body: dict = Body(...)):
+    """Same states as Lister Intake tiles: None / 'tagged' (purple, owner wants Grok
+    on it) / 'actioned' (yellow, Grok says done). Editor can only flip tagged<->actioned."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    state = body.get("state")
+    if state not in (None, "tagged", "actioned"):
+        raise HTTPException(400, "state must be null, 'tagged' or 'actioned'")
+    lot = _owned_lot(lot_id, business_id)
+    if get_session_role(request) == "editor":
+        if (lot.get("grok_state"), state) not in {("tagged", "actioned"), ("actioned", "tagged")}:
+            raise HTTPException(403, "Grok can only mark a tagged lot as actioned (or undo that)")
+    supabase.table("auction_lots").update({"grok_state": state}).eq("id", lot_id).execute()
+    return {"ok": True, "grok_state": state}
+
+@app.post("/api/auction/capture/lots/grok-tag-bulk")
+async def bulk_tag_capture_lots_for_grok(request: Request, body: dict = Body(...)):
+    """Owner-only (not in the editor allowlist): tag/untag many selected lots at once."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    lot_ids = [str(x) for x in (body.get("lot_ids") or [])]
+    state = body.get("state")
+    if state not in (None, "tagged") or not lot_ids:
+        raise HTTPException(400, "lot_ids and state (tagged|null) required")
+    done = 0
+    for i in range(0, len(lot_ids), 150):
+        chunk = lot_ids[i:i + 150]
+        sess_ids = {l["session_id"] for l in (supabase.table("auction_lots").select("session_id")
+                    .in_("id", chunk).execute().data or [])}
+        if not all(_owned_capture_session(s, business_id) for s in sess_ids):
+            raise HTTPException(404, "Lot not found")
+        done += len(supabase.table("auction_lots").update({"grok_state": state}).in_("id", chunk).execute().data or [])
+    return {"ok": True, "updated": done}
 
 @app.patch("/api/auction/capture/lots/{lot_id}/notes")
 async def update_capture_lot_notes(lot_id: str, body: dict = Body(...)):
@@ -10513,7 +10670,18 @@ async def login_submit(request: Request):
     try:
         res = supabase.table("businesses").select("id,password_hash").eq("email", email).execute()
         if not res.data:
-            return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid email or password"})
+            # Grok editor login (same business_editors row/password as production
+            # Lister) -- restricted session, see _editor_role_guard.
+            ed = supabase.table("business_editors").select("id,business_id,password_hash").eq("email", email).limit(1).execute()
+            row = ed.data[0] if ed.data else None
+            if not row or not verify_password(password, row.get("password_hash") or ""):
+                return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid email or password"})
+            token = secrets.token_hex(32)
+            supabase.table("sessions").insert({"token": token, "business_id": row["business_id"], "role": "editor"}).execute()
+            from fastapi.responses import RedirectResponse
+            resp = RedirectResponse("/?tab=auction", status_code=302)
+            resp.set_cookie("session_id", token, httponly=True, max_age=60*60*24*365*10)
+            return resp
         biz = res.data[0]
         if not verify_password(password, biz["password_hash"]):
             return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid email or password"})

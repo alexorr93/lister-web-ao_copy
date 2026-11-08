@@ -307,9 +307,23 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 
 /* SELECT dropdown */
 select.field-input { background: #fff; color: #0f172a; }
+
+/* Grok tag on auction lots (same purple/yellow as Lister Intake tiles) */
+.lot-grok-toggle { display:inline-flex; align-items:center; gap:5px; cursor:pointer; user-select:none; margin-top:6px; }
+.lot-grok-check { width:20px; height:20px; border-radius:5px; border:1.5px solid #a855f7; }
+.lot-grok-check.tagged { background:#a855f7; }
+.lot-grok-check.actioned { background:#eab308; border-color:#eab308; }
+.lot-grok-check.tagged::after, .lot-grok-check.actioned::after { content:'✓'; display:block; text-align:center; color:#0b1120; font-size:13px; font-weight:900; line-height:19px; }
+.lot-grok-label { font-size:11px; font-weight:700; color:#a855f7; }
+.lot-grok-label.actioned { color:#eab308; }
+.grok-input { width:100%; font-size:11px; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:4px; margin-bottom:3px; box-sizing:border-box; }
+/* Grok editor login: everything except viewing lots + entering values is hidden.
+   The server refuses all of it anyway; this just keeps the page clean. */
+.editor-mode .owner-only { display:none !important; }
 </style>
 </head>
-<body>
+<body class="{{ 'editor-mode' if is_editor else '' }}">
+<script>const IS_EDITOR = {{ 'true' if is_editor else 'false' }};</script>
 
 {% include "_nav.html" %}
 
@@ -518,7 +532,7 @@ select.field-input { background: #fff; color: #0f172a; }
   <!-- AUCTION TAB -->
   <div class="tab-content" id="tab-auction">
     <!-- PDF Auction Scanner -->
-    <div style="margin-bottom:20px;">
+    <div class="owner-only" style="margin-bottom:20px;">
       <label class="pdf-upload-btn" id="pdf-drop-zone" for="pdf-input">
         <input type="file" id="pdf-input" accept=".pdf" onchange="scanPdfAuction(this)">
         📄 Upload auction PDF
@@ -546,6 +560,7 @@ select.field-input { background: #fff; color: #0f172a; }
         </div>
       </div>
     </div>
+    <div class="owner-only">
     <div style="border-top:1px solid var(--border);padding-top:16px;margin-bottom:10px;font-size:14px;font-weight:700;color:var(--text);">🔨 Live Lot Capture</div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">Paste an auction catalog or watchlist URL. Dickensheet (bid.dickensheet.com) links capture automatically — note a page number if needed (e.g. "page 2"), default is page 1. Roller Auction and BidSpotter links are wired up but currently blocked (Roller: query format mismatch; BidSpotter: bot-protection wall) — ask Claude in chat for those two for now. Other auction sites aren't wired up yet either. Every lot captures instantly with no AI cost — the item is just the title. Later, click "Flag as LOT" on any row that's actually a mixed/bulk lot to pull all its photos and itemize it in detail.</div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
@@ -556,18 +571,20 @@ select.field-input { background: #fff; color: #0f172a; }
       <input type="text" id="capture-scope-input" class="field-input" style="flex:1;min-width:160px;" placeholder="Pages/lots to capture (default: all)" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" name="cap-range-3q7v"/>
       <button class="btn btn-primary" onclick="startCaptureSession()">Create Session</button>
     </div>
+    </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
       <select id="auction-session-select" class="field-input" style="flex:1;min-width:200px;" onchange="loadAuctionItems(this.value)">
         <option value="">Select a capture session...</option>
       </select>
-      <button class="btn" onclick="stopSelectedCapture()">⏸️ Stop Capture</button>
-      <button class="btn" style="background:#7a2020;color:#fff;" onclick="deleteSelectedCaptureSession()">🗑️ Delete Session</button>
-      <button class="btn" onclick="shareSelectedCaptureSession()">🔗 Share</button>
-      <button class="btn" id="lot-select-mode-btn" onclick="toggleSelectMode()">☑️ Select Lots</button>
-      <button class="btn btn-primary" onclick="runAllFields()">▶️ Run All Fields</button>
-      <button class="btn" onclick="refreshBids()">🔄 Refresh Bids</button>
+      <button class="owner-only btn" onclick="stopSelectedCapture()">⏸️ Stop Capture</button>
+      <button class="owner-only btn" style="background:#7a2020;color:#fff;" onclick="deleteSelectedCaptureSession()">🗑️ Delete Session</button>
+      <button class="owner-only btn" onclick="shareSelectedCaptureSession()">🔗 Share</button>
+      <button class="owner-only btn" id="lot-select-mode-btn" onclick="toggleSelectMode()">☑️ Select Lots</button>
+      <button class="owner-only btn btn-primary" onclick="runAllFields()">▶️ Run All Fields</button>
+      <button class="owner-only btn" onclick="refreshBids()">🔄 Refresh Bids</button>
     </div>
-    <div id="auction-back-to-flags" style="margin-bottom:14px;"></div>
+    <div id="auction-back-to-flags" class="owner-only" style="margin-bottom:14px;"></div>
+    <div id="grok-editor-hint" style="display:none;font-size:12px;color:var(--muted);margin-bottom:12px;">Grok view: only lots Alex tagged for you (purple) show here. Fill in the value fields (they save when you leave the box), then tick the Grok box so it turns yellow when the lot is done.</div>
     <div id="metric-progress" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
         <div style="font-size:12px;font-weight:600;color:var(--amber);text-transform:uppercase;letter-spacing:0.06em;" id="metric-progress-label">Running...</div>
@@ -2506,23 +2523,28 @@ function renderAuctionTable() {
       <td style="max-width:220px;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
           <div style="font-weight:700;font-size:12px;color:var(--text);">Lot ${lot.lot_number || '?'}: ${lot.title || 'Unknown'}</div>
-          <div style="flex-shrink:0;display:flex;gap:2px;">
+          <div class="owner-only" style="flex-shrink:0;display:flex;gap:2px;">
             <button onclick="copyResearchPrompt('${lot.id}')" title="Copy a research prompt for this lot to paste into Claude" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;line-height:1;padding:2px;">🧠</button>
             <button onclick="deleteOneLot('${lot.id}')" title="Remove this lot" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;padding:2px;">✕</button>
           </div>
         </div>
         ${lot.current_bid != null ? `<div style="font-size:11px;color:var(--muted);">Bid: $${parseFloat(lot.current_bid).toFixed(2)}</div>` : ''}
         ${lot.listing_url ? `<a href="${lot.listing_url}" target="_blank" style="font-size:10px;color:var(--accent);">View ↗</a>` : ''}
-        <div style="margin-top:4px;">${bulkBadge}</div>
-        ${searchBtns}
+        <div class="owner-only" style="margin-top:4px;">${bulkBadge}</div>
+        <div class="owner-only">${searchBtns}</div>
+        <div class="lot-grok-toggle" onclick="toggleLotGrok('${lot.id}')" title="Purple = tagged for Grok · Yellow = Grok actioned it">
+          <div class="lot-grok-check ${lot.grok_state||''}" id="lot-grok-check-${lot.id}"></div>
+          <span class="lot-grok-label ${lot.grok_state==='actioned'?'actioned':''}" id="lot-grok-label-${lot.id}">Grok</span>
+        </div>
       </td>
       <td style="max-width:200px;font-size:11px;color:var(--text);">${itemsHtml}</td>
+      ${IS_EDITOR ? grokValueCells(lot) : `
       <td style="font-size:11px;">${lot.resale_value_low != null ? `<b>${money(lot.resale_value_low)}–${money(lot.resale_value_high)}</b><div style="color:var(--muted);">${lot.resale_value_notes||''}</div>` : ''}</td>
       <td style="font-size:11px;">${lot.liquidity_rating ? `<b style="text-transform:uppercase;">${lot.liquidity_rating}</b><div style="color:var(--muted);">${lot.liquidity_notes||''}</div>` : ''}</td>
       <td style="font-size:11px;">${lot.weight_lbs != null ? `<b>${Number(lot.weight_lbs).toLocaleString()} lbs</b><div style="color:var(--muted);">${lot.weight_notes||''}</div>` : ''}</td>
-      <td style="font-size:11px;">${lot.max_bid != null ? `<b>${money(lot.max_bid)}</b><div style="color:var(--muted);">${lot.max_bid_notes||''}</div>` : ''}</td>
+      <td style="font-size:11px;">${lot.max_bid != null ? `<b>${money(lot.max_bid)}</b><div style="color:var(--muted);">${lot.max_bid_notes||''}</div>` : ''}</td>`}
       <td style="min-width:160px;">
-        <textarea onblur="saveLotNotes('${lot.id}', this)" placeholder="Notes..." style="width:100%;min-height:50px;font-size:11px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px;resize:vertical;">${lot.notes || ''}</textarea>
+        <textarea ${IS_EDITOR ? 'readonly' : ''} onblur="if(!IS_EDITOR)saveLotNotes('${lot.id}', this)" placeholder="Notes..." style="width:100%;min-height:50px;font-size:11px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px;resize:vertical;">${lot.notes || ''}</textarea>
         <div id="notes-saved-${lot.id}" style="font-size:9px;color:var(--muted);height:11px;"></div>
       </td>
     </tr>`;
@@ -2531,6 +2553,8 @@ function renderAuctionTable() {
     ? `<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
         <span style="font-size:11px;color:var(--muted);">${selectedLotIds.size} selected · shift-click to select a range</span>
         <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="deleteSelectedLots()">🗑️ Delete Selected</button>
+        <button class="btn" style="font-size:11px;padding:4px 10px;border-color:#a855f7;color:#a855f7;" onclick="bulkTagGrok('tagged')">🟣 Tag for Grok</button>
+        <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="bulkTagGrok(null)">Untag Grok</button>
       </div>`
     : '';
   document.getElementById('auction-list').innerHTML = `
@@ -2553,7 +2577,59 @@ function renderAuctionTable() {
     </div>`;
 }
 
+function grokValueCells(lot) {
+  const esc = v => (v === null || v === undefined) ? '' : String(v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  const inp = (f, ph) => `<input class="grok-input" value="${esc(lot[f])}" placeholder="${ph}" onchange="saveLotValue('${lot.id}','${f}',this)">`;
+  const ta = (f, ph) => `<textarea class="grok-input" style="min-height:44px;resize:vertical;" placeholder="${ph}" onchange="saveLotValue('${lot.id}','${f}',this)">${esc(lot[f])}</textarea>`;
+  return `
+      <td style="min-width:130px;">${inp('resale_value_low','Low $')}${inp('resale_value_high','High $')}${ta('resale_value_notes','Comps / notes')}</td>
+      <td style="min-width:120px;">${inp('liquidity_rating','high / medium / low')}${ta('liquidity_notes','Notes')}</td>
+      <td style="min-width:110px;">${inp('weight_lbs','lbs')}${ta('weight_notes','Notes')}</td>
+      <td style="min-width:110px;">${inp('max_bid','Max $')}${ta('max_bid_notes','Notes')}</td>`;
+}
+
+async function saveLotValue(lotId, field, el) {
+  el.style.borderColor = 'var(--amber)';
+  try {
+    const row = await api('PATCH', `/api/auction/capture/lots/${lotId}/values`, {[field]: el.value});
+    const l = auctionLotsCache.find(x => x.id === lotId);
+    if (l) Object.assign(l, row);
+    el.style.borderColor = 'var(--green)';
+  } catch (e) {
+    el.style.borderColor = 'var(--red)';
+    toast('Save failed: ' + e.message, 'error');
+  }
+}
+
+function toggleLotGrok(lotId) {
+  const l = auctionLotsCache.find(x => x.id === lotId);
+  if (!l) return;
+  const cur = l.grok_state || null;
+  // Owner: off -> tagged -> actioned -> off. Grok: tagged <-> actioned only.
+  const next = IS_EDITOR ? (cur === 'tagged' ? 'actioned' : cur === 'actioned' ? 'tagged' : null)
+                         : (cur === null ? 'tagged' : cur === 'tagged' ? 'actioned' : null);
+  if (IS_EDITOR && !cur) return;
+  const paint = st => {
+    const c = document.getElementById('lot-grok-check-' + lotId), lb = document.getElementById('lot-grok-label-' + lotId);
+    if (c) c.className = 'lot-grok-check ' + (st || '');
+    if (lb) lb.className = 'lot-grok-label ' + (st === 'actioned' ? 'actioned' : '');
+  };
+  l.grok_state = next; paint(next);
+  api('POST', `/api/auction/capture/lots/${lotId}/grok-state`, {state: next})
+    .catch(e => { l.grok_state = cur; paint(cur); toast('Grok toggle failed', 'error'); });
+}
+
+async function bulkTagGrok(state) {
+  if (!selectedLotIds.size) { toast('Select lots first', 'error'); return; }
+  try {
+    const r = await api('POST', '/api/auction/capture/lots/grok-tag-bulk', {lot_ids: [...selectedLotIds], state});
+    toast(state ? `Tagged ${r.updated} lot(s) for Grok` : `Untagged ${r.updated} lot(s)`);
+    loadAuctionItems(activeSession);
+  } catch (e) { toast('Bulk Grok tag failed', 'error'); }
+}
+
 function metricRunBtn(metric) {
+  if (IS_EDITOR) return '';
   return `<button class="btn" style="font-size:10px;padding:2px 6px;margin-left:4px;" onclick="runMetric('${metric}')">▶</button>`;
 }
 
@@ -3173,10 +3249,14 @@ async function loadShippingPolicyOptions() {
 }
 
 // ── INIT ───────────────────────────────────────────────────────
-loadListings();
-initTileListeners();
-loadShippingPolicyOptions();
-loadLotSkus();
+if (!IS_EDITOR) {
+  loadListings();
+  initTileListeners();
+  loadShippingPolicyOptions();
+  loadLotSkus();
+} else {
+  document.getElementById('grok-editor-hint').style.display = '';
+}
 
 // Allow linking directly to a tab from other pages, e.g. /?tab=upload
 (async function() {
@@ -3197,7 +3277,12 @@ loadLotSkus();
 
 // Auto-refresh Intake every 30s when on that tab
 setInterval(() => { if (activeTab === 'intake') { loadListings(); } }, 30000);
-setInterval(() => { if (activeTab === 'auction' && activeSession) loadAuctionItems(activeSession); }, 30000);
+// Don't re-render under someone mid-typing in a lot field (would wipe the input).
+setInterval(() => {
+  const a = document.activeElement;
+  if (a && (a.classList.contains('grok-input') || a.tagName === 'TEXTAREA') && a.closest('#auction-list')) return;
+  if (activeTab === 'auction' && activeSession) loadAuctionItems(activeSession);
+}, 30000);
 
 async function rotatePhoto(dir) {
   const img = document.getElementById('modal-img');
