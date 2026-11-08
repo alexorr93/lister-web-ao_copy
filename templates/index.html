@@ -586,6 +586,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <button class="owner-only btn" id="lot-select-mode-btn" onclick="toggleSelectMode()">☑️ Select Lots</button>
       <button class="owner-only btn btn-primary" onclick="runAllFields()">▶️ Run All Fields</button>
       <button class="owner-only btn" onclick="refreshBids()">🔄 Refresh Bids</button>
+      <button class="owner-only btn" id="grok-done-filter-btn" onclick="toggleGrokDoneFilter()" title="Show only lots Grok has finished (yellow)">🟡 Grok Done</button>
     </div>
     <div id="auction-back-to-flags" class="owner-only" style="margin-bottom:14px;"></div>
     <div id="grok-editor-hint" style="display:none;font-size:12px;color:var(--muted);margin-bottom:12px;">Grok view: only lots Alex tagged for you (purple) show here. Fill in the value fields (they save when you leave the box), then tick the Grok box so it turns yellow when the lot is done.</div>
@@ -2523,8 +2524,24 @@ function lotSortArrow() {
   return ' ⇅';
 }
 
+let grokDoneOnly = !!_loadView().grokDone;
+function toggleGrokDoneFilter() {
+  grokDoneOnly = !grokDoneOnly;
+  _saveView({grokDone: grokDoneOnly});
+  renderAuctionTable();
+}
+function _paintGrokDoneBtn() {
+  const b = document.getElementById('grok-done-filter-btn');
+  if (!b) return;
+  b.style.background = grokDoneOnly ? '#eab308' : '';
+  b.style.color = grokDoneOnly ? '#0b1120' : '';
+  b.style.borderColor = grokDoneOnly ? '#eab308' : '';
+}
+
 function renderAuctionTable() {
+  _paintGrokDoneBtn();
   let lots = auctionLotsCache;
+  if (grokDoneOnly && !IS_EDITOR) lots = lots.filter(l => l.grok_state === 'actioned');
   if (lotSortDir) {
     lots = lots.slice().sort((a, b) => {
       const [an, as_] = lotNumberSortKey(a.lot_number);
@@ -2534,7 +2551,7 @@ function renderAuctionTable() {
     });
   }
   if (!lots.length) {
-    document.getElementById('auction-list').innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px;">No lots captured yet for this session.</div>';
+    document.getElementById('auction-list').innerHTML = `<div style="color:var(--muted);font-size:12px;padding:12px;">${grokDoneOnly && !IS_EDITOR && auctionLotsCache.length ? 'Grok hasn\'t finished any lots in this session yet. Click 🟡 Grok Done to show all lots.' : 'No lots captured yet for this session.'}</div>`;
     return;
   }
   const money = v => (v === null || v === undefined) ? '' : '$' + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
