@@ -317,9 +317,9 @@ select.field-input { background: #fff; color: #0f172a; }
 .lot-grok-label { font-size:11px; font-weight:700; color:#a855f7; }
 .lot-grok-label.actioned { color:#eab308; }
 /* Auction lots: header row stays frozen while scrolling */
-#auction-scroll { overflow:auto; max-height:calc(100vh - 170px); }
+/* one page scrollbar only: header sticks just under the 52px sticky nav */
 #auction-scroll .pdf-result-table { margin-top:0; }
-#auction-scroll thead th { position:sticky; top:0; z-index:5; box-shadow:0 1px 0 var(--border); }
+#auction-scroll thead th { position:sticky; top:52px; z-index:5; box-shadow:0 1px 0 var(--border); }
 .grok-input { width:100%; font-size:11px; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:4px; margin-bottom:3px; box-sizing:border-box; }
 /* Grok editor login: everything except viewing lots + entering values is hidden.
    The server refuses all of it anyway; this just keeps the page clean. */
@@ -2601,8 +2601,8 @@ function renderAuctionTable() {
     : '';
   const _prevBox = document.getElementById('auction-scroll');
   const _sv = _loadView();
-  const _keep = (_prevBox && _prevBox.dataset.session === activeSession) ? [_prevBox.scrollTop, _prevBox.scrollLeft]
-    : (_sv.session === activeSession ? [_sv.scroll || 0, _sv.scrollLeft || 0] : [0, 0]);
+  const _keepY = (_prevBox && _prevBox.dataset.session === activeSession) ? window.scrollY
+    : (_sv.session === activeSession ? (_sv.scroll || 0) : null);
   document.getElementById('auction-list').innerHTML = `
     ${selectToolbar}
     <div id="auction-scroll" data-session="${activeSession}">
@@ -2622,13 +2622,14 @@ function renderAuctionTable() {
       </table>
     </div>`;
   const _box = document.getElementById('auction-scroll');
-  _box.scrollTop = _keep[0]; _box.scrollLeft = _keep[1];
-  let _t;
-  _box.addEventListener('scroll', () => {
-    clearTimeout(_t);
-    _t = setTimeout(() => _saveView({session: activeSession, scroll: _box.scrollTop, scrollLeft: _box.scrollLeft}), 250);
-  });
+  if (_keepY !== null) window.scrollTo(0, _keepY);
 }
+let _scrollSaveT;
+window.addEventListener('scroll', () => {
+  if (activeTab !== 'auction' || !activeSession) return;
+  clearTimeout(_scrollSaveT);
+  _scrollSaveT = setTimeout(() => _saveView({session: activeSession, scroll: window.scrollY}), 250);
+});
 
 function grokValueCells(lot) {
   const esc = v => (v === null || v === undefined) ? '' : String(v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
