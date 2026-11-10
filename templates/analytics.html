@@ -1095,7 +1095,12 @@ function renderMonthlySnapshot() {
     }
     const td = 'padding:10px 14px;text-align:right;border-bottom:1px solid var(--border);';
     const indent = (k === 'green_net' || k === 'freight') ? 'padding-left:28px;' : '';
-    const cnt = (r) => k === 'listings_value' ? ` <span style="font-weight:400;color:var(--muted);">· ${Math.round(Number(r.listings || 0)).toLocaleString()}</span>` : '';
+    const cnt = (r) => {
+      const sub = (t) => ` <span style="font-weight:400;color:var(--muted);">· ${t}</span>`;
+      if (k === 'listings_value') return sub(Math.round(Number(r.listings || 0)).toLocaleString());
+      if (k === 'shipping') { const s = Number(r.sales || 0); return sub(s ? (Number(r.shipping || 0) / s * 100).toFixed(1) + '% of sales' : '—'); }
+      return '';
+    };
     h += `<tr><td style="${td}text-align:left;${indent}">${name}</td><td style="${td}font-weight:700;">${msFmt(a, unit)}${cnt(cur)}</td><td style="${td}color:var(--muted);">${msFmt(b, unit)}${cnt(prev)}</td><td style="${td}font-weight:700;color:${col};">${pct}</td></tr>`;
   });
   tbl.innerHTML = h;
