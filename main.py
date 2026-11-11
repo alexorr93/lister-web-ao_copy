@@ -10994,6 +10994,7 @@ class SubmitGroup(BaseModel):
     group_id:  str
     condition: str
     quantity:  int
+    category_mode: Optional[str] = None  # 11/11: per-item B&I/Auto Parts from Upload tab
 
 @app.post("/api/listings/{item_id}/assign-lot-from-group")
 async def assign_lot_from_group(item_id: str, request: Request):
@@ -11068,11 +11069,14 @@ async def submit_group(body: SubmitGroup, request: Request):
         # Only a still-'waiting' group can be submitted -- makes this safe for the
         # Intake page to repeat (auto-resume after the phone killed an upload)
         # without ever re-queuing a group that's already pending/scanned.
-        supabase.table("listing_groups").update({
+        upd = {
             "condition": body.condition,
             "quantity":  body.quantity,
             "status":    "pending",
-        }).eq("id", body.group_id).eq("status", "waiting").execute()
+        }
+        if body.category_mode in ("industrial", "motors"):
+            upd["category_mode"] = body.category_mode
+        supabase.table("listing_groups").update(upd).eq("id", body.group_id).eq("status", "waiting").execute()
         return {"ok": True}
     except Exception as e:
         raise HTTPException(500, str(e))

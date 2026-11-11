@@ -525,6 +525,11 @@ select.field-input { background: #fff; color: #0f172a; }
       <button class="btn" style="width:100%;font-size:15px;padding:13px;background:#0891b2;border-color:#0891b2;color:#fff;" id="up-done-btn" onclick="submitUploadItem()">✓ Done — Next Item →</button>
       <!-- 11/11: condition moved to the very bottom, well away from Take Photo/Gallery, per Alex (kept mis-tapping it) -->
       <div style="margin-top:96px;margin-bottom:12px;padding-top:14px;border-top:1px dashed var(--border);">
+        <div class="field-label">Category (this item)</div>
+        <div style="display:flex;gap:8px;margin-top:6px;margin-bottom:12px;">
+          <button class="btn catmode-btn" data-catmode="industrial" onclick="setCategoryMode('industrial')" style="flex:1;font-size:14px;padding:10px;">Business &amp; Industrial</button>
+          <button class="btn catmode-btn" data-catmode="motors" onclick="setCategoryMode('motors')" style="flex:1;font-size:14px;padding:10px;">Auto Parts</button>
+        </div>
         <div class="field-label">Condition (this item)</div>
         <div style="display:flex;gap:8px;margin-top:6px;">
           <button class="btn" id="up-batch-cond-used" onclick="setUpCondition('used')" style="flex:1;font-size:14px;padding:10px;">Used</button>
@@ -3634,7 +3639,7 @@ async function _upDbPut(job) {
       const tx = db.transaction('jobs', 'readwrite');
       tx.objectStore('jobs').put({
         groupId: job.groupId, condition: job.condition, qty: job.qty,
-        itemNumber: job.itemNumber, batchTs: job.batchTs || null,
+        itemNumber: job.itemNumber, batchTs: job.batchTs || null, categoryMode: job.categoryMode || null,
         files: recs, savedAt: Date.now(),
       });
       tx.oncomplete = res; tx.onerror = () => rej(tx.error);
@@ -3670,7 +3675,7 @@ async function _resumeSavedUploads() {
   for (const j of saved) {
     if (known.has(j.groupId)) continue;
     upBackgroundQueue.push({photos: (j.files || []).map(_recToFile).filter(Boolean).map(f => ({file: f})), groupId: j.groupId,
-      condition: j.condition, qty: j.qty, itemNumber: j.itemNumber, batchTs: j.batchTs});
+      condition: j.condition, qty: j.qty, itemNumber: j.itemNumber, batchTs: j.batchTs, categoryMode: j.categoryMode});
     upBackgroundJobs++; added++;
   }
   if (added) {
@@ -3725,6 +3730,7 @@ function submitUploadItem() {
   const photosForThis = upPhotos;
   const groupForThis = upGroupId;
   const conditionForThis = upCondition;
+  const categoryForThis = categoryMode;
   const qtyForThis = upQtyVal;
   const itemNumber = upItems.length + 1;
 
@@ -3736,7 +3742,7 @@ function submitUploadItem() {
   renderUpItems();
   createUpGroup();  // saves the session once the next item's group exists
 
-  const _job = {photos: photosForThis, groupId: groupForThis, condition: conditionForThis, qty: qtyForThis, itemNumber};
+  const _job = {photos: photosForThis, groupId: groupForThis, condition: conditionForThis, categoryMode: categoryForThis, qty: qtyForThis, itemNumber};
   upBackgroundQueue.push(_job);
   _upDbPut(_job);  // saved on the phone until the server confirms it
   upBackgroundJobs++;
@@ -3756,7 +3762,7 @@ async function _runUploadQueue() {
   while (upBackgroundQueue.length) {
     const job = upBackgroundQueue.shift();
     _upInFlight = [job];
-    await _uploadAndSubmitItemBackground(job.photos, job.groupId, job.condition, job.qty, job.itemNumber, job.batchTs);
+    await _uploadAndSubmitItemBackground(job.photos, job.groupId, job.condition, job.qty, job.itemNumber, job.batchTs, job.categoryMode);
     _upInFlight = [];
     upBackgroundJobs--;
     _updateUpBackgroundIndicator();
@@ -3785,7 +3791,7 @@ async function _postWithRetry(doRequest, label, attempts = 4) {
   throw lastErr;
 }
 
-async function _uploadAndSubmitItemBackground(photos, groupId, condition, qty, itemNumber, batchTs) {
+async function _uploadAndSubmitItemBackground(photos, groupId, condition, qty, itemNumber, batchTs, catMode) {
   // Computed once per item (kept across retries) and shared by every photo --
   // see the matching comment in /api/photos/upload. Reusing it on retry means a
   // re-sent photo overwrites the same file instead of creating a duplicate.
@@ -3793,7 +3799,7 @@ async function _uploadAndSubmitItemBackground(photos, groupId, condition, qty, i
     const now = new Date();
     const pad = n => String(n).padStart(2, '0');
     batchTs = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-    _upDbPut({photos, groupId, condition, qty, itemNumber, batchTs});  // pin filenames so a resume overwrites, never duplicates
+    _upDbPut({photos, groupId, condition, qty, itemNumber, batchTs, categoryMode: catMode});  // pin filenames so a resume overwrites, never duplicates
   }
   try {
     // Concurrent within this item's photos; submit only after ALL landed.
@@ -3805,12 +3811,12 @@ async function _uploadAndSubmitItemBackground(photos, groupId, condition, qty, i
       fd.append('batch_ts', batchTs);
       return fetch('/api/photos/upload', {method:'POST', body:fd});
     }, `photo ${i+1}`)));
-    await _postWithRetry(() => api('POST', '/api/groups/submit', {group_id: groupId, condition, quantity: qty}), 'submit');
+    await _postWithRetry(() => api('POST', '/api/groups/submit', {group_id: groupId, condition, quantity: qty, category_mode: catMode || undefined}), 'submit');
     _upDbDelete(groupId);
     toast(`✅ Item ${itemNumber} sent to scanner`);
     return true;
   } catch(e) {
-    upFailedJobs.push({photos, groupId, condition, qty, itemNumber, batchTs});
+    upFailedJobs.push({photos, groupId, condition, qty, itemNumber, batchTs, categoryMode: catMode});
     toast(`❌ Item ${itemNumber} didn't finish — it's saved and will retry automatically (${e.message})`, 'error');
     return false;
   }
