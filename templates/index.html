@@ -483,13 +483,6 @@ select.field-input { background: #fff; color: #0f172a; }
       </div>
       <input type="file" id="upload-file-input" accept="image/*,image/heic" multiple style="display:none;" onchange="handleUploadFiles(this)"/>
       <div id="upload-thumbs" class="photo-thumbs"></div>
-      <div style="margin-bottom:12px;">
-        <div class="field-label">Condition (this item)</div>
-        <div style="display:flex;gap:8px;margin-top:6px;">
-          <button class="btn" id="up-batch-cond-used" onclick="setUpCondition('used')" style="flex:1;font-size:14px;padding:10px;">Used</button>
-          <button class="btn" id="up-batch-cond-new" onclick="setUpCondition('new')" style="flex:1;font-size:14px;padding:10px;">New</button>
-        </div>
-      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;"><button class="btn" style="font-size:14px;padding:12px;" onclick="document.getElementById('upload-camera-input').click()">📷 Take Photo</button><button class="btn" style="font-size:14px;padding:12px;" onclick="document.getElementById('upload-file-input').click()">🖼️ Gallery</button></div><input type="file" id="upload-camera-input" accept="image/*" capture="environment" multiple style="display:none;" onchange="handleUploadFiles(this, true)"/>
 <div id="camera-mode-overlay" style="display:none;position:fixed;inset:0;background:#000;z-index:500;flex-direction:column;">
   <div style="position:relative;flex:1;overflow:hidden;">
@@ -530,6 +523,14 @@ select.field-input { background: #fff; color: #0f172a; }
         <div id="up-progress-text" style="font-size:12px;color:var(--muted);margin-top:4px;text-align:center;"></div>
       </div>
       <button class="btn" style="width:100%;font-size:15px;padding:13px;background:#0891b2;border-color:#0891b2;color:#fff;" id="up-done-btn" onclick="submitUploadItem()">✓ Done — Next Item →</button>
+      <!-- 11/11: condition moved to the very bottom, well away from Take Photo/Gallery, per Alex (kept mis-tapping it) -->
+      <div style="margin-top:96px;margin-bottom:12px;padding-top:14px;border-top:1px dashed var(--border);">
+        <div class="field-label">Condition (this item)</div>
+        <div style="display:flex;gap:8px;margin-top:6px;">
+          <button class="btn" id="up-batch-cond-used" onclick="setUpCondition('used')" style="flex:1;font-size:14px;padding:10px;">Used</button>
+          <button class="btn" id="up-batch-cond-new" onclick="setUpCondition('new')" style="flex:1;font-size:14px;padding:10px;">New</button>
+        </div>
+      </div>
     </div>
     <div id="upload-items-list" style="margin-top:16px;"></div>
   </div>
