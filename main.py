@@ -7609,6 +7609,19 @@ async def bulk_tag_capture_lots_for_grok(request: Request, body: dict = Body(...
         asyncio.create_task(_notify_grok_webhook(lot_ids[0], f"{done} auction lot(s) tagged for Grok on the Auctions tab"))
     return {"ok": True, "updated": done}
 
+@app.post("/api/auction/capture/lots/{lot_id}/star")
+async def set_capture_lot_star(lot_id: str, request: Request, body: dict = Body(...)):
+    """Owner-only star toggle (stored in auction_lots.is_favorite)."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    if get_session_role(request) == "editor":
+        raise HTTPException(403, "Editor login can't star lots")
+    _owned_lot(lot_id, business_id)
+    starred = bool(body.get("starred"))
+    supabase.table("auction_lots").update({"is_favorite": starred}).eq("id", lot_id).execute()
+    return {"ok": True, "starred": starred}
+
 @app.patch("/api/auction/capture/lots/{lot_id}/notes")
 async def update_capture_lot_notes(lot_id: str, body: dict = Body(...)):
     res = (supabase.table("auction_lots")

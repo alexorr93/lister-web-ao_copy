@@ -587,6 +587,7 @@ select.field-input { background: #fff; color: #0f172a; }
       <button class="owner-only btn btn-primary" onclick="runAllFields()">▶️ Run All Fields</button>
       <button class="owner-only btn" onclick="refreshBids()">🔄 Refresh Bids</button>
       <button class="owner-only btn" id="grok-done-filter-btn" onclick="toggleGrokDoneFilter()" title="Show only lots Grok has finished (yellow)">🟡 Grok Done</button>
+      <button class="owner-only btn" id="starred-filter-btn" onclick="toggleStarredFilter()" title="Show only starred lots">⭐ Starred</button>
     </div>
     <div id="auction-back-to-flags" class="owner-only" style="margin-bottom:14px;"></div>
     <div id="grok-editor-hint" style="display:none;font-size:12px;color:var(--muted);margin-bottom:12px;">Grok view: only lots Alex tagged for you (purple) show here. Fill in the value fields (they save when you leave the box), then tick the Grok box so it turns yellow when the lot is done.</div>
@@ -2538,10 +2539,42 @@ function _paintGrokDoneBtn() {
   b.style.borderColor = grokDoneOnly ? '#eab308' : '';
 }
 
+let starredOnly = !!_loadView().starred;
+function toggleStarredFilter() {
+  starredOnly = !starredOnly;
+  _saveView({starred: starredOnly});
+  renderAuctionTable();
+}
+function _paintStarredBtn() {
+  const b = document.getElementById('starred-filter-btn');
+  if (!b) return;
+  b.style.background = starredOnly ? '#facc15' : '';
+  b.style.color = starredOnly ? '#0b1120' : '';
+  b.style.borderColor = starredOnly ? '#facc15' : '';
+}
+async function toggleLotStar(lotId) {
+  const lot = auctionLotsCache.find(l => l.id === lotId);
+  if (!lot) return;
+  const next = !lot.is_favorite;
+  lot.is_favorite = next;
+  const btn = document.getElementById(`lot-star-${lotId}`);
+  if (btn) { btn.textContent = next ? '★' : '☆'; btn.style.color = next ? '#facc15' : 'var(--muted)'; }
+  try {
+    await api('POST', `/api/auction/capture/lots/${lotId}/star`, {starred: next});
+    if (starredOnly && !next) renderAuctionTable();
+  } catch (e) {
+    lot.is_favorite = !next;
+    if (btn) { btn.textContent = !next ? '★' : '☆'; btn.style.color = !next ? '#facc15' : 'var(--muted)'; }
+    toast('Failed to save star: ' + e.message, 'error');
+  }
+}
+
 function renderAuctionTable() {
   _paintGrokDoneBtn();
+  _paintStarredBtn();
   let lots = auctionLotsCache;
   if (grokDoneOnly && !IS_EDITOR) lots = lots.filter(l => l.grok_state === 'actioned');
+  if (starredOnly && !IS_EDITOR) lots = lots.filter(l => l.is_favorite);
   if (lotSortDir) {
     lots = lots.slice().sort((a, b) => {
       const [an, as_] = lotNumberSortKey(a.lot_number);
@@ -2551,7 +2584,7 @@ function renderAuctionTable() {
     });
   }
   if (!lots.length) {
-    document.getElementById('auction-list').innerHTML = `<div style="color:var(--muted);font-size:12px;padding:12px;">${grokDoneOnly && !IS_EDITOR && auctionLotsCache.length ? 'Grok hasn\'t finished any lots in this session yet. Click 🟡 Grok Done to show all lots.' : 'No lots captured yet for this session.'}</div>`;
+    document.getElementById('auction-list').innerHTML = `<div style="color:var(--muted);font-size:12px;padding:12px;">${starredOnly && !IS_EDITOR && auctionLotsCache.length ? 'No starred lots in this session yet. Click ⭐ Starred to show all lots.' : grokDoneOnly && !IS_EDITOR && auctionLotsCache.length ? 'Grok hasn\'t finished any lots in this session yet. Click 🟡 Grok Done to show all lots.' : 'No lots captured yet for this session.'}</div>`;
     return;
   }
   const money = v => (v === null || v === undefined) ? '' : '$' + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
@@ -2583,6 +2616,7 @@ function renderAuctionTable() {
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
           <div style="font-weight:700;font-size:12px;color:var(--text);">Lot ${lot.lot_number || '?'}: ${lot.title || 'Unknown'}</div>
           <div class="owner-only" style="flex-shrink:0;display:flex;gap:2px;">
+            <button id="lot-star-${lot.id}" onclick="toggleLotStar('${lot.id}')" title="Star this lot" style="background:none;border:none;color:${lot.is_favorite ? '#facc15' : 'var(--muted)'};cursor:pointer;font-size:20px;line-height:1;padding:0 2px;">${lot.is_favorite ? '★' : '☆'}</button>
             <button onclick="copyResearchPrompt('${lot.id}')" title="Copy a research prompt for this lot to paste into Claude" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;line-height:1;padding:2px;">🧠</button>
             <button onclick="deleteOneLot('${lot.id}')" title="Remove this lot" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;padding:2px;">✕</button>
           </div>
