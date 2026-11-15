@@ -2589,6 +2589,8 @@ function renderAuctionTable() {
   }
   const money = v => (v === null || v === undefined) ? '' : '$' + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
   const searchQueryFor = lot => (lot.items && lot.items.length && lot.items[0].item_name) ? lot.items[0].item_name : (lot.title || '');
+  const _sessInfo = (auctionSessions || []).find(x => x.id === activeSession) || {};
+  const _sessCatalogUrl = _sessInfo.source_url || _sessInfo.source_catalog_url || '';
   const rows = lots.map(lot => {
     const photos = lot.photo_urls || [];
     const imgHtml = photos.length
@@ -2622,7 +2624,7 @@ function renderAuctionTable() {
           </div>
         </div>
         ${lot.current_bid != null ? `<div style="font-size:11px;color:var(--muted);">Bid: $${parseFloat(lot.current_bid).toFixed(2)}</div>` : ''}
-        ${lot.listing_url ? `<a href="${lot.listing_url}" target="_blank" style="font-size:10px;color:var(--accent);">View ↗</a>` : ''}
+        ${lot.listing_url ? `<a href="${lot.listing_url}" target="_blank" style="font-size:10px;color:var(--accent);">View ↗</a>` : (_sessCatalogUrl ? `<a href="${_sessCatalogUrl}" target="_blank" title="This lot was captured without its own link — opens the auction catalog" style="font-size:10px;color:var(--accent);">Catalog ↗</a>` : '')}
         <div class="owner-only" style="margin-top:4px;">${bulkBadge}</div>
         <div class="owner-only">${searchBtns}</div>
         <div class="lot-grok-toggle" onclick="toggleLotGrok('${lot.id}')" title="Purple = tagged for Grok · Yellow = Grok actioned it">
