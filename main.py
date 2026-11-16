@@ -2450,7 +2450,10 @@ async def ebay_sync_push(body: EbaySyncPush, request: Request):
                                   f"(status: {listing_status or 'unknown'}) — refusing to push.")
 
     quantity_sold = _safe_int(selling_status.get("QuantitySold")) or 0
-    new_total_qty = shopify_qty + quantity_sold
+    # FIX 11/16: ReviseItem <Quantity> is treated by eBay as AVAILABLE, not lifetime total
+    # (verified: Nitto 406915925389 sent 12 w/ 2 sold -> eBay showed 12 available).
+    # Adding QuantitySold inflated eBay by the sold count on every push. Send available as-is.
+    new_total_qty = shopify_qty  # number actually sent to eBay = desired available
     log_row["live_quantity_sold"] = quantity_sold
     log_row["new_total_qty_sent"] = new_total_qty
 
@@ -2480,7 +2483,7 @@ async def ebay_sync_push(body: EbaySyncPush, request: Request):
         # quantity_available via _live_check_ebay_listing_status.
         try:
             supabase.table("ebay_listing_status").update({
-                "quantity": new_total_qty, "quantity_available": shopify_qty,
+                "quantity": shopify_qty + quantity_sold, "quantity_available": shopify_qty,
             }).eq("business_id", business_id).eq("item_id", ebay_item_id).execute()
         except Exception as e:
             print(f"ebay_sync_push: local ebay_listing_status update failed (eBay itself succeeded): {e}")
@@ -3771,12 +3774,10 @@ def _ebay_revise_quantity_only(business_id: str, ebay_item_id: str, new_total_qu
     ItemSpecifics/etc. here means they're left completely alone. Never expand this
     call to include other fields for that same reason.
 
-    IMPORTANT: new_total_quantity must be the LIFETIME total (what ReviseItem
-    expects), not "how many available right now" -- eBay computes available as
-    Quantity - QuantitySold itself. The caller is responsible for adding the
-    live QuantitySold before calling this (see push_inventory_quantity below);
-    this function does no such adjustment itself and will send exactly the
-    number it's given."""
+    IMPORTANT (corrected 11/16): eBay applies ReviseItem <Quantity> as the
+    AVAILABLE quantity, NOT the lifetime total. Pass the number you want
+    buyers to see as available. Do NOT add QuantitySold -- that inflated every
+    push by the sold count (Aug-Nov 2026 bug). Sends exactly what it's given."""
     import requests as _req
     import xml.etree.ElementTree as ET
     from xml.sax.saxutils import escape as _xesc
@@ -18079,11 +18080,9 @@ async def push_inventory_quantity(row_id: str, body: InventoryQuantityPush, requ
       - The eBay write itself (_ebay_revise_quantity_only) sends ONLY ItemID +
         Quantity -- structurally incapable of touching price, title, category,
         or anything else, the same proven pattern as the SKU-only revise above.
-      - eBay's Quantity is a LIFETIME total, not "available now" -- it computes
-        available as Quantity - QuantitySold itself. This reads the live
-        QuantitySold right before writing and adds it to the requested
-        available quantity, so the number that ends up showing as available
-        actually matches what was asked for.
+      - (Corrected 11/16) eBay applies ReviseItem Quantity as AVAILABLE. The
+        requested quantity is sent as-is; QuantitySold is only used to keep the
+        local mirror's lifetime total accurate.
       - Fails closed: if the eBay write fails, Shopify is never touched at all.
         If eBay succeeds but Shopify then fails, that's reported clearly as a
         partial failure -- never silently swallowed.
@@ -18136,7 +18135,8 @@ async def push_inventory_quantity(row_id: str, body: InventoryQuantityPush, requ
                                   f"(status: {listing_status or 'unknown'}) — refusing to push a quantity update.")
 
     quantity_sold = _safe_int(selling_status.get("QuantitySold")) or 0
-    new_total_qty = body.quantity + quantity_sold
+    # FIX 11/16: send desired available as-is (see ebay_sync_push) -- adding QuantitySold inflated eBay.
+    new_total_qty = body.quantity  # number actually sent to eBay = desired available
     log_row["live_quantity_sold"] = quantity_sold
     log_row["new_total_qty_sent"] = new_total_qty
 
@@ -18163,7 +18163,7 @@ async def push_inventory_quantity(row_id: str, body: InventoryQuantityPush, requ
     if body.quantity > 0:
         try:
             supabase.table("ebay_listing_status").update({
-                "quantity": new_total_qty, "quantity_available": body.quantity,
+                "quantity": body.quantity + quantity_sold, "quantity_available": body.quantity,
             }).eq("business_id", business_id).eq("item_id", ebay_item_id).execute()
         except Exception as e:
             print(f"push_inventory_quantity: local ebay_listing_status update failed (eBay itself succeeded): {e}")
