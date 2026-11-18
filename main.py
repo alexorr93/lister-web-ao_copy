@@ -947,6 +947,87 @@ async def _oneshot_archive_samiflex_inserts_20261023():
     except Exception:
         pass
 
+async def _oneshot_strip_item_specifics_20261118():
+    """ONE-SHOT (11/18 per owner, after a search-manipulation takedown): strip the item
+    specifics on 67 live eBay listings down to Brand + MPN (+ Manufacturer Part Number
+    where present). Everything else (stuffed model/year lists, copied catalog junk,
+    N/A filler) is removed. Title/price/description/photos untouched. If eBay says a
+    specific is REQUIRED for the category, that one is kept with its current value.
+    Results JSON stored in app_settings ITEM_SPECIFICS_STRIP_20261118."""
+    import asyncio, json as _json, re as _re
+    await asyncio.sleep(60)
+    biz_id = "e6aa8f2d-4e17-4b88-b511-2cffd3c2168d"
+    flag_key = "ITEM_SPECIFICS_STRIP_20261118"
+    try:
+        if (supabase.table("app_settings").select("value").eq("key", flag_key).limit(1).execute()).data:
+            return
+    except Exception as e:
+        print(f"[strip-specifics] flag check failed: {e}"); return
+    IDS = "405482836174,405618744702,405629089963,405655531861,405667686187,405667686201,405806725315,405806725345,405914680036,405914680052,405950385359,405977034820,406060715696,406124749540,406186970265,406199889959,406205507964,406220743253,406224150624,406278894308,406354592685,406363777537,406450462629,406479698064,406495198350,406524159105,406531818769,406567684498,406581310035,406581314673,406597586325,406598541410,406634811413,406642477025,406650921916,406666359272,406689121614,406693938504,406693938506,406708505295,406728138355,406743480543,406743480551,406743505377,406743533910,406748047472,406748435761,406754382195,406760284700,406770325459,406835470058,406846305720,406851168787,406854153442,406854156717,406854276065,406861855368,406864760486,406867837519,406876395534,406931460690,406931468569,406933113052,406953562936,406958110459,407073258058,407224768539".split(",")
+    KEEP = ("Brand", "MPN", "Manufacturer Part Number")
+
+    def _work():
+        import requests as _req
+        import xml.etree.ElementTree as ET
+        from xml.sax.saxutils import escape as _xesc
+        token = get_ebay_access_token(biz_id)
+        results = {}
+        for iid in IDS:
+            try:
+                parsed = _ebay_backup_parse_item(_ebay_get_item_full(token, iid))
+                if str(parsed.get("listing_status") or "") != "Active":
+                    results[iid] = f"skipped: {parsed.get('listing_status')}"; continue
+                cur = parsed.get("item_specifics") or {}
+                keep = {k: cur[k] for k in KEEP if cur.get(k)}
+                keep.setdefault("Brand", "Unbranded")
+                keep.setdefault("MPN", "Does Not Apply")
+                added = []
+                for attempt in range(4):
+                    nvl = ""
+                    for k, v in keep.items():
+                        vals = v if isinstance(v, list) else [v]
+                        nvl += "<NameValueList><Name>" + _xesc(k) + "</Name>" + "".join(
+                            "<Value>" + _xesc(str(x)[:65]) + "</Value>" for x in vals if x) + "</NameValueList>"
+                    body = ('<?xml version="1.0" encoding="utf-8"?>'
+                            '<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+                            f'<RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>'
+                            f'<Item><ItemID>{_xesc(iid)}</ItemID><ItemSpecifics>{nvl}</ItemSpecifics></Item>'
+                            '</ReviseFixedPriceItemRequest>')
+                    resp = None
+                    for site in ("0", "100"):
+                        r = _req.post("https://api.ebay.com/ws/api.dll", headers={
+                            "X-EBAY-API-COMPATIBILITY-LEVEL": "1193", "X-EBAY-API-CALL-NAME": "ReviseFixedPriceItem",
+                            "X-EBAY-API-SITEID": site, "Content-Type": "text/xml"}, data=body.encode("utf-8"), timeout=30)
+                        resp = _ebay_xml_to_dict(ET.fromstring(r.content))
+                        if resp.get("Ack") in ("Success", "Warning") or "site" not in str(resp.get("Errors")).lower():
+                            break
+                    if resp.get("Ack") in ("Success", "Warning"):
+                        results[iid] = "ok" + (f" (kept required: {', '.join(added)})" if added else "")
+                        break
+                    errs = str(resp.get("Errors"))
+                    missing = [m for m in _re.findall(r"item specific ([A-Za-z0-9 /&()'-]+?) is missing", errs) if m not in keep]
+                    if not missing:
+                        results[iid] = "FAILED: " + errs[:400]; break
+                    for m in missing:
+                        keep[m] = cur.get(m) or "Does Not Apply"; added.append(m)
+                else:
+                    results[iid] = "FAILED: too many required-specific retries"
+            except Exception as e:
+                results[iid] = f"FAILED: {e}"[:400]
+                if "RATE_LIMIT" in str(e):
+                    break
+            print(f"[strip-specifics] {iid}: {results.get(iid)}")
+        return results
+
+    try:
+        results = await asyncio.to_thread(_work)
+    except Exception as e:
+        print(f"[strip-specifics] fatal: {e}"); return
+    try:
+        supabase.table("app_settings").insert({"business_id": biz_id, "key": flag_key, "value": _json.dumps(results)}).execute()
+    except Exception as e:
+        print(f"[strip-specifics] could not save results: {e}")
+
 async def _oneshot_shopify_google_attrs_backfill():
     """ONE-SHOT (10/16 per owner): brand + condition on every live Shopify
     product, taken from that product's own eBay listing (ebay_listing_backup via
@@ -1334,6 +1415,7 @@ async def start_background_jobs():
     asyncio.create_task(_oneshot_publish_lots_am1_btm2_to_shopify())  # 10/23: one-time night publish of lots AM1 + BTM2 to Shopify
     asyncio.create_task(_oneshot_publish_lot_nh1_to_shopify())  # 10/24: one-time night publish of lot NH1 to Shopify (skips Shimadzu spectrometer)
     asyncio.create_task(_oneshot_publish_lot_rb9_to_shopify())  # 11/3: one-time night publish of lot RB9 to Shopify (skips CAT/Caterpillar)
+    asyncio.create_task(_oneshot_strip_item_specifics_20261118())  # 11/18: strip 67 eBay listings to Brand+MPN
     asyncio.create_task(_oneshot_shopify_google_attrs_backfill())  # 10/16: one-time brand+condition backfill from eBay to Shopify
     asyncio.create_task(browse_search_daily_worker())
     asyncio.create_task(shopify_reactivation_worker())  # 10/6: one-time Shopify reactivation from shopify_reactivation_plan (Shopify calls only)
