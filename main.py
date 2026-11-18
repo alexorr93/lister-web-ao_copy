@@ -1338,7 +1338,7 @@ async def start_background_jobs():
     asyncio.create_task(browse_search_daily_worker())
     asyncio.create_task(shopify_reactivation_worker())  # 10/6: one-time Shopify reactivation from shopify_reactivation_plan (Shopify calls only)
     asyncio.create_task(shopify_db_qty_guard_worker())  # 10/6: DB-only eBay->Shopify qty lowering, no eBay calls
-    asyncio.create_task(ebay_listing_backup_worker())  # 9/24: ONE-TIME finish of remaining listings, then stops forever (EBAY_BACKUP_DONE)
+    asyncio.create_task(ebay_listing_backup_worker())  # 11/18: nightly 1-5am Denver, new listings only, 500/night cap
 
 async def browse_search_daily_worker():
     """Runs all saved Browse searches once daily. For each business with saved
@@ -3639,7 +3639,12 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
         # elsewhere -- both need the same value sent, not just one or the other.
         item_specifics_xml += f"<NameValueList><Name>Manufacturer Part Number</Name><Value>{_xesc(mpn)}</Value></NameValueList>"
 
-    result = {"offer_id": None, "sku": sku, "item_id": None, "status": "draft", "scheduled_at": None, "brand": brand, "mpn": mpn, "mpn_is_fallback": mpn_is_fallback}
+    # Exactly the item specifics sent to eBay -- saved to listings.ebay_item_specifics on
+    # publish (was never written back after the 7/24 migration, so it sat blank).
+    _sent_specifics = {"Brand": brand, "MPN": mpn}
+    if listing.get("category_mode") == "motors":
+        _sent_specifics["Manufacturer Part Number"] = mpn
+    result = {"offer_id": None, "sku": sku, "item_id": None, "status": "draft", "scheduled_at": None, "brand": brand, "mpn": mpn, "mpn_is_fallback": mpn_is_fallback, "item_specifics": _sent_specifics}
 
     if mode == "draft":
         # No real draft concept on the Trading API — nothing is sent to eBay yet, this
@@ -5278,6 +5283,8 @@ async def submit_to_ebay_v2(item_id: str, body: EbaySubmit, request: Request):
         if result.get("status") == "published" and result.get("item_id"):
             import datetime as _pdt
             update["published_at"] = _pdt.datetime.now(_pdt.timezone.utc).isoformat()
+        if result.get("item_specifics") and result.get("item_id"):
+            update["ebay_item_specifics"] = result["item_specifics"]
         try:
             update["ebay_mpn"] = result.get("mpn")
             update["ebay_mpn_is_fallback"] = result.get("mpn_is_fallback", False)
@@ -18289,8 +18296,9 @@ def _kick_inventory_rebuild(business_id: str) -> None:
 # ---------------------------------------------------------------------------
 EBAY_BACKUP_BUCKET = "ebay-listing-backup"
 EBAY_BACKUP_REFRESH_DAYS = 30
-EBAY_BACKUP_BATCH_ITEMS = 7         # per cycle; 9/25 per user: slow and steady, ~300/day spread across the day
-EBAY_BACKUP_DAILY_CAP = 300         # 9/25 per user: hard cap of GetItem calls per UTC day (restart-proof, see _ebay_listing_backup_work)
+EBAY_BACKUP_BATCH_ITEMS = 100       # per cycle (night window only)
+EBAY_BACKUP_DAILY_CAP = 500         # 11/18 per user: max 500 GetItem calls per night (restart-proof, see _ebay_listing_backup_work)
+EBAY_BACKUP_NIGHT_HOURS = (1, 5)    # 11/18 per user: only runs 1am-5am America/Denver, daytime API quota stays free for publishing
 _ebay_backup_calls_today = {"day": None, "n": 0}
 EBAY_BACKUP_BATCH_SECONDS = 15 * 60  # hard stop per cycle
 EBAY_BACKUP_CYCLE_SLEEP = 30 * 60    # between cycles
@@ -18498,37 +18506,28 @@ def _ebay_listing_backup_work(business_id: str, max_items: int = None, max_secon
     return summary
 
 async def ebay_listing_backup_worker():
-    """Runs forever: one small batch per business every 30 min (~80 items/hr max);
-    the full ~5.4k backfill completes on its own in about 3 days, after which it just
-    keeps up with new listings and re-copies anything older than 30 days."""
-    import asyncio
+    """11/18 per user: back up NEW listings only (any Active listing not yet in
+    ebay_listing_backup), nightly 1am-5am Denver, hard cap 500 GetItem calls/night.
+    No 30-day re-copy. Outside the window it makes zero eBay calls, so daytime
+    publishing quota is untouched."""
+    import asyncio, datetime as _dt
+    from zoneinfo import ZoneInfo
     await asyncio.sleep(120)  # let boot settle
     while True:
-        backoff = EBAY_BACKUP_CYCLE_SLEEP
+        backoff = 10 * 60
         try:
-            res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
-            biz_ids = list(set(r["business_id"] for r in (res.data or [])))
-            # 9/24 per user: one backup copy of every listing, then stop for good.
-            done_res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_BACKUP_DONE").eq("value", "true").execute()
-            done_ids = set(r["business_id"] for r in (done_res.data or []))
-            pending = [b for b in biz_ids if b not in done_ids]
-            if not pending:
-                print("ebay_listing_backup_worker: one-time backup complete for all businesses -- worker stopped")
-                return
-            for biz_id in pending:
-                try:
-                    summary = await asyncio.to_thread(_ebay_listing_backup_work, biz_id)
-                    print(f"ebay_listing_backup_worker: {summary}")
-                    # queue_* counts are measured at cycle START, so 0 here means the previous
-                    # cycles already copied everything. Incomplete-photo items are retried until
-                    # then but don't block completion (a few have permanently dead photo URLs).
-                    if not summary.get("rate_limited") and summary.get("queue_never", 1) == 0:
-                        save_ebay_setting(biz_id, "EBAY_BACKUP_DONE", "true")
-                        print(f"ebay_listing_backup_worker: business {biz_id} fully backed up -- marked done, no further eBay calls")
-                    if summary.get("rate_limited"):
-                        backoff = 6 * 3600
-                except Exception as e:
-                    print(f"ebay_listing_backup_worker: business {biz_id} failed: {e}")
+            _h = _dt.datetime.now(ZoneInfo("America/Denver")).hour
+            if EBAY_BACKUP_NIGHT_HOURS[0] <= _h < EBAY_BACKUP_NIGHT_HOURS[1]:
+                res = supabase.table("app_settings").select("business_id").eq("key", "EBAY_REFRESH_TOKEN").execute()
+                biz_ids = list(set(r["business_id"] for r in (res.data or [])))
+                for biz_id in biz_ids:
+                    try:
+                        summary = await asyncio.to_thread(_ebay_listing_backup_work, biz_id)
+                        print(f"ebay_listing_backup_worker: {summary}")
+                        if summary.get("rate_limited"):
+                            backoff = 6 * 3600  # sit out the rest of tonight
+                    except Exception as e:
+                        print(f"ebay_listing_backup_worker: business {biz_id} failed: {e}")
         except Exception as e:
             print(f"ebay_listing_backup_worker error: {e}")
         await asyncio.sleep(backoff)
