@@ -2573,6 +2573,19 @@ async function toggleLotStar(lotId) {
   }
 }
 
+// BidSpotter in-catalog search link for a lot: catalog URL + ?searchTerm=<title up to
+// the first comma, max 6 words>&whereToSearch=<catalog path>.
+function _catalogSearchUrl(catalogUrl, title) {
+  try {
+    const u = new URL(catalogUrl);
+    let term = String(title || '').split(',')[0].replace(/\s+/g, ' ').trim();
+    term = term.split(' ').slice(0, 6).join(' ');
+    if (!term) return catalogUrl;
+    const path = u.pathname;
+    return `${u.origin}${path}?searchTerm=${encodeURIComponent(term).replace(/%20/g, '+')}&whereToSearch=${encodeURIComponent(path)}`;
+  } catch (e) { return catalogUrl; }
+}
+
 function renderAuctionTable() {
   _paintGrokDoneBtn();
   _paintStarredBtn();
@@ -2628,7 +2641,7 @@ function renderAuctionTable() {
           </div>
         </div>
         ${lot.current_bid != null ? `<div style="font-size:11px;color:var(--muted);">Bid: $${parseFloat(lot.current_bid).toFixed(2)}</div>` : ''}
-        ${lot.listing_url ? `<a href="${lot.listing_url}" target="_blank" style="font-size:10px;color:var(--accent);">View ↗</a>` : (_sessCatalogUrl ? `<a href="${_sessCatalogUrl}" target="_blank" title="This lot was captured without its own link — opens the auction catalog" style="font-size:10px;color:var(--accent);">Catalog ↗</a>` : '')}
+        ${lot.listing_url ? `<a href="${lot.listing_url}" target="_blank" style="font-size:10px;color:var(--accent);">View ↗</a>` : (_sessCatalogUrl ? `<a href="${_catalogSearchUrl(_sessCatalogUrl, lot.title)}" target="_blank" title="Opens the auction catalog searched for this lot" style="font-size:10px;color:var(--accent);">Catalog ↗</a>` : '')}
         <div class="owner-only" style="margin-top:4px;">${bulkBadge}</div>
         <div class="owner-only">${searchBtns}</div>
         <div class="lot-grok-toggle" onclick="toggleLotGrok('${lot.id}')" title="Purple = tagged for Grok · Yellow = Grok actioned it">
