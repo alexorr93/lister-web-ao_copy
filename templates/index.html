@@ -2465,7 +2465,7 @@ function prefetchAllSessionLots() {
     for (const s of (auctionSessions || [])) {
       if (auctionLotsBySession[s.id]) continue;
       try { const lots = await api('GET', `/api/auction/capture/sessions/${s.id}/lots`);
-            if (!auctionLotsBySession[s.id]) auctionLotsBySession[s.id] = lots; } catch (e) {}
+            if (!auctionLotsBySession[s.id]) { _applyNoteDrafts(lots); auctionLotsBySession[s.id] = lots; } } catch (e) {}
     }
   })();
 }
@@ -2479,6 +2479,7 @@ async function loadAuctionItems(sessionId, useCache) {
     document.getElementById('auction-back-to-flags').innerHTML = (sessionInfo && sessionInfo.source_catalog_url)
       ? `<a href="/flags?catalog=${encodeURIComponent(sessionInfo.source_catalog_url)}" style="font-size:12px;">← Back to Flags</a>` : '';
     auctionLotsCache = auctionLotsBySession[sessionId];
+    _applyNoteDrafts(auctionLotsCache);
     renderAuctionTable();
     if (isNew) resumeMetricJobIfAny();
     return;
@@ -2493,8 +2494,11 @@ async function loadAuctionItems(sessionId, useCache) {
   try {
     const lots = await api('GET', `/api/auction/capture/sessions/${sessionId}/lots`);
     if (activeSession !== sessionId) return;  // user already switched days
+    _applyNoteDrafts(lots);
     auctionLotsCache = lots;
     auctionLotsBySession[sessionId] = lots;
+    // The fetch may have started before you clicked into a box — never re-render under typing.
+    if (_typingInAuction()) return;
     renderAuctionTable();
     if (isNewSession) resumeMetricJobIfAny();
   } catch(e) { toast('Failed to load lots', 'error'); }
@@ -2640,7 +2644,7 @@ function renderAuctionTable() {
       <td style="font-size:11px;">${lot.max_bid != null ? `<b>${money(lot.max_bid)}</b><div style="color:var(--muted);">${lot.max_bid_notes||''}</div>` : ''}</td>`}
       <td style="min-width:160px;height:1px;vertical-align:top;">
         <div style="display:flex;flex-direction:column;height:100%;min-height:220px;">
-        <textarea ${IS_EDITOR ? 'readonly' : ''} onblur="if(!IS_EDITOR)saveLotNotes('${lot.id}', this)" placeholder="Notes..." style="flex:1;width:100%;min-height:50px;box-sizing:border-box;font-size:11px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px;resize:vertical;">${lot.notes || ''}</textarea>
+        <textarea id="lot-notes-${lot.id}" ${IS_EDITOR ? 'readonly' : ''} oninput="if(!IS_EDITOR)lotNoteInput('${lot.id}', this)" onblur="if(!IS_EDITOR)saveLotNotes('${lot.id}', this)" placeholder="Notes..." style="flex:1;width:100%;min-height:50px;box-sizing:border-box;font-size:11px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px;resize:vertical;">${String(lot.notes || '').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea>
         <div id="notes-saved-${lot.id}" style="font-size:9px;color:var(--muted);height:11px;"></div>
         </div>
       </td>
@@ -2654,6 +2658,9 @@ function renderAuctionTable() {
         <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="bulkTagGrok(null)">Untag Grok</button>
       </div>`
     : '';
+  const _fa = document.activeElement;
+  const _focusId = (_fa && _fa.id && _fa.id.startsWith('lot-notes-')) ? _fa.id : null;
+  const _sel = _focusId ? [_fa.selectionStart, _fa.selectionEnd] : null;
   const _prevBox = document.getElementById('auction-scroll');
   const _sv = _loadView();
   const _keepY = (_prevBox && _prevBox.dataset.session === activeSession) ? window.scrollY
@@ -2678,6 +2685,10 @@ function renderAuctionTable() {
     </div>`;
   const _box = document.getElementById('auction-scroll');
   if (_keepY !== null) window.scrollTo(0, _keepY);
+  if (_focusId) {
+    const t = document.getElementById(_focusId);
+    if (t) { t.focus({preventScroll: true}); try { t.setSelectionRange(_sel[0], _sel[1]); } catch (e) {} }
+  }
 }
 let _scrollSaveT;
 window.addEventListener('scroll', () => {
@@ -2906,18 +2917,47 @@ async function flagLotAsBulk(lotId, btn) {
   }
 }
 
+// Notes: every keystroke is kept as a local draft and auto-saved ~0.8s after you stop
+// typing (and on blur). Drafts override server data until the save is confirmed, so a
+// background refresh can never put old text back over what you typed.
+const _noteDrafts = {};
+const _noteSaveTimers = {};
+function _typingInAuction() {
+  const a = document.activeElement;
+  return !!(a && (a.classList.contains('grok-input') || a.tagName === 'TEXTAREA') && a.closest('#auction-list'));
+}
+function _applyNoteDrafts(lots) {
+  for (const l of (lots || [])) if (Object.prototype.hasOwnProperty.call(_noteDrafts, l.id)) l.notes = _noteDrafts[l.id];
+}
+function _setCachedNote(lotId, text) {
+  for (const arr of [auctionLotsCache, ...Object.values(auctionLotsBySession || {})]) {
+    const l = (arr || []).find(x => x.id === lotId);
+    if (l) l.notes = text;
+  }
+}
+function lotNoteInput(lotId, textarea) {
+  _noteDrafts[lotId] = textarea.value;
+  _setCachedNote(lotId, textarea.value);
+  clearTimeout(_noteSaveTimers[lotId]);
+  _noteSaveTimers[lotId] = setTimeout(() => saveLotNotes(lotId, textarea), 800);
+}
 async function saveLotNotes(lotId, textarea) {
+  clearTimeout(_noteSaveTimers[lotId]);
+  const text = textarea.value;
+  _noteDrafts[lotId] = text;
+  _setCachedNote(lotId, text);
   const indicator = document.getElementById(`notes-saved-${lotId}`);
   try {
-    await api('PATCH', `/api/auction/capture/lots/${lotId}/notes`, {notes: textarea.value});
-    const lot = auctionLotsCache.find(l => l.id === lotId);
-    if (lot) lot.notes = textarea.value;
-    if (indicator) {
-      indicator.textContent = 'Saved';
-      setTimeout(() => { if (indicator) indicator.textContent = ''; }, 1500);
+    await api('PATCH', `/api/auction/capture/lots/${lotId}/notes`, {notes: text});
+    if (_noteDrafts[lotId] === text) delete _noteDrafts[lotId];  // newer typing keeps its draft
+    const ind = document.getElementById(`notes-saved-${lotId}`);
+    if (ind) {
+      ind.textContent = 'Saved';
+      setTimeout(() => { ind.textContent = ''; }, 1500);
     }
   } catch(e) {
-    if (indicator) indicator.textContent = 'Save failed';
+    const ind = document.getElementById(`notes-saved-${lotId}`) || indicator;
+    if (ind) ind.textContent = 'Save failed';
     toast('Failed to save notes: ' + e.message, 'error');
   }
 }
@@ -3394,8 +3434,7 @@ if (!IS_EDITOR) {
 setInterval(() => { if (activeTab === 'intake') { loadListings(); } }, 30000);
 // Don't re-render under someone mid-typing in a lot field (would wipe the input).
 setInterval(() => {
-  const a = document.activeElement;
-  if (a && (a.classList.contains('grok-input') || a.tagName === 'TEXTAREA') && a.closest('#auction-list')) return;
+  if (_typingInAuction()) return;
   if (activeTab === 'auction' && activeSession) loadAuctionItems(activeSession);
 }, 30000);
 
