@@ -947,6 +947,34 @@ async def _oneshot_archive_samiflex_inserts_20261023():
     except Exception:
         pass
 
+async def _oneshot_check_items_20261118():
+    """ONE-SHOT read-only (11/18): GetItem on the GM O-ring kit + Leatherman to confirm
+    title/specifics after revisions. Stores JSON in app_settings ITEM_CHECK_20261118."""
+    import asyncio, json as _json
+    await asyncio.sleep(150)  # after the Leatherman strip runs
+    biz_id = "e6aa8f2d-4e17-4b88-b511-2cffd3c2168d"
+    flag_key = "ITEM_CHECK_20261118"
+    try:
+        if (supabase.table("app_settings").select("value").eq("key", flag_key).limit(1).execute()).data:
+            return
+    except Exception:
+        return
+    def _work():
+        token = get_ebay_access_token(biz_id)
+        out = {}
+        for iid in ("405488086009", "405914680036"):
+            try:
+                p = _ebay_backup_parse_item(_ebay_get_item_full(token, iid))
+                out[iid] = {"title": p.get("title"), "status": p.get("listing_status"), "specifics": p.get("item_specifics")}
+            except Exception as e:
+                out[iid] = {"error": str(e)[:300]}
+        return out
+    try:
+        res = await asyncio.to_thread(_work)
+        supabase.table("app_settings").insert({"business_id": biz_id, "key": flag_key, "value": _json.dumps(res)}).execute()
+    except Exception as e:
+        print(f"[item-check] failed: {e}")
+
 async def _oneshot_strip_item_specifics_20261118(IDS=None, flag_key="ITEM_SPECIFICS_STRIP_20261118"):
     """ONE-SHOT (11/18 per owner, after a search-manipulation takedown): strip the item
     specifics on 67 live eBay listings down to Brand + MPN (+ Manufacturer Part Number
@@ -1414,6 +1442,7 @@ async def start_background_jobs():
     asyncio.create_task(_oneshot_publish_lots_am1_btm2_to_shopify())  # 10/23: one-time night publish of lots AM1 + BTM2 to Shopify
     asyncio.create_task(_oneshot_publish_lot_nh1_to_shopify())  # 10/24: one-time night publish of lot NH1 to Shopify (skips Shimadzu spectrometer)
     asyncio.create_task(_oneshot_publish_lot_rb9_to_shopify())  # 11/3: one-time night publish of lot RB9 to Shopify (skips CAT/Caterpillar)
+    asyncio.create_task(_oneshot_check_items_20261118())  # 11/18 read-only check
     asyncio.create_task(_oneshot_strip_item_specifics_20261118())  # 11/18: strip 67 eBay listings to Brand+MPN
     asyncio.create_task(_oneshot_strip_item_specifics_20261118(["405914680036"], "ITEM_SPECIFICS_STRIP_20261118_LEATHERMAN"))  # retry after duplicate ended
     asyncio.create_task(_oneshot_shopify_google_attrs_backfill())  # 10/16: one-time brand+condition backfill from eBay to Shopify
