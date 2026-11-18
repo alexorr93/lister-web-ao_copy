@@ -324,6 +324,7 @@ select.field-input { background: #fff; color: #0f172a; }
 /* Grok editor login: everything except viewing lots + entering values is hidden.
    The server refuses all of it anyway; this just keeps the page clean. */
 .editor-mode .owner-only { display:none !important; }
+tr.lot-starred > td { background: rgba(250, 204, 21, 0.18) !important; }
 </style>
 </head>
 <body class="{{ 'editor-mode' if is_editor else '' }}">
@@ -2563,12 +2564,15 @@ async function toggleLotStar(lotId) {
   lot.is_favorite = next;
   const btn = document.getElementById(`lot-star-${lotId}`);
   if (btn) { btn.textContent = next ? '★' : '☆'; btn.style.color = next ? '#facc15' : 'var(--muted)'; }
+  const row = document.getElementById(`lot-row-${lotId}`);
+  if (row) row.classList.toggle('lot-starred', next);
   try {
     await api('POST', `/api/auction/capture/lots/${lotId}/star`, {starred: next});
     if (starredOnly && !next) renderAuctionTable();
   } catch (e) {
     lot.is_favorite = !next;
     if (btn) { btn.textContent = !next ? '★' : '☆'; btn.style.color = !next ? '#facc15' : 'var(--muted)'; }
+    if (row) row.classList.toggle('lot-starred', !next);
     toast('Failed to save star: ' + e.message, 'error');
   }
 }
@@ -2628,7 +2632,7 @@ function renderAuctionTable() {
     const selectCell = lotSelectMode
       ? `<td><input type="checkbox" ${selectedLotIds.has(lot.id) ? 'checked' : ''} onclick="toggleLotSelect(event,'${lot.id}')"></td>`
       : '';
-    return `<tr id="lot-row-${lot.id}">
+    return `<tr id="lot-row-${lot.id}" class="${lot.is_favorite ? 'lot-starred' : ''}">
       ${selectCell}
       <td>${imgHtml}</td>
       <td style="max-width:220px;">
