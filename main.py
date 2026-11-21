@@ -8549,10 +8549,29 @@ def fetch_shopify_orders(business_id: str, start_iso: str, end_iso: str) -> list
             line_items = order.get("line_items", [])
             order_subtotal = sum(float(li.get("price", 0) or 0) * int(li.get("quantity", 1)) for li in line_items)
 
+            # Buyer-paid shipping (e.g. the flat $13.95). Previously never captured, so
+            # Shopify revenue/net excluded shipping the buyer paid while the label cost
+            # was still subtracted -- understating Shopify profit. Now stored the same
+            # way eBay rows do it: buyer_shipping on its own, AND included in revenue
+            # (eBay's gross_revenue = item + shipping; downstream code relies on that).
+            order_shipping_paid = 0.0
+            for sl in order.get("shipping_lines", []) or []:
+                order_shipping_paid += float(sl.get("discounted_price", sl.get("price", 0)) or 0)
+            # Shipping refunds live in refunds[].order_adjustments (kind=shipping_refund,
+            # amount is negative), not in refund_line_items.
+            order_shipping_refunded = 0.0
+            for refund in order.get("refunds", []) or []:
+                for adj in refund.get("order_adjustments", []) or []:
+                    if (adj.get("kind") or "") == "shipping_refund":
+                        order_shipping_refunded += abs(float(adj.get("amount", 0) or 0))
+
             for li in line_items:
-                gross = float(li.get("price", 0) or 0) * int(li.get("quantity", 1))
-                refund_amt = refunded_by_line.get(li.get("id"), 0.0)
-                fee_share = (order_fee_total * (gross / order_subtotal)) if order_subtotal > 0 else 0.0
+                item_gross = float(li.get("price", 0) or 0) * int(li.get("quantity", 1))
+                ratio = (item_gross / order_subtotal) if order_subtotal > 0 else (1.0 / len(line_items))
+                buyer_shipping = order_shipping_paid * ratio
+                gross = item_gross + buyer_shipping
+                refund_amt = refunded_by_line.get(li.get("id"), 0.0) + order_shipping_refunded * ratio
+                fee_share = order_fee_total * ratio
                 rows.append({
                     "platform": "Shopify",
                     "sku": li.get("sku") or "(no SKU)",
@@ -8561,6 +8580,7 @@ def fetch_shopify_orders(business_id: str, start_iso: str, end_iso: str) -> list
                     "quantity": int(li.get("quantity", 1)),
                     "line_item_id": li.get("id"),
                     "revenue": gross,
+                    "buyer_shipping": buyer_shipping,
                     "refund": refund_amt,
                     "fee": fee_share,
                     "net": gross - refund_amt - fee_share,
@@ -9100,6 +9120,7 @@ def _sync_orders_window(business_id: str, start_iso: str, end_iso: str) -> dict:
                 "business_id": business_id, "platform": "Shopify", "order_id": row["order_id"],
                 "sku": final_sku, "title": row["title"], "quantity": row["quantity"],
                 "order_date": row["order_date"], "gross_revenue": _safe2(row["revenue"]),
+                "buyer_shipping": _safe2(row.get("buyer_shipping", 0)),
                 # REAL BUG FIXED: refund_amt was computed correctly above (line ~6201,
                 # used correctly to compute net/final_net) but never actually written
                 # to this record -- orders.refund was 0/null for EVERY Shopify order
