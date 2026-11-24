@@ -5110,6 +5110,11 @@ function filterCatPicker() {
       return as - bs || a.path.length - b.path.length;
     });
   }
+  // Shortcut: typing just "x" pins Other Heavy Equipment Parts & Accessories (#97126) to the top, so x + Enter picks it.
+  if (q === 'x') {
+    const pin = catPickerRows.find(r => String(r.id) === '97126');
+    if (pin) m = [pin].concat(m.filter(r => r !== pin));
+  }
   catPickerMatches = m; catPickerActive = 0;
   renderCatPickerList();
 }
