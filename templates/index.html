@@ -585,6 +585,7 @@ tr.lot-starred > td { background: rgba(250, 204, 21, 0.18) !important; }
       <button class="owner-only btn" style="background:#7a2020;color:#fff;" onclick="deleteSelectedCaptureSession()">🗑️ Delete Session</button>
       <button class="owner-only btn" onclick="shareSelectedCaptureSession()">🔗 Share</button>
       <button class="owner-only btn" id="lot-select-mode-btn" onclick="toggleSelectMode()">☑️ Select Lots</button>
+      <label class="owner-only" style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--muted);cursor:pointer;" title="Ask before deleting any lot (the ✕ on a row or Delete Selected)"><input type="checkbox" id="confirm-lot-deletes" autocomplete="off" data-lpignore="true" data-1p-ignore onchange="setConfirmLotDeletes(this.checked)"> Confirm deletions</label>
       <button class="owner-only btn btn-primary" onclick="runAllFields()">▶️ Run All Fields</button>
       <button class="owner-only btn" onclick="refreshBids()">🔄 Refresh Bids</button>
       <button class="owner-only btn" id="grok-done-filter-btn" onclick="toggleGrokDoneFilter()" title="Show only lots Grok has finished (yellow)">🟡 Grok Done</button>
@@ -2410,7 +2411,24 @@ function toggleSelectAllLots(headerCb) {
   renderAuctionTable();
 }
 
+// "Confirm deletions" option — ON by default. Only an explicit uncheck turns it off.
+function confirmLotDeletesOn() {
+  try { return localStorage.getItem('confirmLotDeletes') !== 'off'; } catch(e) { return true; }
+}
+function setConfirmLotDeletes(on) {
+  try { localStorage.setItem('confirmLotDeletes', on ? 'on' : 'off'); } catch(e) {}
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const cb = document.getElementById('confirm-lot-deletes');
+  if (cb) cb.checked = confirmLotDeletesOn();
+});
+
 async function deleteOneLot(lotId) {
+  if (confirmLotDeletesOn()) {
+    const lot = auctionLotsCache.find(l => l.id === lotId);
+    const label = lot ? `Lot ${lot.lot_number || '?'}: ${(lot.title || '').slice(0, 60)}` : 'this lot';
+    if (!confirm(`Delete ${label}? This cannot be undone.`)) return;
+  }
   try {
     await api('POST', '/api/auction/capture/lots/bulk-delete', {lot_ids: [lotId]});
     auctionLotsCache = auctionLotsCache.filter(l => l.id !== lotId);
@@ -2446,7 +2464,7 @@ function copyResearchPrompt(lotId) {
 async function deleteSelectedLots() {
   if (!selectedLotIds.size) { toast('Nothing selected', 'error'); return; }
   const n = selectedLotIds.size;
-  if (!confirm(`Delete ${n} selected lot(s)? This cannot be undone.`)) return;
+  if (confirmLotDeletesOn() && !confirm(`Delete ${n} selected lot(s)? This cannot be undone.`)) return;
   try {
     const r = await api('POST', '/api/auction/capture/lots/bulk-delete', {lot_ids: Array.from(selectedLotIds)});
     toast(`Deleted ${r.deleted} lot(s)`);
