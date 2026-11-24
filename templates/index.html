@@ -821,6 +821,7 @@ select.field-input { background: #fff; color: #0f172a; }
               <option value="new">New</option>
               <option value="new_other">New (other)</option>
               <option value="reman">Remanufactured</option>
+              <option value="parts">For parts or not working</option>
             </select>
           </div>
         </div>
@@ -1562,7 +1563,7 @@ function renderTiles() {
       <div class="tile-photo" onclick="handlePhotoClick('${l.id}')">
         ${photoHtml}
         ${photoNavHtml}
-        <div class="tile-badge-tl" style="color:${condCol};">${cond==='new_other'?'NEW OTHER':(cond==='reman'?'REMAN':(isNew?'NEW':'USED'))}</div>
+        <div class="tile-badge-tl" style="color:${condCol};">${cond==='new_other'?'NEW OTHER':(cond==='reman'?'REMAN':(cond==='parts'?'FOR PARTS':(isNew?'NEW':'USED')))}</div>
         <div class="tile-badge-tr">${statusBadge}</div>
         ${needsMpnAttention(l) ? `<div class="tile-mpn-flag" title="${l.ebay_mpn_is_fallback ? 'eBay MPN set to &quot;Does Not Apply&quot; — click to fix' : 'No confirmed MPN on file — will publish as &quot;Does Not Apply&quot; unless fixed first'}" onclick="event.stopPropagation();openModal('${l.id}')"></div>` : ''}
         ${(onEbay || onShopify) ? `<div class="tile-platform-badges">${onEbay ? `<div class="tile-platform-badge ebay">${onEbayLabel}</div>` : ''}${onShopify ? '<div class="tile-platform-badge shopify">Shopify</div>' : ''}</div>` : ''}

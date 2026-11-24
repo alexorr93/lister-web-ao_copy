@@ -3463,6 +3463,8 @@ def ebay_condition(cond: str) -> str:
         return "NEW_OTHER"
     if c == "reman":
         return "SELLER_REFURBISHED"
+    if c == "parts":
+        return "FOR_PARTS_OR_NOT_WORKING"
     return "USED_EXCELLENT"
 
 def push_listing_to_ebay(listing: dict, mode: str, hours_from_now: float = None, brand_override: str = None, mpn_override: str = None) -> dict:
@@ -3717,7 +3719,7 @@ def push_listing_to_ebay_v2(listing: dict, mode: str, hours_from_now: float = No
     # ID, displayed as "Remanufactured" in parts categories) / 3000 Used.
     # Condition notes (ConditionDescription) are only accepted for non-New.
     _ec = ebay_condition(listing.get("condition"))
-    condition_id = {"NEW": "1000", "NEW_OTHER": "1500", "SELLER_REFURBISHED": "2500"}.get(_ec, "3000")
+    condition_id = {"NEW": "1000", "NEW_OTHER": "1500", "SELLER_REFURBISHED": "2500", "FOR_PARTS_OR_NOT_WORKING": "7000"}.get(_ec, "3000")
     # Manuals/books categories (e.g. "Heavy Equipment Manuals & Books") reject plain
     # Used (3000) -- they require a book grade. Per standing rule, used manuals go up
     # as "Very Good" (4000). The retry below the request also catches any other
@@ -4371,7 +4373,7 @@ def _build_listings_payload(business_id: str, archived: bool = False, ready: boo
             # tile showed Used even though the DB (and the eBay publish) were
             # New Other. Keep this list in sync with the modal's <select>.
             cond = str(l.get("condition") or "").strip().lower()
-            l["condition"] = cond if cond in ("new", "used", "new_other", "reman") else "used"
+            l["condition"] = cond if cond in ("new", "used", "new_other", "reman", "parts") else "used"
             # Normalize listing_type — items from batch upload are not auctions
             lt = str(l.get("listing_type") or "").strip().lower()
             if lt not in ("auction", "fixed"):
@@ -4575,7 +4577,7 @@ async def export_ebay_csv(request: Request):
 
     for item in items:
         cond = str(item.get("condition") or "used").strip().lower()
-        cond_id = {"new": "NEW", "new_other": "NEW_OTHER", "reman": "SELLER_REFURBISHED"}.get(cond, "USED")
+        cond_id = {"new": "NEW", "new_other": "NEW_OTHER", "reman": "SELLER_REFURBISHED", "parts": "FOR_PARTS_OR_NOT_WORKING"}.get(cond, "USED")
         pid = str(item.get("photo_id") or "")
         pic = "|".join(photo_url(p) for p in get_all_photo_ids(pid) if photo_url(p))
         category_id = "12576"
