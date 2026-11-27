@@ -2314,7 +2314,7 @@ async function loadAuctionSessions() {
     const sel = document.getElementById('auction-session-select');
     const keepId = sel.value; // preserve selection across refreshes (e.g. during progress polling)
     const boot = AUCTION_BOOT; AUCTION_BOOT = null;  // server-inlined on page open: no API wait
-    if (boot && boot.session_id && boot.lots) { _lotsSig[boot.session_id] = _sigOf(boot.lots); _applyNoteDrafts(boot.lots); auctionLotsBySession[boot.session_id] = boot.lots; }
+    if (boot && boot.lots_by_session) _ingestAllLots(boot.lots_by_session);
     auctionSessions = boot ? boot.sessions : await api('GET', '/api/auction/capture/sessions');
     sel.innerHTML = '<option value="">Select a capture session...</option>' +
       auctionSessions.map(s => {
@@ -2482,7 +2482,7 @@ async function deleteSelectedLots() {
 const auctionLotsBySession = {};
 let _prefetchStarted = false;
 function prefetchAllSessionLots() {
-  if (_prefetchStarted) return;
+  if (_prefetchStarted || Object.keys(auctionLotsBySession).length >= (auctionSessions || []).length) return;
   _prefetchStarted = true;
   (async () => {
     for (const s of (auctionSessions || [])) {
@@ -2494,6 +2494,38 @@ function prefetchAllSessionLots() {
 }
 
 const _lotsSig = {};
+// Every day's lots live in memory, all the time (server-inlined on open, then kept fresh below).
+function _ingestAllLots(bySession) {
+  let activeChanged = false;
+  for (const [sid, lots] of Object.entries(bySession || {})) {
+    const sig = _sigOf(lots);
+    if (_lotsSig[sid] === sig && auctionLotsBySession[sid]) continue;
+    _lotsSig[sid] = sig;
+    _applyNoteDrafts(lots);
+    auctionLotsBySession[sid] = lots;
+    if (sid === activeSession) { auctionLotsCache = lots; activeChanged = true; }
+  }
+  return activeChanged;
+}
+async function refreshAllAuctionData() {
+  if (IS_EDITOR) return;
+  try {
+    const data = await api('GET', '/api/auction/capture/all');
+    const sessSig = _sigOf(data.sessions);
+    if (sessSig !== window._sessSig) {
+      window._sessSig = sessSig;
+      auctionSessions = data.sessions;
+      const sel = document.getElementById('auction-session-select');
+      const keep = sel.value;
+      sel.innerHTML = '<option value="">Select a capture session...</option>' +
+        auctionSessions.map(s => `<option value="${s.id}">${s.name || 'Untitled'} · scope: ${s.capture_scope || 'all'} · ${_captureStatusLabel(s.status)} · ${(s.created_at||'').slice(0,10)}</option>`).join('');
+      sel.value = keep;
+    }
+    const changed = _ingestAllLots(data.lots_by_session);
+    if (changed && activeTab === 'auction' && !_typingInAuction()) renderAuctionTable();
+  } catch (e) {}
+}
+if (!IS_EDITOR) setInterval(refreshAllAuctionData, 30000);
 function _sigOf(lots) { try { return JSON.stringify(lots); } catch (e) { return String(Math.random()); } }
 async function loadAuctionItems(sessionId, useCache) {
   if (!sessionId) { document.getElementById('auction-list').innerHTML = ''; return; }
@@ -3482,7 +3514,7 @@ setInterval(() => { if (activeTab === 'intake') { loadListings(); } }, 30000);
 // Don't re-render under someone mid-typing in a lot field (would wipe the input).
 setInterval(() => {
   if (_typingInAuction()) return;
-  if (activeTab === 'auction' && activeSession) loadAuctionItems(activeSession);
+  if (IS_EDITOR && activeTab === 'auction' && activeSession) loadAuctionItems(activeSession);
 }, 30000);
 
 async function rotatePhoto(dir) {

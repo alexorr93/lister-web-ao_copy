@@ -1116,14 +1116,11 @@ async def dashboard(request: Request):
         # an empty page that fills in after two API round trips.
         def _boot():
             business_id = require_auth(request)
-            sessions = (supabase.table("auction_capture_sessions").select("*")
-                        .eq("business_id", str(business_id))
-                        .order("created_at", desc=True).limit(100).execute().data or [])
+            data = _fetch_all_auction_data(business_id)
             want = request.query_params.get("session") or request.cookies.get("input_auction_session") or ""
-            ids = [x["id"] for x in sessions]
-            sid = want if want in ids else (ids[0] if ids else None)
-            return {"sessions": sessions, "session_id": sid,
-                    "lots": _fetch_session_lots(sid, False) if sid else []}
+            ids = [x["id"] for x in data["sessions"]]
+            data["session_id"] = want if want in ids else (ids[0] if ids else None)
+            return data
         try:
             from starlette.concurrency import run_in_threadpool
             auction_boot = await run_in_threadpool(_boot)
@@ -7510,6 +7507,42 @@ def _fetch_session_lots(session_id: str, is_editor: bool) -> list:
     for lot in lots:
         lot["items"] = items_by_lot.get(lot["id"], [])
     return lots
+
+def _fetch_all_auction_data(business_id) -> dict:
+    """Every session + every lot (with items) for this business, grouped by session."""
+    sessions = (supabase.table("auction_capture_sessions").select("*")
+                .eq("business_id", str(business_id))
+                .order("created_at", desc=True).limit(100).execute().data or [])
+    by_session = {x["id"]: [] for x in sessions}
+    sids = list(by_session)
+    lots = []
+    for i in range(0, len(sids), 20):
+        chunk, start = sids[i:i + 20], 0
+        while True:
+            page = (supabase.table("auction_lots").select("*").in_("session_id", chunk)
+                    .order("created_at").order("id").range(start, start + 999).execute().data or [])
+            lots.extend(page)
+            if len(page) < 1000:
+                break
+            start += 1000
+    items_by_lot = {}
+    ids = [l["id"] for l in lots]
+    for i in range(0, len(ids), 150):
+        for it in (supabase.table("auction_lot_items").select("*")
+                   .in_("lot_id", ids[i:i + 150]).execute().data or []):
+            items_by_lot.setdefault(it["lot_id"], []).append(it)
+    for l in lots:
+        l["items"] = items_by_lot.get(l["id"], [])
+        by_session.setdefault(l["session_id"], []).append(l)
+    return {"sessions": sessions, "lots_by_session": by_session}
+
+@app.get("/api/auction/capture/all")
+def list_all_capture_data(request: Request):
+    """Owner only: all sessions + all lots in one call, so every day is always loaded."""
+    business_id = require_auth(request)
+    if not business_id or get_session_role(request) == "editor":
+        raise HTTPException(401, "Unauthorized")
+    return _fetch_all_auction_data(business_id)
 
 @app.get("/api/auction/capture/sessions/{session_id}/lots")
 def list_capture_lots(session_id: str, request: Request):
