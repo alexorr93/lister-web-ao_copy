@@ -1109,7 +1109,28 @@ async def dashboard(request: Request):
         # index.html) is the main working view here, so that's the actual landing page.
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/flags", status_code=302)
-    return templates.TemplateResponse("index.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "intake"})
+    auction_boot = None
+    if request.query_params.get("tab") == "auction":
+        # Server-render the Auctions tab's data (sessions + the day you were last on)
+        # straight into the page, so opening it shows the list instantly instead of
+        # an empty page that fills in after two API round trips.
+        def _boot():
+            business_id = require_auth(request)
+            sessions = (supabase.table("auction_capture_sessions").select("*")
+                        .eq("business_id", str(business_id))
+                        .order("created_at", desc=True).limit(100).execute().data or [])
+            want = request.query_params.get("session") or request.cookies.get("input_auction_session") or ""
+            ids = [x["id"] for x in sessions]
+            sid = want if want in ids else (ids[0] if ids else None)
+            return {"sessions": sessions, "session_id": sid,
+                    "lots": _fetch_session_lots(sid, False) if sid else []}
+        try:
+            from starlette.concurrency import run_in_threadpool
+            auction_boot = await run_in_threadpool(_boot)
+        except Exception as e:
+            print(f"auction boot inline failed, page falls back to API load: {e}")
+            auction_boot = None
+    return templates.TemplateResponse("index.html", {"request": request, "is_admin": nav["is_admin"], "account_label": nav["account_label"], "active_tab": "intake", "auction_boot": auction_boot})
 
 # ── API: LISTINGS ─────────────────────────────────────────────── #
 
@@ -7467,17 +7488,7 @@ def _owned_capture_session(session_id: str, business_id) -> bool:
     return bool(supabase.table("auction_capture_sessions").select("id")
                 .eq("id", session_id).eq("business_id", str(business_id)).limit(1).execute().data)
 
-@app.get("/api/auction/capture/sessions/{session_id}/lots")
-def list_capture_lots(session_id: str, request: Request):
-    """Paginated (Supabase caps a single read at 1,000 rows -- big catalogs were
-    silently cut off) and item fetch chunked (one .in_() with thousands of ids
-    blows the URL limit). Grok editor login only sees lots tagged for Grok."""
-    business_id = require_auth(request)
-    if not business_id:
-        raise HTTPException(401, "Unauthorized")
-    if not _owned_capture_session(session_id, business_id):
-        raise HTTPException(404, "Session not found")
-    is_editor = get_session_role(request) == "editor"
+def _fetch_session_lots(session_id: str, is_editor: bool) -> list:
     lots, start = [], 0
     while True:
         q = supabase.table("auction_lots").select("*").eq("session_id", session_id)
@@ -7499,6 +7510,18 @@ def list_capture_lots(session_id: str, request: Request):
     for lot in lots:
         lot["items"] = items_by_lot.get(lot["id"], [])
     return lots
+
+@app.get("/api/auction/capture/sessions/{session_id}/lots")
+def list_capture_lots(session_id: str, request: Request):
+    """Paginated (Supabase caps a single read at 1,000 rows -- big catalogs were
+    silently cut off) and item fetch chunked (one .in_() with thousands of ids
+    blows the URL limit). Grok editor login only sees lots tagged for Grok."""
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    if not _owned_capture_session(session_id, business_id):
+        raise HTTPException(404, "Session not found")
+    return _fetch_session_lots(session_id, get_session_role(request) == "editor")
 
 def _owned_lot(lot_id: str, business_id) -> dict:
     lot = (supabase.table("auction_lots").select("id,session_id,grok_state,title")
