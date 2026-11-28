@@ -14316,7 +14316,121 @@ def _set_shopify_variant_google_fields(domain: str, token: str, variant_id, mpn:
     errs = (((r.json() or {}).get("data") or {}).get("metafieldsSet") or {}).get("userErrors") or []
     return {"error": errs} if errs else {"ok": True, "mpn": mpn, "condition": condition}
 
+# ── ONE SHOPIFY PRODUCT PER HD_ID (11/27 hard lock) ───────────────────────── #
+# Real case 11/2: Altec 070420070 (listing 6935 / eBay 407334211343) got TWO
+# Shopify products 24s apart (SKU AM1- then JJ1-). Only the second was saved on
+# the listing / HD_ID row, so the eBay sale zeroed that one and the orphan stayed
+# live at qty 1. The old guard only looked for the same title in the
+# shopify_inventory mirror, which a just-created product isn't in yet, and never
+# looked at the listing's own shopify_product_id or its HD_ID link at all.
+# Every publish path now goes through this wrapper, which:
+#   1. blocks a second publish of the same listing / eBay item while one is in flight,
+#   2. blocks if the listing id or its eBay item id is already linked (listings.
+#      shopify_product_id or inventory_match by hd_id / ebay_id) to a Shopify
+#      product that is still ACTIVE or DRAFT (checked live on Shopify),
+#   3. saves the new product id on the listing + mirror BEFORE releasing the lock,
+#   4. after an ambiguous timeout, keeps the item locked 10 min (product may exist).
+import threading as _pub_threading
+_SHOPIFY_PUBLISH_GUARD = _pub_threading.Lock()
+_SHOPIFY_PUBLISH_INFLIGHT = set()
+_SHOPIFY_PUBLISH_COOLDOWN = {}  # key -> unix expiry
+
+def _shopify_publish_keys(listing: dict, synthetic: bool):
+    biz = str(listing.get("business_id") or "")
+    lid = None if synthetic else listing.get("id")
+    lid = str(lid) if lid not in (None, "") else None
+    eid = str(listing.get("ebay_item_id") or "").strip() or None
+    keys = set()
+    if lid: keys.add(f"{biz}:L:{lid}")
+    if eid: keys.add(f"{biz}:E:{eid}")
+    return keys, lid, eid
+
+def _existing_live_shopify_product(business_id: str, listing_id, ebay_item_id):
+    """Returns (product_id, status, title) of a still-ACTIVE/DRAFT Shopify product
+    already tied to this listing (HD_ID) or eBay item, else None. Fails closed."""
+    ids = set()
+    def _add(v):
+        v = str(v or "").strip()
+        if v.isdigit(): ids.add(v)
+    if listing_id:
+        for r in (supabase.table("listings").select("shopify_product_id")
+                  .eq("id", listing_id).limit(1).execute().data or []):
+            _add(r.get("shopify_product_id"))
+        for r in (supabase.table("inventory_match").select("shopify_id")
+                  .eq("business_id", business_id).eq("hd_id", str(listing_id)).execute().data or []):
+            _add(r.get("shopify_id"))
+    if ebay_item_id:
+        for r in (supabase.table("listings").select("shopify_product_id")
+                  .eq("business_id", business_id).eq("ebay_item_id", str(ebay_item_id)).execute().data or []):
+            _add(r.get("shopify_product_id"))
+        for r in (supabase.table("inventory_match").select("shopify_id")
+                  .eq("business_id", business_id).eq("ebay_id", str(ebay_item_id)).execute().data or []):
+            _add(r.get("shopify_id"))
+    if not ids:
+        return None
+    # inventory_match.shopify_id can be a variant id OR a product id -- ask for both.
+    gids = [f"gid://shopify/Product/{i}" for i in ids] + [f"gid://shopify/ProductVariant/{i}" for i in ids]
+    try:
+        data = _shopify_gql(business_id, """
+          query($ids: [ID!]!) { nodes(ids: $ids) {
+            ... on Product { id status title }
+            ... on ProductVariant { product { id status title } }
+          } }""", {"ids": gids})
+    except Exception as e:
+        raise Exception(f"Couldn't verify this item isn't already on Shopify ({e}) -- publish blocked to avoid a duplicate. Try again.")
+    for n in (data.get("nodes") or []):
+        if not n:
+            continue
+        prod = n.get("product") or n
+        if (prod.get("status") or "").upper() in ("ACTIVE", "DRAFT"):
+            return (str(prod.get("id", "")).rsplit("/", 1)[-1], prod.get("status"), prod.get("title"))
+    return None
+
 def push_listing_to_shopify(listing: dict, image_urls_override: list = None) -> dict:
+    synthetic = image_urls_override is not None  # eBay-only path: listing["id"] is the eBay item id
+    biz = listing.get("business_id")
+    keys, lid, eid = _shopify_publish_keys(listing, synthetic)
+    now = _ed_time.time()
+    with _SHOPIFY_PUBLISH_GUARD:
+        for k in [k for k, exp in _SHOPIFY_PUBLISH_COOLDOWN.items() if exp <= now]:
+            _SHOPIFY_PUBLISH_COOLDOWN.pop(k, None)
+        if keys & _SHOPIFY_PUBLISH_INFLIGHT:
+            raise Exception("This item is already being published to Shopify right now -- duplicate publish blocked.")
+        if keys & set(_SHOPIFY_PUBLISH_COOLDOWN):
+            raise Exception("The last Shopify publish for this item timed out and may have gone through -- "
+                            "blocked for 10 min. Check Shopify before retrying.")
+        _SHOPIFY_PUBLISH_INFLIGHT.update(keys)
+    try:
+        if biz and (lid or eid):
+            hit = _existing_live_shopify_product(biz, lid, eid)
+            if hit:
+                raise Exception(f"Already on Shopify: product {hit[0]} ({hit[1]}) is linked to this listing / eBay item. "
+                                f"Duplicate publish blocked -- edit that product, or archive it first if you really want a new one.")
+        try:
+            result = _push_listing_to_shopify_inner(listing, image_urls_override)
+        except Exception as e:
+            if "didn't respond within" in str(e):
+                with _SHOPIFY_PUBLISH_GUARD:
+                    for k in keys:
+                        _SHOPIFY_PUBLISH_COOLDOWN[k] = _ed_time.time() + 600
+            raise
+        # Lock in the link BEFORE releasing, so a follow-up publish sees it.
+        if lid and result.get("product_id"):
+            try:
+                supabase.table("listings").update({
+                    "shopify_product_id": str(result["product_id"]),
+                    "shopify_status": result.get("status") or "active",
+                    "shopify_error": None,
+                }).eq("id", lid).execute()
+            except Exception as e:
+                print(f"push_listing_to_shopify: product {result.get('product_id')} created but listing {lid} link save failed: {e}")
+        _record_new_shopify_publish_locally(biz, result)  # mirror row (title guard); never raises
+        return result
+    finally:
+        with _SHOPIFY_PUBLISH_GUARD:
+            _SHOPIFY_PUBLISH_INFLIGHT.difference_update(keys)
+
+def _push_listing_to_shopify_inner(listing: dict, image_urls_override: list = None) -> dict:
     """Creates an active product on Shopify via the Admin REST API.
     image_urls_override, when given, is used as-is (skips the photo_id/group_photos
     lookup and the eBay-live-fallback below entirely) — for items that never had a
