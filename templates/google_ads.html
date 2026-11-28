@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Google Ads — Lister AI</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<style>
+:root { --bg:#1a0611; --card:#1e2535; --border:#2d3348; --text:#f1f5f9; --muted:#64748b; --accent:#2563eb; --green:#4ade80; --red:#f87171; }
+* { box-sizing:border-box; margin:0; padding:0; }
+body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+.nav { background:var(--card); border-bottom:1px solid var(--border); padding:0 16px; display:flex; align-items:center; gap:6px; overflow-x:auto; height:52px; position:sticky; top:0; z-index:100; }
+.nav-btn { padding:6px 14px; border-radius:8px; border:none; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; background:transparent; color:var(--muted); text-decoration:none; display:inline-block; font-family:inherit; }
+.nav-btn:hover { background:#1e2535; color:var(--text); }
+.nav-spacer { flex:1; }
+.nav-download { padding:6px 12px; background:#1e2535; border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:12px; font-weight:600; text-decoration:none; }
+.nav-account { font-size:12px; color:var(--muted); margin-right:4px; white-space:nowrap; }
+.nav-settings { color:#94a3b8; }
+.main { max-width:1100px; margin:0 auto; padding:20px 16px; }
+h1 { font-size:20px; margin-bottom:4px; }
+.sub { color:var(--muted); font-size:13px; margin-bottom:16px; }
+.daybar { display:flex; gap:8px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
+.daybar button, .daybar select { padding:7px 12px; background:var(--card); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:14px; font-weight:600; font-family:inherit; }
+.daybar button:disabled { opacity:.4; }
+.cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:20px; }
+.card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:12px 14px; }
+.card .lbl { font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); }
+.card .val { font-size:22px; font-weight:700; margin-top:4px; font-variant-numeric:tabular-nums; }
+h2 { font-size:15px; margin:0 0 10px; }
+.section { margin-bottom:26px; }
+.tblwrap { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); padding:10px 12px; border-bottom:1px solid var(--border); white-space:nowrap; }
+td { padding:8px 12px; border-bottom:1px solid var(--border); font-size:13px; vertical-align:middle; }
+tr:last-child td { border-bottom:none; }
+.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.spend { font-weight:700; }
+.thumb { width:36px; height:36px; border-radius:6px; object-fit:cover; background:#0f172a; display:block; }
+.title-cell { max-width:420px; }
+.title-cell .t { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.meta { font-size:11px; color:var(--muted); margin-top:2px; }
+.meta a { color:#60a5fa; text-decoration:none; }
+.warn { color:#facc15; }
+.zero { color:var(--red); font-weight:700; }
+.bar { height:4px; background:var(--accent); border-radius:2px; margin-top:4px; }
+.empty { color:var(--muted); font-size:13px; padding:24px 0; text-align:center; }
+details.setup { background:var(--card); border:1px solid var(--border); border-left:3px solid #eab308; border-radius:8px; padding:12px 14px; margin-bottom:18px; font-size:13px; line-height:1.5; }
+details.setup summary { cursor:pointer; font-weight:700; color:#eab308; }
+details.setup ol { margin:10px 0 10px 18px; }
+details.setup pre { background:#0f172a; border:1px solid var(--border); border-radius:6px; padding:10px; font-size:11px; overflow:auto; max-height:300px; white-space:pre; }
+.copybtn { margin-top:8px; padding:6px 12px; background:var(--accent); border:none; border-radius:8px; color:#fff; font-weight:600; font-size:12px; cursor:pointer; }
+</style>
+</head>
+<body>
+{% include "_nav.html" %}
+<div class="main">
+  <h1>📣 Google Ads Spend</h1>
+  <div class="sub" id="sub">Where each day's Google Ads budget went, product by product.</div>
+
+  {% if show_setup %}
+  <details class="setup" id="setup">
+    <summary>Setup: Google Ads Script (one time)</summary>
+    <ol>
+      <li>In Google Ads: <b>Tools → Bulk actions → Scripts</b> → <b>+</b> → New script.</li>
+      <li>Delete everything in the editor, paste the script below, and click <b>Authorize</b>.</li>
+      <li>Click <b>Preview</b> once (should log "Lister: ok"), then <b>Save</b> and <b>Run</b>.</li>
+      <li>Set the script's <b>Frequency</b> to <b>Hourly</b>.</li>
+    </ol>
+    <pre id="script">// Lister — Google Ads daily spend push
+var LISTER_URL = '{{ ingest_url }}';
+var LISTER_TOKEN = '{{ ingest_token }}';
+
+function main() {
+  var tz = AdsApp.currentAccount().getTimeZone();
+  var now = new Date();
+  // Lister says how many days to send: 60 for the first run / once a day, otherwise 3
+  var plan = JSON.parse(UrlFetchApp.fetch(LISTER_URL, {headers: {'X-Ingest-Token': LISTER_TOKEN}}).getContentText());
+  var days = plan.days || 3;
+  var dates = [];
+  for (var i = 0; i &lt; days; i++) {
+    dates.push(Utilities.formatDate(new Date(now.getTime() - i * 86400000), tz, 'yyyy-MM-dd'));
+  }
+  var from = dates[dates.length - 1], to = dates[0];
+
+  var products = [];
+  var it = AdsApp.search(
+    "SELECT segments.date, campaign.id, campaign.name, segments.product_item_id, segments.product_title, " +
+    "metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.conversions_value " +
+    "FROM shopping_performance_view WHERE segments.date BETWEEN '" + from + "' AND '" + to + "' AND metrics.impressions &gt; 0");
+  while (it.hasNext()) {
+    var r = it.next();
+    products.push({date: r.segments.date, campaign_id: r.campaign.id, campaign: r.campaign.name,
+      item_id: r.segments.productItemId, title: r.segments.productTitle,
+      impressions: r.metrics.impressions, clicks: r.metrics.clicks, cost_micros: r.metrics.costMicros,
+      conversions: r.metrics.conversions, conv_value: r.metrics.conversionsValue});
+  }
+
+  var campaigns = [];
+  var it2 = AdsApp.search(
+    "SELECT segments.date, campaign.id, campaign.name, campaign.advertising_channel_type, " +
+    "metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.conversions_value " +
+    "FROM campaign WHERE segments.date BETWEEN '" + from + "' AND '" + to + "' AND metrics.impressions &gt; 0");
+  while (it2.hasNext()) {
+    var c = it2.next();
+    campaigns.push({date: c.segments.date, campaign_id: c.campaign.id, campaign: c.campaign.name,
+      channel: c.campaign.advertisingChannelType,
+      impressions: c.metrics.impressions, clicks: c.metrics.clicks, cost_micros: c.metrics.costMicros,
+      conversions: c.metrics.conversions, conv_value: c.metrics.conversionsValue});
+  }
+
+  var resp = UrlFetchApp.fetch(LISTER_URL, {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: {'X-Ingest-Token': LISTER_TOKEN},
+    payload: JSON.stringify({dates: dates, products: products, campaigns: campaigns})
+  });
+  if (resp.getResponseCode() !== 200) {
+    throw new Error('Lister push failed: ' + resp.getResponseCode() + ' ' + resp.getContentText().slice(0, 300));
+  }
+  Logger.log('Lister: ok ' + resp.getContentText());
+}</pre>
+    <button class="copybtn" onclick="copyScript(this)">Copy script</button>
+  </details>
+  {% endif %}
+
+  <div class="daybar">
+    <button id="prev" onclick="step(1)">◀</button>
+    <select id="daysel" onchange="load(this.value)"></select>
+    <button id="next" onclick="step(-1)">▶</button>
+  </div>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="section">
+    <h2>Products</h2>
+    <div class="tblwrap"><table>
+      <thead><tr><th></th><th>Product</th><th class="num">Spend</th><th class="num">Clicks</th><th class="num">CPC</th><th class="num">Impr</th><th class="num">Conv</th><th class="num">Conv value</th></tr></thead>
+      <tbody id="prows"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
+    </table></div>
+  </div>
+
+  <div class="section">
+    <h2>Campaigns</h2>
+    <div class="tblwrap"><table>
+      <thead><tr><th>Campaign</th><th>Type</th><th class="num">Spend</th><th class="num">Clicks</th><th class="num">Impr</th><th class="num">Conv</th><th class="num">Conv value</th></tr></thead>
+      <tbody id="crows"></tbody>
+    </table></div>
+  </div>
+</div>
+<script>
+let DATES = [], CUR = '';
+const $ = id => document.getElementById(id);
+const money = v => '$' + (Number(v)||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const int = v => (Number(v)||0).toLocaleString();
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function fmtDate(d){ const [y,m,dd]=d.split('-').map(Number); return new Date(y,m-1,dd).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}); }
+function copyScript(btn){ navigator.clipboard.writeText($('script').textContent).then(()=>{btn.textContent='Copied ✓'; setTimeout(()=>btn.textContent='Copy script',1500);}); }
+function step(dir){ const i = DATES.indexOf(CUR); const j = i + dir; if (j>=0 && j<DATES.length) load(DATES[j]); }
+async function load(date){
+  const r = await fetch('/api/google-ads/day' + (date ? '?date=' + encodeURIComponent(date) : ''));
+  if (!r.ok) { $('prows').innerHTML = '<tr><td colspan="8" class="empty">Failed to load ('+r.status+')</td></tr>'; return; }
+  const d = await r.json();
+  DATES = d.available_dates || []; CUR = d.date || '';
+  $('daysel').innerHTML = DATES.map(x => `<option value="${x}"${x===CUR?' selected':''}>${fmtDate(x)}</option>`).join('') || '<option>No data yet</option>';
+  $('prev').disabled = DATES.indexOf(CUR) >= DATES.length - 1; $('next').disabled = DATES.indexOf(CUR) <= 0;
+  if (d.last_ingest) $('sub').textContent = "Where each day's Google Ads budget went, product by product. Last synced " + new Date(d.last_ingest).toLocaleString() + '.';
+  if (!CUR) {
+    $('cards').innerHTML = '';
+    $('prows').innerHTML = '<tr><td colspan="8" class="empty">No Google Ads data yet. Set up the script above — data shows up after its first run.</td></tr>';
+    $('crows').innerHTML = ''; const s=$('setup'); if (s) s.open = true; return;
+  }
+  const t = d.totals || {};
+  const roas = t.cost ? (t.conv_value / t.cost) : 0;
+  $('cards').innerHTML = [
+    ['Spend', money(t.cost)], ['Clicks', int(t.clicks)], ['Avg CPC', t.clicks ? money(t.cost/t.clicks) : '—'],
+    ['Conversions', (t.conversions||0).toFixed(1)], ['Conv value', money(t.conv_value)], ['ROAS', t.cost ? roas.toFixed(2)+'x' : '—'],
+  ].map(([l,v]) => `<div class="card"><div class="lbl">${l}</div><div class="val">${v}</div></div>`).join('');
+  const maxc = Math.max(0.01, ...(d.products||[]).map(p => p.cost));
+  let rows = (d.products||[]).map(p => {
+    const meta = [];
+    if (p.sku) meta.push(esc(p.sku));
+    if (p.hd_id) meta.push('HD ' + esc(p.hd_id));
+    if (p.shopify_product_id) meta.push((d.shop_domain ? `<a href="https://${d.shop_domain}/admin/products/${p.shopify_product_id}" target="_blank">Shopify</a>` : ""));
+    if (p.shopify_status && p.shopify_status !== 'active') meta.push(`<span class="warn">${esc(p.shopify_status)}</span>`);
+    else if (p.shopify_qty === 0) meta.push('<span class="zero">0 in stock</span>');
+    if (!p.shopify_product_id) meta.push('<span class="warn">' + esc(p.item_id) + '</span>');
+    return `<tr><td>${p.thumb ? `<img class="thumb" src="${esc(p.thumb)}" loading="lazy">` : ''}</td>
+      <td class="title-cell"><div class="t" title="${esc(p.title)}">${esc(p.title)}</div><div class="meta">${meta.join(' · ')}</div><div class="bar" style="width:${(p.cost/maxc*100).toFixed(1)}%"></div></td>
+      <td class="num spend">${money(p.cost)}</td><td class="num">${int(p.clicks)}</td><td class="num">${p.clicks ? money(p.cost/p.clicks) : '—'}</td>
+      <td class="num">${int(p.impressions)}</td><td class="num">${(p.conversions||0).toFixed(1)}</td><td class="num">${money(p.conv_value)}</td></tr>`;
+  });
+  if (Math.abs(d.unattributed_cost) >= 0.01) rows.push(`<tr><td></td><td class="title-cell"><div class="t"><i>Not tied to a product</i></div><div class="meta">Search / display / video placements inside your campaigns</div></td><td class="num spend">${money(d.unattributed_cost)}</td><td colspan="5"></td></tr>`);
+  $('prows').innerHTML = rows.join('') || '<tr><td colspan="8" class="empty">No product-level spend this day.</td></tr>';
+  $('crows').innerHTML = (d.campaigns||[]).map(c => `<tr><td>${esc(c.campaign_name)}</td><td>${esc((c.channel_type||'').replace(/_/g,' ').toLowerCase())}</td>
+    <td class="num spend">${money(c.cost)}</td><td class="num">${int(c.clicks)}</td><td class="num">${int(c.impressions)}</td><td class="num">${(Number(c.conversions)||0).toFixed(1)}</td><td class="num">${money(c.conv_value)}</td></tr>`).join('')
+    || '<tr><td colspan="7" class="empty">No campaign spend this day.</td></tr>';
+}
+load('');
+</script>
+</body>
+</html>

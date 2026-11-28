@@ -19545,3 +19545,167 @@ async def shopify_sale_status(request: Request):
     return {"progress": _shopify_sale_progress.get(business_id),
             "active_pct": (settings.get("SHOPIFY_SALE_PCT") or "").strip()}
 # one-off corrective run trigger 2026-08-21T20:42:44Z
+
+# ── GOOGLE ADS DAILY SPEND VIEW (11/27) ─────────────────────────────────────── #
+# Data comes from a Google Ads Script running inside the Ads account (no API
+# developer token needed). The script POSTs per-product (shopping_performance_view)
+# and per-campaign spend for recent days to /api/google-ads/ingest with a secret
+# token; each push fully replaces the dates it contains.
+
+def _gads_ingest_token(business_id: str) -> str:
+    import secrets as _s
+    tok = (get_ebay_settings(business_id).get("GOOGLE_ADS_INGEST_TOKEN") or "").strip()
+    if not tok:
+        tok = _s.token_urlsafe(32)
+        save_ebay_setting(business_id, "GOOGLE_ADS_INGEST_TOKEN", tok)
+    return tok
+
+def _gads_business_for_token(tok: str):
+    if not tok:
+        return None
+    rows = (supabase.table("app_settings").select("business_id,value")
+            .eq("key", "GOOGLE_ADS_INGEST_TOKEN").execute().data or [])
+    import hmac
+    for r in rows:
+        if r.get("value") and hmac.compare_digest(str(r["value"]), tok):
+            return r["business_id"]
+    return None
+
+@app.get("/api/google-ads/ingest")
+async def google_ads_ingest_plan(request: Request):
+    """Tells the Ads Script how many days to send: 60 on first run and once per
+    ~20h (cost keeps settling for days), otherwise the last 3."""
+    biz = _gads_business_for_token(request.headers.get("X-Ingest-Token", "").strip())
+    if not biz:
+        raise HTTPException(401, "bad token")
+    last_full = (get_ebay_settings(biz).get("GOOGLE_ADS_LAST_BACKFILL") or "").strip()
+    days = 3
+    try:
+        if not last_full or (datetime.utcnow() - datetime.fromisoformat(last_full.rstrip("Z"))).total_seconds() > 20 * 3600:
+            days = 60
+    except Exception:
+        days = 60
+    return {"days": days}
+
+@app.post("/api/google-ads/ingest")
+async def google_ads_ingest(request: Request):
+    biz = _gads_business_for_token(request.headers.get("X-Ingest-Token", "").strip())
+    if not biz:
+        raise HTTPException(401, "bad token")
+    body = await request.json()
+    dates = sorted({str(d)[:10] for d in (body.get("dates") or []) if d})
+    if not dates:
+        raise HTTPException(400, "no dates")
+    def _n(v, f=float):
+        try: return f(v or 0)
+        except Exception: return f(0)
+    prods, camps = [], []
+    for r in body.get("products") or []:
+        d = str(r.get("date") or "")[:10]
+        if d not in dates: continue
+        prods.append({"business_id": biz, "date": d,
+            "campaign_id": str(r.get("campaign_id") or ""), "campaign_name": r.get("campaign") or "",
+            "item_id": str(r.get("item_id") or ""), "product_title": r.get("title") or "",
+            "impressions": _n(r.get("impressions"), int), "clicks": _n(r.get("clicks"), int),
+            "cost": round(_n(r.get("cost_micros")) / 1e6, 2),
+            "conversions": round(_n(r.get("conversions")), 2), "conv_value": round(_n(r.get("conv_value")), 2)})
+    for r in body.get("campaigns") or []:
+        d = str(r.get("date") or "")[:10]
+        if d not in dates: continue
+        camps.append({"business_id": biz, "date": d,
+            "campaign_id": str(r.get("campaign_id") or ""), "campaign_name": r.get("campaign") or "",
+            "channel_type": r.get("channel") or "",
+            "impressions": _n(r.get("impressions"), int), "clicks": _n(r.get("clicks"), int),
+            "cost": round(_n(r.get("cost_micros")) / 1e6, 2),
+            "conversions": round(_n(r.get("conversions")), 2), "conv_value": round(_n(r.get("conv_value")), 2)})
+    for tbl, rows in (("google_ads_product_spend", prods), ("google_ads_campaign_spend", camps)):
+        supabase.table(tbl).delete().eq("business_id", biz).in_("date", dates).execute()
+        for i in range(0, len(rows), 500):
+            supabase.table(tbl).insert(rows[i:i+500]).execute()
+    save_ebay_setting(biz, "GOOGLE_ADS_LAST_INGEST", datetime.utcnow().isoformat() + "Z")
+    if len(dates) >= 30:
+        save_ebay_setting(biz, "GOOGLE_ADS_LAST_BACKFILL", datetime.utcnow().isoformat() + "Z")
+    return {"ok": True, "dates": len(dates), "products": len(prods), "campaigns": len(camps)}
+
+@app.get("/api/google-ads/day")
+async def google_ads_day(request: Request, date: str = ""):
+    business_id = require_auth(request)
+    if not business_id:
+        raise HTTPException(401, "Unauthorized")
+    # available dates (most recent first)
+    drows = (supabase.table("google_ads_campaign_spend").select("date")
+             .eq("business_id", business_id).order("date", desc=True).limit(5000).execute().data or [])
+    avail = sorted({r["date"] for r in drows}, reverse=True)
+    if not date:
+        date = avail[0] if avail else ""
+    camps = prods = []
+    if date:
+        camps = (supabase.table("google_ads_campaign_spend").select("*")
+                 .eq("business_id", business_id).eq("date", date).execute().data or [])
+        prods = (supabase.table("google_ads_product_spend").select("*")
+                 .eq("business_id", business_id).eq("date", date).execute().data or [])
+    # roll products up by item (a product can appear under several campaigns)
+    agg = {}
+    for p in prods:
+        k = (p.get("item_id") or "").lower()
+        a = agg.setdefault(k, {"item_id": p.get("item_id"), "title": p.get("product_title"), "campaigns": set(),
+                               "impressions": 0, "clicks": 0, "cost": 0.0, "conversions": 0.0, "conv_value": 0.0})
+        a["campaigns"].add(p.get("campaign_name") or "")
+        for f in ("impressions", "clicks"): a[f] += int(p.get(f) or 0)
+        for f in ("cost", "conversions", "conv_value"): a[f] += float(p.get(f) or 0)
+    # link Google item ids (shopify_us_<product>_<variant>) back to Lister / eBay
+    pids = {}
+    for k, a in agg.items():
+        m = re.search(r"shopify_[a-z]{2}_(\d+)_(\d+)", k or "", re.I)
+        if m:
+            a["shopify_product_id"], a["shopify_variant_id"] = m.group(1), m.group(2)
+            pids[m.group(1)] = a
+    if pids:
+        ids = list(pids)
+        for i in range(0, len(ids), 200):
+            for s in (supabase.table("shopify_inventory").select("product_id,sku,quantity,status,title")
+                      .eq("business_id", business_id).in_("product_id", ids[i:i+200]).execute().data or []):
+                a = pids.get(str(s["product_id"]))
+                if a:
+                    a.update({"sku": s.get("sku"), "shopify_qty": s.get("quantity"), "shopify_status": s.get("status")})
+                    a["title"] = a.get("title") or s.get("title")
+            for l in (supabase.table("listings").select("id,shopify_product_id,ebay_item_id,photo_id")
+                      .in_("shopify_product_id", ids[i:i+200]).execute().data or []):
+                a = pids.get(str(l["shopify_product_id"]))
+                if a:
+                    a["hd_id"] = l.get("id"); a["ebay_item_id"] = l.get("ebay_item_id")
+                    pid = str(l.get("photo_id") or "")
+                    if pid and len([x for x in pids.values() if x.get("thumb")]) < 80:
+                        try:
+                            ph = get_all_photo_ids(pid)
+                            if ph: a["thumb"] = photo_url(ph[0], thumb=True)
+                        except Exception:
+                            pass
+    products = []
+    for a in agg.values():
+        a["campaigns"] = sorted(c for c in a["campaigns"] if c)
+        a["cost"] = round(a["cost"], 2); a["conv_value"] = round(a["conv_value"], 2)
+        a["conversions"] = round(a["conversions"], 2)
+        products.append(a)
+    products.sort(key=lambda x: (-x["cost"], -x["clicks"]))
+    tot = {f: sum(float(c.get(f) or 0) for c in camps) for f in ("impressions", "clicks", "cost", "conversions", "conv_value")}
+    prod_cost = round(sum(p["cost"] for p in products), 2)
+    settings = get_ebay_settings(business_id)
+    shop_domain = (settings.get("SHOPIFY_STORE_DOMAIN") or "").replace("https://", "").replace("http://", "").strip("/")
+    return {"date": date, "available_dates": avail[:120], "shop_domain": shop_domain, "totals": {k: round(v, 2) for k, v in tot.items()},
+            "product_cost": prod_cost, "unattributed_cost": round(tot["cost"] - prod_cost, 2),
+            "campaigns": sorted(camps, key=lambda c: -float(c.get("cost") or 0)),
+            "products": products, "last_ingest": settings.get("GOOGLE_ADS_LAST_INGEST")}
+
+@app.get("/google-ads", response_class=HTMLResponse)
+async def google_ads_page(request: Request):
+    nav = get_nav_context(request)
+    if nav is None:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login", status_code=302)
+    show_setup = get_session_role(request) != "editor"
+    token = _gads_ingest_token(nav["business_id"]) if show_setup else ""
+    ingest_url = str(request.base_url).rstrip("/").replace("http://", "https://") + "/api/google-ads/ingest"
+    return templates.TemplateResponse("google_ads.html", {"request": request, "is_admin": nav["is_admin"],
+        "account_label": nav["account_label"], "active_tab": "google_ads",
+        "show_setup": show_setup, "ingest_token": token, "ingest_url": ingest_url})
