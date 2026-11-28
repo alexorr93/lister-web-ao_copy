@@ -14400,7 +14400,21 @@ def push_listing_to_shopify(listing: dict, image_urls_override: list = None) -> 
             raise Exception("The last Shopify publish for this item timed out and may have gone through -- "
                             "blocked for 10 min. Check Shopify before retrying.")
         _SHOPIFY_PUBLISH_INFLIGHT.update(keys)
+    db_claimed = False
     try:
+        # Cross-process / cross-environment lock: atomic claim on the listing row.
+        # Only one publisher can flip shopify_publish_claim from empty (or stale >10 min).
+        if lid:
+            import datetime as _cdt
+            _now = _cdt.datetime.now(_cdt.timezone.utc)
+            _cutoff = (_now - _cdt.timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            got = (supabase.table("listings").update({"shopify_publish_claim": _now.isoformat()})
+                   .eq("id", lid)
+                   .or_(f"shopify_publish_claim.is.null,shopify_publish_claim.lt.{_cutoff}")
+                   .execute().data or [])
+            if not got:
+                raise Exception("This item is already being published to Shopify (claimed by another job) -- duplicate publish blocked.")
+            db_claimed = True
         if biz and (lid or eid):
             hit = _existing_live_shopify_product(biz, lid, eid)
             if hit:
@@ -14413,6 +14427,7 @@ def push_listing_to_shopify(listing: dict, image_urls_override: list = None) -> 
                 with _SHOPIFY_PUBLISH_GUARD:
                     for k in keys:
                         _SHOPIFY_PUBLISH_COOLDOWN[k] = _ed_time.time() + 600
+                db_claimed = False  # leave the DB claim in place: blocks retries ~10 min
             raise
         # Lock in the link BEFORE releasing, so a follow-up publish sees it.
         if lid and result.get("product_id"):
@@ -14427,6 +14442,11 @@ def push_listing_to_shopify(listing: dict, image_urls_override: list = None) -> 
         _record_new_shopify_publish_locally(biz, result)  # mirror row (title guard); never raises
         return result
     finally:
+        if db_claimed:
+            try:
+                supabase.table("listings").update({"shopify_publish_claim": None}).eq("id", lid).execute()
+            except Exception as e:
+                print(f"push_listing_to_shopify: failed to release claim on listing {lid}: {e}")
         with _SHOPIFY_PUBLISH_GUARD:
             _SHOPIFY_PUBLISH_INFLIGHT.difference_update(keys)
 
@@ -19133,10 +19153,12 @@ def _shopify_batch_publish_work(business_id: str, item_ids: list) -> dict:
         except Exception as e:
             failed_ids.append(item_id)
             errors[item_id] = str(e)
-            try:
-                supabase.table("listings").update({"shopify_status": "failed", "shopify_error": str(e)}).eq("id", item_id).execute()
-            except Exception:
-                pass
+            # dedup lock = listing is (or is becoming) published; don't mark it failed
+            if not ("Already on Shopify" in str(e) or "already being published" in str(e)):
+                try:
+                    supabase.table("listings").update({"shopify_status": "failed", "shopify_error": str(e)}).eq("id", item_id).execute()
+                except Exception:
+                    pass
         _shopify_batch_publish_job_status[business_id]["progress"] = {"done": published + len(failed_ids), "total": len(item_ids)}
     return {"published": published, "failed": len(failed_ids), "failed_ids": failed_ids, "errors": errors}
 
